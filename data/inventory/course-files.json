@@ -1,0 +1,1085 @@
+﻿{
+    "schemaVersion":  1,
+    "sources":  [
+                    {
+                        "courseId":  "cs3481",
+                        "sourcePath":  "D:\\下载\\course_files_export (4)",
+                        "exists":  true,
+                        "fileCount":  25,
+                        "totalBytes":  35475784,
+                        "extensions":  [
+                                           {
+                                               "extension":  ".csv",
+                                               "count":  1
+                                           },
+                                           {
+                                               "extension":  ".data",
+                                               "count":  1
+                                           },
+                                           {
+                                               "extension":  ".docx",
+                                               "count":  1
+                                           },
+                                           {
+                                               "extension":  ".ipynb",
+                                               "count":  4
+                                           },
+                                           {
+                                               "extension":  ".pdf",
+                                               "count":  12
+                                           },
+                                           {
+                                               "extension":  ".pptx",
+                                               "count":  6
+                                           }
+                                       ]
+                    },
+                    {
+                        "courseId":  "cs3481",
+                        "sourcePath":  "D:\\下载\\course_files_export (6)",
+                        "exists":  true,
+                        "fileCount":  25,
+                        "totalBytes":  10624215,
+                        "extensions":  [
+                                           {
+                                               "extension":  ".csv",
+                                               "count":  2
+                                           },
+                                           {
+                                               "extension":  ".ipynb",
+                                               "count":  3
+                                           },
+                                           {
+                                               "extension":  ".pdf",
+                                               "count":  18
+                                           },
+                                           {
+                                               "extension":  ".ppt",
+                                               "count":  1
+                                           },
+                                           {
+                                               "extension":  ".pptx",
+                                               "count":  1
+                                           }
+                                       ]
+                    },
+                    {
+                        "courseId":  "cs3481",
+                        "sourcePath":  "D:\\下载\\tut7",
+                        "exists":  false,
+                        "fileCount":  0,
+                        "totalBytes":  0,
+                        "extensions":  [
+
+                                       ]
+                    },
+                    {
+                        "courseId":  "cs3481",
+                        "sourcePath":  "D:\\下载\\tut8",
+                        "exists":  false,
+                        "fileCount":  0,
+                        "totalBytes":  0,
+                        "extensions":  [
+
+                                       ]
+                    },
+                    {
+                        "courseId":  "ge2324",
+                        "sourcePath":  "D:\\下载\\course_files_export (3)",
+                        "exists":  true,
+                        "fileCount":  25,
+                        "totalBytes":  17056909,
+                        "extensions":  [
+                                           {
+                                               "extension":  ".csv",
+                                               "count":  4
+                                           },
+                                           {
+                                               "extension":  ".docx",
+                                               "count":  6
+                                           },
+                                           {
+                                               "extension":  ".gml",
+                                               "count":  1
+                                           },
+                                           {
+                                               "extension":  ".ipynb",
+                                               "count":  2
+                                           },
+                                           {
+                                               "extension":  ".pdf",
+                                               "count":  9
+                                           },
+                                           {
+                                               "extension":  ".pptx",
+                                               "count":  3
+                                           }
+                                       ]
+                    },
+                    {
+                        "courseId":  "ge2324",
+                        "sourcePath":  "D:\\下载\\course_files_export (5)",
+                        "exists":  true,
+                        "fileCount":  11,
+                        "totalBytes":  83132580,
+                        "extensions":  [
+                                           {
+                                               "extension":  ".ppt",
+                                               "count":  1
+                                           },
+                                           {
+                                               "extension":  ".pptx",
+                                               "count":  10
+                                           }
+                                       ]
+                    }
+                ],
+    "files":  [
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "5.1 - Point Estimates and Sampling Variability.pptx",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\5.1 - Point Estimates and Sampling Variability.pptx",
+                      "filename":  "5.1 - Point Estimates and Sampling Variability.pptx",
+                      "extension":  ".pptx",
+                      "sizeBytes":  1095540,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.0595830Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "5.2 - Confidence Intervals for a Proportion (1).pptx",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\5.2 - Confidence Intervals for a Proportion (1).pptx",
+                      "filename":  "5.2 - Confidence Intervals for a Proportion (1).pptx",
+                      "extension":  ".pptx",
+                      "sizeBytes":  1812998,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.1065736Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "5.2 - Confidence Intervals for a Proportion.pptx",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\5.2 - Confidence Intervals for a Proportion.pptx",
+                      "filename":  "5.2 - Confidence Intervals for a Proportion.pptx",
+                      "extension":  ".pptx",
+                      "sizeBytes":  1813000,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.1425992Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "5.3 - Hypothesis Testing for a Proportion.pptx",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\5.3 - Hypothesis Testing for a Proportion.pptx",
+                      "filename":  "5.3 - Hypothesis Testing for a Proportion.pptx",
+                      "extension":  ".pptx",
+                      "sizeBytes":  732875,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.1714613Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "6.1 - Inference for a single proportion.pptx",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\6.1 - Inference for a single proportion.pptx",
+                      "filename":  "6.1 - Inference for a single proportion.pptx",
+                      "extension":  ".pptx",
+                      "sizeBytes":  412284,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.1978836Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "adult.data",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\adult.data",
+                      "filename":  "adult.data",
+                      "extension":  ".data",
+                      "sizeBytes":  3974305,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.2429403Z",
+                      "importerMode":  "inventory-only"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "apriori_example.ipynb",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\apriori_example.ipynb",
+                      "filename":  "apriori_example.ipynb",
+                      "extension":  ".ipynb",
+                      "sizeBytes":  10429,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.2797802Z",
+                      "importerMode":  "inventory-only"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "arm_practice_problems.docx",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\arm_practice_problems.docx",
+                      "filename":  "arm_practice_problems.docx",
+                      "extension":  ".docx",
+                      "sizeBytes":  21996,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.3220423Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "Association Analysis (Itemset Representation).pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\Association Analysis (Itemset Representation).pdf",
+                      "filename":  "Association Analysis (Itemset Representation).pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  231342,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.3505298Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "Association Analysis.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\Association Analysis.pdf",
+                      "filename":  "Association Analysis.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  427299,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.3818723Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "causal_inference_intro.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\causal_inference_intro.pdf",
+                      "filename":  "causal_inference_intro.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  133156,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.4242662Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "chp5.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\chp5.pdf",
+                      "filename":  "chp5.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  4647707,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.4836587Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "Classifier Evaluation.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\Classifier Evaluation.pdf",
+                      "filename":  "Classifier Evaluation.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  405052,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.5145691Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "Cluster Analysis (Hierarchical and Density-Based Approaches).pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\Cluster Analysis (Hierarchical and Density-Based Approaches).pdf",
+                      "filename":  "Cluster Analysis (Hierarchical and Density-Based Approaches).pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  364598,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.5482553Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "Cluster Analysis (K-means).pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\Cluster Analysis (K-means).pdf",
+                      "filename":  "Cluster Analysis (K-means).pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  148010,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.5749153Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "cps_00001.csv",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\cps_00001.csv",
+                      "filename":  "cps_00001.csv",
+                      "extension":  ".csv",
+                      "sizeBytes":  12033800,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.6871786Z",
+                      "importerMode":  "inventory-only"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "CS 3481_linear regression.pptx",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\CS 3481_linear regression.pptx",
+                      "filename":  "CS 3481_linear regression.pptx",
+                      "extension":  ".pptx",
+                      "sizeBytes":  4906805,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.7523994Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "CS_3481_Assignment_1.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\CS_3481_Assignment_1.pdf",
+                      "filename":  "CS_3481_Assignment_1.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  67548,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.7794667Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "CS_3481_Assignment_2.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\CS_3481_Assignment_2.pdf",
+                      "filename":  "CS_3481_Assignment_2.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  130391,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.8078755Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "cs_3481_lec1.ipynb",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\cs_3481_lec1.ipynb",
+                      "filename":  "cs_3481_lec1.ipynb",
+                      "extension":  ".ipynb",
+                      "sizeBytes":  422035,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.8761228Z",
+                      "importerMode":  "inventory-only"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "CS_3481_lec1_suppliment.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\CS_3481_lec1_suppliment.pdf",
+                      "filename":  "CS_3481_lec1_suppliment.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  746084,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.8428835Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "CS_3481_lec2.ipynb",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\CS_3481_lec2.ipynb",
+                      "filename":  "CS_3481_lec2.ipynb",
+                      "extension":  ".ipynb",
+                      "sizeBytes":  2937,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.9247312Z",
+                      "importerMode":  "inventory-only"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "CS_3481_lec3.ipynb",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\CS_3481_lec3.ipynb",
+                      "filename":  "CS_3481_lec3.ipynb",
+                      "extension":  ".ipynb",
+                      "sizeBytes":  34147,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.9617823Z",
+                      "importerMode":  "inventory-only"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "CS_3481_lec5_sup.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\CS_3481_lec5_sup.pdf",
+                      "filename":  "CS_3481_lec5_sup.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  394286,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:41.9994557Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (4)",
+                      "relativePath":  "Data.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (4)\\Data.pdf",
+                      "filename":  "Data.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  507160,
+                      "lastWriteTimeUtc":  "2026-07-30T08:38:42.0309476Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "Decision Tree Classifier in sklearn.ipynb",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\Decision Tree Classifier in sklearn.ipynb",
+                      "filename":  "Decision Tree Classifier in sklearn.ipynb",
+                      "extension":  ".ipynb",
+                      "sizeBytes":  411441,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:37.6804519Z",
+                      "importerMode":  "inventory-only"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "Decision Tree.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\Decision Tree.pdf",
+                      "filename":  "Decision Tree.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  252088,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:37.7407983Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "Introduction.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\Introduction.pdf",
+                      "filename":  "Introduction.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  406190,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:37.7974885Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "iris.csv",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\iris.csv",
+                      "filename":  "iris.csv",
+                      "extension":  ".csv",
+                      "sizeBytes":  4464,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:37.8469492Z",
+                      "importerMode":  "inventory-only"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "K-Means-HierarchicalStructures.ipynb",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\K-Means-HierarchicalStructures.ipynb",
+                      "filename":  "K-Means-HierarchicalStructures.ipynb",
+                      "extension":  ".ipynb",
+                      "sizeBytes":  1796224,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:37.8998305Z",
+                      "importerMode":  "inventory-only"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "lecture3.ppt",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\lecture3.ppt",
+                      "filename":  "lecture3.ppt",
+                      "extension":  ".ppt",
+                      "sizeBytes":  540672,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:37.9253500Z",
+                      "importerMode":  "optional-conversion"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "logistic_regression.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\logistic_regression.pdf",
+                      "filename":  "logistic_regression.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  222679,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:37.9509127Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "Naïve Bayes Classification with Python and Scikit-Learn.ipynb",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\Naïve Bayes Classification with Python and Scikit-Learn.ipynb",
+                      "filename":  "Naïve Bayes Classification with Python and Scikit-Learn.ipynb",
+                      "extension":  ".ipynb",
+                      "sizeBytes":  157115,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:37.9820966Z",
+                      "importerMode":  "inventory-only"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "Nearest Neighbor Classifier and Probabilistic Classification Model.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\Nearest Neighbor Classifier and Probabilistic Classification Model.pdf",
+                      "filename":  "Nearest Neighbor Classifier and Probabilistic Classification Model.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  302085,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:38.0087420Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "practice_problems_1.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\practice_problems_1.pdf",
+                      "filename":  "practice_problems_1.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  161375,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:38.0344864Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "practice_problems_2.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\practice_problems_2.pdf",
+                      "filename":  "practice_problems_2.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  89998,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:38.0591578Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "SDSC6018_Lecture3.pptx",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\SDSC6018_Lecture3.pptx",
+                      "filename":  "SDSC6018_Lecture3.pptx",
+                      "extension":  ".pptx",
+                      "sizeBytes":  4784710,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:38.1184583Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "state_fips.csv",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\state_fips.csv",
+                      "filename":  "state_fips.csv",
+                      "extension":  ".csv",
+                      "sizeBytes":  829,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:38.1605635Z",
+                      "importerMode":  "inventory-only"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "tut1.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\tut1.pdf",
+                      "filename":  "tut1.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  147476,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:38.2158798Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "tut1_answer.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\tut1_answer.pdf",
+                      "filename":  "tut1_answer.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  118861,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:38.1858172Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "tut2.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\tut2.pdf",
+                      "filename":  "tut2.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  124772,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:38.2685184Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "tut2_answer.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\tut2_answer.pdf",
+                      "filename":  "tut2_answer.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  135524,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:38.2423467Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "tut3.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\tut3.pdf",
+                      "filename":  "tut3.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  108795,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:38.3185876Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "tut3_answer.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\tut3_answer.pdf",
+                      "filename":  "tut3_answer.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  118854,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:38.2936565Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "tut4.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\tut4.pdf",
+                      "filename":  "tut4.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  127089,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:38.3843781Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "tut4_answer.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\tut4_answer.pdf",
+                      "filename":  "tut4_answer.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  119478,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:38.3539623Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "tut5.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\tut5.pdf",
+                      "filename":  "tut5.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  151718,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:38.4352528Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "tut5_answer.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\tut5_answer.pdf",
+                      "filename":  "tut5_answer.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  109671,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:38.4115159Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "tut6.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\tut6.pdf",
+                      "filename":  "tut6.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  114369,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:38.4851540Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "cs3481",
+                      "sourcePath":  "D:\\下载\\course_files_export (6)",
+                      "relativePath":  "tut6_answer.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (6)\\tut6_answer.pdf",
+                      "filename":  "tut6_answer.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  117738,
+                      "lastWriteTimeUtc":  "2026-07-30T08:41:38.4600146Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "5.3 - Hypothesis Testing for a Proportion.pptx",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\5.3 - Hypothesis Testing for a Proportion.pptx",
+                      "filename":  "5.3 - Hypothesis Testing for a Proportion.pptx",
+                      "extension":  ".pptx",
+                      "sizeBytes":  612872,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "assignment_2.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\assignment_2.pdf",
+                      "filename":  "assignment_2.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  452992,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "causal_inference_intro.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\causal_inference_intro.pdf",
+                      "filename":  "causal_inference_intro.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  133156,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "Centrality in Social Networks.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\Centrality in Social Networks.pdf",
+                      "filename":  "Centrality in Social Networks.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  1671592,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "chp5.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\chp5.pdf",
+                      "filename":  "chp5.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  4647707,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "data_preprocessing.ipynb",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\data_preprocessing.ipynb",
+                      "filename":  "data_preprocessing.ipynb",
+                      "extension":  ".ipynb",
+                      "sizeBytes":  120867,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "inventory-only"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "example_edges.csv",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\example_edges.csv",
+                      "filename":  "example_edges.csv",
+                      "extension":  ".csv",
+                      "sizeBytes":  102,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "inventory-only"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "example_nodes.csv",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\example_nodes.csv",
+                      "filename":  "example_nodes.csv",
+                      "extension":  ".csv",
+                      "sizeBytes":  33,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "inventory-only"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "GE_2324_Assignment_1.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\GE_2324_Assignment_1.pdf",
+                      "filename":  "GE_2324_Assignment_1.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  85936,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "ge_2324_lec1.ipynb",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\ge_2324_lec1.ipynb",
+                      "filename":  "ge_2324_lec1.ipynb",
+                      "extension":  ".ipynb",
+                      "sizeBytes":  41892,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "inventory-only"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "GE_2324_lec1.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\GE_2324_lec1.pdf",
+                      "filename":  "GE_2324_lec1.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  392106,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "ge2234_linear regression.pptx",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\ge2234_linear regression.pptx",
+                      "filename":  "ge2234_linear regression.pptx",
+                      "extension":  ".pptx",
+                      "sizeBytes":  4906858,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "ge2324_assignment_3.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\ge2324_assignment_3.pdf",
+                      "filename":  "ge2324_assignment_3.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  59164,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "GE2324_Tut02.docx",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\GE2324_Tut02.docx",
+                      "filename":  "GE2324_Tut02.docx",
+                      "extension":  ".docx",
+                      "sizeBytes":  35776,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "GE2324_Tut05.docx",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\GE2324_Tut05.docx",
+                      "filename":  "GE2324_Tut05.docx",
+                      "extension":  ".docx",
+                      "sizeBytes":  192907,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "GE2324_Tut07.docx",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\GE2324_Tut07.docx",
+                      "filename":  "GE2324_Tut07.docx",
+                      "extension":  ".docx",
+                      "sizeBytes":  18764,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "GE2324_Tut08.docx",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\GE2324_Tut08.docx",
+                      "filename":  "GE2324_Tut08.docx",
+                      "extension":  ".docx",
+                      "sizeBytes":  18956,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "GE2324_Tut09_updated.docx",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\GE2324_Tut09_updated.docx",
+                      "filename":  "GE2324_Tut09_updated.docx",
+                      "extension":  ".docx",
+                      "sizeBytes":  18456,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "GE2324_Tut10.docx",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\GE2324_Tut10.docx",
+                      "filename":  "GE2324_Tut10.docx",
+                      "extension":  ".docx",
+                      "sizeBytes":  18920,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "karate.gml",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\karate.gml",
+                      "filename":  "karate.gml",
+                      "extension":  ".gml",
+                      "sizeBytes":  4194,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "inventory-only"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "lsh.pptx",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\lsh.pptx",
+                      "filename":  "lsh.pptx",
+                      "extension":  ".pptx",
+                      "sizeBytes":  141774,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "network_family.csv",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\network_family.csv",
+                      "filename":  "network_family.csv",
+                      "extension":  ".csv",
+                      "sizeBytes":  798,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "inventory-only"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "state_fips.csv",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\state_fips.csv",
+                      "filename":  "state_fips.csv",
+                      "extension":  ".csv",
+                      "sizeBytes":  829,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "inventory-only"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "teng2011a.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\teng2011a.pdf",
+                      "filename":  "teng2011a.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  3357440,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (3)",
+                      "relativePath":  "test_for_mediation.pdf",
+                      "fullPath":  "D:\\下载\\course_files_export (3)\\test_for_mediation.pdf",
+                      "filename":  "test_for_mediation.pdf",
+                      "extension":  ".pdf",
+                      "sizeBytes":  122818,
+                      "lastWriteTimeUtc":  "2026-07-30T08:24:32.0000000Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (5)",
+                      "relativePath":  "Topic01a_[CourseSlides]Introduction.pptx",
+                      "fullPath":  "D:\\下载\\course_files_export (5)\\Topic01a_[CourseSlides]Introduction.pptx",
+                      "filename":  "Topic01a_[CourseSlides]Introduction.pptx",
+                      "extension":  ".pptx",
+                      "sizeBytes":  25481628,
+                      "lastWriteTimeUtc":  "2026-07-30T08:39:45.5947206Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (5)",
+                      "relativePath":  "Topic01b_[CourseSlides]DataBasics.pptx",
+                      "fullPath":  "D:\\下载\\course_files_export (5)\\Topic01b_[CourseSlides]DataBasics.pptx",
+                      "filename":  "Topic01b_[CourseSlides]DataBasics.pptx",
+                      "extension":  ".pptx",
+                      "sizeBytes":  442476,
+                      "lastWriteTimeUtc":  "2026-07-30T08:39:45.6284453Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (5)",
+                      "relativePath":  "Topic02_[CourseSlides]NetworkAnalysis_final.pptx",
+                      "fullPath":  "D:\\下载\\course_files_export (5)\\Topic02_[CourseSlides]NetworkAnalysis_final.pptx",
+                      "filename":  "Topic02_[CourseSlides]NetworkAnalysis_final.pptx",
+                      "extension":  ".pptx",
+                      "sizeBytes":  21279194,
+                      "lastWriteTimeUtc":  "2026-07-30T08:39:45.8267497Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (5)",
+                      "relativePath":  "Topic02_[CourseSlides]Supp for Network data.pptx",
+                      "fullPath":  "D:\\下载\\course_files_export (5)\\Topic02_[CourseSlides]Supp for Network data.pptx",
+                      "filename":  "Topic02_[CourseSlides]Supp for Network data.pptx",
+                      "extension":  ".pptx",
+                      "sizeBytes":  134645,
+                      "lastWriteTimeUtc":  "2026-07-30T08:39:45.8487485Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (5)",
+                      "relativePath":  "Topic03_[CourseSlides]DataVisualization_final.pptx",
+                      "fullPath":  "D:\\下载\\course_files_export (5)\\Topic03_[CourseSlides]DataVisualization_final.pptx",
+                      "filename":  "Topic03_[CourseSlides]DataVisualization_final.pptx",
+                      "extension":  ".pptx",
+                      "sizeBytes":  20390181,
+                      "lastWriteTimeUtc":  "2026-07-30T08:39:46.0551412Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (5)",
+                      "relativePath":  "Topic04_[CourseSlides]ClusteringAnalysis.pptx",
+                      "fullPath":  "D:\\下载\\course_files_export (5)\\Topic04_[CourseSlides]ClusteringAnalysis.pptx",
+                      "filename":  "Topic04_[CourseSlides]ClusteringAnalysis.pptx",
+                      "extension":  ".pptx",
+                      "sizeBytes":  5357195,
+                      "lastWriteTimeUtc":  "2026-07-30T08:39:46.1286637Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (5)",
+                      "relativePath":  "Topic05_[CourseSlides]Correlation.pptx",
+                      "fullPath":  "D:\\下载\\course_files_export (5)\\Topic05_[CourseSlides]Correlation.pptx",
+                      "filename":  "Topic05_[CourseSlides]Correlation.pptx",
+                      "extension":  ".pptx",
+                      "sizeBytes":  1504847,
+                      "lastWriteTimeUtc":  "2026-07-30T08:39:46.1739526Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (5)",
+                      "relativePath":  "Topic06_[CourseSlides]Associations and Frequent Item Anal.pptx",
+                      "fullPath":  "D:\\下载\\course_files_export (5)\\Topic06_[CourseSlides]Associations and Frequent Item Anal.pptx",
+                      "filename":  "Topic06_[CourseSlides]Associations and Frequent Item Anal.pptx",
+                      "extension":  ".pptx",
+                      "sizeBytes":  287345,
+                      "lastWriteTimeUtc":  "2026-07-30T08:39:46.2223128Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (5)",
+                      "relativePath":  "Topic07_[CourseSlides]FindingSimilarItems.pptx",
+                      "fullPath":  "D:\\下载\\course_files_export (5)\\Topic07_[CourseSlides]FindingSimilarItems.pptx",
+                      "filename":  "Topic07_[CourseSlides]FindingSimilarItems.pptx",
+                      "extension":  ".pptx",
+                      "sizeBytes":  3014251,
+                      "lastWriteTimeUtc":  "2026-07-30T08:39:46.3076842Z",
+                      "importerMode":  "index"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (5)",
+                      "relativePath":  "Topic08_Recommendation.ppt",
+                      "fullPath":  "D:\\下载\\course_files_export (5)\\Topic08_Recommendation.ppt",
+                      "filename":  "Topic08_Recommendation.ppt",
+                      "extension":  ".ppt",
+                      "sizeBytes":  2525184,
+                      "lastWriteTimeUtc":  "2026-07-30T08:39:46.3701543Z",
+                      "importerMode":  "optional-conversion"
+                  },
+                  {
+                      "courseId":  "ge2324",
+                      "sourcePath":  "D:\\下载\\course_files_export (5)",
+                      "relativePath":  "Topic99_Lecture13.pptx",
+                      "fullPath":  "D:\\下载\\course_files_export (5)\\Topic99_Lecture13.pptx",
+                      "filename":  "Topic99_Lecture13.pptx",
+                      "extension":  ".pptx",
+                      "sizeBytes":  2715634,
+                      "lastWriteTimeUtc":  "2026-07-30T08:39:46.4519622Z",
+                      "importerMode":  "index"
+                  }
+              ]
+}
