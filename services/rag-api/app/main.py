@@ -7,11 +7,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.ingestion import router as ingestion_router
+from app.api.qa import router as qa_router
 from app.config import Settings
 from app.db import Database
 from app.errors import ApiError
+from app.rag.answers import AnswerProvider, MissingAnswerProvider, OpenAIAnswerProvider
 from app.rag.embeddings import EmbeddingProvider, OpenAIEmbeddingProvider
+from app.rag.retrieval import HybridRetriever
+from app.repositories.chunks import ChunkRepository
 from app.services.ingestion import IngestionService, MissingEmbeddingProvider
+from app.services.qa import QaService
 
 LOGGER = logging.getLogger(__name__)
 
@@ -20,19 +25,27 @@ def create_app(
     *,
     settings: Settings | None = None,
     embedding_provider: EmbeddingProvider | None = None,
+    answer_provider: AnswerProvider | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     database = Database(resolved_settings)
     database.initialize()
+    secret = resolved_settings.openai_api_key
+    api_key = secret.get_secret_value() if secret else ""
     if embedding_provider is None:
-        secret = resolved_settings.openai_api_key
         embedding_provider = (
             OpenAIEmbeddingProvider(
-                api_key=secret.get_secret_value(),
+                api_key=api_key,
                 model=resolved_settings.openai_embedding_model,
             )
-            if secret and secret.get_secret_value()
+            if api_key
             else MissingEmbeddingProvider()
+        )
+    if answer_provider is None:
+        answer_provider = (
+            OpenAIAnswerProvider(api_key=api_key, model=resolved_settings.openai_chat_model)
+            if api_key
+            else MissingAnswerProvider()
         )
 
     application = FastAPI(title="CourseMate RAG API", version="0.1.0")
@@ -43,6 +56,13 @@ def create_app(
     )
     application.state.database = database
     application.state.settings = resolved_settings
+    application.state.qa_service = QaService(
+        database,
+        HybridRetriever(ChunkRepository(database), embedding_provider),
+        answer_provider,
+        top_k=resolved_settings.top_k,
+        max_context_chars=resolved_settings.max_context_chars,
+    )
     application.add_middleware(
         CORSMiddleware,
         allow_origins=[resolved_settings.web_origin],
@@ -103,6 +123,7 @@ def create_app(
         )
 
     application.include_router(ingestion_router)
+    application.include_router(qa_router)
     return application
 
 

@@ -91,6 +91,11 @@ class Health(ApiModel):
     service: str
 
 
+class QaChatRequest(ApiModel):
+    course_id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,49}$")
+    question: str = Field(min_length=1, max_length=2_000)
+
+
 class ErrorDetail(ApiModel):
     code: str
     message: str
