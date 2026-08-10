@@ -1,0 +1,1 @@
+"""CourseMate RAG API package."""
