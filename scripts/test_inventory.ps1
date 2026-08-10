@@ -45,6 +45,14 @@ try {
     if (@($csvRows | Where-Object { -not $_.courseId -or -not $_.fullPath }).Count -ne 0) {
         throw "CSV rows contain empty courseId or fullPath values."
     }
+    $missingFiles = @($files | Where-Object { -not (Test-Path -LiteralPath $_.fullPath -PathType Leaf) })
+    if ($missingFiles.Count -ne 0) {
+        throw "JSON inventory contains $($missingFiles.Count) fullPath values that cannot be read back."
+    }
+    $missingCsvFiles = @($csvRows | Where-Object { -not (Test-Path -LiteralPath $_.fullPath -PathType Leaf) })
+    if ($missingCsvFiles.Count -ne 0) {
+        throw "CSV inventory contains $($missingCsvFiles.Count) fullPath values that cannot be read back."
+    }
 
     Write-Output "PASS inventory: 86 files (cs3481=50, ge2324=36), 2 missing sources recorded."
 }
