@@ -1,0 +1,21 @@
+{
+  "name": "coursemate-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Course-grounded RAG and a tool-calling study planner.",
+  "workspaces": [
+    "apps/web",
+    "services/agent-api"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev:web": "npm --workspace @coursemate/web run dev",
+    "dev:agent": "npm --workspace @coursemate/agent-api run dev",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:e2e": "playwright test"
+  }
+}
