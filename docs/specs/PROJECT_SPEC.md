@@ -45,7 +45,7 @@ Every grounded QA answer exposes **Add to Study Plan**. The frontend sends the s
 
 - Web: React + TypeScript + Vite; React Router; accessible semantic CSS without a heavyweight component framework.
 - RAG service: Python 3.11+; FastAPI; Pydantic; SQLite `sqlite3` + FTS5; official OpenAI Python SDK; PyPDF, python-docx, and python-pptx for supported loaders.
-- Agent service: Node.js 22+; TypeScript; Express; official OpenAI JavaScript SDK; Ajv; `better-sqlite3`.
+- Agent service: Node.js 24.14+; TypeScript; Express; official OpenAI JavaScript SDK; Ajv; the built-in `node:sqlite` API. ADR-002 records the verified portability reason for this baseline adjustment.
 - Tests: pytest, FastAPI TestClient/httpx, Vitest, Supertest, and Playwright.
 - Persistence: separate `data/rag.sqlite3` and `data/agent.sqlite3` files locally. Stable `courseId` values form the cross-service contract.
 - Deployment: static frontend plus two long-running services with persistent storage. Final provider choice is made from current official deployment documentation after local acceptance passes.

@@ -2,73 +2,97 @@
 
 ## System context
 
-```text
-Browser / React
-├── Course QA ──HTTP + SSE──> FastAPI RAG service
-│                              ├── document loaders
-│                              ├── paragraph-aware chunker
-│                              ├── SQLite FTS5 + stored embeddings
-│                              ├── explicit hybrid ranker
-│                              └── OpenAI Responses + Embeddings APIs
-│
-└── Study Agent ──HTTP──────> Node/TypeScript Agent service
-                               ├── strict JSON Schema tools
-                               ├── Ajv validator + allow-listed executor
-                               ├── SQLite task repository
-                               └── OpenAI Responses tool loop
-```
+    Student browser
+      |
+      +-- /qa and /documents -- HTTP + SSE --> FastAPI RAG service
+      |                                          |-- loaders and chunker
+      |                                          |-- FTS5 + embedding retrieval
+      |                                          |-- grounded answer stream
+      |                                          \-- RAG-owned SQLite
+      |
+      \-- /tasks ---------------- HTTP --------> Express Agent service
+                                                 |-- Responses reasoning loop
+                                                 |-- strict tool validator/executor
+                                                 \-- Agent-owned SQLite
 
-The browser coordinates the lightweight cross-module link: a grounded QA citation becomes a task draft sent to the Agent service. The frontend never writes either database directly.
+The frontend coordinates one cross-service action: an answered question and its first citation are converted to a task request sent to the Agent API. There is no browser-side database and no browser-side OpenAI secret.
 
-## Service boundaries
+## Responsibilities
 
-### Web
+### React web
 
-Owns presentation, browser routing, local interaction state, SSE parsing, accessibility, and user-readable errors. It does not contain retrieval, task mutation, secret, or OpenAI logic.
+Owns routing, presentation, form state, accessible feedback, SSE parsing, and client-side orchestration. The main integration points are apps/web/src/services/ragApi.ts and apps/web/src/services/agentApi.ts.
 
-### RAG API
+### FastAPI RAG service
 
-Owns courses, documents, ingestion, chunks, embeddings, keyword/vector retrieval, context construction, conversations, citations, and streamed grounded answers. Every retrieval query requires `course_id`.
+Owns course and document records, upload validation, extraction, chunking, embeddings, FTS synchronization, hybrid retrieval, context construction, answers, citations, and conversation/message persistence. Every retrieval operation requires a course_id and filters both keyword and vector candidates before fusion.
 
-### Agent API
+### Express Agent service
 
-Owns task persistence and the tool-calling loop. OpenAI can propose one of five allow-listed actions; only validated server functions can execute CRUD.
+Owns tasks and the natural-language tool loop. Model output is never executed directly: services/agent-api/src/tools/validator.ts checks the exact strict schema and services/agent-api/src/tools/executor.ts dispatches only allow-listed functions to a parameterized repository.
 
-## Data ownership
+## Runtime data flow
 
-- `data/rag.sqlite3`: `courses`, `documents`, `chunks`, `chunks_fts`, `ingestion_jobs`, `conversations`, and `messages`.
-- `data/agent.sqlite3`: `tasks` and agent conversation/audit records.
-- Shared value: normalized lowercase `course_id` such as `cs3481` or `ge2324`.
+    original files (read only)
+        -> inventory JSON
+        -> import/upload validation
+        -> safe generated copies
+        -> extracted located blocks
+        -> paragraph-aware chunks
+        -> embedding JSON + FTS5 rows
 
-Separate databases keep migrations and transactions service-owned. The trade-off is deliberate duplication of stable course identifiers; no distributed transaction is required because QA-to-plan is an ordinary Agent API call.
+    courseId + question
+        -> FTS5 keyword candidates
+        -> cosine vector candidates
+        -> reciprocal-rank fusion
+        -> bounded, labelled context
+        -> Responses stream
+        -> text deltas + citations + done event
+        -> conversations/messages
 
-## Retrieval decision
+    natural-language study request
+        -> Responses function_call
+        -> Ajv strict validation
+        -> allow-listed executor
+        -> SQLite transaction
+        -> function_call_output
+        -> final model response
 
-SQLite FTS5 provides explainable lexical search. Embeddings are stored as JSON float arrays for the portfolio-scale corpus and scored in application code with cosine similarity. Reciprocal-rank fusion combines the result ranks, avoiding misleading normalization between BM25 and cosine score ranges.
+## Service-owned SQLite
 
-This first version favors inspectability over a specialized vector database. A future vector adapter can replace the scan behind the same typed interface if measured corpus size or latency requires it.
+data/rag.sqlite3 and data/agent.sqlite3 deliberately have different owners. This prevents cross-runtime migrations and lock ownership. A stable lowercase course_id is duplicated across services, while answer-to-plan uses an HTTP call rather than a cross-database write. See docs/decisions/ADR-001-service-owned-sqlite.md.
 
-## OpenAI decision
+## Retrieval strategy
 
-Both services use the official SDK and Responses API. RAG uses `responses.create(..., stream=True)` after locally constructing context; the Agent consumes `function_call` items, validates arguments with the exact schemas supplied to OpenAI, executes server code, and returns `function_call_output` items for the final natural-language response.
+SQLite FTS5/BM25 supplies exact-term recall; stored embeddings and cosine similarity supply semantic recall. Reciprocal-rank fusion combines positions instead of attempting to normalize unrelated score scales. JSON vectors and an application scan are intentionally transparent at this corpus size. A vector index becomes justified only after measured latency or corpus growth crosses an agreed threshold.
 
-Default models are configuration, not hard-coded behavior: `gpt-5.6-luna` for cost-sensitive text/tool work and `text-embedding-3-small` for embeddings. Live model availability is verified only when credentials are present.
+## Provider modes
 
-## Trust boundaries and controls
+- openai: official Python/JavaScript OpenAI SDKs, Responses API, text-embedding-3-small, and configurable chat model.
+- deterministic: stable local embeddings, extractive answers, and a constrained task-intent parser. This is a test/demo provider, not a hidden mock database.
 
-| Boundary | Risk | Control |
+Provider selection is environment configuration. Business logic and API contracts remain the same.
+
+## Trust boundaries
+
+| Boundary | Primary risk | Control |
 |---|---|---|
-| File upload | oversized, corrupt, disguised, duplicate file | size/type/content checks, safe generated name, SHA-256, isolated upload directory |
-| Course corpus | prompt injection or poisoned text | delimiter and explicit untrusted-data instruction; citations; course partition |
-| OpenAI output | invalid arguments or unsafe action | strict JSON Schema, Ajv, allow-listed tools, bounded rounds, parameterized SQL |
-| Browser input | malformed requests or XSS | server validation, React escaping, structured errors, limits |
-| Environment | leaked API key | `.env` only, ignore rules, secret scan, no logging |
+| Upload | oversized, disguised, corrupt, duplicate, path traversal | byte limit, extension/signature checks, loader errors, SHA-256 uniqueness, generated storage names |
+| Course text | prompt injection in untrusted material | delimited source context, instruction hierarchy, explicit evidence-only prompt, citations |
+| Retrieval | cross-course leakage | mandatory course_id in both candidate paths plus repository filters |
+| Model tools | arbitrary function or malformed arguments | five strict schemas, Ajv, no dynamic evaluation, bounded rounds |
+| SQL | injection or corrupted state | parameterized statements, CHECK constraints, transactions, foreign keys |
+| Browser/API | malformed input, XSS, secret exposure | Pydantic/Ajv validation, React escaping, CORS allow-list, security headers, server-only key |
+| Deployment | ephemeral SQLite data | paid persistent disks mounted at /var/data; single instance per disk |
 
-## Deployment constraints
+## Failure behavior
 
-The local contract uses real SQLite. Production must run the Python and Node services as long-lived processes with persistent volumes or use an explicitly documented storage adapter. The static React site may deploy independently. No production topology is accepted until current provider documentation and real health/browser checks confirm persistence and connectivity.
+- No relevant context: the RAG service returns an evidence-insufficient answer and no invented citation.
+- Loader/embedding failure: the job and document become failed with a user-readable message; existing data remains intact.
+- Invalid tool call: the model receives a structured error; no repository mutation occurs.
+- Tool-round limit: the Agent terminates with an explicit error instead of looping indefinitely.
+- Missing OpenAI key: regular CRUD and deterministic mode continue; live model operations return a controlled configuration error.
 
-## Decisions
+## Deployment topology
 
-- `docs/decisions/ADR-001-service-owned-sqlite.md` — service-owned SQLite databases.
-- Additional ADRs are added when retrieval fusion, API transport, or production storage decisions become expensive to reverse.
+Netlify hosts the static Vite site. Render hosts two long-lived services, each on a paid Starter instance with its own persistent disk. Netlify receives only public API base URLs. Render receives OPENAI_API_KEY and the exact Netlify origin. Private source documents are uploaded only after authorization.

@@ -1,0 +1,55 @@
+services:
+  - type: web
+    name: coursemate-rag-api
+    runtime: python
+    plan: starter
+    rootDir: services/rag-api
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    disk:
+      name: rag-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.13
+      - key: RAG_DATABASE_PATH
+        value: /var/data/rag.sqlite3
+      - key: RAG_UPLOAD_DIR
+        value: /var/data/uploads
+      - key: RAG_PROVIDER_MODE
+        value: openai
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_CHAT_MODEL
+        value: gpt-5.6-luna
+      - key: OPENAI_EMBEDDING_MODEL
+        value: text-embedding-3-small
+      - key: WEB_ORIGIN
+        sync: false
+
+  - type: web
+    name: coursemate-agent-api
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build --workspace @coursemate/agent-api
+    startCommand: node services/agent-api/dist/src/server.js
+    healthCheckPath: /health
+    disk:
+      name: agent-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: 24.14.0
+      - key: AGENT_DATABASE_PATH
+        value: /var/data/agent.sqlite3
+      - key: AGENT_PROVIDER_MODE
+        value: openai
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_CHAT_MODEL
+        value: gpt-5.6-luna
+      - key: WEB_ORIGIN
+        sync: false

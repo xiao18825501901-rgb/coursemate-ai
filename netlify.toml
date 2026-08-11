@@ -1,0 +1,11 @@
+[build]
+  command = "npm run build --workspace @coursemate/web"
+  publish = "apps/web/dist"
+
+[build.environment]
+  NODE_VERSION = "24.14.0"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
