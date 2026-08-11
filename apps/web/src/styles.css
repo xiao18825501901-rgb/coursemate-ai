@@ -57,14 +57,21 @@ a {
   top: 0.5rem;
   left: 0.5rem;
   z-index: 20;
+  width: 1px;
+  height: 1px;
   padding: 0.5rem 0.75rem;
+  overflow: hidden;
+  clip-path: inset(50%);
   color: white;
   background: var(--ink);
-  transform: translateY(-150%);
+  white-space: nowrap;
 }
 
 .skip-link:focus {
-  transform: translateY(0);
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip-path: none;
 }
 
 .app-shell {
