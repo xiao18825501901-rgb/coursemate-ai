@@ -7,6 +7,7 @@ export interface AgentConfig {
   openaiApiKey: string;
   openaiChatModel: string;
   maxToolRounds: number;
+  providerMode: "openai" | "deterministic";
 }
 
 function boundedInteger(value: string | undefined, fallback: number, min: number, max: number): number {
@@ -19,6 +20,10 @@ function boundedInteger(value: string | undefined, fallback: number, min: number
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AgentConfig {
   const configuredPath = environment.AGENT_DATABASE_PATH ?? "../../data/agent.sqlite3";
+  const providerMode = environment.AGENT_PROVIDER_MODE ?? "openai";
+  if (providerMode !== "openai" && providerMode !== "deterministic") {
+    throw new Error("AGENT_PROVIDER_MODE must be openai or deterministic.");
+  }
   return {
     databasePath:
       configuredPath === ":memory:" ? configuredPath : path.resolve(process.cwd(), configuredPath),
@@ -27,5 +32,6 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AgentC
     openaiApiKey: environment.OPENAI_API_KEY ?? "",
     openaiChatModel: environment.OPENAI_CHAT_MODEL ?? "gpt-5.6-luna",
     maxToolRounds: boundedInteger(environment.AGENT_MAX_TOOL_ROUNDS, 4, 1, 10),
+    providerMode,
   };
 }

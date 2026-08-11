@@ -11,8 +11,17 @@ from app.api.qa import router as qa_router
 from app.config import Settings
 from app.db import Database
 from app.errors import ApiError
-from app.rag.answers import AnswerProvider, MissingAnswerProvider, OpenAIAnswerProvider
-from app.rag.embeddings import EmbeddingProvider, OpenAIEmbeddingProvider
+from app.rag.answers import (
+    AnswerProvider,
+    ExtractiveAnswerProvider,
+    MissingAnswerProvider,
+    OpenAIAnswerProvider,
+)
+from app.rag.embeddings import (
+    DeterministicEmbeddingProvider,
+    EmbeddingProvider,
+    OpenAIEmbeddingProvider,
+)
 from app.rag.retrieval import HybridRetriever
 from app.repositories.chunks import ChunkRepository
 from app.services.ingestion import IngestionService, MissingEmbeddingProvider
@@ -33,20 +42,26 @@ def create_app(
     secret = resolved_settings.openai_api_key
     api_key = secret.get_secret_value() if secret else ""
     if embedding_provider is None:
-        embedding_provider = (
-            OpenAIEmbeddingProvider(
+        if resolved_settings.rag_provider_mode == "deterministic":
+            embedding_provider = DeterministicEmbeddingProvider()
+        else:
+            embedding_provider = (
+                OpenAIEmbeddingProvider(
                 api_key=api_key,
                 model=resolved_settings.openai_embedding_model,
+                )
+                if api_key
+                else MissingEmbeddingProvider()
             )
-            if api_key
-            else MissingEmbeddingProvider()
-        )
     if answer_provider is None:
-        answer_provider = (
-            OpenAIAnswerProvider(api_key=api_key, model=resolved_settings.openai_chat_model)
-            if api_key
-            else MissingAnswerProvider()
-        )
+        if resolved_settings.rag_provider_mode == "deterministic":
+            answer_provider = ExtractiveAnswerProvider()
+        else:
+            answer_provider = (
+                OpenAIAnswerProvider(api_key=api_key, model=resolved_settings.openai_chat_model)
+                if api_key
+                else MissingAnswerProvider()
+            )
 
     application = FastAPI(title="CourseMate RAG API", version="0.1.0")
     application.state.ingestion_service = IngestionService(

@@ -12,6 +12,11 @@ from app.rag.types import SourceSection
 Loader = Callable[[Path], list[SourceSection]]
 
 
+def _shape_text(shape: object) -> str:
+    value = getattr(shape, "text", "")
+    return value.strip() if isinstance(value, str) else ""
+
+
 def _require_content(sections: list[SourceSection], path: Path) -> list[SourceSection]:
     populated = [section for section in sections if section.text.strip()]
     if not populated:
@@ -97,6 +102,21 @@ def _load_pdf(path: Path) -> list[SourceSection]:
         raise DocumentLoadError(
             "CORRUPT_DOCUMENT", f"{path.name} could not be parsed as a PDF."
         ) from error
+    populated = [section for section in sections if section.text.strip()]
+    if populated:
+        return populated
+    sidecar = path.with_name(f"{path.name}.ocr.md")
+    if sidecar.is_file():
+        transcribed = _load_markdown(sidecar)
+        return [
+            SourceSection(
+                text=section.text,
+                locator_type="page",
+                locator_value=(section.section or "Page").removeprefix("Page "),
+                section=section.section,
+            )
+            for section in transcribed
+        ]
     return _require_content(sections, path)
 
 
@@ -145,17 +165,12 @@ def _load_pptx(path: Path) -> list[SourceSection]:
         presentation = Presentation(str(path))
         sections: list[SourceSection] = []
         for index, slide in enumerate(presentation.slides, start=1):
-            title_shape = slide.shapes.title
-            title = (
-                title_shape.text.strip()
-                if title_shape and title_shape.text
-                else f"Slide {index}"
-            )
+            title = _shape_text(slide.shapes.title) or f"Slide {index}"
             values: list[str] = []
             for shape in slide.shapes:
                 if not getattr(shape, "has_text_frame", False):
                     continue
-                value = shape.text.strip()
+                value = _shape_text(shape)
                 if value and value != title:
                     values.append(value)
             sections.append(

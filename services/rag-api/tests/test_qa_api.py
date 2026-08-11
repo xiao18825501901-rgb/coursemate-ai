@@ -172,3 +172,25 @@ def test_qa_request_validation_uses_standard_error_envelope(tmp_path: Path) -> N
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_deterministic_provider_mode_runs_without_an_openai_key(tmp_path: Path) -> None:
+    settings = Settings(
+        database_path=tmp_path / "rag.sqlite3",
+        upload_dir=tmp_path / "uploads",
+        rag_provider_mode="deterministic",
+        openai_api_key=None,
+        chunk_size=200,
+        chunk_overlap=20,
+    )
+    with TestClient(create_app(settings=settings)) as client:
+        create_course_and_document(client)
+        response = client.post(
+            "/api/qa/chat",
+            json={"courseId": "cs3481", "question": "What terms does Phong use?"},
+        )
+
+    events = parse_sse(response.text)
+    answer = "".join(str(data.get("text", "")) for name, data in events if name == "delta")
+    assert "ambient diffuse and specular" in answer
+    assert [name for name, _ in events][-2:] == ["citation", "done"]

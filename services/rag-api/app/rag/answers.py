@@ -1,3 +1,4 @@
+import re
 from collections.abc import Iterator
 from typing import Protocol
 
@@ -45,3 +46,37 @@ class OpenAIAnswerProvider:
 class MissingAnswerProvider:
     def stream_answer(self, *, question: str, context: str) -> Iterator[str]:
         raise RuntimeError("OPENAI_API_KEY is required for grounded answers")
+
+
+class ExtractiveAnswerProvider:
+    """Deterministic local answerer for demos when the OpenAI network is unavailable."""
+
+    def stream_answer(self, *, question: str, context: str) -> Iterator[str]:
+        question_tokens = {
+            token
+            for token in re.findall(r"\w+", question.casefold())
+            if len(token) > 2
+        }
+        cleaned_context = re.sub(r"^\[S\d+\] file=.*$", "", context, flags=re.MULTILINE)
+        cleaned_context = cleaned_context.replace(
+            "--- BEGIN UNTRUSTED COURSE MATERIAL ---", ""
+        ).replace("--- END UNTRUSTED COURSE MATERIAL ---", "")
+        sentences = [
+            sentence.strip()
+            for sentence in re.split(r"(?<=[.!?])\s+|\n+", cleaned_context)
+            if len(sentence.strip()) >= 20
+        ]
+        ranked = sorted(
+            enumerate(sentences),
+            key=lambda item: (
+                -len(question_tokens & set(re.findall(r"\w+", item[1].casefold()))),
+                item[0],
+            ),
+        )
+        selected = [sentence for _, sentence in ranked[:3]]
+        if not selected:
+            yield "The retrieved sources did not contain readable supporting text."
+            return
+        answer = "Based on the selected course material: " + " ".join(selected)
+        for offset in range(0, len(answer), 96):
+            yield answer[offset : offset + 96]

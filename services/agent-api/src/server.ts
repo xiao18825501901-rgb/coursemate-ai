@@ -6,6 +6,7 @@ import {
   type AgentModelClient,
   OpenAIResponsesClient,
 } from "./openai/client.js";
+import { DeterministicAgentModelClient } from "./openai/deterministic-client.js";
 import { TaskRepository } from "./repositories/tasks.js";
 import { AgentService } from "./services/agent.js";
 import { ToolExecutor } from "./tools/executor.js";
@@ -23,9 +24,11 @@ const unavailableClient: AgentModelClient = {
     );
   },
 };
-const modelClient = config.openaiApiKey
-  ? new OpenAIResponsesClient(config.openaiApiKey)
-  : unavailableClient;
+const modelClient = config.providerMode === "deterministic"
+  ? new DeterministicAgentModelClient()
+  : config.openaiApiKey
+    ? new OpenAIResponsesClient(config.openaiApiKey)
+    : unavailableClient;
 const agentService = new AgentService(modelClient, new ToolExecutor(repository), {
   model: config.openaiChatModel,
   maxToolRounds: config.maxToolRounds,

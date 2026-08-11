@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -16,6 +17,7 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = None
     openai_chat_model: str = "gpt-5.6-luna"
     openai_embedding_model: str = "text-embedding-3-small"
+    rag_provider_mode: Literal["openai", "deterministic"] = "openai"
     web_origin: str = "http://localhost:5173"
 
     database_path: Path = Path("../../data/rag.sqlite3")

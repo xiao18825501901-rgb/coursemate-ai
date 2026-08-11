@@ -5,7 +5,7 @@ from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from app.rag.errors import DocumentLoadError
-from app.rag.loaders import load_document
+from app.rag.loaders import _shape_text, load_document
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -60,6 +60,24 @@ def test_pdf_loader_extracts_real_page_text_and_locator(tmp_path: Path) -> None:
     assert sections[0].locator_value == "1"
 
 
+def test_scanned_pdf_loader_uses_a_trusted_page_transcription(tmp_path: Path) -> None:
+    path = tmp_path / "scan.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    with path.open("wb") as output:
+        writer.write(output)
+    path.with_name("scan.pdf.ocr.md").write_text(
+        "# Page 1\n\nK-means reduces the number of colors.",
+        encoding="utf-8",
+    )
+
+    sections = load_document(path)
+
+    assert sections[0].text == "K-means reduces the number of colors."
+    assert sections[0].locator_type == "page"
+    assert sections[0].locator_value == "1"
+
+
 @pytest.mark.parametrize(
     ("filename", "content", "expected_code"),
     [
@@ -88,3 +106,10 @@ def test_missing_document_returns_typed_error(tmp_path: Path) -> None:
         load_document(tmp_path / "missing.md")
 
     assert error.value.code == "FILE_NOT_FOUND"
+
+
+def test_shape_text_tolerates_non_text_title_placeholders() -> None:
+    class GraphicPlaceholder:
+        pass
+
+    assert _shape_text(GraphicPlaceholder()) == ""

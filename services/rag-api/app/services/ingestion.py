@@ -121,6 +121,47 @@ class IngestionService:
             raise ApiError(404, "JOB_NOT_FOUND", "The ingestion job was not found.")
         return IngestionJob.model_validate(dict(row))
 
+    def get_document(self, document_id: str) -> Document:
+        return self._get_document(document_id)
+
+    def attach_pdf_transcription(self, document_id: str, transcription: str) -> None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT stored_path, extension FROM documents WHERE id = ?", (document_id,)
+            ).fetchone()
+        if row is None:
+            raise ValueError("Document does not exist")
+        if row["extension"] != ".pdf":
+            raise ValueError("Transcriptions can only be attached to PDF documents")
+        stored_path = Path(row["stored_path"])
+        stored_path.with_name(f"{stored_path.name}.ocr.md").write_text(
+            transcription,
+            encoding="utf-8",
+        )
+
+    def retry_failed_document(self, document_id: str) -> IngestionJob:
+        document = self._get_document(document_id)
+        if document.status.value != "failed":
+            raise ValueError("Only failed documents can be retried")
+        job_id = f"job_{uuid4().hex}"
+        with self.database.connect() as connection:
+            connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
+            connection.execute(
+                """
+                UPDATE documents
+                SET status = 'pending', chunk_count = 0, error_message = NULL,
+                    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                WHERE id = ?
+                """,
+                (document_id,),
+            )
+            connection.execute(
+                "INSERT INTO ingestion_jobs (id, document_id, status) VALUES (?, ?, 'queued')",
+                (job_id, document_id),
+            )
+        self.process_document(document_id, job_id)
+        return self.get_job(job_id)
+
     def queue_document(
         self,
         *,

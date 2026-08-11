@@ -1,0 +1,705 @@
+{
+  "schema_version": 1,
+  "embedding_mode": "deterministic",
+  "generated_at": "2026-08-11T07:15:46.937336Z",
+  "summary": {
+    "total": 86,
+    "ready": 66,
+    "failed": 0,
+    "duplicate": 0,
+    "inventory_only": 20,
+    "missing": 0,
+    "invalid": 0,
+    "chunks": 1936
+  },
+  "items": [
+    {
+      "course_id": "cs3481",
+      "filename": "5.1 - Point Estimates and Sampling Variability.pptx",
+      "extension": ".pptx",
+      "status": "ready",
+      "chunks": 32,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "5.2 - Confidence Intervals for a Proportion (1).pptx",
+      "extension": ".pptx",
+      "status": "ready",
+      "chunks": 32,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "5.2 - Confidence Intervals for a Proportion.pptx",
+      "extension": ".pptx",
+      "status": "ready",
+      "chunks": 32,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "5.3 - Hypothesis Testing for a Proportion.pptx",
+      "extension": ".pptx",
+      "status": "ready",
+      "chunks": 76,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "6.1 - Inference for a single proportion.pptx",
+      "extension": ".pptx",
+      "status": "ready",
+      "chunks": 42,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "adult.data",
+      "extension": ".data",
+      "status": "inventory-only",
+      "chunks": 0,
+      "reason": "Importer mode: inventory-only"
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "apriori_example.ipynb",
+      "extension": ".ipynb",
+      "status": "inventory-only",
+      "chunks": 0,
+      "reason": "Importer mode: inventory-only"
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "arm_practice_problems.docx",
+      "extension": ".docx",
+      "status": "ready",
+      "chunks": 1,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "Association Analysis (Itemset Representation).pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 18,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "Association Analysis.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 63,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "causal_inference_intro.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 16,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "chp5.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 107,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "Classifier Evaluation.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 35,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "Cluster Analysis (Hierarchical and Density-Based Approaches).pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 37,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "Cluster Analysis (K-means).pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 35,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "cps_00001.csv",
+      "extension": ".csv",
+      "status": "inventory-only",
+      "chunks": 0,
+      "reason": "Importer mode: inventory-only"
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "CS 3481_linear regression.pptx",
+      "extension": ".pptx",
+      "status": "ready",
+      "chunks": 53,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "CS_3481_Assignment_1.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 3,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "CS_3481_Assignment_2.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 3,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "cs_3481_lec1.ipynb",
+      "extension": ".ipynb",
+      "status": "inventory-only",
+      "chunks": 0,
+      "reason": "Importer mode: inventory-only"
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "CS_3481_lec1_suppliment.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 21,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "CS_3481_lec2.ipynb",
+      "extension": ".ipynb",
+      "status": "inventory-only",
+      "chunks": 0,
+      "reason": "Importer mode: inventory-only"
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "CS_3481_lec3.ipynb",
+      "extension": ".ipynb",
+      "status": "inventory-only",
+      "chunks": 0,
+      "reason": "Importer mode: inventory-only"
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "CS_3481_lec5_sup.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 8,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "Data.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 75,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "Decision Tree Classifier in sklearn.ipynb",
+      "extension": ".ipynb",
+      "status": "inventory-only",
+      "chunks": 0,
+      "reason": "Importer mode: inventory-only"
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "Decision Tree.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 59,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "Introduction.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 54,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "iris.csv",
+      "extension": ".csv",
+      "status": "inventory-only",
+      "chunks": 0,
+      "reason": "Importer mode: inventory-only"
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "K-Means-HierarchicalStructures.ipynb",
+      "extension": ".ipynb",
+      "status": "inventory-only",
+      "chunks": 0,
+      "reason": "Importer mode: inventory-only"
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "lecture3.ppt",
+      "extension": ".ppt",
+      "status": "inventory-only",
+      "chunks": 0,
+      "reason": "Importer mode: optional-conversion"
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "logistic_regression.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 19,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "Naïve Bayes Classification with Python and Scikit-Learn.ipynb",
+      "extension": ".ipynb",
+      "status": "inventory-only",
+      "chunks": 0,
+      "reason": "Importer mode: inventory-only"
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "Nearest Neighbor Classifier and Probabilistic Classification Model.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 33,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "practice_problems_1.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 5,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "practice_problems_2.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 2,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "SDSC6018_Lecture3.pptx",
+      "extension": ".pptx",
+      "status": "ready",
+      "chunks": 42,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "state_fips.csv",
+      "extension": ".csv",
+      "status": "inventory-only",
+      "chunks": 0,
+      "reason": "Importer mode: inventory-only"
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "tut1.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 4,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "tut1_answer.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 2,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "tut2.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 1,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "tut2_answer.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 2,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "tut3.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 1,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "tut3_answer.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 3,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "tut4.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 1,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "tut4_answer.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 2,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "tut5.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 1,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "tut5_answer.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 1,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "tut6.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 1,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "cs3481",
+      "filename": "tut6_answer.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 2,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "5.3 - Hypothesis Testing for a Proportion.pptx",
+      "extension": ".pptx",
+      "status": "ready",
+      "chunks": 75,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "assignment_2.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 3,
+      "reason": "A verified local transcription supplied text for this scanned PDF."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "causal_inference_intro.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 16,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "Centrality in Social Networks.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 56,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "chp5.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 107,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "data_preprocessing.ipynb",
+      "extension": ".ipynb",
+      "status": "inventory-only",
+      "chunks": 0,
+      "reason": "Importer mode: inventory-only"
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "example_edges.csv",
+      "extension": ".csv",
+      "status": "inventory-only",
+      "chunks": 0,
+      "reason": "Importer mode: inventory-only"
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "example_nodes.csv",
+      "extension": ".csv",
+      "status": "inventory-only",
+      "chunks": 0,
+      "reason": "Importer mode: inventory-only"
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "GE_2324_Assignment_1.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 2,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "ge_2324_lec1.ipynb",
+      "extension": ".ipynb",
+      "status": "inventory-only",
+      "chunks": 0,
+      "reason": "Importer mode: inventory-only"
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "GE_2324_lec1.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 25,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "ge2234_linear regression.pptx",
+      "extension": ".pptx",
+      "status": "ready",
+      "chunks": 53,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "ge2324_assignment_3.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 4,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "GE2324_Tut02.docx",
+      "extension": ".docx",
+      "status": "ready",
+      "chunks": 1,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "GE2324_Tut05.docx",
+      "extension": ".docx",
+      "status": "ready",
+      "chunks": 1,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "GE2324_Tut07.docx",
+      "extension": ".docx",
+      "status": "ready",
+      "chunks": 1,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "GE2324_Tut08.docx",
+      "extension": ".docx",
+      "status": "ready",
+      "chunks": 1,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "GE2324_Tut09_updated.docx",
+      "extension": ".docx",
+      "status": "ready",
+      "chunks": 1,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "GE2324_Tut10.docx",
+      "extension": ".docx",
+      "status": "ready",
+      "chunks": 1,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "karate.gml",
+      "extension": ".gml",
+      "status": "inventory-only",
+      "chunks": 0,
+      "reason": "Importer mode: inventory-only"
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "lsh.pptx",
+      "extension": ".pptx",
+      "status": "ready",
+      "chunks": 20,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "network_family.csv",
+      "extension": ".csv",
+      "status": "inventory-only",
+      "chunks": 0,
+      "reason": "Importer mode: inventory-only"
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "state_fips.csv",
+      "extension": ".csv",
+      "status": "inventory-only",
+      "chunks": 0,
+      "reason": "Importer mode: inventory-only"
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "teng2011a.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 62,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "test_for_mediation.pdf",
+      "extension": ".pdf",
+      "status": "ready",
+      "chunks": 6,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "Topic01a_[CourseSlides]Introduction.pptx",
+      "extension": ".pptx",
+      "status": "ready",
+      "chunks": 40,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "Topic01b_[CourseSlides]DataBasics.pptx",
+      "extension": ".pptx",
+      "status": "ready",
+      "chunks": 38,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "Topic02_[CourseSlides]NetworkAnalysis_final.pptx",
+      "extension": ".pptx",
+      "status": "ready",
+      "chunks": 127,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "Topic02_[CourseSlides]Supp for Network data.pptx",
+      "extension": ".pptx",
+      "status": "ready",
+      "chunks": 18,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "Topic03_[CourseSlides]DataVisualization_final.pptx",
+      "extension": ".pptx",
+      "status": "ready",
+      "chunks": 89,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "Topic04_[CourseSlides]ClusteringAnalysis.pptx",
+      "extension": ".pptx",
+      "status": "ready",
+      "chunks": 67,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "Topic05_[CourseSlides]Correlation.pptx",
+      "extension": ".pptx",
+      "status": "ready",
+      "chunks": 103,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "Topic06_[CourseSlides]Associations and Frequent Item Anal.pptx",
+      "extension": ".pptx",
+      "status": "ready",
+      "chunks": 25,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "Topic07_[CourseSlides]FindingSimilarItems.pptx",
+      "extension": ".pptx",
+      "status": "ready",
+      "chunks": 52,
+      "reason": "Already indexed; no duplicate rows were created."
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "Topic08_Recommendation.ppt",
+      "extension": ".ppt",
+      "status": "inventory-only",
+      "chunks": 0,
+      "reason": "Importer mode: optional-conversion"
+    },
+    {
+      "course_id": "ge2324",
+      "filename": "Topic99_Lecture13.pptx",
+      "extension": ".pptx",
+      "status": "ready",
+      "chunks": 18,
+      "reason": "Already indexed; no duplicate rows were created."
+    }
+  ]
+}
