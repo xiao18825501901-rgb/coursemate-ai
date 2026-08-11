@@ -61,8 +61,54 @@ class QaService:
         if found is None:
             raise ApiError(404, "COURSE_NOT_FOUND", "The course was not found.")
 
+    def _start_conversation(self, *, course_id: str, question: str) -> str:
+        conversation_id = f"conv_{uuid4().hex}"
+        with self.database.connect() as connection:
+            connection.execute(
+                "INSERT INTO conversations (id, course_id) VALUES (?, ?)",
+                (conversation_id, course_id),
+            )
+            connection.execute(
+                """
+                INSERT INTO messages (id, conversation_id, role, content)
+                VALUES (?, ?, 'user', ?)
+                """,
+                (f"msg_{uuid4().hex}", conversation_id, question),
+            )
+        return conversation_id
+
+    def _record_answer(
+        self,
+        *,
+        conversation_id: str,
+        content: str,
+        citations: list[dict[str, object]],
+    ) -> None:
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO messages (id, conversation_id, role, content, citations_json)
+                VALUES (?, ?, 'assistant', ?, ?)
+                """,
+                (
+                    f"msg_{uuid4().hex}",
+                    conversation_id,
+                    content,
+                    json.dumps(citations, ensure_ascii=False, separators=(",", ":")),
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE conversations
+                SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                WHERE id = ?
+                """,
+                (conversation_id,),
+            )
+
     def stream(self, *, course_id: str, question: str) -> Iterator[str]:
         request_id = f"qa_{uuid4().hex}"
+        conversation_id = self._start_conversation(course_id=course_id, question=question)
         hits = self.retriever.retrieve(
             course_id=course_id,
             query=question,
@@ -76,21 +122,41 @@ class QaService:
             "meta",
             {
                 "requestId": request_id,
+                "conversationId": conversation_id,
                 "courseId": course_id,
                 "retrievedChunks": len(included_hits),
             },
         )
         if not included_hits:
+            self._record_answer(
+                conversation_id=conversation_id,
+                content=NO_SUPPORT_MESSAGE,
+                citations=[],
+            )
             yield encode_sse("delta", {"text": NO_SUPPORT_MESSAGE})
             yield encode_sse("done", {"requestId": request_id})
             return
 
         try:
+            answer_parts: list[str] = []
             for delta in self.answer_provider.stream_answer(question=question, context=context):
                 if delta:
+                    answer_parts.append(delta)
                     yield encode_sse("delta", {"text": delta})
-            for index, item in enumerate(included_hits, start=1):
-                yield encode_sse("citation", _citation(item, index))
+            citations = [
+                _citation(item, index)
+                for index, item in enumerate(included_hits, start=1)
+            ]
+            answer_text = "".join(answer_parts).strip()
+            if not answer_text:
+                raise RuntimeError("Answer provider returned no visible text")
+            self._record_answer(
+                conversation_id=conversation_id,
+                content=answer_text,
+                citations=citations,
+            )
+            for citation in citations:
+                yield encode_sse("citation", citation)
             yield encode_sse("done", {"requestId": request_id})
         except Exception:
             LOGGER.exception("Grounded answer generation failed for request %s", request_id)

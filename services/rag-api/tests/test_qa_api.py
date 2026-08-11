@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -104,6 +105,14 @@ def test_qa_chat_streams_named_events_and_traceable_citation(tmp_path: Path) -> 
     assert citation["locatorType"] == "section"
     assert "Phong" in str(citation["excerpt"])
     assert provider.calls and "UNTRUSTED COURSE MATERIAL" in provider.calls[0][1]
+    with sqlite3.connect(tmp_path / "rag.sqlite3") as connection:
+        assert connection.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 1
+        rows = connection.execute(
+            "SELECT role, content, citations_json FROM messages ORDER BY created_at, rowid"
+        ).fetchall()
+    assert [row[0] for row in rows] == ["user", "assistant"]
+    assert "What terms" in rows[0][1]
+    assert json.loads(rows[1][2])[0]["filename"] == "lighting.md"
 
 
 def test_empty_course_streams_no_support_without_calling_model(tmp_path: Path) -> None:

@@ -53,9 +53,27 @@ CREATE TABLE IF NOT EXISTS chunks (
     UNIQUE (document_id, ordinal)
 );
 
+CREATE TABLE IF NOT EXISTS conversations (
+    id TEXT PRIMARY KEY,
+    course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+    content TEXT NOT NULL CHECK (length(trim(content)) > 0),
+    citations_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(citations_json)),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_documents_course ON documents(course_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_chunks_course ON chunks(course_id, document_id, ordinal);
 CREATE INDEX IF NOT EXISTS idx_jobs_document ON ingestion_jobs(document_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_conversations_course ON conversations(course_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
     content,
