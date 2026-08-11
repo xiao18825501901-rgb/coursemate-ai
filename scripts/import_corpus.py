@@ -7,15 +7,15 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 RAG_ROOT = REPOSITORY_ROOT / "services" / "rag-api"
 sys.path.insert(0, str(RAG_ROOT))
 
-from app.config import Settings  # noqa: E402
-from app.corpus_import import ImportItem, import_corpus, load_inventory  # noqa: E402
-from app.db import Database  # noqa: E402
-from app.rag.embeddings import (  # noqa: E402
+from app.config import Settings
+from app.corpus_import import ImportItem, import_corpus, load_inventory
+from app.db import Database
+from app.rag.embeddings import (
     DeterministicEmbeddingProvider,
     EmbeddingProvider,
     OpenAIEmbeddingProvider,
 )
-from app.services.ingestion import IngestionService  # noqa: E402
+from app.services.ingestion import IngestionService
 
 
 def parse_args() -> argparse.Namespace:

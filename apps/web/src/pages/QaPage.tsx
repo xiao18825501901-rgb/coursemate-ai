@@ -39,6 +39,11 @@ export function QaPage() {
 
   useEffect(() => {
     let active = true;
+    abortRef.current?.abort();
+    setMessages([]);
+    setQuestion("");
+    setPlanNotice("");
+    setError(null);
     void listCourses()
       .then((page) => {
         if (!active) return;

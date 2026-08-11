@@ -4,7 +4,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$node = 'C:\Users\Hp\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe'
+$node = (Get-Command node -ErrorAction Stop).Source
+$nodeVersion = [Version]((& $node --version).TrimStart('v'))
+if ($nodeVersion -lt [Version]'24.14.0') {
+    throw "CourseMate requires Node.js 24.14.0 or newer; PATH resolves to $nodeVersion."
+}
 $python = Join-Path $repo 'services\rag-api\.venv\Scripts\python.exe'
 $logDir = Join-Path $repo 'work\local-logs'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null

@@ -8,7 +8,7 @@
     "services/agent-api"
   ],
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=24.14.0"
   },
   "scripts": {
     "dev:web": "npm --workspace @coursemate/web run dev",
@@ -19,6 +19,8 @@
     "test:e2e": "playwright test"
   },
   "devDependencies": {
-    "@playwright/test": "1.62.1"
+    "@playwright/test": "1.62.1",
+    "@testing-library/dom": "10.4.1",
+    "jsdom": "29.1.1"
   }
 }

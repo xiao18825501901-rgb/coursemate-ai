@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
-
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 
 import type {
   CreateTaskInput,
@@ -78,7 +77,7 @@ export class TaskRepository {
   private readonly idFactory: () => string;
 
   constructor(
-    private readonly database: Database.Database,
+    private readonly database: DatabaseSync,
     options: RepositoryOptions = {},
   ) {
     this.clock = options.clock ?? (() => new Date());
@@ -149,7 +148,7 @@ export class TaskRepository {
          ORDER BY created_at DESC, id DESC
          LIMIT ? OFFSET ?`,
       )
-      .all(...values, query.pageSize, offset) as TaskRow[];
+      .all(...values, query.pageSize, offset) as unknown as TaskRow[];
     return {
       items: rows.map(mapTask),
       page: query.page,

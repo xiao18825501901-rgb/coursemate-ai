@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,6 +12,7 @@ class Settings(BaseSettings):
         env_file=(".env", "../../.env"),
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     openai_api_key: SecretStr | None = None
@@ -20,8 +21,14 @@ class Settings(BaseSettings):
     rag_provider_mode: Literal["openai", "deterministic"] = "openai"
     web_origin: str = "http://localhost:5173"
 
-    database_path: Path = Path("../../data/rag.sqlite3")
-    upload_dir: Path = Path("../../data/uploads")
+    database_path: Path = Field(
+        default=Path("../../data/rag.sqlite3"),
+        validation_alias=AliasChoices("RAG_DATABASE_PATH", "DATABASE_PATH"),
+    )
+    upload_dir: Path = Field(
+        default=Path("../../data/uploads"),
+        validation_alias=AliasChoices("RAG_UPLOAD_DIR", "UPLOAD_DIR"),
+    )
     chunk_size: int = Field(default=1_200, ge=200, le=12_000)
     chunk_overlap: int = Field(default=200, ge=0, le=4_000)
     top_k: int = Field(default=6, ge=1, le=30)

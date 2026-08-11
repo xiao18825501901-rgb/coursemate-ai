@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 
 
 const SCHEMA_SQL = `
@@ -24,17 +23,18 @@ CREATE INDEX IF NOT EXISTS idx_tasks_course_status ON tasks(course_id, status);
 `;
 
 export class AgentDatabase {
-  readonly connection: Database.Database;
+  readonly connection: DatabaseSync;
 
   constructor(databasePath: string) {
     if (databasePath !== ":memory:") {
       fs.mkdirSync(path.dirname(databasePath), { recursive: true });
     }
-    this.connection = new Database(databasePath);
-    this.connection.pragma("foreign_keys = ON");
-    this.connection.pragma("busy_timeout = 10000");
+    this.connection = new DatabaseSync(databasePath, {
+      enableForeignKeyConstraints: true,
+      timeout: 10_000,
+    });
     if (databasePath !== ":memory:") {
-      this.connection.pragma("journal_mode = WAL");
+      this.connection.exec("PRAGMA journal_mode = WAL");
     }
   }
 

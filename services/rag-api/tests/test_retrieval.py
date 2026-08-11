@@ -144,6 +144,23 @@ def test_rrf_promotes_hits_found_by_both_channels() -> None:
     assert fused[0].channels == ("keyword", "vector")
 
 
+def test_rrf_does_not_let_a_weak_lexical_match_override_the_best_keyword_hit() -> None:
+    keyword_hits = [hit("assignment", 10.0, "keyword")]
+    keyword_hits.extend(
+        hit(f"filler-{index}", 9.0 - index, "keyword") for index in range(16)
+    )
+    keyword_hits.append(hit("vector-collision", 0.1, "keyword"))
+
+    fused = reciprocal_rank_fusion(
+        keyword_hits,
+        [hit("vector-collision", 1.0, "vector")],
+        top_k=6,
+    )
+
+    assert fused[0].chunk_id == "assignment"
+    assert any(item.chunk_id == "vector-collision" for item in fused)
+
+
 def test_keyword_and_vector_retrieval_are_course_scoped(tmp_path: Path) -> None:
     database = make_database(tmp_path)
     seed_chunks(database)
@@ -156,6 +173,85 @@ def test_keyword_and_vector_retrieval_are_course_scoped(tmp_path: Path) -> None:
     assert vector_hits[0].chunk_id == "chunk-cs-1"
     assert {item.course_id for item in keyword_hits + vector_hits} == {"cs3481"}
     assert all(item.chunk_id != "chunk-ge-1" for item in keyword_hits + vector_hits)
+
+
+def test_keyword_search_prioritizes_assignment_terms_over_question_stopwords(
+    tmp_path: Path,
+) -> None:
+    database = make_database(tmp_path)
+    seed_chunks(database)
+    with database.connect() as connection:
+        connection.executemany(
+            """
+            INSERT INTO documents (
+                id, course_id, filename, stored_path, media_type, extension, sha256, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "doc-ge-assignment",
+                    "ge2324",
+                    "assignment_2.pdf",
+                    "assignment_2.pdf",
+                    "application/pdf",
+                    ".pdf",
+                    "c" * 64,
+                    "ready",
+                ),
+                (
+                    "doc-ge-distractor",
+                    "ge2324",
+                    "hypothesis-testing.pptx",
+                    "hypothesis-testing.pptx",
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    ".pptx",
+                    "d" * 64,
+                    "ready",
+                ),
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO chunks (
+                id, document_id, course_id, ordinal, content, locator_type,
+                locator_value, section, embedding
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "chunk-ge-assignment",
+                    "doc-ge-assignment",
+                    "ge2324",
+                    0,
+                    "Assignment 2 requires K-means clustering to reduce 16 input "
+                    "colors to 3 representative colors.",
+                    "page",
+                    "1",
+                    "Assignment 2",
+                    json.dumps([0.0, 1.0]),
+                ),
+                (
+                    "chunk-ge-distractor",
+                    "doc-ge-distractor",
+                    "ge2324",
+                    0,
+                    "What does this ask students to do with a sample, and what "
+                    "does independence require?",
+                    "slide",
+                    "51",
+                    "Hypothesis testing",
+                    json.dumps([0.0, 1.0]),
+                ),
+            ],
+        )
+
+    hits = ChunkRepository(database).keyword_search(
+        "ge2324",
+        "What does Assignment 2 ask students to do with K-means and colors?",
+        limit=5,
+    )
+
+    assert hits[0].filename == "assignment_2.pdf"
 
 
 def test_hybrid_retriever_fuses_channels_and_empty_queries_remain_empty(

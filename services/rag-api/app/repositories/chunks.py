@@ -6,6 +6,57 @@ from app.db import Database
 from app.rag.embeddings import cosine_similarity
 from app.rag.types import SearchHit
 
+ENGLISH_STOP_WORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "ask",
+        "at",
+        "be",
+        "by",
+        "did",
+        "do",
+        "does",
+        "for",
+        "from",
+        "had",
+        "has",
+        "have",
+        "how",
+        "in",
+        "is",
+        "it",
+        "of",
+        "on",
+        "or",
+        "that",
+        "the",
+        "this",
+        "to",
+        "was",
+        "were",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "why",
+        "with",
+    }
+)
+
+
+def _query_tokens(query: str) -> list[str]:
+    tokens = [token.casefold() for token in re.findall(r"\w+", query, flags=re.UNICODE)]
+    meaningful = [
+        token for token in tokens if len(token) > 1 and token not in ENGLISH_STOP_WORDS
+    ]
+    selected = meaningful or tokens
+    return list(dict.fromkeys(selected))[:24]
+
 
 def _search_hit(row: sqlite3.Row, *, score: float, channel: str) -> SearchHit:
     return SearchHit(
@@ -27,10 +78,10 @@ class ChunkRepository:
         self.database = database
 
     def keyword_search(self, course_id: str, query: str, *, limit: int) -> list[SearchHit]:
-        tokens = re.findall(r"\w+", query, flags=re.UNICODE)
+        tokens = _query_tokens(query)
         if not tokens or limit <= 0:
             return []
-        fts_query = " OR ".join(f'"{token}"' for token in tokens[:24])
+        fts_query = " OR ".join(f'"{token}"' for token in tokens)
         with self.database.connect() as connection:
             rows = connection.execute(
                 """

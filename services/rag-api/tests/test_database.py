@@ -48,8 +48,23 @@ def test_database_initializes_relational_and_fts_schema(tmp_path: Path) -> None:
         ("table", "ingestion_jobs"),
         ("table", "chunks"),
         ("table", "chunks_fts"),
+        ("table", "conversations"),
+        ("table", "messages"),
     }.issubset(objects)
     assert settings.upload_dir.is_dir()
+
+
+def test_deployment_path_environment_aliases_are_honored(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAG_DATABASE_PATH", str(tmp_path / "deployed.sqlite3"))
+    monkeypatch.setenv("RAG_UPLOAD_DIR", str(tmp_path / "deployed-uploads"))
+
+    settings = Settings(_env_file=None)
+
+    assert settings.database_path == tmp_path / "deployed.sqlite3"
+    assert settings.upload_dir == tmp_path / "deployed-uploads"
 
 
 def test_chunk_fts_is_synchronized_and_document_delete_cascades(tmp_path: Path) -> None:

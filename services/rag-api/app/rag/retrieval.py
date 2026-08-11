@@ -11,17 +11,22 @@ def reciprocal_rank_fusion(
     *,
     top_k: int,
     rank_constant: int = 60,
+    keyword_weight: float = 1.0,
+    vector_weight: float = 0.15,
 ) -> list[SearchHit]:
-    """Fuse incomparable channel scores by their ranks."""
+    """Fuse incomparable ranks while keeping local citations lexically grounded."""
 
     if top_k <= 0:
         return []
     scores: dict[str, float] = {}
     hits_by_id: dict[str, SearchHit] = {}
     channels: dict[str, list[str]] = {}
-    for channel_hits in (keyword_hits, vector_hits):
+    for channel_hits, weight in (
+        (keyword_hits, keyword_weight),
+        (vector_hits, vector_weight),
+    ):
         for rank, item in enumerate(channel_hits, start=1):
-            scores[item.chunk_id] = scores.get(item.chunk_id, 0.0) + 1.0 / (
+            scores[item.chunk_id] = scores.get(item.chunk_id, 0.0) + weight / (
                 rank_constant + rank
             )
             hits_by_id.setdefault(item.chunk_id, item)
