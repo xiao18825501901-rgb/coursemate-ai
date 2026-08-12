@@ -37,6 +37,16 @@ class ClerkAuthVerifier:
         return subject if isinstance(subject, str) and subject else None
 
 
+class TestAuthVerifier:
+    def __init__(self, user_id: str) -> None:
+        self.user_id = user_id
+
+    def authenticate(self, request: Request) -> str | None:
+        if request.headers.get("authorization") == "Bearer test-session-token":
+            return self.user_id
+        return None
+
+
 @dataclass(frozen=True)
 class AuthenticatedUser:
     user_id: str

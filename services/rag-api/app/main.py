@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.ingestion import router as ingestion_router
 from app.api.qa import router as qa_router
-from app.auth import AuthVerifier, ClerkAuthVerifier
+from app.auth import AuthVerifier, ClerkAuthVerifier, TestAuthVerifier
 from app.config import Settings
 from app.db import Database
 from app.errors import ApiError
@@ -39,6 +39,17 @@ def create_app(
     auth_verifier: AuthVerifier | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
+    if resolved_settings.auth_test_user_id and (
+        resolved_settings.app_env != "test"
+        or resolved_settings.rag_provider_mode != "deterministic"
+    ):
+        raise RuntimeError("AUTH_TEST_USER_ID is allowed only in test deterministic mode.")
+    if (
+        auth_verifier is None
+        and not resolved_settings.auth_test_user_id
+        and not (resolved_settings.clerk_secret_key or resolved_settings.clerk_jwt_key)
+    ):
+        raise RuntimeError("CLERK_SECRET_KEY or CLERK_JWT_KEY is required.")
     database = Database(resolved_settings)
     database.initialize()
     secret = resolved_settings.openai_api_key
@@ -73,7 +84,14 @@ def create_app(
     )
     application.state.database = database
     application.state.settings = resolved_settings
-    application.state.auth_verifier = auth_verifier or ClerkAuthVerifier(resolved_settings)
+    application.state.auth_verifier = (
+        auth_verifier
+        or (
+            TestAuthVerifier(resolved_settings.auth_test_user_id)
+            if resolved_settings.auth_test_user_id
+            else ClerkAuthVerifier(resolved_settings)
+        )
+    )
     application.state.qa_service = QaService(
         database,
         HybridRetriever(ChunkRepository(database), embedding_provider),
@@ -143,6 +161,3 @@ def create_app(
     application.include_router(ingestion_router)
     application.include_router(qa_router)
     return application
-
-
-app = create_app()

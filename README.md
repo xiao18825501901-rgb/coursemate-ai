@@ -1,6 +1,6 @@
 # CourseMate AI
 
-CourseMate AI is a complete learning application with two independent backends: a course-scoped RAG service that answers from uploaded materials with citations, and a Function Calling study agent that persists Todo tasks through five validated tools. The React interface connects both into one evidence-to-action workflow.
+CourseMate AI is a multi-user learning application with Clerk authentication, a shared read-only course corpus, private cited conversations, and owner-isolated Todo tasks. Two independently verified backends connect the React interface into one evidence-to-action workflow.
 
 ## What is ready
 
@@ -11,13 +11,14 @@ CourseMate AI is a complete learning application with two independent backends: 
 - Five strict task tools: create, search, update, complete, and delete.
 - Responsive React pages for Home, QA, Study Plan, Documents, and About.
 - Deterministic offline providers for repeatable tests and OpenAI Responses/Embeddings providers for production.
+- Clerk verification in both backends, owner-scoped tasks/conversations, admin-only corpus mutation, and per-user AI limits.
 
 ## Architecture at a glance
 
-    React / Vite (5173)
-      |-- HTTP + SSE --> FastAPI RAG API (8000) --> data/rag.sqlite3
+    React / Vite + Clerk (5173)
+      |-- Bearer + SSE -> FastAPI RAG API (8000) --> data/rag.sqlite3
       |                                      \--> OpenAI Responses + Embeddings
-      \-- HTTP ------> Express Agent API (8001) -> data/agent.sqlite3
+      \-- Bearer -----> Express Agent API (8001) -> data/agent.sqlite3
                                              \--> OpenAI Responses tool loop
 
 Each backend owns its database. The browser never receives an OpenAI key and never writes SQLite directly.
@@ -38,7 +39,7 @@ From the repository root:
     services/rag-api/.venv/Scripts/python.exe -m pip install -r services/rag-api/requirements-dev.txt
     npm ci
 
-Add OPENAI_API_KEY to .env for live answers and agent chat. Keep RAG_PROVIDER_MODE=openai and AGENT_PROVIDER_MODE=openai in that case. For a credential-free local demo, set both to deterministic.
+Create a Clerk application, then set `VITE_CLERK_PUBLISHABLE_KEY`, `CLERK_PUBLISHABLE_KEY`, and `CLERK_SECRET_KEY`. Add `OPENAI_API_KEY` for live answers and agent chat. `ADMIN_USER_IDS` is a comma-separated allowlist of Clerk user IDs that may mutate the corpus. Automated browser tests use a fixed adapter accepted only in test + deterministic mode.
 
 ## Run locally
 
@@ -51,7 +52,7 @@ Then open http://localhost:5173. The health endpoints are http://localhost:8000/
 To run services manually:
 
     cd services/rag-api
-    .venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8000
+    .venv/Scripts/python.exe -m uvicorn app.main:create_app --factory --reload --port 8000
 
     npm run dev:agent
     npm run dev:web
@@ -90,6 +91,6 @@ The end-to-end suite uses real Chrome, the full RAG database, deterministic mode
 - docs/VERIFICATION_REPORT.md — final corpus, test, security, build, and deployment-gate evidence.
 - PROJECT_HANDOFF_FOR_CHATGPT.md — complete teaching and maintenance handoff.
 
-## Privacy and production note
+## Security and production note
 
-The repository contains local copies of private course materials under data/uploads so the requested local product is immediately usable. Do not publish those files or the populated database to a public repository without permission from the material owners. The provided Render blueprint creates empty persistent disks; production course upload is an explicit, authorized post-deploy step. The APIs are a single-user build without an identity layer, so authentication or platform access control is required before public internet exposure.
+The repository contains local copies of private course materials under data/uploads. Do not publish them or the populated database without permission. The Render blueprint creates empty persistent disks; an allowlisted administrator must perform production ingestion. Clerk and OpenAI secrets belong only in backend secret stores; the browser receives only the Clerk publishable key. Deployment still requires the owner to create accounts, approve paid storage, set secrets, seed authorized data, and run production smoke tests.

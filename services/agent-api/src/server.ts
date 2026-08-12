@@ -1,5 +1,5 @@
 import { createApp } from "./app.js";
-import { createClerkAuthStrategy } from "./auth.js";
+import { createClerkAuthStrategy, createTestAuthStrategy } from "./auth.js";
 import { loadConfig } from "./config.js";
 import { AgentDatabase } from "./db.js";
 import { AgentError } from "./errors.js";
@@ -39,12 +39,14 @@ const application = createApp({
   repository,
   agentService,
   webOrigin: config.webOrigin,
-  authStrategy: createClerkAuthStrategy({
-    publishableKey: config.clerkPublishableKey,
-    secretKey: config.clerkSecretKey,
-    ...(config.clerkJwtKey === undefined ? {} : { jwtKey: config.clerkJwtKey }),
-    authorizedParties: [config.webOrigin],
-  }),
+  authStrategy: config.authTestUserId === undefined
+    ? createClerkAuthStrategy({
+        publishableKey: config.clerkPublishableKey,
+        secretKey: config.clerkSecretKey,
+        ...(config.clerkJwtKey === undefined ? {} : { jwtKey: config.clerkJwtKey }),
+        authorizedParties: [config.webOrigin],
+      })
+    : createTestAuthStrategy(config.authTestUserId),
   modelRateLimiter: new SqliteModelRateLimiter(database.connection, {
     limitPerMinute: config.agentChatRequestsPerMinute,
   }),

@@ -25,7 +25,7 @@ $env:VITE_AGENT_API_URL = 'http://127.0.0.1:8001'
 
 $processes = @()
 try {
-    $processes += Start-Process -FilePath $python -WorkingDirectory (Join-Path $repo 'services\rag-api') -ArgumentList '-m','uvicorn','app.main:app','--host','127.0.0.1','--port','8000' -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logDir 'rag.out.log') -RedirectStandardError (Join-Path $logDir 'rag.err.log') -PassThru
+    $processes += Start-Process -FilePath $python -WorkingDirectory (Join-Path $repo 'services\rag-api') -ArgumentList '-m','uvicorn','app.main:create_app','--factory','--host','127.0.0.1','--port','8000' -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logDir 'rag.out.log') -RedirectStandardError (Join-Path $logDir 'rag.err.log') -PassThru
     $processes += Start-Process -FilePath $node -WorkingDirectory $repo -ArgumentList (Join-Path $repo 'services\agent-api\dist\src\server.js') -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logDir 'agent.out.log') -RedirectStandardError (Join-Path $logDir 'agent.err.log') -PassThru
     $processes += Start-Process -FilePath $node -WorkingDirectory (Join-Path $repo 'apps\web') -ArgumentList (Join-Path $repo 'node_modules\vite\bin\vite.js'),'--host','127.0.0.1' -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logDir 'web.out.log') -RedirectStandardError (Join-Path $logDir 'web.err.log') -PassThru
     Write-Host 'CourseMate is starting at http://127.0.0.1:5173'

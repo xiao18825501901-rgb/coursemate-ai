@@ -1,0 +1,33 @@
+import { describe, expect, it } from "vitest";
+
+import { loadConfig } from "../src/config.js";
+
+
+describe("Agent security configuration", () => {
+  it("fails closed without Clerk credentials", () => {
+    expect(() => loadConfig({})).toThrow(/CLERK_PUBLISHABLE_KEY/);
+  });
+
+  it("allows the fixed test adapter only in test deterministic mode", () => {
+    const config = loadConfig({
+      NODE_ENV: "test",
+      AGENT_PROVIDER_MODE: "deterministic",
+      AUTH_TEST_USER_ID: "e2e-user",
+    });
+    expect(config.authTestUserId).toBe("e2e-user");
+    expect(() => loadConfig({
+      NODE_ENV: "production",
+      AGENT_PROVIDER_MODE: "deterministic",
+      AUTH_TEST_USER_ID: "e2e-user",
+    })).toThrow(/only in test deterministic mode/);
+  });
+
+  it("uses the platform PORT when AGENT_PORT is absent", () => {
+    const config = loadConfig({
+      CLERK_PUBLISHABLE_KEY: "pk_test_example",
+      CLERK_SECRET_KEY: "sk_test_example",
+      PORT: "10000",
+    });
+    expect(config.port).toBe(10_000);
+  });
+});

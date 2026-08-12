@@ -5,7 +5,7 @@ services:
     plan: starter
     rootDir: services/rag-api
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn app.main:create_app --factory --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     disk:
       name: rag-data
@@ -28,6 +28,16 @@ services:
         value: text-embedding-3-small
       - key: WEB_ORIGIN
         sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: CLERK_JWT_KEY
+        sync: false
+      - key: ADMIN_USER_IDS
+        sync: false
+      - key: RAG_QA_REQUESTS_PER_MINUTE
+        value: 10
+      - key: APP_ENV
+        value: production
 
   - type: web
     name: coursemate-agent-api
@@ -53,3 +63,11 @@ services:
         value: gpt-5.6-luna
       - key: WEB_ORIGIN
         sync: false
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: CLERK_JWT_KEY
+        sync: false
+      - key: AGENT_CHAT_REQUESTS_PER_MINUTE
+        value: 10

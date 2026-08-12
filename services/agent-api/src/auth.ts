@@ -26,3 +26,11 @@ export function createClerkAuthStrategy(options: ClerkAuthOptions): AuthStrategy
     userId: (request) => getAuth(request).userId,
   };
 }
+
+export function createTestAuthStrategy(userId: string): AuthStrategy {
+  return {
+    middleware: (_request, _response, next) => next(),
+    userId: (request) =>
+      request.get("authorization") === "Bearer test-session-token" ? userId : null,
+  };
+}

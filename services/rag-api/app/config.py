@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     clerk_jwt_key: SecretStr | None = None
     admin_user_ids: str = ""
     rag_qa_requests_per_minute: int = Field(default=10, ge=1, le=1_000)
+    app_env: Literal["development", "test", "production"] = "production"
+    auth_test_user_id: str | None = None
 
     database_path: Path = Field(
         default=Path("../../data/rag.sqlite3"),

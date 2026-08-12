@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from app.config import Settings
 from app.db import Database
+from app.main import create_app
 
 
 def make_settings(
@@ -24,6 +25,25 @@ def make_settings(
 def test_settings_require_overlap_smaller_than_chunk_size(tmp_path: Path) -> None:
     with pytest.raises(ValidationError, match="chunk_overlap must be smaller"):
         make_settings(tmp_path, chunk_size=400, chunk_overlap=400)
+
+
+def test_application_fails_closed_without_clerk_configuration(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match="CLERK_SECRET_KEY"):
+        create_app(settings=make_settings(tmp_path))
+
+
+def test_auth_test_adapter_is_rejected_outside_test_deterministic_mode(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(
+        database_path=tmp_path / "rag.sqlite3",
+        upload_dir=tmp_path / "uploads",
+        auth_test_user_id="e2e-user",
+        app_env="production",
+        rag_provider_mode="deterministic",
+    )
+    with pytest.raises(RuntimeError, match="only in test deterministic mode"):
+        create_app(settings=settings)
 
 
 def test_database_initializes_relational_and_fts_schema(tmp_path: Path) -> None:

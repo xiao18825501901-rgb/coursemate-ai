@@ -12,6 +12,7 @@ export interface AgentConfig {
   clerkSecretKey: string;
   clerkJwtKey: string | undefined;
   agentChatRequestsPerMinute: number;
+  authTestUserId: string | undefined;
 }
 
 function boundedInteger(value: string | undefined, fallback: number, min: number, max: number): number {
@@ -30,13 +31,20 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AgentC
   }
   const clerkPublishableKey = environment.CLERK_PUBLISHABLE_KEY ?? "";
   const clerkSecretKey = environment.CLERK_SECRET_KEY ?? "";
-  if (!clerkPublishableKey || !clerkSecretKey) {
+  const authTestUserId = environment.AUTH_TEST_USER_ID || undefined;
+  if (
+    authTestUserId !== undefined &&
+    (environment.NODE_ENV !== "test" || providerMode !== "deterministic")
+  ) {
+    throw new Error("AUTH_TEST_USER_ID is allowed only in test deterministic mode.");
+  }
+  if (authTestUserId === undefined && (!clerkPublishableKey || !clerkSecretKey)) {
     throw new Error("CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY are required.");
   }
   return {
     databasePath:
       configuredPath === ":memory:" ? configuredPath : path.resolve(process.cwd(), configuredPath),
-    port: boundedInteger(environment.AGENT_PORT, 8001, 1, 65_535),
+    port: boundedInteger(environment.AGENT_PORT ?? environment.PORT, 8001, 1, 65_535),
     webOrigin: environment.WEB_ORIGIN ?? "http://localhost:5173",
     openaiApiKey: environment.OPENAI_API_KEY ?? "",
     openaiChatModel: environment.OPENAI_CHAT_MODEL ?? "gpt-5.6-luna",
@@ -51,5 +59,6 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AgentC
       1,
       1_000,
     ),
+    authTestUserId,
   };
 }
