@@ -136,6 +136,7 @@ export function createApp(dependencies: AppDependencies): express.Express {
 
   application.post("/api/agent/chat", async (request, response) => {
     const userId = requireUser(request, dependencies.authStrategy);
+    const { message } = validateChat(request.body);
     if (!dependencies.modelRateLimiter.consume(userId)) {
       throw new HttpError(
         429,
@@ -143,7 +144,6 @@ export function createApp(dependencies: AppDependencies): express.Express {
         "Too many AI requests. Please try again shortly.",
       );
     }
-    const { message } = validateChat(request.body);
     response.json(await dependencies.agentService.chat(userId, message));
   });
 
