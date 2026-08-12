@@ -27,8 +27,8 @@ export interface AgentModelClient {
 export class OpenAIResponsesClient implements AgentModelClient {
   private readonly client: OpenAI;
 
-  constructor(apiKey: string, client?: OpenAI) {
-    this.client = client ?? new OpenAI({ apiKey });
+  constructor(apiKey: string, client?: OpenAI, baseURL?: string) {
+    this.client = client ?? new OpenAI({ apiKey, ...(baseURL ? { baseURL } : {}) });
   }
 
   async create(request: AgentModelRequest): Promise<AgentModelResponse> {

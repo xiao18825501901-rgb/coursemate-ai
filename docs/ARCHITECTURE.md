@@ -68,10 +68,10 @@ SQLite FTS5/BM25 supplies exact-term recall; stored embeddings and cosine simila
 
 ## Provider modes
 
-- openai: official Python/JavaScript OpenAI SDKs, Responses API, text-embedding-3-small, and configurable chat model.
+- openai: official Python/JavaScript OpenAI SDKs, Responses API, configurable chat/embedding models, and an optional trusted `OPENAI_BASE_URL` for OpenAI-compatible providers.
 - deterministic: stable local embeddings, extractive answers, and a constrained task-intent parser. This is a test/demo provider, not a hidden mock database.
 
-Provider selection is environment configuration. Business logic and API contracts remain the same.
+Provider selection is environment configuration. When `OPENAI_BASE_URL` is unset or empty, both SDKs use their original OpenAI endpoint; otherwise both backends use the configured compatible endpoint. Business logic, Responses streaming, Function Calling, authentication, and API contracts remain the same.
 
 ## Trust boundaries
 
@@ -95,4 +95,4 @@ Provider selection is environment configuration. Business logic and API contract
 
 ## Deployment topology
 
-Netlify hosts the static Vite site. Render hosts two long-lived services, each on a paid Starter instance with its own persistent disk. Netlify receives only public API base URLs. Render receives OPENAI_API_KEY and the exact Netlify origin. Private source documents are uploaded only after authorization.
+Netlify hosts the static Vite site. Render hosts two long-lived services, each on a paid Starter instance with its own persistent disk. Netlify receives only public API base URLs. Render receives the model-provider key under `OPENAI_API_KEY`, optional compatible endpoint configuration, and the exact Netlify origin. Private source documents are uploaded only after authorization.

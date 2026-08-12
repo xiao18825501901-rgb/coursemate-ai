@@ -14,6 +14,15 @@ class FakeEmbeddingProvider:
         return [[float(len(text)), 1.0] for text in texts]
 
 
+class RecordingEmbeddingProvider:
+    def __init__(self) -> None:
+        self.batch_sizes: list[int] = []
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        self.batch_sizes.append(len(texts))
+        return [[float(len(text)), 1.0] for text in texts]
+
+
 class FakeAuthVerifier:
     def authenticate(self, request: Request) -> str | None:
         tokens = {
@@ -98,6 +107,41 @@ def test_markdown_upload_completes_real_ingestion_pipeline(
     assert documents.json()["items"][0]["status"] == "ready"
     assert documents.json()["items"][0]["chunkCount"] == 1
     assert len(list(settings.upload_dir.rglob("*.md"))) == 1
+
+
+def test_embedding_ingestion_batches_at_most_ten_chunks(tmp_path: Path) -> None:
+    provider = RecordingEmbeddingProvider()
+    batch_settings = Settings(
+        database_path=tmp_path / "rag.sqlite3",
+        upload_dir=tmp_path / "uploads",
+        chunk_size=200,
+        chunk_overlap=20,
+        max_upload_bytes=5_000,
+        admin_user_ids="user-admin",
+    )
+    paragraphs = [f"Paragraph {index} " + ("word " * 32) for index in range(12)]
+    content = ("# Batching\n\n" + "\n\n".join(paragraphs)).encode()
+
+    with TestClient(
+        create_app(
+            settings=batch_settings,
+            embedding_provider=provider,
+            auth_verifier=FakeAuthVerifier(),
+        )
+    ) as batch_client:
+        batch_client.headers["Authorization"] = "Bearer admin-token"
+        create_course(batch_client)
+        upload = batch_client.post(
+            "/api/courses/cs3481/documents",
+            files={"file": ("batching.md", content, "text/markdown")},
+        )
+        job = batch_client.get(f"/api/ingestion-jobs/{upload.json()['job']['id']}")
+
+    assert upload.status_code == 202
+    assert job.json()["status"] == "completed"
+    assert job.json()["processedChunks"] > 10
+    assert max(provider.batch_sizes) <= 10
+    assert sum(provider.batch_sizes) == job.json()["processedChunks"]
 
 
 def test_duplicate_content_is_rejected_without_second_document(client: TestClient) -> None:

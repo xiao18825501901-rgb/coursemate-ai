@@ -21,9 +21,14 @@ class OpenAIAnswerProvider:
         api_key: str,
         model: str,
         client: OpenAI | None = None,
+        base_url: str | None = None,
         max_output_tokens: int = 1_200,
     ) -> None:
-        self.client = client or OpenAI(api_key=api_key)
+        self.client = client or (
+            OpenAI(api_key=api_key, base_url=base_url)
+            if base_url
+            else OpenAI(api_key=api_key)
+        )
         self.model = model
         self.max_output_tokens = max_output_tokens
 

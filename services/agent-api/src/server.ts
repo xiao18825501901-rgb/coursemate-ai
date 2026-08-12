@@ -29,7 +29,7 @@ const unavailableClient: AgentModelClient = {
 const modelClient = config.providerMode === "deterministic"
   ? new DeterministicAgentModelClient()
   : config.openaiApiKey
-    ? new OpenAIResponsesClient(config.openaiApiKey)
+    ? new OpenAIResponsesClient(config.openaiApiKey, undefined, config.openaiBaseUrl)
     : unavailableClient;
 const agentService = new AgentService(modelClient, new ToolExecutor(repository), {
   model: config.openaiChatModel,

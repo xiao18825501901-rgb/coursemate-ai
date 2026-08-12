@@ -14,8 +14,19 @@ class EmbeddingProvider(Protocol):
 class OpenAIEmbeddingProvider:
     """Official OpenAI embeddings adapter kept behind a testable interface."""
 
-    def __init__(self, *, api_key: str, model: str, client: OpenAI | None = None) -> None:
-        self.client = client or OpenAI(api_key=api_key)
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        client: OpenAI | None = None,
+        base_url: str | None = None,
+    ) -> None:
+        self.client = client or (
+            OpenAI(api_key=api_key, base_url=base_url)
+            if base_url
+            else OpenAI(api_key=api_key)
+        )
         self.model = model
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:

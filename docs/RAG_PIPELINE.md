@@ -13,7 +13,7 @@ The RAG service answers only from the selected course. It keeps source locations
 5. IngestionService.process_document marks both records processing and calls load_document.
 6. loaders.py returns SourceSection values with content and a page, slide, section, paragraph, or line locator.
 7. chunk_sections keeps paragraph boundaries where possible, word-splits oversized blocks, and carries a bounded overlap.
-8. The configured EmbeddingProvider embeds batches. Production uses OpenAIEmbeddingProvider; repeatable tests use DeterministicEmbeddingProvider.
+8. The configured EmbeddingProvider embeds batches of at most 10 inputs. Production uses OpenAIEmbeddingProvider; repeatable tests use DeterministicEmbeddingProvider.
 9. chunks are inserted transactionally. SQLite triggers mirror their content into chunks_fts.
 10. Document and job states become ready/completed with the exact chunk count. Exceptions roll back the chunk replacement and produce failed states.
 
@@ -73,7 +73,8 @@ For each query verify a non-empty answer, at least one citation when evidence ex
 | CHUNK_OVERLAP | 200 | context carried into the next chunk |
 | TOP_K | 6 | fused hits returned to the prompt |
 | MAX_CONTEXT_CHARS | 18000 | hard context budget |
+| OPENAI_BASE_URL | empty | optional trusted OpenAI-compatible API endpoint |
 | OPENAI_EMBEDDING_MODEL | text-embedding-3-small | production vector model |
 | RAG_PROVIDER_MODE | openai | openai or deterministic |
 
-Changing the embedding model requires re-embedding the corpus. Changing only the answer model does not.
+The ingestion batch size is fixed at 10 to stay within the target synchronous embedding API limit. Changing the embedding model requires re-embedding the corpus. Changing only the answer model does not.

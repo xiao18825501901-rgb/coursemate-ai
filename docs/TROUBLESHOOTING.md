@@ -14,6 +14,8 @@ Cause: the global Node 18 runtime is older than this workspace's requirement. Us
 
 The .env file is missing, the key is empty, or the service did not load the expected working directory. Copy .env.example, set OPENAI_API_KEY without quotes/newlines, restart both APIs, and never print the key. Direct task CRUD still works. To prove the rest of the stack, set both provider modes to deterministic.
 
+For an OpenAI-compatible provider, also confirm `OPENAI_BASE_URL` is the provider's exact compatible API root and that both model names exist in that region/workspace. Leave `OPENAI_BASE_URL` empty to return to the original OpenAI SDK endpoint. Do not include the key in diagnostic output.
+
 ## OpenAI timeout or connection reset
 
 If deterministic mode passes but live mode times out before an HTTP response, inspect firewall, proxy, TLS interception, DNS, and outbound allow-listing. Do not rotate or expose the key until network reachability is confirmed. A transport failure does not validate whether the model name or key is accepted.

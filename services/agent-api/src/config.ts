@@ -5,6 +5,7 @@ export interface AgentConfig {
   port: number;
   webOrigin: string;
   openaiApiKey: string;
+  openaiBaseUrl: string | undefined;
   openaiChatModel: string;
   maxToolRounds: number;
   providerMode: "openai" | "deterministic";
@@ -47,6 +48,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AgentC
     port: boundedInteger(environment.AGENT_PORT ?? environment.PORT, 8001, 1, 65_535),
     webOrigin: environment.WEB_ORIGIN ?? "http://localhost:5173",
     openaiApiKey: environment.OPENAI_API_KEY ?? "",
+    openaiBaseUrl: environment.OPENAI_BASE_URL || undefined,
     openaiChatModel: environment.OPENAI_CHAT_MODEL ?? "gpt-5.6-luna",
     maxToolRounds: boundedInteger(environment.AGENT_MAX_TOOL_ROUNDS, 4, 1, 10),
     providerMode,

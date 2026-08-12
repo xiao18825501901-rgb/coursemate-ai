@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     )
 
     openai_api_key: SecretStr | None = None
+    openai_base_url: str | None = None
     openai_chat_model: str = "gpt-5.6-luna"
     openai_embedding_model: str = "text-embedding-3-small"
     rag_provider_mode: Literal["openai", "deterministic"] = "openai"

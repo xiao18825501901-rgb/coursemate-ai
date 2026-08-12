@@ -22,10 +22,12 @@ services:
         value: openai
       - key: OPENAI_API_KEY
         sync: false
+      - key: OPENAI_BASE_URL
+        value: https://ws-fcszqpvmuz5bcq72.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
       - key: OPENAI_CHAT_MODEL
-        value: gpt-5.6-luna
+        value: qwen3.7-plus
       - key: OPENAI_EMBEDDING_MODEL
-        value: text-embedding-3-small
+        value: text-embedding-v4
       - key: WEB_ORIGIN
         sync: false
       - key: CLERK_SECRET_KEY
@@ -59,8 +61,10 @@ services:
         value: openai
       - key: OPENAI_API_KEY
         sync: false
+      - key: OPENAI_BASE_URL
+        value: https://ws-fcszqpvmuz5bcq72.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
       - key: OPENAI_CHAT_MODEL
-        value: gpt-5.6-luna
+        value: qwen3.7-plus
       - key: WEB_ORIGIN
         sync: false
       - key: CLERK_PUBLISHABLE_KEY

@@ -30,4 +30,24 @@ describe("Agent security configuration", () => {
     });
     expect(config.port).toBe(10_000);
   });
+
+  it("loads a custom OpenAI-compatible base URL", () => {
+    const config = loadConfig({
+      CLERK_PUBLISHABLE_KEY: "pk_test_example",
+      CLERK_SECRET_KEY: "sk_test_example",
+      OPENAI_BASE_URL: "https://workspace.example.com/compatible-mode/v1",
+    });
+
+    expect(config.openaiBaseUrl).toBe("https://workspace.example.com/compatible-mode/v1");
+  });
+
+  it.each([undefined, ""])("leaves an absent or empty OpenAI base URL undefined", (baseUrl) => {
+    const environment: NodeJS.ProcessEnv = {
+      CLERK_PUBLISHABLE_KEY: "pk_test_example",
+      CLERK_SECRET_KEY: "sk_test_example",
+      ...(baseUrl === undefined ? {} : { OPENAI_BASE_URL: baseUrl }),
+    };
+
+    expect(loadConfig(environment).openaiBaseUrl).toBeUndefined();
+  });
 });

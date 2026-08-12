@@ -60,8 +60,9 @@ def create_app(
         else:
             embedding_provider = (
                 OpenAIEmbeddingProvider(
-                api_key=api_key,
-                model=resolved_settings.openai_embedding_model,
+                    api_key=api_key,
+                    model=resolved_settings.openai_embedding_model,
+                    base_url=resolved_settings.openai_base_url,
                 )
                 if api_key
                 else MissingEmbeddingProvider()
@@ -71,7 +72,11 @@ def create_app(
             answer_provider = ExtractiveAnswerProvider()
         else:
             answer_provider = (
-                OpenAIAnswerProvider(api_key=api_key, model=resolved_settings.openai_chat_model)
+                OpenAIAnswerProvider(
+                    api_key=api_key,
+                    model=resolved_settings.openai_chat_model,
+                    base_url=resolved_settings.openai_base_url,
+                )
                 if api_key
                 else MissingAnswerProvider()
             )

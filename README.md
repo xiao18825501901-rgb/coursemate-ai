@@ -10,16 +10,16 @@ CourseMate AI is a multi-user learning application with Clerk authentication, a 
 - Hybrid retrieval with SQLite FTS5, stored embeddings, reciprocal-rank fusion, citations, SSE streaming, and conversation persistence.
 - Five strict task tools: create, search, update, complete, and delete.
 - Responsive React pages for Home, QA, Study Plan, Documents, and About.
-- Deterministic offline providers for repeatable tests and OpenAI Responses/Embeddings providers for production.
+- Deterministic offline providers for repeatable tests and OpenAI SDK Responses/Embeddings providers for production, including OpenAI-compatible endpoints.
 - Clerk verification in both backends, owner-scoped tasks/conversations, admin-only corpus mutation, and per-user AI limits.
 
 ## Architecture at a glance
 
     React / Vite + Clerk (5173)
       |-- Bearer + SSE -> FastAPI RAG API (8000) --> data/rag.sqlite3
-      |                                      \--> OpenAI Responses + Embeddings
+      |                                      \--> OpenAI-compatible Responses + Embeddings
       \-- Bearer -----> Express Agent API (8001) -> data/agent.sqlite3
-                                             \--> OpenAI Responses tool loop
+                                             \--> OpenAI-compatible Responses tool loop
 
 Each backend owns its database. The browser never receives an OpenAI key and never writes SQLite directly.
 
@@ -28,7 +28,7 @@ Each backend owns its database. The browser never receives an OpenAI key and nev
 - Node.js 24.14 or newer; Node 24.14 is the verified runtime and supplies the Agent's built-in SQLite API.
 - Python 3.11 or newer; Python 3.12 is the verified runtime.
 - Google Chrome for the configured Playwright acceptance suite.
-- An OpenAI API key only for live model mode. Offline development and all automated tests use deterministic providers.
+- A provider API key only for live model mode. OpenAI-compatible providers continue to use the server-side `OPENAI_API_KEY` variable; offline development and all automated tests use deterministic providers or injected clients.
 
 ## Setup
 
@@ -39,7 +39,7 @@ From the repository root:
     services/rag-api/.venv/Scripts/python.exe -m pip install -r services/rag-api/requirements-dev.txt
     npm ci
 
-Create a Clerk application, then set `VITE_CLERK_PUBLISHABLE_KEY`, `CLERK_PUBLISHABLE_KEY`, and `CLERK_SECRET_KEY`. Add `OPENAI_API_KEY` for live answers and agent chat. `ADMIN_USER_IDS` is a comma-separated allowlist of Clerk user IDs that may mutate the corpus. Automated browser tests use a fixed adapter accepted only in test + deterministic mode.
+Create a Clerk application, then set `VITE_CLERK_PUBLISHABLE_KEY`, `CLERK_PUBLISHABLE_KEY`, and `CLERK_SECRET_KEY`. Add `OPENAI_API_KEY` for live answers and agent chat. Leave `OPENAI_BASE_URL` empty for OpenAI's default API, or set it to a trusted OpenAI-compatible `/v1` endpoint; keep the configured chat and embedding model names valid for that provider. `ADMIN_USER_IDS` is a comma-separated allowlist of Clerk user IDs that may mutate the corpus. Automated browser tests use a fixed adapter accepted only in test + deterministic mode.
 
 ## Run locally
 
@@ -93,4 +93,4 @@ The end-to-end suite uses real Chrome, the full RAG database, deterministic mode
 
 ## Security and production note
 
-The repository contains local copies of private course materials under data/uploads. Do not publish them or the populated database without permission. The Render blueprint creates empty persistent disks; an allowlisted administrator must perform production ingestion. Clerk and OpenAI secrets belong only in backend secret stores; the browser receives only the Clerk publishable key. Deployment still requires the owner to create accounts, approve paid storage, set secrets, seed authorized data, and run production smoke tests.
+The repository contains local copies of private course materials under data/uploads. Do not publish them or the populated database without permission. The Render blueprint creates empty persistent disks; an allowlisted administrator must perform production ingestion. Clerk and model-provider secrets belong only in backend secret stores; the browser receives only the Clerk publishable key. Deployment still requires the owner to create accounts, approve paid storage, set secrets, seed authorized data, and run production smoke tests.

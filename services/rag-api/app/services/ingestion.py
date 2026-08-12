@@ -23,6 +23,7 @@ from app.rag.errors import DocumentLoadError
 from app.rag.loaders import LOADERS, load_document
 
 LOGGER = logging.getLogger(__name__)
+EMBEDDING_BATCH_SIZE = 10
 
 MEDIA_TYPES: dict[str, set[str]] = {
     ".md": {"text/markdown", "text/plain", "application/octet-stream"},
@@ -249,8 +250,8 @@ class IngestionService:
                 overlap=self.settings.chunk_overlap,
             )
             embeddings: list[list[float]] = []
-            for offset in range(0, len(chunks), 64):
-                batch = chunks[offset : offset + 64]
+            for offset in range(0, len(chunks), EMBEDDING_BATCH_SIZE):
+                batch = chunks[offset : offset + EMBEDDING_BATCH_SIZE]
                 embeddings.extend(
                     self.embedding_provider.embed_texts([chunk.content for chunk in batch])
                 )

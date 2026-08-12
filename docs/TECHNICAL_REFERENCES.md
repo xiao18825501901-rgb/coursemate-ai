@@ -16,6 +16,13 @@ The implementation is based on primary papers and official project/provider docu
 - Function Calling guide; source for strict schemas, function_call, call_id, and function_call_output: https://developers.openai.com/api/docs/guides/function-calling
 - Embeddings guide; source for embedding creation and semantic similarity: https://developers.openai.com/api/docs/guides/embeddings
 
+## Alibaba Cloud Model Studio
+
+- Model Studio OpenAI compatibility and Singapore workspace endpoint format: https://www.alibabacloud.com/help/en/model-studio/what-is-model-studio
+- Qwen Responses API through the OpenAI-compatible interface: https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-responses
+- Embedding models through the OpenAI-compatible client: https://www.alibabacloud.com/help/en/model-studio/embedding
+- Synchronous text embedding input and response limits, including batches of at most 10 and float encoding: https://www.alibabacloud.com/help/en/model-studio/text-embedding-synchronous-api
+
 ## Data and web stack
 
 - SQLite FTS5 official documentation, including BM25 and external synchronization patterns: https://www.sqlite.org/fts5.html

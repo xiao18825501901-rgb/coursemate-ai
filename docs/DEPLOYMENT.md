@@ -12,7 +12,7 @@ The root netlify.toml and render.yaml are ready for this topology. Render Starte
 
 1. Confirm you are authorized to upload or publicly expose the course documents. Do not push data/uploads or data/rag.sqlite3 to a public repository without that permission.
 2. Put the code in a Git repository accessible to Render and Netlify. Keep .env and private course data ignored.
-3. Have an OpenAI API key with access to the configured chat and embedding models.
+3. Have a provider API key with access to the configured chat and embedding models. Keep it only in the deployment platform's secret store.
 4. Have Render billing enabled for two Starter web services and two 1 GiB disks.
 5. Authenticate Netlify CLI or connect the Git repository through the dashboard.
 6. Create a Clerk application. Record its public publishable key and backend secret key in the platform secret stores; never paste them into documentation or Git.
@@ -22,7 +22,7 @@ The root netlify.toml and render.yaml are ready for this topology. Render Starte
 
 1. In Render, create a Blueprint from this repository. Render reads render.yaml.
 2. Review both paid Starter services and disk charges before applying.
-3. Enter `OPENAI_API_KEY` for both services when prompted.
+3. Enter `OPENAI_API_KEY` for both services when prompted. The name is retained for SDK compatibility even when the secret was issued by an OpenAI-compatible provider.
 4. Enter `CLERK_SECRET_KEY` for both services and `CLERK_PUBLISHABLE_KEY` for Agent. Optionally set `CLERK_JWT_KEY` on both for networkless verification. Set the RAG-only `ADMIN_USER_IDS` allowlist.
 5. Temporarily set `WEB_ORIGIN` on both services to the anticipated Netlify URL or a controlled placeholder. Update it to the exact production origin after Netlify supplies the final URL.
 6. Apply the Blueprint and wait for both health checks to pass. Both services fail closed if Clerk verification configuration is absent.
@@ -33,6 +33,19 @@ The root netlify.toml and render.yaml are ready for this topology. Render Starte
        curl https://<agent-host>/health
 
 The RAG disk stores rag.sqlite3 and uploads. The Agent disk stores agent.sqlite3. Only /var/data persists; never change the deployment paths to the service source directory.
+
+### Model provider configuration
+
+Both backends use the official OpenAI SDK. `OPENAI_BASE_URL` is optional: unset or empty preserves the SDK's original OpenAI endpoint, while a non-empty value selects a trusted OpenAI-compatible endpoint. The Render Blueprint targets Alibaba Cloud Model Studio's Singapore workspace with these non-secret values:
+
+| Variable | Production value |
+|---|---|
+| `OPENAI_BASE_URL` | `https://ws-fcszqpvmuz5bcq72.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1` |
+| `OPENAI_CHAT_MODEL` | `qwen3.7-plus` |
+| `OPENAI_EMBEDDING_MODEL` | `text-embedding-v4` |
+| `OPENAI_API_KEY` | Set as a secret in both backend services; never commit it. |
+
+The RAG service uses the endpoint for embeddings and streamed Responses. The Agent uses it for the existing Responses Function Calling loop. Model calls remain server-side. Changing the embedding model for an existing corpus requires re-embedding that corpus.
 
 ## Initialize production course data
 
