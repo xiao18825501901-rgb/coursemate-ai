@@ -2,8 +2,9 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { CitationList } from "../components/CitationList";
+import { useCourseMateAuth } from "../auth/AuthProvider";
 import { createTask } from "../services/agentApi";
-import { listCourses, listDocuments, streamQa, uploadDocument } from "../services/ragApi";
+import { listCourses, listDocuments, streamQa } from "../services/ragApi";
 import type { Citation, Course, CourseDocument } from "../types/api";
 
 
@@ -24,6 +25,7 @@ function errorMessage(error: unknown): string {
 }
 
 export function QaPage() {
+  const { getToken } = useCourseMateAuth();
   const { courseId: routeCourseId } = useParams();
   const navigate = useNavigate();
   const [courses, setCourses] = useState<Course[]>([]);
@@ -44,7 +46,7 @@ export function QaPage() {
     setQuestion("");
     setPlanNotice("");
     setError(null);
-    void listCourses()
+    void listCourses(getToken)
       .then((page) => {
         if (!active) return;
         setCourses(page.items);
@@ -60,17 +62,17 @@ export function QaPage() {
       active = false;
       abortRef.current?.abort();
     };
-  }, [navigate, routeCourseId]);
+  }, [getToken, navigate, routeCourseId]);
 
   useEffect(() => {
     if (!courseId) {
       setDocuments([]);
       return;
     }
-    void listDocuments(courseId)
+    void listDocuments(getToken, courseId)
       .then((page) => setDocuments(page.items))
       .catch((caught: unknown) => setError(errorMessage(caught)));
-  }, [courseId]);
+  }, [courseId, getToken]);
 
   const currentCourse = useMemo(
     () => courses.find((course) => course.id === courseId) ?? null,
@@ -94,6 +96,7 @@ export function QaPage() {
     abortRef.current = controller;
     try {
       await streamQa(
+        getToken,
         courseId,
         trimmed,
         {
@@ -124,7 +127,7 @@ export function QaPage() {
     try {
       setError(null);
       const citation = message.citations[0];
-      await createTask({
+      await createTask(getToken, {
         title: `Review: ${(message.question ?? "Course answer").slice(0, 160)}`,
         notes: message.text.slice(0, 5_000),
         courseId,
@@ -137,17 +140,6 @@ export function QaPage() {
           : null,
       });
       setPlanNotice("Added this answer to your study plan.");
-    } catch (caught: unknown) {
-      setError(errorMessage(caught));
-    }
-  }
-
-  async function upload(file: File): Promise<void> {
-    try {
-      setError(null);
-      await uploadDocument(courseId, file);
-      const page = await listDocuments(courseId);
-      setDocuments(page.items);
     } catch (caught: unknown) {
       setError(errorMessage(caught));
     }
@@ -195,19 +187,7 @@ export function QaPage() {
               ))}
             </ul>
           )}
-          <label className={`upload-label ${!courseId ? "is-disabled" : ""}`}>
-            <span>Upload a source</span>
-            <input
-              accept=".pdf,.md,.markdown,.txt,.docx,.pptx"
-              disabled={!courseId}
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) void upload(file);
-                event.target.value = "";
-              }}
-              type="file"
-            />
-          </label>
+          <p className="managed-corpus-note">Course sources are managed by CourseMate administrators.</p>
         </aside>
 
         <section className="chat-panel" aria-labelledby="qa-chat-title">

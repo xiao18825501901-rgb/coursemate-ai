@@ -49,7 +49,7 @@ describe("QaPage", () => {
   });
 
   it("streams an answer, renders its citation, and saves it as a task", async () => {
-    vi.mocked(streamQa).mockImplementation(async (_courseId, _question, callbacks) => {
+    vi.mocked(streamQa).mockImplementation(async (_getToken, _courseId, _question, callbacks) => {
       callbacks.onDelta("The Phong model combines ambient, diffuse, and specular terms.");
       callbacks.onCitation({
         sourceLabel: "S1",
@@ -83,14 +83,17 @@ describe("QaPage", () => {
     expect(screen.getByText(/keyword \+ vector/i)).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: /add to study plan/i }));
-    await waitFor(() => expect(createTask).toHaveBeenCalledWith(expect.objectContaining({
-      courseId: "cs3481",
-      sourceCitation: expect.objectContaining({ filename: "lecture-07.pdf" }),
-    })));
+    await waitFor(() => expect(createTask).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({
+        courseId: "cs3481",
+        sourceCitation: expect.objectContaining({ filename: "lecture-07.pdf" }),
+      }),
+    ));
   });
 
   it("starts a fresh conversation when the selected course changes", async () => {
-    vi.mocked(streamQa).mockImplementation(async (_courseId, _question, callbacks) => {
+    vi.mocked(streamQa).mockImplementation(async (_getToken, _courseId, _question, callbacks) => {
       callbacks.onDelta("A CS3481-only DBSCAN answer.");
     });
 

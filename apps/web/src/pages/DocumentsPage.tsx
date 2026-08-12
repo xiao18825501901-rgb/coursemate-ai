@@ -1,22 +1,24 @@
 import { useEffect, useState } from "react";
 
-import { listCourses, listDocuments, uploadDocument } from "../services/ragApi";
+import { useCourseMateAuth } from "../auth/AuthProvider";
+import { listCourses, listDocuments } from "../services/ragApi";
 import type { Course, CourseDocument } from "../types/api";
 
 
 interface CourseSources { course: Course; documents: CourseDocument[] }
 
 export function DocumentsPage() {
+  const { getToken } = useCourseMateAuth();
   const [sources, setSources] = useState<CourseSources[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   async function refresh(): Promise<void> {
     try {
-      const courses = await listCourses();
+      const courses = await listCourses(getToken);
       const rows = await Promise.all(courses.items.map(async (course) => ({
         course,
-        documents: (await listDocuments(course.id)).items,
+        documents: (await listDocuments(getToken, course.id)).items,
       })));
       setSources(rows);
       setError(null);
@@ -27,16 +29,7 @@ export function DocumentsPage() {
     }
   }
 
-  useEffect(() => { void refresh(); }, []);
-
-  async function upload(courseId: string, file: File): Promise<void> {
-    try {
-      await uploadDocument(courseId, file);
-      await refresh();
-    } catch (caught: unknown) {
-      setError(caught instanceof Error ? caught.message : "The upload failed.");
-    }
-  }
+  useEffect(() => { void refresh(); }, [getToken]);
 
   return (
     <div className="page narrow-page">
@@ -46,7 +39,7 @@ export function DocumentsPage() {
         <div className="source-groups">
           {sources.map(({ course, documents }) => (
             <section className="source-group" key={course.id}>
-              <header><div><span className="course-pill">{course.id.toUpperCase()}</span><h2>{course.name}</h2><p>{course.description}</p></div><label className="upload-label"><span>Add document</span><input accept=".pdf,.md,.markdown,.txt,.docx,.pptx" onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(course.id, file); event.target.value = ""; }} type="file" /></label></header>
+              <header><div><span className="course-pill">{course.id.toUpperCase()}</span><h2>{course.name}</h2><p>{course.description}</p></div><span className="managed-corpus-note">Admin managed</span></header>
               <div className="source-table" role="table" aria-label={`${course.name} documents`}>
                 <div className="source-table-head" role="row"><span role="columnheader">Document</span><span role="columnheader">State</span><span role="columnheader">Chunks</span></div>
                 {documents.length === 0 ? <p className="panel-empty">No documents yet.</p> : documents.map((document) => <div className="source-table-row" role="row" key={document.id}><span role="cell"><strong>{document.filename}</strong><small>{document.extension.toUpperCase()}</small></span><span role="cell" className={`status-text status-${document.status}`}>{document.status}</span><span role="cell">{document.chunkCount}</span></div>)}

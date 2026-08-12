@@ -1,4 +1,5 @@
 import type { ApiErrorBody } from "../types/api";
+import type { GetSessionToken } from "../auth/AuthProvider";
 
 
 export class ApiError extends Error {
@@ -30,8 +31,26 @@ async function errorFromResponse(response: Response): Promise<ApiError> {
   return new ApiError(response.status, "REQUEST_FAILED", `Request failed (${response.status}).`);
 }
 
-export async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
+export async function authenticatedFetch(
+  getToken: GetSessionToken,
+  url: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const token = await getToken();
+  if (!token) {
+    throw new ApiError(401, "UNAUTHENTICATED", "A valid sign-in session is required.");
+  }
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+  return fetch(url, { ...init, headers });
+}
+
+export async function requestJson<T>(
+  getToken: GetSessionToken,
+  url: string,
+  init?: RequestInit,
+): Promise<T> {
+  const response = await authenticatedFetch(getToken, url, init);
   if (!response.ok) throw await errorFromResponse(response);
   return (await response.json()) as T;
 }

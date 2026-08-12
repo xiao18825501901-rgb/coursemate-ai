@@ -40,13 +40,18 @@ describe("TasksPage", () => {
 
     expect(await screen.findByRole("heading", { level: 3, name: task.title })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Mark complete" }));
-    await waitFor(() => expect(updateTask).toHaveBeenCalledWith("task-1", { status: "completed" }));
+    await waitFor(() => expect(updateTask).toHaveBeenCalledWith(
+      expect.any(Function),
+      "task-1",
+      { status: "completed" },
+    ));
 
     fireEvent.change(screen.getByLabelText(/message the study agent/i), {
       target: { value: "Create a high-priority task for GE2324" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(chatWithAgent).toHaveBeenCalledWith(
+      expect.any(Function),
       "Create a high-priority task for GE2324",
     ));
     expect(await screen.findByText("Created one study task.")).toBeVisible();

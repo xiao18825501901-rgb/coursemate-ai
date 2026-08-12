@@ -1,6 +1,7 @@
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 
 import { TaskBoard } from "../components/TaskBoard";
+import { useCourseMateAuth } from "../auth/AuthProvider";
 import { chatWithAgent, createTask, deleteTask, listTasks, updateTask } from "../services/agentApi";
 import type { Task, TaskStatus, UpdateTaskInput } from "../types/api";
 
@@ -10,6 +11,7 @@ function errorMessage(error: unknown): string {
 }
 
 export function TasksPage() {
+  const { getToken } = useCourseMateAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +26,7 @@ export function TasksPage() {
   const refresh = useCallback(async () => {
     try {
       setError(null);
-      const page = await listTasks({
+      const page = await listTasks(getToken, {
         ...(status ? { status } : {}),
         ...(courseId ? { courseId } : {}),
         ...(query ? { query } : {}),
@@ -35,7 +37,7 @@ export function TasksPage() {
     } finally {
       setLoading(false);
     }
-  }, [courseId, query, status]);
+  }, [courseId, getToken, query, status]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -44,7 +46,7 @@ export function TasksPage() {
     const title = quickTitle.trim();
     if (!title) return;
     try {
-      await createTask({ title, ...(courseId ? { courseId } : {}) });
+      await createTask(getToken, { title, ...(courseId ? { courseId } : {}) });
       setQuickTitle("");
       await refresh();
     } catch (caught: unknown) {
@@ -59,7 +61,7 @@ export function TasksPage() {
     setAgentBusy(true);
     setError(null);
     try {
-      const response = await chatWithAgent(message);
+      const response = await chatWithAgent(getToken, message);
       setAgentReply(response.message);
       setAgentMessage("");
       await refresh();
@@ -72,7 +74,7 @@ export function TasksPage() {
 
   async function patch(taskId: string, input: UpdateTaskInput): Promise<void> {
     try {
-      await updateTask(taskId, input);
+      await updateTask(getToken, taskId, input);
       await refresh();
     } catch (caught: unknown) {
       setError(errorMessage(caught));
@@ -81,7 +83,7 @@ export function TasksPage() {
 
   async function remove(taskId: string): Promise<void> {
     try {
-      await deleteTask(taskId);
+      await deleteTask(getToken, taskId);
       await refresh();
     } catch (caught: unknown) {
       setError(errorMessage(caught));

@@ -133,6 +133,32 @@ a {
   gap: 0.25rem;
 }
 
+.header-auth,
+.auth-actions,
+.account-control {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.header-auth .button {
+  min-height: 2.35rem;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.78rem;
+}
+
+.account-label,
+.auth-note,
+.managed-corpus-note {
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+}
+
+.auth-gate p {
+  max-width: 34rem;
+  color: var(--ink-soft);
+}
+
 .nav-link {
   padding: 0.55rem 0.7rem;
   border-bottom: 2px solid transparent;
@@ -1085,6 +1111,10 @@ button:disabled,
     align-items: flex-start;
   }
 
+  .header-auth {
+    margin-left: auto;
+  }
+
   .brand small {
     display: none;
   }
@@ -1169,6 +1199,10 @@ button:disabled,
 @media (max-width: 420px) {
   .site-header {
     display: block;
+  }
+
+  .header-auth {
+    margin-top: 0.75rem;
   }
 
   .primary-nav {

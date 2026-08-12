@@ -1,12 +1,15 @@
 import { NavLink, Outlet } from "react-router-dom";
 
+import { SignedInAccount, SignedOutActions, useCourseMateAuth } from "../auth/AuthProvider";
 
-const navigation = [
-  { to: "/", label: "Home", end: true },
+
+const homeNavigation = { to: "/", label: "Home", end: true };
+const aboutNavigation = { to: "/about", label: "About", end: true };
+const publicNavigation = [homeNavigation, aboutNavigation];
+const privateNavigation = [
   { to: "/qa", label: "Course QA", end: false },
   { to: "/tasks", label: "Study plan", end: false },
   { to: "/documents", label: "Documents", end: false },
-  { to: "/about", label: "About", end: true },
 ];
 
 function BrandMark() {
@@ -20,6 +23,10 @@ function BrandMark() {
 }
 
 export function Layout() {
+  const auth = useCourseMateAuth();
+  const navigation = auth.isSignedIn
+    ? [homeNavigation, ...privateNavigation, aboutNavigation]
+    : publicNavigation;
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">
@@ -45,6 +52,9 @@ export function Layout() {
             </NavLink>
           ))}
         </nav>
+        <div className="header-auth">
+          {auth.isSignedIn ? <SignedInAccount /> : <SignedOutActions />}
+        </div>
       </header>
       <main id="main-content">
         <Outlet />

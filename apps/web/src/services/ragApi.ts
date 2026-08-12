@@ -1,4 +1,5 @@
-import { requireOk, requestJson } from "./http";
+import type { GetSessionToken } from "../auth/AuthProvider";
+import { authenticatedFetch, requireOk, requestJson } from "./http";
 import type { Citation, Course, CourseDocument, Page } from "../types/api";
 
 
@@ -48,21 +49,29 @@ export interface QaStreamCallbacks {
   onDone?: () => void;
 }
 
-export async function listCourses(): Promise<Page<Course>> {
-  return requestJson<Page<Course>>(`${RAG_API}/api/courses?page=1&pageSize=100`);
+export async function listCourses(getToken: GetSessionToken): Promise<Page<Course>> {
+  return requestJson<Page<Course>>(getToken, `${RAG_API}/api/courses?page=1&pageSize=100`);
 }
 
-export async function listDocuments(courseId: string): Promise<Page<CourseDocument>> {
+export async function listDocuments(
+  getToken: GetSessionToken,
+  courseId: string,
+): Promise<Page<CourseDocument>> {
   return requestJson<Page<CourseDocument>>(
+    getToken,
     `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/documents?page=1&pageSize=100`,
   );
 }
 
-export async function uploadDocument(courseId: string, file: File): Promise<void> {
+export async function uploadDocument(
+  getToken: GetSessionToken,
+  courseId: string,
+  file: File,
+): Promise<void> {
   const body = new FormData();
   body.append("file", file);
   await requireOk(
-    await fetch(`${RAG_API}/api/courses/${encodeURIComponent(courseId)}/documents`, {
+    await authenticatedFetch(getToken, `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/documents`, {
       method: "POST",
       body,
     }),
@@ -70,6 +79,7 @@ export async function uploadDocument(courseId: string, file: File): Promise<void
 }
 
 export async function streamQa(
+  getToken: GetSessionToken,
   courseId: string,
   question: string,
   callbacks: QaStreamCallbacks,
@@ -82,7 +92,7 @@ export async function streamQa(
   };
   if (signal !== undefined) request.signal = signal;
   const response = await requireOk(
-    await fetch(`${RAG_API}/api/qa/chat`, request),
+    await authenticatedFetch(getToken, `${RAG_API}/api/qa/chat`, request),
   );
   if (response.body === null) throw new Error("The browser did not provide a response stream.");
   const reader = response.body.getReader();

@@ -3,6 +3,7 @@ import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 
 import { AppRoutes } from "./App";
+import { TestAuthProvider } from "./auth/AuthProvider";
 
 
 describe("CourseMate application shell", () => {
@@ -49,5 +50,28 @@ describe("CourseMate application shell", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: /page not found/i })).toBeVisible();
     expect(screen.getByRole("link", { name: /return home/i })).toHaveAttribute("href", "/");
+  });
+
+  it("keeps private navigation and routes behind sign-in", () => {
+    const { rerender } = render(
+      <TestAuthProvider token={null}>
+        <MemoryRouter initialEntries={["/tasks"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </TestAuthProvider>,
+    );
+
+    expect(screen.getByRole("heading", { name: /sign in to continue/i })).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Study plan" })).not.toBeInTheDocument();
+
+    rerender(
+      <TestAuthProvider token="token-a">
+        <MemoryRouter initialEntries={["/about"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </TestAuthProvider>,
+    );
+    expect(screen.getByRole("link", { name: "Study plan" })).toBeVisible();
+    expect(screen.getByText("Test Student")).toBeVisible();
   });
 });
