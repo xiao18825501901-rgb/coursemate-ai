@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.ingestion import router as ingestion_router
 from app.api.qa import router as qa_router
+from app.auth import AuthVerifier, ClerkAuthVerifier
 from app.config import Settings
 from app.db import Database
 from app.errors import ApiError
@@ -35,6 +36,7 @@ def create_app(
     settings: Settings | None = None,
     embedding_provider: EmbeddingProvider | None = None,
     answer_provider: AnswerProvider | None = None,
+    auth_verifier: AuthVerifier | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     database = Database(resolved_settings)
@@ -71,6 +73,7 @@ def create_app(
     )
     application.state.database = database
     application.state.settings = resolved_settings
+    application.state.auth_verifier = auth_verifier or ClerkAuthVerifier(resolved_settings)
     application.state.qa_service = QaService(
         database,
         HybridRetriever(ChunkRepository(database), embedding_provider),
@@ -83,7 +86,7 @@ def create_app(
         allow_origins=[resolved_settings.web_origin],
         allow_credentials=False,
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Authorization", "Content-Type"],
     )
 
     @application.middleware("http")

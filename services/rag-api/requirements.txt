@@ -1,4 +1,5 @@
 fastapi==0.141.1
+clerk-backend-api==6.0.1
 openai==2.53.0
 pydantic-settings==2.15.0
 pypdf==6.15.0

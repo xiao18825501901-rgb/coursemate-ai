@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     openai_embedding_model: str = "text-embedding-3-small"
     rag_provider_mode: Literal["openai", "deterministic"] = "openai"
     web_origin: str = "http://localhost:5173"
+    clerk_secret_key: SecretStr | None = None
+    clerk_jwt_key: SecretStr | None = None
+    admin_user_ids: str = ""
+    rag_qa_requests_per_minute: int = Field(default=10, ge=1, le=1_000)
 
     database_path: Path = Field(
         default=Path("../../data/rag.sqlite3"),
@@ -40,3 +44,7 @@ class Settings(BaseSettings):
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError("chunk_overlap must be smaller than chunk_size")
         return self
+
+    @property
+    def admin_user_id_set(self) -> frozenset[str]:
+        return frozenset(item.strip() for item in self.admin_user_ids.split(",") if item.strip())

@@ -50,8 +50,44 @@ def test_database_initializes_relational_and_fts_schema(tmp_path: Path) -> None:
         ("table", "chunks_fts"),
         ("table", "conversations"),
         ("table", "messages"),
+        ("table", "schema_migrations"),
+        ("table", "rate_limit_windows"),
     }.issubset(objects)
     assert settings.upload_dir.is_dir()
+
+
+def test_legacy_conversations_are_quarantined_and_migration_is_repeatable(
+    tmp_path: Path,
+) -> None:
+    settings = make_settings(tmp_path)
+    database = Database(settings)
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    import sqlite3
+
+    with sqlite3.connect(settings.database_path) as connection:
+        connection.execute(
+            "CREATE TABLE courses (id TEXT PRIMARY KEY, name TEXT NOT NULL, "
+            "description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '')"
+        )
+        connection.execute(
+            "CREATE TABLE conversations (id TEXT PRIMARY KEY, course_id TEXT NOT NULL, "
+            "created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '')"
+        )
+        connection.execute("INSERT INTO courses VALUES ('cs3481', 'CS3481', '', '')")
+        connection.execute(
+            "INSERT INTO conversations VALUES ('legacy-conv', 'cs3481', '', '')"
+        )
+
+    database.initialize()
+    database.initialize()
+    with database.connect() as connection:
+        owner = connection.execute(
+            "SELECT owner_user_id FROM conversations WHERE id = 'legacy-conv'"
+        ).fetchone()[0]
+        migrations = connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0]
+
+    assert owner == "legacy_orphaned"
+    assert migrations == 1
 
 
 def test_deployment_path_environment_aliases_are_honored(

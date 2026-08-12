@@ -8,6 +8,10 @@ export interface AgentConfig {
   openaiChatModel: string;
   maxToolRounds: number;
   providerMode: "openai" | "deterministic";
+  clerkPublishableKey: string;
+  clerkSecretKey: string;
+  clerkJwtKey: string | undefined;
+  agentChatRequestsPerMinute: number;
 }
 
 function boundedInteger(value: string | undefined, fallback: number, min: number, max: number): number {
@@ -24,6 +28,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AgentC
   if (providerMode !== "openai" && providerMode !== "deterministic") {
     throw new Error("AGENT_PROVIDER_MODE must be openai or deterministic.");
   }
+  const clerkPublishableKey = environment.CLERK_PUBLISHABLE_KEY ?? "";
+  const clerkSecretKey = environment.CLERK_SECRET_KEY ?? "";
+  if (!clerkPublishableKey || !clerkSecretKey) {
+    throw new Error("CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY are required.");
+  }
   return {
     databasePath:
       configuredPath === ":memory:" ? configuredPath : path.resolve(process.cwd(), configuredPath),
@@ -33,5 +42,14 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AgentC
     openaiChatModel: environment.OPENAI_CHAT_MODEL ?? "gpt-5.6-luna",
     maxToolRounds: boundedInteger(environment.AGENT_MAX_TOOL_ROUNDS, 4, 1, 10),
     providerMode,
+    clerkPublishableKey,
+    clerkSecretKey,
+    clerkJwtKey: environment.CLERK_JWT_KEY || undefined,
+    agentChatRequestsPerMinute: boundedInteger(
+      environment.AGENT_CHAT_REQUESTS_PER_MINUTE,
+      10,
+      1,
+      1_000,
+    ),
   };
 }

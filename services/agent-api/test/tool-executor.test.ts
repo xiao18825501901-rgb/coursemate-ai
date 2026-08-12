@@ -14,6 +14,7 @@ const emptyCreateFields = {
 };
 
 describe("ToolExecutor", () => {
+  const ownerUserId = "user-a";
   let database: AgentDatabase;
   let repository: TaskRepository;
   let executor: ToolExecutor;
@@ -33,13 +34,13 @@ describe("ToolExecutor", () => {
   afterEach(() => database.close());
 
   it("executes createTask and searchTask through validated arguments", () => {
-    const created = executor.execute("createTask", {
+    const created = executor.execute(ownerUserId, "createTask", {
       title: "Review lighting",
       ...emptyCreateFields,
       courseId: "cs3481",
       priority: "high",
     });
-    const found = executor.execute("searchTask", {
+    const found = executor.execute(ownerUserId, "searchTask", {
       query: "lighting",
       courseId: "cs3481",
       status: null,
@@ -54,8 +55,8 @@ describe("ToolExecutor", () => {
   });
 
   it("executes selected update fields, completion, and exact deletion", () => {
-    const task = repository.create({ title: "Read notes" });
-    const updated = executor.execute("updateTask", {
+    const task = repository.create(ownerUserId, { title: "Read notes" });
+    const updated = executor.execute(ownerUserId, "updateTask", {
       taskId: task.id,
       updateFields: ["title", "notes"],
       title: "Read lecture notes",
@@ -65,18 +66,18 @@ describe("ToolExecutor", () => {
       priority: null,
       dueDate: null,
     });
-    const completed = executor.execute("completeTask", { taskId: task.id });
-    const deleted = executor.execute("deleteTask", { taskId: task.id });
+    const completed = executor.execute(ownerUserId, "completeTask", { taskId: task.id });
+    const deleted = executor.execute(ownerUserId, "deleteTask", { taskId: task.id });
 
     expect(updated.data).toMatchObject({ title: "Read lecture notes", notes: "Chapter 2" });
     expect(completed.data).toMatchObject({ status: "completed" });
     expect(deleted).toEqual({ ok: true, data: { taskId: task.id, deleted: true }, error: null });
-    expect(repository.get(task.id)).toBeNull();
+    expect(repository.get(ownerUserId, task.id)).toBeNull();
   });
 
   it("rejects unknown tools and malformed arguments without mutation", () => {
-    const unknown = executor.execute("runSql", { sql: "DROP TABLE tasks" });
-    const malformed = executor.execute("createTask", {
+    const unknown = executor.execute(ownerUserId, "runSql", { sql: "DROP TABLE tasks" });
+    const malformed = executor.execute(ownerUserId, "createTask", {
       title: "Unsafe",
       ...emptyCreateFields,
       sql: "DROP TABLE tasks",
@@ -87,13 +88,13 @@ describe("ToolExecutor", () => {
       ok: false,
       error: { code: "INVALID_TOOL_ARGUMENTS" },
     });
-    expect(repository.list({ page: 1, pageSize: 10 }).total).toBe(0);
+    expect(repository.list(ownerUserId, { page: 1, pageSize: 10 }).total).toBe(0);
   });
 
   it("rejects null for a selected non-nullable update field", () => {
-    const task = repository.create({ title: "Read notes" });
+    const task = repository.create(ownerUserId, { title: "Read notes" });
 
-    const result = executor.execute("updateTask", {
+    const result = executor.execute(ownerUserId, "updateTask", {
       taskId: task.id,
       updateFields: ["title"],
       title: null,
@@ -105,23 +106,23 @@ describe("ToolExecutor", () => {
     });
 
     expect(result).toMatchObject({ ok: false, error: { code: "INVALID_UPDATE_VALUE" } });
-    expect(repository.get(task.id)?.title).toBe("Read notes");
+    expect(repository.get(ownerUserId, task.id)?.title).toBe("Read notes");
   });
 
   it("returns typed not-found errors and search never mutates ambiguous matches", () => {
-    repository.create({ title: "Review lecture one" });
-    repository.create({ title: "Review lecture two" });
-    const search = executor.execute("searchTask", {
+    repository.create(ownerUserId, { title: "Review lecture one" });
+    repository.create(ownerUserId, { title: "Review lecture two" });
+    const search = executor.execute(ownerUserId, "searchTask", {
       query: "Review lecture",
       courseId: null,
       status: null,
       page: 1,
       pageSize: 20,
     });
-    const missing = executor.execute("deleteTask", { taskId: "missing" });
+    const missing = executor.execute(ownerUserId, "deleteTask", { taskId: "missing" });
 
     expect(search.data).toMatchObject({ total: 2 });
     expect(missing).toMatchObject({ ok: false, error: { code: "TASK_NOT_FOUND" } });
-    expect(repository.list({ page: 1, pageSize: 10 }).total).toBe(2);
+    expect(repository.list(ownerUserId, { page: 1, pageSize: 10 }).total).toBe(2);
   });
 });

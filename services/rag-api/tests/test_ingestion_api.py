@@ -2,6 +2,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 from app.config import Settings
@@ -13,6 +14,15 @@ class FakeEmbeddingProvider:
         return [[float(len(text)), 1.0] for text in texts]
 
 
+class FakeAuthVerifier:
+    def authenticate(self, request: Request) -> str | None:
+        tokens = {
+            "Bearer admin-token": "user-admin",
+            "Bearer user-token": "user-a",
+        }
+        return tokens.get(request.headers.get("authorization", ""))
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     return Settings(
@@ -21,13 +31,19 @@ def settings(tmp_path: Path) -> Settings:
         chunk_size=200,
         chunk_overlap=20,
         max_upload_bytes=1_024,
+        admin_user_ids="user-admin",
     )
 
 
 @pytest.fixture
 def client(settings: Settings) -> Iterator[TestClient]:
-    app = create_app(settings=settings, embedding_provider=FakeEmbeddingProvider())
+    app = create_app(
+        settings=settings,
+        embedding_provider=FakeEmbeddingProvider(),
+        auth_verifier=FakeAuthVerifier(),
+    )
     with TestClient(app) as test_client:
+        test_client.headers["Authorization"] = "Bearer admin-token"
         yield test_client
 
 
@@ -134,3 +150,38 @@ def test_missing_course_and_request_validation_use_error_envelope(client: TestCl
     assert missing.json()["error"]["code"] == "COURSE_NOT_FOUND"
     assert invalid.status_code == 422
     assert invalid.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_authentication_admin_boundary_and_shared_read_access(client: TestClient) -> None:
+    create_course(client)
+    client.headers["Authorization"] = "Bearer user-token"
+
+    shared_read = client.get("/api/courses")
+    forbidden_write = client.post(
+        "/api/courses",
+        json={"id": "ge2324", "name": "GE2324", "description": "Notes"},
+    )
+    client.headers.pop("Authorization")
+    missing = client.get("/api/courses")
+    invalid = client.get("/api/courses", headers={"Authorization": "Bearer invalid"})
+
+    assert shared_read.status_code == 200
+    assert shared_read.json()["items"][0]["id"] == "cs3481"
+    assert forbidden_write.status_code == 403
+    assert forbidden_write.json()["error"]["code"] == "ADMIN_REQUIRED"
+    assert missing.status_code == 401
+    assert invalid.status_code == 401
+
+
+def test_cors_preflight_allows_authorization_header(client: TestClient) -> None:
+    response = client.options(
+        "/api/courses",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "Authorization",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Authorization" in response.headers["access-control-allow-headers"]

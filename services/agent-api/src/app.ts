@@ -3,6 +3,7 @@ import express, { type ErrorRequestHandler, type Request } from "express";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 
+import type { AuthStrategy } from "./auth.js";
 import { AgentError, HttpError } from "./errors.js";
 import {
   validateChat,
@@ -10,6 +11,7 @@ import {
   validateUpdateTask,
 } from "./http/validation.js";
 import type { TaskRepository } from "./repositories/tasks.js";
+import type { ModelRateLimiter } from "./rate-limit.js";
 import type { AgentService } from "./services/agent.js";
 import type { TaskListQuery, TaskStatus } from "./types.js";
 
@@ -18,6 +20,16 @@ export interface AppDependencies {
   repository: TaskRepository;
   agentService: AgentService;
   webOrigin: string;
+  authStrategy: AuthStrategy;
+  modelRateLimiter: ModelRateLimiter;
+}
+
+function requireUser(request: Request, strategy: AuthStrategy): string {
+  const userId = strategy.userId(request);
+  if (userId === null) {
+    throw new HttpError(401, "UNAUTHENTICATED", "A valid sign-in session is required.");
+  }
+  return userId;
 }
 
 function positiveInteger(value: unknown, fallback: number, maximum: number): number {
@@ -53,11 +65,12 @@ export function createApp(dependencies: AppDependencies): express.Express {
     cors({
       origin: dependencies.webOrigin,
       methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type"],
+      allowedHeaders: ["Authorization", "Content-Type"],
       credentials: false,
     }),
   );
   application.use(express.json({ limit: "64kb" }));
+  application.use(dependencies.authStrategy.middleware);
   application.use(
     rateLimit({
       windowMs: 60_000,
@@ -81,6 +94,7 @@ export function createApp(dependencies: AppDependencies): express.Express {
   });
 
   application.get("/api/tasks", (request, response) => {
+    const userId = requireUser(request, dependencies.authStrategy);
     const page = positiveInteger(request.query.page, 1, 10_000);
     const pageSize = positiveInteger(request.query.pageSize, 50, 100);
     const courseId = optionalString(request, "courseId", 50);
@@ -93,17 +107,19 @@ export function createApp(dependencies: AppDependencies): express.Express {
     if (courseId !== undefined) query.courseId = courseId;
     if (status !== undefined) query.status = status as TaskStatus;
     if (queryText !== undefined) query.query = queryText;
-    response.json(dependencies.repository.list(query));
+    response.json(dependencies.repository.list(userId, query));
   });
 
   application.post("/api/tasks", (request, response) => {
+    const userId = requireUser(request, dependencies.authStrategy);
     const input = validateCreateTask(request.body);
-    response.status(201).json(dependencies.repository.create(input));
+    response.status(201).json(dependencies.repository.create(userId, input));
   });
 
   application.patch("/api/tasks/:taskId", (request, response) => {
+    const userId = requireUser(request, dependencies.authStrategy);
     const input = validateUpdateTask(request.body);
-    const task = dependencies.repository.update(request.params.taskId ?? "", input);
+    const task = dependencies.repository.update(userId, request.params.taskId ?? "", input);
     if (task === null) {
       throw new HttpError(404, "TASK_NOT_FOUND", "The task was not found.");
     }
@@ -111,15 +127,24 @@ export function createApp(dependencies: AppDependencies): express.Express {
   });
 
   application.delete("/api/tasks/:taskId", (request, response) => {
-    if (!dependencies.repository.delete(request.params.taskId ?? "")) {
+    const userId = requireUser(request, dependencies.authStrategy);
+    if (!dependencies.repository.delete(userId, request.params.taskId ?? "")) {
       throw new HttpError(404, "TASK_NOT_FOUND", "The task was not found.");
     }
     response.status(204).send();
   });
 
   application.post("/api/agent/chat", async (request, response) => {
+    const userId = requireUser(request, dependencies.authStrategy);
+    if (!dependencies.modelRateLimiter.consume(userId)) {
+      throw new HttpError(
+        429,
+        "RATE_LIMITED",
+        "Too many AI requests. Please try again shortly.",
+      );
+    }
     const { message } = validateChat(request.body);
-    response.json(await dependencies.agentService.chat(message));
+    response.json(await dependencies.agentService.chat(userId, message));
   });
 
   application.use((_request, _response) => {

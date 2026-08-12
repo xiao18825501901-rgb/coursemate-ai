@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
   title TEXT NOT NULL CHECK (length(trim(title)) BETWEEN 1 AND 200),
   notes TEXT CHECK (notes IS NULL OR length(notes) <= 5000),
   course_id TEXT,
@@ -18,9 +19,23 @@ CREATE TABLE IF NOT EXISTS tasks (
   completed_at TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_tasks_status_due_date ON tasks(status, due_date);
-CREATE INDEX IF NOT EXISTS idx_tasks_course_status ON tasks(course_id, status);
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS rate_limit_windows (
+  owner_user_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  window_start INTEGER NOT NULL,
+  request_count INTEGER NOT NULL CHECK (request_count >= 0),
+  PRIMARY KEY (owner_user_id, action, window_start)
+);
+
 `;
+
+const LEGACY_OWNER_USER_ID = "legacy_orphaned";
 
 export class AgentDatabase {
   readonly connection: DatabaseSync;
@@ -40,6 +55,22 @@ export class AgentDatabase {
 
   initialize(): void {
     this.connection.exec(SCHEMA_SQL);
+    const columns = this.connection.prepare("PRAGMA table_info(tasks)").all() as Array<{
+      name: string;
+    }>;
+    if (!columns.some((column) => column.name === "owner_user_id")) {
+      this.connection.exec(
+        `ALTER TABLE tasks ADD COLUMN owner_user_id TEXT NOT NULL DEFAULT '${LEGACY_OWNER_USER_ID}'`,
+      );
+    }
+    this.connection.exec(`
+      CREATE INDEX IF NOT EXISTS idx_tasks_owner_status_due
+      ON tasks(owner_user_id, status, due_date);
+      CREATE INDEX IF NOT EXISTS idx_tasks_owner_course_status
+      ON tasks(owner_user_id, course_id, status);
+      INSERT OR IGNORE INTO schema_migrations (version, name)
+      VALUES (1, 'task ownership and per-user limits');
+    `);
   }
 
   close(): void {

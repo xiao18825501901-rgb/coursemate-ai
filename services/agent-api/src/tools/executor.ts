@@ -57,7 +57,7 @@ function failure(code: string, message: string): ToolResult<never> {
 export class ToolExecutor {
   constructor(private readonly repository: TaskRepository) {}
 
-  execute(toolName: string, argumentsValue: unknown): ToolResult<unknown> {
+  execute(ownerUserId: string, toolName: string, argumentsValue: unknown): ToolResult<unknown> {
     if (!isToolName(toolName)) {
       return failure("UNKNOWN_TOOL", `Tool ${toolName} is not allowed.`);
     }
@@ -68,19 +68,19 @@ export class ToolExecutor {
 
     switch (toolName) {
       case "createTask":
-        return this.create(argumentsValue as CreateTaskArguments);
+        return this.create(ownerUserId, argumentsValue as CreateTaskArguments);
       case "searchTask":
-        return this.search(argumentsValue as SearchTaskArguments);
+        return this.search(ownerUserId, argumentsValue as SearchTaskArguments);
       case "updateTask":
-        return this.update(argumentsValue as UpdateTaskArguments);
+        return this.update(ownerUserId, argumentsValue as UpdateTaskArguments);
       case "completeTask":
-        return this.complete(argumentsValue as TaskIdArguments);
+        return this.complete(ownerUserId, argumentsValue as TaskIdArguments);
       case "deleteTask":
-        return this.delete(argumentsValue as TaskIdArguments);
+        return this.delete(ownerUserId, argumentsValue as TaskIdArguments);
     }
   }
 
-  private create(argumentsValue: CreateTaskArguments): ToolResult<unknown> {
+  private create(ownerUserId: string, argumentsValue: CreateTaskArguments): ToolResult<unknown> {
     const input: CreateTaskInput = {
       title: argumentsValue.title,
       notes: argumentsValue.notes,
@@ -91,10 +91,10 @@ export class ToolExecutor {
     if (argumentsValue.priority !== null) {
       input.priority = argumentsValue.priority;
     }
-    return success(this.repository.create(input));
+    return success(this.repository.create(ownerUserId, input));
   }
 
-  private search(argumentsValue: SearchTaskArguments): ToolResult<unknown> {
+  private search(ownerUserId: string, argumentsValue: SearchTaskArguments): ToolResult<unknown> {
     const query: TaskListQuery = {
       page: argumentsValue.page,
       pageSize: argumentsValue.pageSize,
@@ -102,10 +102,10 @@ export class ToolExecutor {
     if (argumentsValue.query !== null) query.query = argumentsValue.query;
     if (argumentsValue.courseId !== null) query.courseId = argumentsValue.courseId;
     if (argumentsValue.status !== null) query.status = argumentsValue.status;
-    return success(this.repository.list(query));
+    return success(this.repository.list(ownerUserId, query));
   }
 
-  private update(argumentsValue: UpdateTaskArguments): ToolResult<unknown> {
+  private update(ownerUserId: string, argumentsValue: UpdateTaskArguments): ToolResult<unknown> {
     const input: UpdateTaskInput = {};
     for (const field of argumentsValue.updateFields) {
       switch (field) {
@@ -138,21 +138,21 @@ export class ToolExecutor {
           break;
       }
     }
-    const task = this.repository.update(argumentsValue.taskId, input);
+    const task = this.repository.update(ownerUserId, argumentsValue.taskId, input);
     return task === null
       ? failure("TASK_NOT_FOUND", "The selected task was not found.")
       : success(task);
   }
 
-  private complete(argumentsValue: TaskIdArguments): ToolResult<unknown> {
-    const task = this.repository.complete(argumentsValue.taskId);
+  private complete(ownerUserId: string, argumentsValue: TaskIdArguments): ToolResult<unknown> {
+    const task = this.repository.complete(ownerUserId, argumentsValue.taskId);
     return task === null
       ? failure("TASK_NOT_FOUND", "The selected task was not found.")
       : success(task);
   }
 
-  private delete(argumentsValue: TaskIdArguments): ToolResult<unknown> {
-    if (!this.repository.delete(argumentsValue.taskId)) {
+  private delete(ownerUserId: string, argumentsValue: TaskIdArguments): ToolResult<unknown> {
+    if (!this.repository.delete(ownerUserId, argumentsValue.taskId)) {
       return failure("TASK_NOT_FOUND", "The selected task was not found.");
     }
     return success({ taskId: argumentsValue.taskId, deleted: true });

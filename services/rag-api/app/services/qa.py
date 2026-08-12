@@ -61,12 +61,54 @@ class QaService:
         if found is None:
             raise ApiError(404, "COURSE_NOT_FOUND", "The course was not found.")
 
-    def _start_conversation(self, *, course_id: str, question: str) -> str:
+    def get_conversation(
+        self, *, owner_user_id: str, conversation_id: str
+    ) -> dict[str, object]:
+        with self.database.connect() as connection:
+            conversation = connection.execute(
+                """
+                SELECT id, course_id, created_at, updated_at
+                FROM conversations
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                (conversation_id, owner_user_id),
+            ).fetchone()
+            if conversation is None:
+                raise ApiError(404, "CONVERSATION_NOT_FOUND", "The conversation was not found.")
+            messages = connection.execute(
+                """
+                SELECT id, role, content, citations_json, created_at
+                FROM messages
+                WHERE conversation_id = ?
+                ORDER BY created_at, rowid
+                """,
+                (conversation_id,),
+            ).fetchall()
+        return {
+            "id": conversation["id"],
+            "course_id": conversation["course_id"],
+            "created_at": conversation["created_at"],
+            "updated_at": conversation["updated_at"],
+            "messages": [
+                {
+                    "id": row["id"],
+                    "role": row["role"],
+                    "content": row["content"],
+                    "citations": json.loads(row["citations_json"]),
+                    "created_at": row["created_at"],
+                }
+                for row in messages
+            ],
+        }
+
+    def _start_conversation(
+        self, *, owner_user_id: str, course_id: str, question: str
+    ) -> str:
         conversation_id = f"conv_{uuid4().hex}"
         with self.database.connect() as connection:
             connection.execute(
-                "INSERT INTO conversations (id, course_id) VALUES (?, ?)",
-                (conversation_id, course_id),
+                "INSERT INTO conversations (id, owner_user_id, course_id) VALUES (?, ?, ?)",
+                (conversation_id, owner_user_id, course_id),
             )
             connection.execute(
                 """
@@ -106,9 +148,15 @@ class QaService:
                 (conversation_id,),
             )
 
-    def stream(self, *, course_id: str, question: str) -> Iterator[str]:
+    def stream(
+        self, *, owner_user_id: str, course_id: str, question: str
+    ) -> Iterator[str]:
         request_id = f"qa_{uuid4().hex}"
-        conversation_id = self._start_conversation(course_id=course_id, question=question)
+        conversation_id = self._start_conversation(
+            owner_user_id=owner_user_id,
+            course_id=course_id,
+            question=question,
+        )
         hits = self.retriever.retrieve(
             course_id=course_id,
             query=question,

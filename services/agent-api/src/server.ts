@@ -1,4 +1,5 @@
 import { createApp } from "./app.js";
+import { createClerkAuthStrategy } from "./auth.js";
 import { loadConfig } from "./config.js";
 import { AgentDatabase } from "./db.js";
 import { AgentError } from "./errors.js";
@@ -8,6 +9,7 @@ import {
 } from "./openai/client.js";
 import { DeterministicAgentModelClient } from "./openai/deterministic-client.js";
 import { TaskRepository } from "./repositories/tasks.js";
+import { SqliteModelRateLimiter } from "./rate-limit.js";
 import { AgentService } from "./services/agent.js";
 import { ToolExecutor } from "./tools/executor.js";
 
@@ -33,7 +35,20 @@ const agentService = new AgentService(modelClient, new ToolExecutor(repository),
   model: config.openaiChatModel,
   maxToolRounds: config.maxToolRounds,
 });
-const application = createApp({ repository, agentService, webOrigin: config.webOrigin });
+const application = createApp({
+  repository,
+  agentService,
+  webOrigin: config.webOrigin,
+  authStrategy: createClerkAuthStrategy({
+    publishableKey: config.clerkPublishableKey,
+    secretKey: config.clerkSecretKey,
+    ...(config.clerkJwtKey === undefined ? {} : { jwtKey: config.clerkJwtKey }),
+    authorizedParties: [config.webOrigin],
+  }),
+  modelRateLimiter: new SqliteModelRateLimiter(database.connection, {
+    limitPerMinute: config.agentChatRequestsPerMinute,
+  }),
+});
 const server = application.listen(config.port, () => {
   console.log(`CourseMate Agent API listening on http://localhost:${config.port}`);
 });

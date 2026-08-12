@@ -69,11 +69,11 @@ describe("AgentService", () => {
     ]);
     const service = new AgentService(model, executor, { model: "test-model", maxToolRounds: 4 });
 
-    const result = await service.chat("Add a lighting review task for CS3481.");
+    const result = await service.chat("user-a", "Add a lighting review task for CS3481.");
 
     expect(result.message).toBe("Created your CS3481 lighting task.");
     expect(result.toolResults).toHaveLength(1);
-    expect(repository.get("task-1")).toMatchObject({ title: "Review Phong lighting" });
+    expect(repository.get("user-a", "task-1")).toMatchObject({ title: "Review Phong lighting" });
     expect(model.requests).toHaveLength(2);
     expect(model.requests[0]?.tools.every((tool) => tool.strict)).toBe(true);
     expect(model.requests[1]?.input).toContainEqual(
@@ -92,14 +92,14 @@ describe("AgentService", () => {
     ]);
     const service = new AgentService(model, executor, { model: "test-model", maxToolRounds: 4 });
 
-    const result = await service.chat("Create a lighting task.");
+    const result = await service.chat("user-a", "Create a lighting task.");
 
     expect(result.toolResults[0]).toMatchObject({
       ok: false,
       error: { code: "INVALID_JSON_ARGUMENTS" },
     });
     expect(result.toolResults[1]).toMatchObject({ ok: true });
-    expect(repository.list({ page: 1, pageSize: 10 }).total).toBe(1);
+    expect(repository.list("user-a", { page: 1, pageSize: 10 }).total).toBe(1);
   });
 
   it("stops after the configured tool round bound", async () => {
@@ -116,22 +116,22 @@ describe("AgentService", () => {
       maxToolRounds: 2,
     });
 
-    await expect(service.chat("Keep searching forever.")).rejects.toMatchObject({
+    await expect(service.chat("user-a", "Keep searching forever.")).rejects.toMatchObject({
       code: "TOOL_LOOP_LIMIT",
     });
   });
 
   it("allows a direct clarification response without mutating tasks", async () => {
-    repository.create({ title: "Review lecture one" });
+    repository.create("user-a", { title: "Review lecture one" });
     const model = new FakeModelClient([
       { outputText: "Which exact task should I delete?", output: [] },
     ]);
     const service = new AgentService(model, executor, { model: "test-model", maxToolRounds: 4 });
 
-    const result = await service.chat("Delete the review task.");
+    const result = await service.chat("user-a", "Delete the review task.");
 
     expect(result.message).toContain("Which exact task");
     expect(result.toolResults).toEqual([]);
-    expect(repository.list({ page: 1, pageSize: 10 }).total).toBe(1);
+    expect(repository.list("user-a", { page: 1, pageSize: 10 }).total).toBe(1);
   });
 });

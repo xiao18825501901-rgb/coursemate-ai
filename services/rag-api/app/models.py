@@ -96,6 +96,22 @@ class QaChatRequest(ApiModel):
     question: str = Field(min_length=1, max_length=2_000)
 
 
+class ConversationMessage(ApiModel):
+    id: str
+    role: str
+    content: str
+    citations: list[dict[str, object]]
+    created_at: datetime
+
+
+class ConversationDetail(ApiModel):
+    id: str
+    course_id: str
+    created_at: datetime
+    updated_at: datetime
+    messages: list[ConversationMessage]
+
+
 class ErrorDetail(ApiModel):
     code: str
     message: str

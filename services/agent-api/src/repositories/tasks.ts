@@ -15,6 +15,7 @@ import type {
 
 interface TaskRow {
   id: string;
+  owner_user_id: string;
   title: string;
   notes: string | null;
   course_id: string | null;
@@ -84,18 +85,19 @@ export class TaskRepository {
     this.idFactory = options.idFactory ?? (() => `task_${randomUUID()}`);
   }
 
-  create(input: CreateTaskInput): Task {
+  create(ownerUserId: string, input: CreateTaskInput): Task {
     const now = this.clock().toISOString();
     const id = this.idFactory();
     this.database
       .prepare(
         `INSERT INTO tasks (
-          id, title, notes, course_id, status, priority, due_date,
+          id, owner_user_id, title, notes, course_id, status, priority, due_date,
           source_citation, created_at, updated_at, completed_at
-        ) VALUES (?, ?, ?, ?, 'todo', ?, ?, ?, ?, ?, NULL)`,
+        ) VALUES (?, ?, ?, ?, ?, 'todo', ?, ?, ?, ?, ?, NULL)`,
       )
       .run(
         id,
+        ownerUserId,
         input.title,
         input.notes ?? null,
         input.courseId ?? null,
@@ -107,23 +109,25 @@ export class TaskRepository {
         now,
         now,
       );
-    const task = this.get(id);
+    const task = this.get(ownerUserId, id);
     if (task === null) {
       throw new Error("Created task could not be loaded.");
     }
     return task;
   }
 
-  get(id: string): Task | null {
-    const row = this.database.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as
+  get(ownerUserId: string, id: string): Task | null {
+    const row = this.database
+      .prepare("SELECT * FROM tasks WHERE owner_user_id = ? AND id = ?")
+      .get(ownerUserId, id) as
       | TaskRow
       | undefined;
     return row === undefined ? null : mapTask(row);
   }
 
-  list(query: TaskListQuery): TaskPage {
-    const clauses: string[] = [];
-    const values: Array<string | number> = [];
+  list(ownerUserId: string, query: TaskListQuery): TaskPage {
+    const clauses: string[] = ["owner_user_id = ?"];
+    const values: Array<string | number> = [ownerUserId];
     if (query.courseId !== undefined) {
       clauses.push("course_id = ?");
       values.push(query.courseId);
@@ -137,7 +141,7 @@ export class TaskRepository {
       const search = `%${query.query.trim()}%`;
       values.push(search, search);
     }
-    const where = clauses.length === 0 ? "" : `WHERE ${clauses.join(" AND ")}`;
+    const where = `WHERE ${clauses.join(" AND ")}`;
     const count = this.database
       .prepare(`SELECT COUNT(*) AS total FROM tasks ${where}`)
       .get(...values) as { total: number };
@@ -157,8 +161,8 @@ export class TaskRepository {
     };
   }
 
-  update(id: string, input: UpdateTaskInput): Task | null {
-    if (this.get(id) === null) {
+  update(ownerUserId: string, id: string, input: UpdateTaskInput): Task | null {
+    if (this.get(ownerUserId, id) === null) {
       return null;
     }
     const assignments: string[] = [];
@@ -183,20 +187,22 @@ export class TaskRepository {
       add("completed_at", input.status === "completed" ? this.clock().toISOString() : null);
     }
     if (assignments.length === 0) {
-      return this.get(id);
+      return this.get(ownerUserId, id);
     }
     add("updated_at", this.clock().toISOString());
     this.database
-      .prepare(`UPDATE tasks SET ${assignments.join(", ")} WHERE id = ?`)
-      .run(...values, id);
-    return this.get(id);
+      .prepare(`UPDATE tasks SET ${assignments.join(", ")} WHERE owner_user_id = ? AND id = ?`)
+      .run(...values, ownerUserId, id);
+    return this.get(ownerUserId, id);
   }
 
-  complete(id: string): Task | null {
-    return this.update(id, { status: "completed" });
+  complete(ownerUserId: string, id: string): Task | null {
+    return this.update(ownerUserId, id, { status: "completed" });
   }
 
-  delete(id: string): boolean {
-    return this.database.prepare("DELETE FROM tasks WHERE id = ?").run(id).changes === 1;
+  delete(ownerUserId: string, id: string): boolean {
+    return this.database
+      .prepare("DELETE FROM tasks WHERE owner_user_id = ? AND id = ?")
+      .run(ownerUserId, id).changes === 1;
   }
 }

@@ -3,6 +3,7 @@ import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 from app.config import Settings
@@ -29,6 +30,15 @@ class FakeAnswerProvider:
         yield from self.deltas
 
 
+class FakeAuthVerifier:
+    def authenticate(self, request: Request) -> str | None:
+        return {
+            "Bearer token-a": "user-a",
+            "Bearer token-b": "user-b",
+            "Bearer admin-token": "user-admin",
+        }.get(request.headers.get("authorization", ""))
+
+
 def parse_sse(body: str) -> list[tuple[str, dict[str, object]]]:
     events: list[tuple[str, dict[str, object]]] = []
     for frame in body.strip().split("\n\n"):
@@ -42,6 +52,8 @@ def parse_sse(body: str) -> list[tuple[str, dict[str, object]]]:
 def make_client(
     tmp_path: Path,
     answer_provider: FakeAnswerProvider,
+    *,
+    qa_limit: int = 10,
 ) -> TestClient:
     settings = Settings(
         database_path=tmp_path / "rag.sqlite3",
@@ -49,12 +61,15 @@ def make_client(
         chunk_size=200,
         chunk_overlap=20,
         top_k=3,
+        admin_user_ids="user-admin",
+        rag_qa_requests_per_minute=qa_limit,
     )
     return TestClient(
         create_app(
             settings=settings,
             embedding_provider=FakeEmbeddingProvider(),
             answer_provider=answer_provider,
+            auth_verifier=FakeAuthVerifier(),
         )
     )
 
@@ -85,7 +100,9 @@ def create_course_and_document(client: TestClient, course_id: str = "cs3481") ->
 def test_qa_chat_streams_named_events_and_traceable_citation(tmp_path: Path) -> None:
     provider = FakeAnswerProvider()
     with make_client(tmp_path, provider) as client:
+        client.headers["Authorization"] = "Bearer admin-token"
         create_course_and_document(client)
+        client.headers["Authorization"] = "Bearer token-a"
         response = client.post(
             "/api/qa/chat",
             json={"courseId": "cs3481", "question": "What terms does Phong use?"},
@@ -118,10 +135,12 @@ def test_qa_chat_streams_named_events_and_traceable_citation(tmp_path: Path) -> 
 def test_empty_course_streams_no_support_without_calling_model(tmp_path: Path) -> None:
     provider = FakeAnswerProvider()
     with make_client(tmp_path, provider) as client:
+        client.headers["Authorization"] = "Bearer admin-token"
         client.post(
             "/api/courses",
             json={"id": "cs3481", "name": "CS3481", "description": "Notes"},
         )
+        client.headers["Authorization"] = "Bearer token-a"
         response = client.post(
             "/api/qa/chat",
             json={"courseId": "cs3481", "question": "What is radiosity?"},
@@ -137,7 +156,9 @@ def test_empty_course_streams_no_support_without_calling_model(tmp_path: Path) -
 def test_model_failure_becomes_sse_error_event(tmp_path: Path) -> None:
     provider = FakeAnswerProvider(fail=True)
     with make_client(tmp_path, provider) as client:
+        client.headers["Authorization"] = "Bearer admin-token"
         create_course_and_document(client)
+        client.headers["Authorization"] = "Bearer token-a"
         response = client.post(
             "/api/qa/chat",
             json={"courseId": "cs3481", "question": "Explain Phong lighting."},
@@ -174,6 +195,7 @@ def test_prompt_marks_retrieved_text_as_untrusted_and_bounds_context() -> None:
 
 def test_qa_request_validation_uses_standard_error_envelope(tmp_path: Path) -> None:
     with make_client(tmp_path, FakeAnswerProvider()) as client:
+        client.headers["Authorization"] = "Bearer token-a"
         response = client.post(
             "/api/qa/chat",
             json={"courseId": "cs3481", "question": ""},
@@ -191,9 +213,12 @@ def test_deterministic_provider_mode_runs_without_an_openai_key(tmp_path: Path) 
         openai_api_key=None,
         chunk_size=200,
         chunk_overlap=20,
+        admin_user_ids="user-admin",
     )
-    with TestClient(create_app(settings=settings)) as client:
+    with TestClient(create_app(settings=settings, auth_verifier=FakeAuthVerifier())) as client:
+        client.headers["Authorization"] = "Bearer admin-token"
         create_course_and_document(client)
+        client.headers["Authorization"] = "Bearer token-a"
         response = client.post(
             "/api/qa/chat",
             json={"courseId": "cs3481", "question": "What terms does Phong use?"},
@@ -203,3 +228,58 @@ def test_deterministic_provider_mode_runs_without_an_openai_key(tmp_path: Path) 
     answer = "".join(str(data.get("text", "")) for name, data in events if name == "delta")
     assert "ambient diffuse and specular" in answer
     assert [name for name, _ in events][-2:] == ["citation", "done"]
+
+
+def test_conversation_history_is_owner_scoped(tmp_path: Path) -> None:
+    with make_client(tmp_path, FakeAnswerProvider()) as client:
+        client.headers["Authorization"] = "Bearer admin-token"
+        create_course_and_document(client)
+        client.headers["Authorization"] = "Bearer token-a"
+        answer = client.post(
+            "/api/qa/chat",
+            json={"courseId": "cs3481", "question": "Explain Phong lighting."},
+        )
+        conversation_id = parse_sse(answer.text)[0][1]["conversationId"]
+        own = client.get(f"/api/conversations/{conversation_id}")
+        other = client.get(
+            f"/api/conversations/{conversation_id}",
+            headers={"Authorization": "Bearer token-b"},
+        )
+
+    assert own.status_code == 200
+    assert [item["role"] for item in own.json()["messages"]] == ["user", "assistant"]
+    assert other.status_code == 404
+    assert other.json()["error"]["code"] == "CONVERSATION_NOT_FOUND"
+
+
+def test_qa_rate_limit_is_per_authenticated_user(tmp_path: Path) -> None:
+    with make_client(tmp_path, FakeAnswerProvider(), qa_limit=1) as client:
+        client.headers["Authorization"] = "Bearer admin-token"
+        create_course_and_document(client)
+        payload = {"courseId": "cs3481", "question": "Explain Phong lighting."}
+        first_a = client.post(
+            "/api/qa/chat", json=payload, headers={"Authorization": "Bearer token-a"}
+        )
+        second_a = client.post(
+            "/api/qa/chat", json=payload, headers={"Authorization": "Bearer token-a"}
+        )
+        first_b = client.post(
+            "/api/qa/chat", json=payload, headers={"Authorization": "Bearer token-b"}
+        )
+
+    assert first_a.status_code == 200
+    assert second_a.status_code == 429
+    assert second_a.json()["error"]["code"] == "RATE_LIMITED"
+    assert first_b.status_code == 200
+
+
+def test_qa_requires_a_valid_bearer_token(tmp_path: Path) -> None:
+    with make_client(tmp_path, FakeAnswerProvider()) as client:
+        payload = {"courseId": "cs3481", "question": "Explain Phong lighting."}
+        missing = client.post("/api/qa/chat", json=payload)
+        invalid = client.post(
+            "/api/qa/chat", json=payload, headers={"Authorization": "Bearer invalid"}
+        )
+
+    assert missing.status_code == 401
+    assert invalid.status_code == 401

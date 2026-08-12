@@ -1,7 +1,8 @@
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, File, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, Request, UploadFile, status
 
+from app.auth import AuthenticatedUser, require_admin, require_user
 from app.models import (
     Course,
     CourseCreate,
@@ -27,13 +28,18 @@ def health() -> Health:
 
 
 @router.post("/api/courses", response_model=Course, status_code=status.HTTP_201_CREATED)
-def create_course(payload: CourseCreate, request: Request) -> Course:
+def create_course(
+    payload: CourseCreate,
+    request: Request,
+    _user: Annotated[AuthenticatedUser, Depends(require_admin)],
+) -> Course:
     return _service(request).create_course(payload)
 
 
 @router.get("/api/courses", response_model=CoursePage)
 def list_courses(
     request: Request,
+    _user: Annotated[AuthenticatedUser, Depends(require_user)],
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, alias="pageSize", ge=1, le=100),
 ) -> CoursePage:
@@ -44,6 +50,7 @@ def list_courses(
 def list_documents(
     course_id: str,
     request: Request,
+    _user: Annotated[AuthenticatedUser, Depends(require_user)],
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, alias="pageSize", ge=1, le=100),
 ) -> DocumentPage:
@@ -60,6 +67,7 @@ async def upload_document(
     request: Request,
     background_tasks: BackgroundTasks,
     file: Annotated[UploadFile, File()],
+    _user: Annotated[AuthenticatedUser, Depends(require_admin)],
 ) -> UploadAccepted:
     service = _service(request)
     content = await file.read(service.settings.max_upload_bytes + 1)
@@ -78,5 +86,9 @@ async def upload_document(
 
 
 @router.get("/api/ingestion-jobs/{job_id}", response_model=IngestionJob)
-def get_ingestion_job(job_id: str, request: Request) -> IngestionJob:
+def get_ingestion_job(
+    job_id: str,
+    request: Request,
+    _user: Annotated[AuthenticatedUser, Depends(require_admin)],
+) -> IngestionJob:
     return _service(request).get_job(job_id)

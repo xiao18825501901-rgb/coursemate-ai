@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS chunks (
 
 CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
     course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -74,6 +75,20 @@ CREATE INDEX IF NOT EXISTS idx_chunks_course ON chunks(course_id, document_id, o
 CREATE INDEX IF NOT EXISTS idx_jobs_document ON ingestion_jobs(document_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_conversations_course ON conversations(course_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at);
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS rate_limit_windows (
+    owner_user_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    window_start INTEGER NOT NULL,
+    request_count INTEGER NOT NULL CHECK (request_count >= 0),
+    PRIMARY KEY (owner_user_id, action, window_start)
+);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
     content,
@@ -127,3 +142,48 @@ class Database:
         with self.connect() as connection:
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(SCHEMA_SQL)
+            columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(conversations)")
+            }
+            if "owner_user_id" not in columns:
+                connection.execute(
+                    "ALTER TABLE conversations ADD COLUMN owner_user_id "
+                    "TEXT NOT NULL DEFAULT 'legacy_orphaned'"
+                )
+            connection.executescript(
+                """
+                CREATE INDEX IF NOT EXISTS idx_conversations_owner_updated
+                ON conversations(owner_user_id, updated_at);
+                CREATE INDEX IF NOT EXISTS idx_conversations_owner_course_updated
+                ON conversations(owner_user_id, course_id, updated_at);
+                INSERT OR IGNORE INTO schema_migrations (version, name)
+                VALUES (1, 'conversation ownership and per-user limits');
+                """
+            )
+
+    def consume_rate_limit(
+        self,
+        *,
+        owner_user_id: str,
+        action: str,
+        limit: int,
+        now_epoch_seconds: int,
+    ) -> bool:
+        window_start = now_epoch_seconds - (now_epoch_seconds % 60)
+        with self.connect() as connection:
+            connection.execute(
+                "DELETE FROM rate_limit_windows WHERE window_start < ?",
+                (window_start - 3_600,),
+            )
+            row = connection.execute(
+                """
+                INSERT INTO rate_limit_windows (
+                    owner_user_id, action, window_start, request_count
+                ) VALUES (?, ?, ?, 1)
+                ON CONFLICT(owner_user_id, action, window_start)
+                DO UPDATE SET request_count = request_count + 1
+                RETURNING request_count
+                """,
+                (owner_user_id, action, window_start),
+            ).fetchone()
+        return row is not None and int(row["request_count"]) <= limit
