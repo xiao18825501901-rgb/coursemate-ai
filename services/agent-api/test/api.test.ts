@@ -71,6 +71,8 @@ describe("Agent API", () => {
     expect(response.body).toEqual({ status: "ok", service: "agent-api" });
     expect(response.headers["access-control-allow-origin"]).toBe("http://localhost:5173");
     expect(response.headers["x-content-type-options"]).toBe("nosniff");
+    expect(response.headers["strict-transport-security"]).toBe("max-age=31536000; includeSubDomains");
+    expect(response.headers["permissions-policy"]).toBe("camera=(), microphone=(), geolocation=()");
     expect(response.headers["x-powered-by"]).toBeUndefined();
   });
 

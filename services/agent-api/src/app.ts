@@ -61,6 +61,10 @@ export function createApp(dependencies: AppDependencies): express.Express {
   const application = express();
   application.disable("x-powered-by");
   application.use(helmet());
+  application.use((_request, response, next) => {
+    response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    next();
+  });
   application.use(
     cors({
       origin: dependencies.webOrigin,

@@ -81,6 +81,21 @@ def test_health_and_course_pagination(client: TestClient) -> None:
     assert courses.json()["items"][0]["id"] == "cs3481"
 
 
+def test_api_responses_include_production_security_headers(client: TestClient) -> None:
+    response = client.get("/health")
+
+    assert response.headers["content-security-policy"] == (
+        "default-src 'none'; frame-ancestors 'none'"
+    )
+    assert response.headers["strict-transport-security"] == (
+        "max-age=31536000; includeSubDomains"
+    )
+    assert response.headers["permissions-policy"] == "camera=(), microphone=(), geolocation=()"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["referrer-policy"] == "no-referrer"
+
+
 def test_course_detail_obeys_private_visibility_policy(client: TestClient) -> None:
     client.headers["Authorization"] = "Bearer user-token"
     assert client.post(
