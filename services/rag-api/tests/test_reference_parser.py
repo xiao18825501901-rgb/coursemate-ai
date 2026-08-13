@@ -17,6 +17,7 @@ def test_parses_real_cs3481_assignment_filename_and_chinese_question() -> None:
     assert reference.document == "CS_3481_Assignment_2.pdf"
     assert reference.document_number == "2"
     assert reference.question_number == "2"
+    assert reference.page_number is None
 
 
 def test_parses_tutorial_reference_without_explicit_extension() -> None:
@@ -46,4 +47,3 @@ def test_parses_page_slide_and_does_not_invent_missing_question() -> None:
     assert slide.document_kind is DocumentKind.LECTURE
     assert slide.document_number == "3"
     assert slide.slide_number == 12
-
