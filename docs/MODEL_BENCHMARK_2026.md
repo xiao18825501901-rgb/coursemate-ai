@@ -29,6 +29,9 @@ Only the first two levels are complete. Anything stronger is recorded as unknown
   private-course authorization, prompt customization, and Agent tools.
 - Candidate template: `benchmarks/model-candidates.example.json`.
 - Runner: `scripts/run_model_benchmark.py`.
+- Embedding judgments: `benchmarks/embedding-retrieval-cases.json` (eight resolvable judgments on
+  the local official/public CS3481 and GE2324 corpus).
+- Embedding runner: `scripts/run_embedding_benchmark.py`.
 - Scoring library: `services/rag-api/app/evaluation/model_benchmark.py`.
 - Tests: `services/rag-api/tests/test_model_benchmark.py`.
 
@@ -93,7 +96,30 @@ vectors from different model/dimension contracts in one index.
 
 **Provisional embedding candidate:** `text-embedding-v4` in the same compliant region as the corpus.
 
-**Final status:** pending real corpus retrieval comparison against the current embedding baseline.
+The independent embedding runner re-embeds all chunks from only the selected official/public
+courses into memory, embeds the eight queries, ranks strictly within each course, and reports
+Recall@K/MRR, latency, dimension, usage and cost. It writes only case/course/chunk identifiers and
+metrics—never chunk text or vectors. Like the generation runner, it requires explicit billable
+opt-in, current price/currency and a conservative total-cost ceiling, refuses output overwrite and
+uses zero SDK retries.
+
+Example after billing is approved:
+
+```powershell
+services\rag-api\.venv\Scripts\python.exe scripts\run_embedding_benchmark.py `
+  --provider "candidate" --model "candidate-embedding-model" `
+  --base-url "https://provider.example/v1" --api-key-env "CANDIDATE_API_KEY" `
+  --database "data\rag.sqlite3" --output "work\benchmarks\candidate-embedding.json" `
+  --input-price-per-million <verified-current-price> `
+  --max-total-cost <approved-maximum> --currency <ISO-4217-code> --allow-billable
+```
+
+Run every candidate at least three times. Compare retrieval metrics first, then dimension/storage,
+latency, cost, region and operational stability. This harness uses the currently available local
+official course corpus; production data is neither required nor authorized.
+
+**Final status:** runnable real-corpus comparison exists; live candidate results and the winner are
+still pending paid-run authorization.
 
 ## Provisional deployment positions (not benchmark winners)
 
@@ -143,6 +169,7 @@ production switch.
 
 - 50-case eval dataset: **PASS**
 - fail-closed, credential-safe, budget-capped and checkpointed runner: **PASS**
+- official-course embedding retrieval dataset and budget-capped runner: **PASS locally**
 - independent tutor / Agent / embedding variables with legacy fallback: **PASS**
 - local Responses/configuration contract tests: **PASS**
 - real provider quality, latency, cost comparison: **BLOCKED — paid calls not authorized**
