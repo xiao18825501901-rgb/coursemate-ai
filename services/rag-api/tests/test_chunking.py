@@ -70,3 +70,56 @@ def test_empty_sections_do_not_create_empty_chunks() -> None:
     )
 
     assert [chunk.content for chunk in chunks] == ["Useful content"]
+
+
+def test_assignment_question_structure_is_split_with_parent_and_part_metadata() -> None:
+    source = SourceSection(
+        text=(
+            "GE2324 Assignment 2\nQuestion 1 [55 marks].\nShared table and instructions.\n"
+            "(a) Calculate the first centroid.\n"
+            "(b) Repeat the assignment step.\n"
+            "(c) Explain why the result converges."
+        ),
+        locator_type="page",
+        locator_value="1",
+        section="Page 1",
+    )
+
+    chunks = chunk_sections([source], chunk_size=400, overlap=20)
+
+    assert [chunk.metadata.get("question_number") for chunk in chunks] == ["1", "1", "1"]
+    assert [chunk.metadata.get("question_part") for chunk in chunks] == ["a", "b", "c"]
+    assert len({chunk.parent_key for chunk in chunks}) == 1
+    assert all("Shared table and instructions" in chunk.content for chunk in chunks)
+
+
+def test_tutorial_numbered_questions_receive_question_metadata() -> None:
+    source = SourceSection(
+        text="Tutorial 1\n1. Compare binary vectors.\n2. Calculate cosine similarity.",
+        locator_type="page",
+        locator_value="1",
+        section="Page 1",
+    )
+
+    chunks = chunk_sections([source], chunk_size=200, overlap=10)
+
+    assert [chunk.metadata.get("question_number") for chunk in chunks] == ["1", "2"]
+    assert chunks[0].metadata["document_kind"] == "tutorial"
+    assert chunks[0].metadata["document_number"] == "1"
+
+
+def test_document_kind_can_be_derived_from_markdown_heading() -> None:
+    source = SourceSection(
+        text="Question 2\n(a) Derive the gradient.\n(b) Check the result.",
+        locator_type="section",
+        locator_value="1",
+        section="Assignment 2",
+    )
+
+    chunks = chunk_sections([source], chunk_size=200, overlap=10)
+
+    assert [chunk.metadata["document_kind"] for chunk in chunks] == [
+        "assignment",
+        "assignment",
+    ]
+    assert [chunk.metadata["document_number"] for chunk in chunks] == ["2", "2"]

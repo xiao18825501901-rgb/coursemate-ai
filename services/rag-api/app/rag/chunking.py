@@ -1,6 +1,10 @@
 import re
+from typing import TypeAlias
 
+from app.rag.structure import extract_structured_blocks
 from app.rag.types import SourceSection, TextChunk
+
+ChunkInput: TypeAlias = tuple[str, dict[str, str | int | None], str | None]
 
 
 def _normalize_paragraphs(text: str) -> list[str]:
@@ -97,14 +101,21 @@ def chunk_sections(
 
     chunks: list[TextChunk] = []
     for source in sections:
-        for content in _chunk_section(source.text, chunk_size=chunk_size, overlap=overlap):
-            chunks.append(
-                TextChunk(
-                    ordinal=len(chunks),
-                    content=content,
-                    locator_type=source.locator_type,
-                    locator_value=source.locator_value,
-                    section=source.section,
+        structured = extract_structured_blocks(source)
+        contents: list[ChunkInput] = [
+            (unit.content, unit.metadata, unit.parent_key) for unit in structured
+        ] or [(source.text, source.metadata, source.parent_key)]
+        for text, metadata, parent_key in contents:
+            for content in _chunk_section(text, chunk_size=chunk_size, overlap=overlap):
+                chunks.append(
+                    TextChunk(
+                        ordinal=len(chunks),
+                        content=content,
+                        locator_type=source.locator_type,
+                        locator_value=source.locator_value,
+                        section=source.section,
+                        metadata=metadata,
+                        parent_key=parent_key,
+                    )
                 )
-            )
     return chunks

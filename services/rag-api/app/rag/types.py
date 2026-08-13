@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True, slots=True)
@@ -9,6 +9,8 @@ class SourceSection:
     locator_type: str
     locator_value: str
     section: str | None = None
+    metadata: dict[str, str | int | None] = field(default_factory=dict)
+    parent_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +22,8 @@ class TextChunk:
     locator_type: str
     locator_value: str
     section: str | None = None
+    metadata: dict[str, str | int | None] = field(default_factory=dict)
+    parent_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,3 +40,5 @@ class SearchHit:
     section: str | None
     score: float
     channels: tuple[str, ...]
+    metadata: dict[str, str | int | None] = field(default_factory=dict)
+    parent_key: str | None = None
