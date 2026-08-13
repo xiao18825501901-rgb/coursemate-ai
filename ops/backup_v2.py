@@ -100,60 +100,56 @@ def create_backup() -> Path:
     final_destination = backup_root / f"coursemate-v2-{stamp}"
     partial_destination = backup_root / f".coursemate-v2-{stamp}.{uuid4().hex}.partial"
     partial_destination.mkdir(mode=0o700)
-    try:
-        _sqlite_backup(rag_database, partial_destination / "rag.sqlite3")
-        _sqlite_backup(agent_database, partial_destination / "agent.sqlite3")
-        upload_file_count, upload_total_bytes = _archive_uploads(
-            upload_root, partial_destination / "uploads.tar.gz"
-        )
-        check_lines: list[str] = []
-        for name in ("rag.sqlite3", "agent.sqlite3"):
-            integrity, foreign_keys = _sqlite_check(partial_destination / name)
-            check_lines.extend(
-                (
-                    f"{name} integrity_check={integrity}",
-                    f"{name} foreign_key_rows={len(foreign_keys)}",
-                )
+    _sqlite_backup(rag_database, partial_destination / "rag.sqlite3")
+    _sqlite_backup(agent_database, partial_destination / "agent.sqlite3")
+    upload_file_count, upload_total_bytes = _archive_uploads(
+        upload_root, partial_destination / "uploads.tar.gz"
+    )
+    check_lines: list[str] = []
+    for name in ("rag.sqlite3", "agent.sqlite3"):
+        integrity, foreign_keys = _sqlite_check(partial_destination / name)
+        check_lines.extend(
+            (
+                f"{name} integrity_check={integrity}",
+                f"{name} foreign_key_rows={len(foreign_keys)}",
             )
-        (partial_destination / "sqlite-check.txt").write_text(
-            "\n".join(check_lines) + "\n", encoding="utf-8"
         )
-        manifest = {
-            "formatVersion": 1,
-            "createdAt": created_at.isoformat(),
-            "artifacts": {
-                "ragDatabase": "rag.sqlite3",
-                "agentDatabase": "agent.sqlite3",
-                "uploads": "uploads.tar.gz",
-            },
-            "uploadFileCount": upload_file_count,
-            "uploadTotalBytes": upload_total_bytes,
-            "verification": {
-                "sqliteIntegrity": "ok",
-                "foreignKeyViolations": 0,
-            },
-        }
-        (partial_destination / "manifest.json").write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-        )
-        checksum_lines = [
-            f"{_sha256(partial_destination / name)}  {name}" for name in ARTIFACTS
-        ]
-        (partial_destination / "SHA256SUMS").write_text(
-            "\n".join(checksum_lines) + "\n", encoding="ascii"
-        )
-        partial_destination.replace(final_destination)
-    except Exception:
-        # Keep a clearly incomplete directory for operator forensics; it can never be
-        # mistaken for a complete backup because its name is hidden and ends in .partial.
-        raise
+    (partial_destination / "sqlite-check.txt").write_text(
+        "\n".join(check_lines) + "\n", encoding="utf-8"
+    )
+    manifest = {
+        "formatVersion": 1,
+        "createdAt": created_at.isoformat(),
+        "artifacts": {
+            "ragDatabase": "rag.sqlite3",
+            "agentDatabase": "agent.sqlite3",
+            "uploads": "uploads.tar.gz",
+        },
+        "uploadFileCount": upload_file_count,
+        "uploadTotalBytes": upload_total_bytes,
+        "verification": {
+            "sqliteIntegrity": "ok",
+            "foreignKeyViolations": 0,
+        },
+    }
+    (partial_destination / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    checksum_lines = [
+        f"{_sha256(partial_destination / name)}  {name}" for name in ARTIFACTS
+    ]
+    (partial_destination / "SHA256SUMS").write_text(
+        "\n".join(checksum_lines) + "\n", encoding="ascii"
+    )
+    # Errors leave only a hidden `.partial` directory, never a complete-looking backup.
+    partial_destination.replace(final_destination)
     return final_destination
 
 
 def main() -> int:
     try:
         print(create_backup())
-    except Exception as error:
+    except (OSError, sqlite3.Error, tarfile.TarError, ValueError, RuntimeError) as error:
         print(f"Backup failed: {error}", file=sys.stderr)
         return 2
     return 0

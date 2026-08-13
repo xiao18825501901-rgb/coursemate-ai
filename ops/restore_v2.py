@@ -154,29 +154,25 @@ def restore_backup() -> Path:
     partial_target.mkdir(mode=0o700, parents=True)
     uploads_target = partial_target / "uploads"
     uploads_target.mkdir(mode=0o700)
-    try:
-        for name in ("rag.sqlite3", "agent.sqlite3"):
-            destination = partial_target / name
-            shutil.copyfile(source / name, destination)
-            _verify_sqlite(destination)
-        _extract_uploads(
-            source / "uploads.tar.gz",
-            uploads_target,
-            expected_file_count=expected_file_count,
-            expected_total_bytes=expected_total_bytes,
-        )
-        partial_target.replace(target)
-    except Exception:
-        # A .partial directory is deliberately retained for operator forensics and can
-        # never be mistaken for a completed isolated restore.
-        raise
+    for name in ("rag.sqlite3", "agent.sqlite3"):
+        destination = partial_target / name
+        shutil.copyfile(source / name, destination)
+        _verify_sqlite(destination)
+    _extract_uploads(
+        source / "uploads.tar.gz",
+        uploads_target,
+        expected_file_count=expected_file_count,
+        expected_total_bytes=expected_total_bytes,
+    )
+    # Errors leave only a hidden `.partial` directory, never a complete-looking restore.
+    partial_target.replace(target)
     return target
 
 
 def main() -> int:
     try:
         print(f"Isolated restore ready at {restore_backup()}")
-    except Exception as error:
+    except (OSError, sqlite3.Error, tarfile.TarError, ValueError, RuntimeError) as error:
         print(f"Restore failed: {error}", file=sys.stderr)
         return 2
     return 0
