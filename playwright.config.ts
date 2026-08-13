@@ -31,7 +31,7 @@ export default defineConfig({
         RAG_PROVIDER_MODE: "deterministic",
         APP_ENV: "test",
         AUTH_TEST_USER_ID: "e2e-user",
-        ADMIN_USER_IDS: "e2e-user",
+        ADMIN_USER_IDS: "",
         WEB_ORIGIN: "http://127.0.0.1:5173",
       },
       url: "http://127.0.0.1:8000/health",

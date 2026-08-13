@@ -15,7 +15,7 @@ test("keeps answers course-scoped, streams citations, and adds one to the plan",
   await page.getByLabel("Ask a course question").fill(
     "How does DBSCAN identify a core point?",
   );
-  await page.getByRole("button", { name: "Ask" }).click();
+  await page.getByRole("button", { name: "Ask", exact: true }).click();
   await expect(page.locator(".message-assistant > p").first()).toContainText("DBSCAN");
   await expect(page.locator(".citation-list").first()).toBeVisible();
 
@@ -27,7 +27,7 @@ test("keeps answers course-scoped, streams citations, and adds one to the plan",
   await page.getByLabel("Ask a course question").fill(
     "What does Assignment 2 ask students to do with K-means and colors?",
   );
-  await page.getByRole("button", { name: "Ask" }).click();
+  await page.getByRole("button", { name: "Ask", exact: true }).click();
   await expect(page.getByText(/Based on the selected course material:/)).toBeVisible();
   const assignmentAnswer = page.locator(".message-assistant").last();
   await expect(assignmentAnswer.locator(":scope > p")).toContainText("K-means");
@@ -81,4 +81,48 @@ test("mobile navigation and core actions remain usable at 390 pixels", async ({ 
   await expect(page.getByLabel("Message the study agent")).toBeVisible();
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
   await page.screenshot({ path: "work/tasks-mobile.png", fullPage: true });
+});
+
+test("creates, indexes, teaches from, and deletes a private course", async ({ page }) => {
+  const consoleErrors: string[] = [];
+  page.on("console", (entry) => {
+    if (entry.type() === "error" || entry.type() === "warning") consoleErrors.push(entry.text());
+  });
+  const courseId = `browser-course-${Date.now()}`;
+  const courseName = `Browser Private Course ${courseId}`;
+
+  await page.goto("/courses");
+  await expect(page.getByRole("heading", { name: "Official Courses" })).toBeVisible();
+  await page.getByRole("link", { name: "Create Course" }).click();
+  await page.getByLabel("Course ID").fill(courseId);
+  await page.getByLabel("Course name").fill(courseName);
+  await page.getByLabel("Description").fill("A private end-to-end course.");
+  await page.getByRole("button", { name: "Create private course" }).click();
+
+  await expect(page).toHaveURL(new RegExp(`/qa/${courseId}$`));
+  await expect(
+    page.getByRole("complementary", { name: "Course documents" }).getByRole("strong"),
+  ).toHaveText(courseName);
+  await page.getByRole("link", { name: "Manage course and sources" }).click();
+  await expect(page.getByText(/not visible to other students/i)).toBeVisible();
+  await page.getByLabel("Upload course material").setInputFiles({
+    name: "private-notes.md",
+    mimeType: "text/markdown",
+    buffer: Buffer.from("# Private topic\n\nThe private answer is evidence-bound."),
+  });
+  await expect(page.getByRole("status")).toContainText("Indexed");
+  await expect(page.getByText("private-notes.md", { exact: true })).toBeVisible();
+  await page.screenshot({ path: "work/private-course-desktop.png", fullPage: true });
+
+  await page.getByRole("link", { name: "Open tutor" }).click();
+  await page.getByLabel("Ask a course question").fill("What is the private answer?");
+  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  await expect(page.locator(".message-assistant > p").last()).toContainText("private answer");
+
+  await page.goto(`/courses/${courseId}/settings`);
+  await page.getByLabel(`Type ${courseId} to confirm`).fill(courseId);
+  await page.getByRole("button", { name: "Delete course permanently" }).click();
+  await expect(page).toHaveURL(/\/courses$/);
+  await expect(page.getByText(courseName, { exact: true })).not.toBeVisible();
+  expect(consoleErrors).toEqual([]);
 });
