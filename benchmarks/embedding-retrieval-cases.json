@@ -1,0 +1,66 @@
+[
+  {
+    "id": "cs-dbscan-core",
+    "courseId": "cs3481",
+    "query": "What conditions make a point a DBSCAN core point?",
+    "filename": "Cluster Analysis (Hierarchical and Density-Based Approaches).pdf",
+    "locatorType": "page",
+    "locatorValue": "31"
+  },
+  {
+    "id": "cs-agglomerative-start",
+    "courseId": "cs3481",
+    "query": "How does agglomerative hierarchical clustering begin?",
+    "filename": "Cluster Analysis (Hierarchical and Density-Based Approaches).pdf",
+    "locatorType": "page",
+    "locatorValue": "2"
+  },
+  {
+    "id": "cs-density-regions",
+    "courseId": "cs3481",
+    "query": "How does density-based clustering separate clusters?",
+    "filename": "Cluster Analysis (Hierarchical and Density-Based Approaches).pdf",
+    "locatorType": "page",
+    "locatorValue": "25"
+  },
+  {
+    "id": "ge-pearson-product-moment",
+    "courseId": "ge2324",
+    "query": "What is another name for the Pearson correlation coefficient?",
+    "filename": "Topic05_[CourseSlides]Correlation.pptx",
+    "locatorType": "slide",
+    "locatorValue": "11"
+  },
+  {
+    "id": "ge-spearman-ordinal",
+    "courseId": "ge2324",
+    "query": "Which correlation should be used for ordinal-level ranked measurements?",
+    "filename": "Topic05_[CourseSlides]Correlation.pptx",
+    "locatorType": "slide",
+    "locatorValue": "60"
+  },
+  {
+    "id": "ge-kendall-ranked-pairs",
+    "courseId": "ge2324",
+    "query": "Which coefficient measures association between two pairs of ranked data?",
+    "filename": "Topic05_[CourseSlides]Correlation.pptx",
+    "locatorType": "slide",
+    "locatorValue": "90"
+  },
+  {
+    "id": "ge-kendall-concordant",
+    "courseId": "ge2324",
+    "query": "What makes two ranked observations concordant?",
+    "filename": "Topic05_[CourseSlides]Correlation.pptx",
+    "locatorType": "slide",
+    "locatorValue": "91"
+  },
+  {
+    "id": "ge-test-statistic",
+    "courseId": "ge2324",
+    "query": "What quantity measures how many standard errors a sample is from the null?",
+    "filename": "5.3 - Hypothesis Testing for a Proportion.pptx",
+    "locatorType": "slide",
+    "locatorValue": "34"
+  }
+]
