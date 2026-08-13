@@ -77,7 +77,9 @@ def create_conversation(
     return service.create_conversation(
         owner_user_id=user.user_id,
         course_id=payload.course_id,
-        preferred_language=payload.preferred_language.value,
+        preferred_language=(
+            payload.preferred_language.value if payload.preferred_language is not None else None
+        ),
     )
 
 

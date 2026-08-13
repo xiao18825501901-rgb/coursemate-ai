@@ -47,6 +47,7 @@ const official = {
   courseType: "official" as const, visibility: "public" as const,
   isOwner: false, canManage: false,
   publicationStatus: "published" as const, publishedAt: "2026-08-11T00:00:00Z",
+  preferredLanguage: "auto" as const,
   createdAt: "2026-08-11T00:00:00Z", updatedAt: "2026-08-11T00:00:00Z",
 };
 const mine = {
@@ -54,6 +55,7 @@ const mine = {
   courseType: "user" as const, visibility: "private" as const,
   isOwner: true, canManage: true,
   publicationStatus: "private" as const, publishedAt: null,
+  preferredLanguage: "auto" as const,
   createdAt: "2026-08-13T00:00:00Z", updatedAt: "2026-08-13T00:00:00Z",
 };
 const profile = {

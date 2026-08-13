@@ -211,10 +211,17 @@ class QaService:
             raise ApiError(404, "CONVERSATION_NOT_FOUND", "The conversation was not found.")
 
     def create_conversation(
-        self, *, owner_user_id: str, course_id: str, preferred_language: str = "auto"
+        self, *, owner_user_id: str, course_id: str, preferred_language: str | None = None
     ) -> dict[str, object]:
         conversation_id = f"conv_{uuid4().hex}"
         with self.database.connect() as connection:
+            if preferred_language is None:
+                course = connection.execute(
+                    "SELECT preferred_language FROM courses WHERE id = ?", (course_id,)
+                ).fetchone()
+                if course is None:
+                    raise ApiError(404, "COURSE_NOT_FOUND", "The course was not found.")
+                preferred_language = str(course["preferred_language"])
             row = connection.execute(
                 """
                 INSERT INTO conversations (

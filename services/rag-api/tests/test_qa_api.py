@@ -498,6 +498,37 @@ def test_conversation_language_preference_overrides_question_detection(tmp_path:
     assert "natural English" not in provider.calls[0][2]
 
 
+def test_new_conversation_inherits_course_language_when_not_explicit(tmp_path: Path) -> None:
+    provider = FakeAnswerProvider(["涓枃璁茶В銆?"])
+    with make_client(tmp_path, provider) as client:
+        client.headers["Authorization"] = "Bearer admin-token"
+        create_course_and_document(client)
+        client.patch(
+            "/api/courses/cs3481",
+            json={"preferredLanguage": "zh-CN"},
+        )
+        created = client.post(
+            "/api/conversations",
+            json={"courseId": "cs3481"},
+            headers={"Authorization": "Bearer token-a"},
+        )
+        response = client.post(
+            "/api/qa/chat",
+            json={
+                "courseId": "cs3481",
+                "conversationId": created.json()["id"],
+                "question": "Please explain this concept step by step.",
+            },
+            headers={"Authorization": "Bearer token-a"},
+        )
+
+    assert created.status_code == 201
+    assert created.json()["preferredLanguage"] == "zh-CN"
+    assert response.status_code == 200
+    assert "English technical term" in provider.calls[0][2]
+    assert "natural English" not in provider.calls[0][2]
+
+
 def test_conversation_history_is_owner_scoped(tmp_path: Path) -> None:
     with make_client(tmp_path, FakeAnswerProvider()) as client:
         client.headers["Authorization"] = "Bearer admin-token"

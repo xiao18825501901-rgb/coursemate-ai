@@ -237,7 +237,7 @@ export function QaPage() {
     if (!courseId) return;
     try {
       setError(null);
-      const created = await createConversation(getToken, courseId, "auto");
+      const created = await createConversation(getToken, courseId);
       setConversations((items) => [created, ...items]);
       navigate(`/qa/${courseId}/${created.id}`);
     } catch (caught: unknown) {

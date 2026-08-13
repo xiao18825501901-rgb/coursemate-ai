@@ -38,6 +38,7 @@ export function CourseSettingsPage() {
   const [profiles, setProfiles] = useState<TeachingProfile[]>([]);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [preferredLanguage, setPreferredLanguage] = useState<Course["preferredLanguage"]>("auto");
   const [job, setJob] = useState<IngestionJob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState("");
@@ -56,6 +57,7 @@ export function CourseSettingsPage() {
     setCourse(found);
     setName(found.name);
     setDescription(found.description);
+    setPreferredLanguage(found.preferredLanguage);
     setDocuments(documentPage.items);
     setProfiles(profilePage.items);
   }
@@ -68,7 +70,7 @@ export function CourseSettingsPage() {
     event.preventDefault();
     try {
       setCourse(await updateCourse(getToken, courseId, {
-        name: name.trim(), description: description.trim(),
+        name: name.trim(), description: description.trim(), preferredLanguage,
       }));
     } catch (caught: unknown) { setError(message(caught)); }
   }
@@ -149,6 +151,7 @@ export function CourseSettingsPage() {
         <form className="course-form" onSubmit={(event) => void save(event)}>
           <label><span className="field-label">Course name</span><input onChange={(event) => setName(event.target.value)} required value={name} /></label>
           <label><span className="field-label">Description</span><textarea onChange={(event) => setDescription(event.target.value)} rows={4} value={description} /></label>
+          <label><span className="field-label">Default teaching language</span><select onChange={(event) => setPreferredLanguage(event.target.value as Course["preferredLanguage"])} value={preferredLanguage}><option value="auto">Mirror each learner</option><option value="zh-CN">Chinese with English terms</option><option value="en">English</option><option value="bilingual">Bilingual</option></select></label>
           <button className="button button-primary" type="submit">Save details</button>
         </form>
       </section>

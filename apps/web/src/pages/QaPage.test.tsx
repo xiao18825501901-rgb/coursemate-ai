@@ -38,6 +38,7 @@ const course = {
   isOwner: false,
   canManage: false,
   publicationStatus: "published" as const,
+  preferredLanguage: "auto" as const,
   publishedAt: "2026-08-11T00:00:00Z",
   createdAt: "2026-08-11T00:00:00Z",
   updatedAt: "2026-08-11T00:00:00Z",
@@ -52,6 +53,7 @@ const geCourse = {
   isOwner: false,
   canManage: false,
   publicationStatus: "published" as const,
+  preferredLanguage: "auto" as const,
   publishedAt: "2026-08-11T00:00:00Z",
   createdAt: "2026-08-11T00:00:00Z",
   updatedAt: "2026-08-11T00:00:00Z",
@@ -345,7 +347,6 @@ describe("QaPage", () => {
     await waitFor(() => expect(createConversation).toHaveBeenCalledWith(
       expect.any(Function),
       "cs3481",
-      "auto",
     ));
 
     fireEvent.click(screen.getByRole("button", { name: "Rename Old title" }));

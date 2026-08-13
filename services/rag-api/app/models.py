@@ -124,6 +124,7 @@ class Course(CourseCreate):
     course_type: CourseType
     visibility: CourseVisibility
     publication_status: PublicationStatus
+    preferred_language: LanguagePreference
     published_at: datetime | None
     is_owner: bool = False
     can_manage: bool = False
@@ -134,6 +135,7 @@ class Course(CourseCreate):
 class CourseUpdate(ApiModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=1_000)
+    preferred_language: LanguagePreference | None = None
 
     @field_validator("name")
     @classmethod
@@ -207,7 +209,7 @@ class RetrievalDiagnosticsRequest(ApiModel):
 
 class ConversationCreate(ApiModel):
     course_id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,49}$")
-    preferred_language: LanguagePreference = LanguagePreference.AUTO
+    preferred_language: LanguagePreference | None = None
 
 
 class ConversationUpdate(ApiModel):

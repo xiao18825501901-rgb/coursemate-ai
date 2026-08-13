@@ -20,6 +20,7 @@ export interface Course {
   courseType: "official" | "user";
   visibility: "private" | "public";
   publicationStatus: "private" | "pending" | "published" | "rejected";
+  preferredLanguage: LanguagePreference;
   publishedAt: string | null;
   isOwner: boolean;
   canManage: boolean;
@@ -36,6 +37,7 @@ export interface CourseCreateInput {
 export interface CourseUpdateInput {
   name?: string;
   description?: string;
+  preferredLanguage?: LanguagePreference;
 }
 
 export type DocumentStatus = "pending" | "processing" | "ready" | "failed" | "unsupported";

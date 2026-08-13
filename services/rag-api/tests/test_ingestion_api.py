@@ -301,10 +301,11 @@ def test_owner_can_update_and_delete_private_course(client: TestClient) -> None:
 
     updated = client.patch(
         "/api/courses/editable-course",
-        json={"name": "Updated", "description": "Revised"},
+        json={"name": "Updated", "description": "Revised", "preferredLanguage": "zh-CN"},
     )
     assert updated.status_code == 200
     assert updated.json()["name"] == "Updated"
+    assert updated.json()["preferredLanguage"] == "zh-CN"
 
     client.headers["Authorization"] = "Bearer user-b-token"
     assert client.patch(

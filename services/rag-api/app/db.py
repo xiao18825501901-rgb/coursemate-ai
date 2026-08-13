@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS courses (
         CHECK (course_type IN ('official', 'user')),
     visibility TEXT NOT NULL DEFAULT 'public'
         CHECK (visibility IN ('private', 'public')),
+    preferred_language TEXT NOT NULL DEFAULT 'auto'
+        CHECK (preferred_language IN ('auto', 'zh-CN', 'en', 'bilingual')),
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     CHECK (
@@ -300,6 +302,12 @@ class Database:
                     "UPDATE courses SET published_at = created_at "
                     "WHERE course_type = 'official'"
                 )
+            if "preferred_language" not in course_columns:
+                connection.execute(
+                    "ALTER TABLE courses ADD COLUMN preferred_language "
+                    "TEXT NOT NULL DEFAULT 'auto' "
+                    "CHECK (preferred_language IN ('auto', 'zh-CN', 'en', 'bilingual'))"
+                )
             connection.execute(
                 "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?, ?)",
                 (7, "consent based course publication workflow"),
@@ -327,6 +335,10 @@ class Database:
             connection.execute(
                 "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?, ?)",
                 (8, "user course storage quotas"),
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?, ?)",
+                (9, "course language preference"),
             )
             if not v2_applied:
                 connection.executescript(

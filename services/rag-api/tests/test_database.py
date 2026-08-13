@@ -115,7 +115,7 @@ def test_legacy_conversations_are_quarantined_and_migration_is_repeatable(
         ).fetchone()
 
     assert tuple(conversation) == ("legacy_orphaned", "New Conversation", "auto")
-    assert migrations == 8
+    assert migrations == 9
     assert tuple(course[:3]) == (None, "official", "public")
     assert course["updated_at"]
     assert "metadata_json" in message_columns
@@ -131,7 +131,7 @@ def test_legacy_conversations_are_quarantined_and_migration_is_repeatable(
         ]
 
     assert {"metadata_json", "parent_key"}.issubset(chunk_columns)
-    assert versions == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 
 def test_database_repairs_empty_course_timestamp_after_migration(tmp_path: Path) -> None:
@@ -253,7 +253,7 @@ def test_v2_conversation_migration_preserves_messages_and_derives_title(
     assert conversation["title"].startswith("DBSCAN 中 core point")
     assert conversation["preferred_language"] == "auto"
     assert message["metadata_json"] == "{}"
-    assert versions == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 
 def test_deployment_path_environment_aliases_are_honored(

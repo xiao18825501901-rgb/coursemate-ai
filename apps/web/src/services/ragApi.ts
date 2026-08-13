@@ -141,12 +141,12 @@ export async function listConversations(
 export async function createConversation(
   getToken: GetSessionToken,
   courseId: string,
-  preferredLanguage: LanguagePreference = "auto",
+  preferredLanguage?: LanguagePreference,
 ): Promise<ConversationSummary> {
   return requestJson<ConversationSummary>(getToken, `${RAG_API}/api/conversations`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ courseId, preferredLanguage }),
+    body: JSON.stringify({ courseId, ...(preferredLanguage ? { preferredLanguage } : {}) }),
   });
 }
 
