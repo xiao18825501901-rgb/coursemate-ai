@@ -11,6 +11,7 @@ import {
   listTeachingProfiles,
   previewTeachingProfile,
   saveTeachingProfile,
+  submitPublicationRequest,
   updateCourse,
   uploadDocument,
 } from "../services/ragApi";
@@ -40,6 +41,8 @@ export function CourseSettingsPage() {
   const [confirmId, setConfirmId] = useState("");
   const [profileRequirement, setProfileRequirement] = useState("");
   const [profilePreview, setProfilePreview] = useState<TeachingProfilePreview | null>(null);
+  const [shareConsent, setShareConsent] = useState(false);
+  const [rightsConfirmation, setRightsConfirmation] = useState(false);
 
   async function refresh() {
     const [coursePage, documentPage, profilePage] = await Promise.all([
@@ -111,6 +114,13 @@ export function CourseSettingsPage() {
     } catch (caught: unknown) { setError(message(caught)); }
   }
 
+  async function requestPublication() {
+    try {
+      await submitPublicationRequest(getToken, courseId);
+      await refresh();
+    } catch (caught: unknown) { setError(message(caught)); }
+  }
+
   return <div className="page narrow-page">
     <header className="page-intro compact-intro">
       <span className="eyebrow">Private course settings</span>
@@ -145,6 +155,15 @@ export function CourseSettingsPage() {
           <button className="button button-primary" onClick={() => void saveProfile()} type="button">Save as new version</button>
         </div>}
         {profiles[0] && <p className="profile-version-note">New conversations use v{profiles[0].version}; existing conversations retain the version they started with.</p>}
+      </section>
+      <section className="settings-panel publication-panel">
+        <div className="panel-heading"><h2>Publication</h2><span>{course?.publicationStatus ?? "private"}</span></div>
+        <p>Publication exposes the course title, description, source files, derived chunks, and teaching profile to every signed-in user. Your account identifier is not displayed.</p>
+        {course?.publicationStatus === "pending" ? <div className="privacy-notice"><strong>Review pending</strong><span>The course remains private until an administrator approves it.</span></div> : <>
+          <label className="consent-row"><input checked={shareConsent} onChange={(event) => setShareConsent(event.target.checked)} type="checkbox" /><span>I want to publish and share this course, including its materials and derived teaching data.</span></label>
+          <label className="consent-row"><input checked={rightsConfirmation} onChange={(event) => setRightsConfirmation(event.target.checked)} type="checkbox" /><span>I confirm I have permission to share these materials and have checked them for private information.</span></label>
+          <button className="button button-secondary" disabled={!shareConsent || !rightsConfirmation} onClick={() => void requestPublication()} type="button">Submit for admin review</button>
+        </>}
       </section>
       <section className="settings-panel danger-zone">
         <h2>Delete course</h2>

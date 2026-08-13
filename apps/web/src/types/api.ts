@@ -96,6 +96,20 @@ export interface TeachingProfile extends TeachingProfilePreview {
   updatedAt: string;
 }
 
+export interface PublicationRequest {
+  id: string;
+  courseId: string;
+  courseName: string;
+  status: "pending" | "approved" | "rejected" | "withdrawn";
+  shareMaterialsConsent: boolean;
+  rightsConfirmation: boolean;
+  consentVersion: string;
+  consentedAt: string;
+  submittedAt: string;
+  reviewedAt: string | null;
+  reviewNote: string;
+}
+
 export interface Citation {
   sourceLabel: string;
   courseId: string;

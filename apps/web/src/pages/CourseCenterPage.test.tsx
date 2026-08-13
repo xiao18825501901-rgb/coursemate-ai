@@ -13,6 +13,7 @@ import {
   listTeachingProfiles,
   previewTeachingProfile,
   saveTeachingProfile,
+  submitPublicationRequest,
   updateCourse,
   uploadDocument,
 } from "../services/ragApi";
@@ -30,6 +31,7 @@ vi.mock("../services/ragApi", () => ({
   listTeachingProfiles: vi.fn(),
   previewTeachingProfile: vi.fn(),
   saveTeachingProfile: vi.fn(),
+  submitPublicationRequest: vi.fn(),
   updateCourse: vi.fn(),
   uploadDocument: vi.fn(),
 }));
@@ -136,6 +138,12 @@ describe("CourseSettingsPage", () => {
       customRequirements: "Explain why first", generatedPrompt: "Structured preview",
       createdAt: "2026-08-13T00:00:00Z", updatedAt: "2026-08-13T00:00:00Z",
     });
+    vi.mocked(submitPublicationRequest).mockResolvedValue({
+      id: "publication_1", courseId: "my-course", courseName: "My Course",
+      status: "pending", shareMaterialsConsent: true, rightsConfirmation: true,
+      consentVersion: "v1", consentedAt: "2026-08-13T00:00:00Z",
+      submittedAt: "2026-08-13T00:00:00Z", reviewedAt: null, reviewNote: "",
+    });
   });
 
   it("uploads a supported file and reports completed indexing", async () => {
@@ -159,5 +167,19 @@ describe("CourseSettingsPage", () => {
 
     await waitFor(() => expect(saveTeachingProfile).toHaveBeenCalled());
     expect(screen.getByText(/new conversations use v1/i)).toBeVisible();
+  });
+
+  it("requires both publication confirmations before submission", async () => {
+    renderRoutes("/courses/my-course/settings");
+    const button = await screen.findByRole("button", { name: "Submit for admin review" });
+    expect(button).toBeDisabled();
+    fireEvent.click(screen.getByLabelText(/I want to publish and share/i));
+    expect(button).toBeDisabled();
+    fireEvent.click(screen.getByLabelText(/I confirm I have permission/i));
+    fireEvent.click(button);
+
+    await waitFor(() => expect(submitPublicationRequest).toHaveBeenCalledWith(
+      expect.any(Function), "my-course",
+    ));
   });
 });

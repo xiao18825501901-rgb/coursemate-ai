@@ -4,6 +4,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Layout } from "./components/Layout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AboutPage } from "./pages/AboutPage";
+import { AdminPublicationPage } from "./pages/AdminPublicationPage";
 import { CourseCenterPage } from "./pages/CourseCenterPage";
 import { CourseSettingsPage } from "./pages/CourseSettingsPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
@@ -26,6 +27,7 @@ export function AppRoutes() {
           <Route element={<CourseCenterPage />} path="courses" />
           <Route element={<CourseCenterPage createMode />} path="courses/new" />
           <Route element={<CourseSettingsPage />} path="courses/:courseId/settings" />
+          <Route element={<AdminPublicationPage />} path="admin/publications" />
           <Route element={<TasksPage />} path="tasks" />
           <Route element={<DocumentsPage />} path="documents" />
         </Route>

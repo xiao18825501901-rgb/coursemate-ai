@@ -11,6 +11,7 @@ import type {
   IngestionJob,
   LanguagePreference,
   Page,
+  PublicationRequest,
   QaStreamMeta,
   TeachingProfile,
   TeachingProfileInput,
@@ -247,6 +248,51 @@ export async function saveTeachingProfile(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(profile),
+    },
+  );
+}
+
+export async function submitPublicationRequest(
+  getToken: GetSessionToken,
+  courseId: string,
+): Promise<PublicationRequest> {
+  return requestJson<PublicationRequest>(
+    getToken,
+    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/publication-requests`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        shareMaterialsConsent: true,
+        rightsConfirmation: true,
+        consentVersion: "v1",
+      }),
+    },
+  );
+}
+
+export async function listPendingPublications(
+  getToken: GetSessionToken,
+): Promise<{ items: PublicationRequest[] }> {
+  return requestJson<{ items: PublicationRequest[] }>(
+    getToken,
+    `${RAG_API}/api/admin/publication-requests`,
+  );
+}
+
+export async function reviewPublication(
+  getToken: GetSessionToken,
+  requestId: string,
+  decision: "approve" | "reject",
+  reviewNote: string,
+): Promise<PublicationRequest> {
+  return requestJson<PublicationRequest>(
+    getToken,
+    `${RAG_API}/api/admin/publication-requests/${encodeURIComponent(requestId)}/review`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision, reviewNote }),
     },
   );
 }
