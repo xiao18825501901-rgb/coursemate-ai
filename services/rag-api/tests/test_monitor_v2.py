@@ -65,6 +65,26 @@ def test_backup_monitor_fails_closed_for_stale_or_incomplete_backup(tmp_path: Pa
     assert incomplete.detail == "no completed backup was found"
 
 
+def test_backup_monitor_ignores_symlinked_completed_backup(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monitor = _monitor_module()
+    now = datetime(2026, 8, 14, tzinfo=UTC)
+    backup_root = tmp_path / "backups"
+    completed = _completed_backup(backup_root, now - timedelta(hours=1))
+    original_is_symlink = Path.is_symlink
+    monkeypatch.setattr(
+        Path,
+        "is_symlink",
+        lambda path: path == completed or original_is_symlink(path),
+    )
+
+    result = monitor.check_backup(backup_root, timedelta(hours=26), now)
+
+    assert result.ok is False
+    assert result.detail == "no completed backup was found"
+
+
 def test_health_monitor_requires_https_without_leaking_url() -> None:
     monitor = _monitor_module()
 
@@ -73,6 +93,37 @@ def test_health_monitor_requires_https_without_leaking_url() -> None:
     assert result.ok is False
     assert result.detail == "health URL must use HTTPS"
     assert "secret-host" not in result.detail
+
+
+def test_health_monitor_rejects_malformed_url_without_leaking_it() -> None:
+    monitor = _monitor_module()
+
+    for url in ("https://secret-host/\x00", "https://[secret-host/health"):
+        result = monitor.check_health("rag", url, "rag-api", 1)
+
+        assert result.ok is False
+        assert result.detail == "health URL format is invalid"
+        assert "secret-host" not in result.detail
+
+
+def test_backup_monitor_ignores_symlinked_required_artifact(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monitor = _monitor_module()
+    now = datetime(2026, 8, 14, tzinfo=UTC)
+    completed = _completed_backup(tmp_path, now - timedelta(hours=1))
+    linked_artifact = completed / "manifest.json"
+    original_is_symlink = Path.is_symlink
+    monkeypatch.setattr(
+        Path,
+        "is_symlink",
+        lambda path: path == linked_artifact or original_is_symlink(path),
+    )
+
+    result = monitor.check_backup(tmp_path, timedelta(hours=26), now)
+
+    assert result.ok is False
+    assert result.detail == "no completed backup was found"
 
 
 def test_main_fails_closed_when_monitoring_paths_and_urls_are_unconfigured(

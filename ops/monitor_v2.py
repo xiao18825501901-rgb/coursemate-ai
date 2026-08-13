@@ -45,14 +45,31 @@ def _positive_number(name: str, default: float) -> float:
 
 
 def check_health(name: str, url: str, expected_service: str, timeout: float) -> Check:
-    parsed = urlsplit(url)
+    try:
+        parsed = urlsplit(url)
+        hostname = parsed.hostname
+    except ValueError:
+        return Check(name, False, "health URL format is invalid")
     allow_insecure = os.environ.get("ALLOW_INSECURE_HEALTH_URLS") == "1"
     if parsed.scheme != "https" and not (allow_insecure and parsed.scheme == "http"):
         return Check(name, False, "health URL must use HTTPS")
-    if not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+    if (
+        any(ord(character) < 32 or ord(character) == 127 for character in url)
+        or not hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
         return Check(name, False, "health URL format is invalid")
 
-    request = Request(url, headers={"Accept": "application/json", "User-Agent": "CourseMateMonitor/2"})
+    try:
+        request = Request(
+            url,
+            headers={"Accept": "application/json", "User-Agent": "CourseMateMonitor/2"},
+        )
+    except ValueError:
+        return Check(name, False, "health URL format is invalid")
     started = time.perf_counter()
     try:
         with urlopen(request, timeout=timeout) as response:
@@ -60,7 +77,7 @@ def check_health(name: str, url: str, expected_service: str, timeout: float) -> 
             payload: Any = json.loads(response.read(4096))
     except HTTPError as error:
         return Check(name, False, f"health returned HTTP {error.code}")
-    except (URLError, TimeoutError, OSError):
+    except (URLError, TimeoutError, OSError, ValueError):
         return Check(name, False, "health request failed")
     except json.JSONDecodeError:
         return Check(name, False, "health response was not JSON")
@@ -83,13 +100,22 @@ def check_backup(backup_root: Path, max_age: timedelta, now: datetime) -> Check:
     except OSError:
         return Check("backup", False, "backup root could not be inspected")
     for candidate in backup_entries:
-        if not candidate.is_dir() or not candidate.name.startswith("coursemate-v2-"):
+        if (
+            candidate.is_symlink()
+            or not candidate.is_dir()
+            or not candidate.name.startswith("coursemate-v2-")
+        ):
             continue
         try:
-            artifact_names = {path.name for path in candidate.iterdir()}
+            artifacts = {path.name: path for path in candidate.iterdir()}
         except OSError:
             continue
-        if not REQUIRED_BACKUP_ARTIFACTS.issubset(artifact_names):
+        if not REQUIRED_BACKUP_ARTIFACTS.issubset(artifacts):
+            continue
+        if any(
+            artifacts[name].is_symlink() or not artifacts[name].is_file()
+            for name in REQUIRED_BACKUP_ARTIFACTS
+        ):
             continue
         try:
             manifest = json.loads((candidate / "manifest.json").read_text(encoding="utf-8"))
