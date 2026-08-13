@@ -100,6 +100,29 @@ describe("CourseCenterPage", () => {
     expect(screen.getByRole("link", { name: /manage my course/i })).toHaveAttribute(
       "href", "/courses/my-course/settings",
     );
+    expect(screen.getAllByText(/0 files · Empty · Updated/i)).toHaveLength(2);
+  });
+
+  it("shows indexing and failure states with recent activity", async () => {
+    vi.mocked(listDocuments)
+      .mockResolvedValueOnce({
+        items: [{
+          id: "doc-ready", courseId: "cs3481", filename: "ready.md", mediaType: "text/markdown",
+          extension: ".md", sha256: "a".repeat(64), byteSize: 5, status: "ready", chunkCount: 1,
+          errorMessage: null, createdAt: "2026-08-13T00:00:00Z", updatedAt: "2026-08-13T00:00:00Z",
+        }], page: 1, pageSize: 100, total: 1,
+      })
+      .mockResolvedValueOnce({
+        items: [{
+          id: "doc-failed", courseId: "my-course", filename: "failed.md", mediaType: "text/markdown",
+          extension: ".md", sha256: "b".repeat(64), byteSize: 5, status: "failed", chunkCount: 0,
+          errorMessage: "Could not index", createdAt: "2026-08-13T00:00:00Z", updatedAt: "2026-08-13T00:00:00Z",
+        }], page: 1, pageSize: 100, total: 1,
+      });
+    renderRoutes();
+
+    expect(await screen.findByText(/1 files · Indexed · Updated/i)).toBeVisible();
+    expect(screen.getByText(/1 files · Failed · Updated/i)).toBeVisible();
   });
 
   it("creates a private course without asking for visibility", async () => {
