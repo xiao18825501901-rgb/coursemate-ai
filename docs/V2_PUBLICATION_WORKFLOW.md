@@ -4,6 +4,7 @@
 
 ```text
 private/rejected -- owner dual consent --> pending
+pending -- owner withdraw -------------> withdrawn + private
 pending -- admin reject ----------------> rejected + private
 pending -- admin approve ---------------> published + public + owner locked
 published -- admin unpublish -----------> private + editable
@@ -29,14 +30,17 @@ unpublish before an owner edits and resubmits.
 
 ```text
 POST   /api/courses/{courseId}/publication-requests
+DELETE /api/courses/{courseId}/publication-requests/current
 GET    /api/admin/publication-requests
 POST   /api/admin/publication-requests/{requestId}/review
 DELETE /api/admin/courses/{courseId}/publication
 ```
 
 The owner settings UI presents the two consent checkboxes and current state. The admin review page is
-available at `/admin/publications`; server authorization remains decisive even if a user navigates
-directly to the route.
+available at `/admin/publications` and lists the course files before a decision; server authorization
+remains decisive even if a user navigates directly to the route. A pending owner may withdraw and
+later submit a new request. Community courses remain read-only. File cloning is deferred until a
+license/attribution model defines whether source materials may legally be copied.
 
 ## Audit limitations
 

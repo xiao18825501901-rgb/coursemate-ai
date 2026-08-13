@@ -8,8 +8,8 @@ local tests.
 
 **Old behavior:** one English-first grounded prompt and an English no-support message.
 **Problem:** Chinese questions were transport-compatible but not taught naturally.
-**New architecture:** deterministic language detection plus conversation preference (`auto`,
-`zh-CN`, `en`, `bilingual`) feeds a language policy below security/grounding rules.
+**New architecture:** deterministic language detection plus course default and conversation
+preference (`auto`, `zh-CN`, `en`, `bilingual`) feed a language policy below security/grounding rules.
 **New code:** `app/tutor/language.py`, conversation models/migration, QA prompt composition and UI
 preference.
 **Why:** language is stable, testable session state; citations remain language-neutral.
@@ -82,7 +82,8 @@ remains not passed and no winner/provider switch is claimed.
 **Old behavior:** only administrator-created shared courses existed.
 **Problem:** no private workspace or ownership model.
 **New architecture:** official/user type, private/public visibility, canonical access resolver,
-owner CRUD, server-owned file paths, isolated ingestion and cascade deletion.
+owner CRUD, opaque owner-isolated server paths, atomic course/file/byte quotas, isolated ingestion
+and cascade deletion.
 **New code:** schema V5, `course_access.py`, ingestion service/routes, Course Center/Settings UI.
 **Why:** private-by-default is enforced at every API boundary, not merely hidden in the UI.
 
@@ -91,7 +92,7 @@ owner CRUD, server-owned file paths, isolated ingestion and cascade deletion.
 **Old behavior:** all courses shared one teaching style.
 **Problem:** learner level, goals and pedagogy could not be durable or course-specific.
 **New architecture:** typed immutable profile versions; deterministic natural-language preview;
-conversations pin the current version on first use.
+historical restore creates a new version; conversations pin the current version on first use.
 **New code:** schema V6, `services/teaching_profiles.py`, profile API and Course Settings builder.
 **Why:** structured fields are reviewable and safe; arbitrary text remains a low-trust preference,
 not a system instruction.
@@ -100,8 +101,9 @@ not a system instruction.
 
 **Old behavior:** no user-course publication state or consent record.
 **Problem:** adding community visibility could accidentally expose private/copyrighted material.
-**New architecture:** dual owner consent -> pending -> administrator approve/reject -> public
-read-only. Published owners are mutation-locked until administrator unpublish.
+**New architecture:** dual owner consent -> pending -> owner withdrawal or administrator
+approve/reject -> public read-only. Published owners are mutation-locked until administrator
+unpublish. Cross-owner file cloning is deferred pending a license/attribution policy.
 **New code:** schema V7, publication service/API, admin review page and permission matrix tests.
 **Why:** public visibility is an audited server transition; reviewed content cannot be swapped later.
 
@@ -111,7 +113,7 @@ read-only. Published owners are mutation-locked until administrator unpublish.
 **Problem:** production data must survive course/profile/publication additions.
 **New architecture:** additive idempotent introspection-based migration; operations SQL record;
 online backup plus isolated restore rehearsal.
-**New code:** `app/db.py`, `migrations/005_007_v2_course_platform.sql`, `ops/*.sh`.
+**New code:** `app/db.py`, migrations 005-009, `ops/*.sh`.
 **Why:** SQLite cannot safely apply unconditional `ADD COLUMN`; executable migration checks actual
 schema and repairs historical null timestamps. A local copied DB passed two runs/integrity/counts.
 
@@ -133,8 +135,8 @@ backup, deploy incrementally and append only verified facts to
 
 ## 14. Verification and next safe work
 
-The final local evidence is 134 RAG tests, 24 Web tests, 48 Agent tests, Ruff, strict Mypy 41 files,
+The final local evidence is 143 RAG tests, 29 Web tests, 48 Agent tests, Ruff, strict Mypy 39 files,
 both TypeScript checks/builds and Chrome 4/4. Review `docs/V2_TEST_REPORT.md`. The next authorized
 release work is production evidence collection and credential rotation; the next quality work that
-requires new authorization is the billable 50-case model benchmark. Per-user total storage/course
-quotas and immutable external publication audit retention are known follow-ups.
+requires new authorization is the billable 50-case model benchmark. Immutable external publication
+audit retention and license-aware community-course cloning are known follow-ups.

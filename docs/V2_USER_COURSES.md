@@ -32,10 +32,16 @@ unpublish, after which the owner can edit and submit a fresh review.
 ## File ingestion
 
 The multipart upload endpoint accepts PDF, Markdown, text, DOCX and PPTX up to
-`MAX_UPLOAD_BYTES` (20 MiB by default). It generates document IDs and stored paths, hashes content,
+`MAX_UPLOAD_BYTES` (20 MiB by default). It generates document IDs and owner-isolated stored paths,
+hashes the identity-provider subject into an opaque path segment instead of exposing it, hashes content,
 rejects duplicate/unsupported/oversized files, records an ingestion job and builds isolated chunks
 and embeddings. Job polling exposes only safe status/error metadata. Filesystem deletion resolves
 the stored path under the configured upload root before removal.
+
+Ordinary users are atomically limited by `USER_COURSE_MAX_COURSES` (10),
+`USER_COURSE_MAX_FILES` (50 per course), and `USER_COURSE_MAX_TOTAL_UPLOAD_BYTES` (500 MiB per
+owner) by default. Administrators are exempt for official corpus operations. The check and insert run
+inside `BEGIN IMMEDIATE` transactions so concurrent requests cannot race past the configured limit.
 
 ## Delete behavior
 
@@ -53,6 +59,5 @@ creation/upload/chat/delete and mobile behavior are covered by component and Chr
 
 ## Remaining operational policy
 
-The service enforces a per-file byte limit and per-user QA limits. Per-user total course/file/storage
-quotas were planned but are not implemented in this release; production must therefore set disk
-alerts and administrator policy before broad self-service rollout.
+Application quotas limit accepted writes but do not replace filesystem-capacity alerts, backup-age
+monitoring, or a distributed limiter when the service scales beyond one SQLite writer.

@@ -11,6 +11,7 @@ Strict Pydantic enums/lengths reject unknown or malformed fields.
 POST /api/teaching-profiles/preview
 GET  /api/courses/{courseId}/teaching-profiles
 POST /api/courses/{courseId}/teaching-profiles
+POST /api/courses/{courseId}/teaching-profiles/{version}/restore
 ```
 
 The preview endpoint deterministically converts a short preference into a typed draft and generated
@@ -22,6 +23,8 @@ fields; response-only `generatedPrompt` is never echoed into the strict save sch
 Saving creates the next course version; prior versions are retained. On the first tutored turn, a
 conversation pins the latest profile version in `conversations.teaching_profile_version`. Later
 profile edits affect new conversations but do not silently change an existing learning session.
+Restoring a historical version copies its validated fields into a new monotonically increasing
+version; it never overwrites or deletes the audit history.
 
 ## Prompt hierarchy
 

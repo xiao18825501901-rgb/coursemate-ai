@@ -1,31 +1,32 @@
 # CourseMate AI V2 Test Report
 
-Executed: 2026-08-13 on `feature/coursemate-v2-ai-tutor` using inert provider variables and
+Executed: 2026-08-14 on `feature/coursemate-v2-ai-tutor` using inert provider variables and
 deterministic test providers. No billable model call was made.
 
 ## Final automated gates
 
 | Gate | Result |
 |---|---|
-| RAG pytest | **134 passed**, 1 dependency deprecation warning |
+| RAG pytest | **143 passed**, 2 non-failing dependency/cache warnings |
 | RAG Ruff | **passed** for app, tests and both Python operational scripts |
-| RAG strict Mypy | **passed**, 41 source files |
-| Web Vitest | **24 passed** across 6 files |
+| RAG strict Mypy | **passed**, 39 source files |
+| Web Vitest | **29 passed** across 6 files |
 | Agent Vitest | **48 passed** across 8 files |
 | Web/Agent TypeScript | **passed** |
 | Web production build | **passed**, 310.12 kB JS / 90.85 kB gzip |
 | Agent production build | **passed** |
 | Playwright Chrome | **4/4 passed** |
 | npm production dependency audit | **0 vulnerabilities** |
-| Migration-on-copy | **integrity ok**, no FK violations, versions 1-7, second run idempotent |
+| Migration-on-copy | **integrity ok**, no FK violations, versions 1-9, second run idempotent |
 | Tracked credential-pattern scan | **no match** |
 
-The one Python warning is Starlette's deprecation notice for the currently installed TestClient
-transport; it does not fail behavior, but dependency migration should be scheduled deliberately.
+The warnings are Starlette's TestClient transport deprecation and a sandbox-denied pytest cache
+write; neither changes behavior. Dependency migration should be scheduled deliberately.
 
 ## Browser journeys
 
-1. Switches official courses, streams a course-scoped answer with citation, and adds a task.
+1. Switches official courses, streams a course-scoped answer with citation, proves history survives
+   refresh and a newly opened page in the same authenticated context, and adds a task.
 2. Creates a task through the Function Calling Agent, then edits and completes it.
 3. Uses navigation and core actions at a 390 px viewport.
 4. Creates a private course, uploads/indexes a document, previews/saves a teaching profile, gives
@@ -36,8 +37,9 @@ transport; it does not fail behavior, but dependency migration should be schedul
 The suites exercise Chinese/English language policy; persisted history/continuation; general-chat
 bypass; intent/rewrite/strategy progression; exact filename/question/subpart location; structured
 and hybrid fallback; citation truth; prompt injection hierarchy; admin-only diagnostics; two-user
-course/conversation/profile/task isolation; file validation/deletion; profile version pinning; dual
-consent/admin publication; post-publication owner lock; and all legacy Agent tools.
+course/conversation/profile/task isolation; file validation/deletion; profile version pinning/restore;
+owner withdrawal and dual-consent/admin publication; post-publication owner lock;
+course/file/byte quotas; course language inheritance; and all legacy Agent tools.
 
 ## Acceptance status
 

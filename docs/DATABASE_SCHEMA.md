@@ -1,13 +1,16 @@
 # Database Schema
 
-> V2 addendum: the executable schema is `services/rag-api/app/db.py`; additive versions 5-7 are
-> recorded in `services/rag-api/migrations/005_007_v2_course_platform.sql` and operationally explained
+> V2 addendum: the executable schema is `services/rag-api/app/db.py`; additive versions 5-9 are
+> recorded in `services/rag-api/migrations/` and operationally explained
 > in `docs/V2_DATABASE_MIGRATION.md`.
 
 ## V2 RAG additions
 
-- `courses`: `owner_user_id`, `course_type`, `visibility`, `publication_status`, `published_at`, and
-  `updated_at`. Existing rows migrate to official/public/published; user rows are private by default.
+- `courses`: `owner_user_id`, `course_type`, `visibility`, `publication_status`, `published_at`,
+  `preferred_language`, and `updated_at`. Existing rows migrate to official/public/published; user
+  rows are private by default.
+- `documents`: `byte_size` supports owner-scoped storage quotas and is backfilled from safe existing
+  file metadata when available.
 - `conversations`: durable `title`, `preferred_language`, owner and optional pinned
   `teaching_profile_version`.
 - `messages`: `metadata_json` stores safe router/retrieval/teaching metadata beside citations.

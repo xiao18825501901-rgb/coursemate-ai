@@ -124,6 +124,7 @@ All routes below require a verified session. Foreign private/owner resources ret
 camelCase and strict.
 
 ```text
+GET    /api/courses/:courseId
 PATCH  /api/courses/:courseId
 DELETE /api/courses/:courseId
 DELETE /api/courses/:courseId/documents/:documentId
@@ -137,8 +138,10 @@ DELETE /api/conversations/:conversationId
 POST   /api/teaching-profiles/preview
 GET    /api/courses/:courseId/teaching-profiles
 POST   /api/courses/:courseId/teaching-profiles
+POST   /api/courses/:courseId/teaching-profiles/:version/restore
 
 POST   /api/courses/:courseId/publication-requests
+DELETE /api/courses/:courseId/publication-requests/current
 GET    /api/admin/publication-requests                 administrator
 POST   /api/admin/publication-requests/:requestId/review administrator
 DELETE /api/admin/courses/:courseId/publication        administrator

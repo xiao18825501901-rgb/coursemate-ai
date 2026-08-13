@@ -14,6 +14,8 @@ test.
 - Publication requires dual consent plus administrator approval; published owner mutations are
   locked until administrator unpublish.
 - JSON bodies are strict and bounded; file extension/size/hash/path rules protect ingestion.
+- Course/file/owner-byte quotas are configurable and checked atomically; user storage namespaces use
+  opaque owner hashes and server-generated document names.
 - SQL uses parameters. SQLite foreign keys, busy timeout, WAL and indexes are configured.
 - CORS accepts one configured origin. RAG emits nosniff/frame-deny/no-referrer; Agent uses Helmet and
   request limits.
@@ -39,7 +41,6 @@ test.
 
 - RAG rate limiting is per authenticated owner but not a distributed global limiter; multiple API
   replicas need shared enforcement.
-- Storage-total/course-count quotas are not yet implemented.
 - SQLite is suitable for this deployment shape but needs one-writer-aware capacity monitoring.
 - Publication audit data cascades on course deletion and is not an immutable legal ledger.
 - Live model quality/security behavior is unknown until an approved benchmark and canary.

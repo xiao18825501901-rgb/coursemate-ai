@@ -4,19 +4,21 @@
 
 `app.db.Database.initialize()` is the executable source of truth. It inspects `PRAGMA table_info`,
 adds missing fields, creates tables/indexes, repairs null legacy timestamps and records versions.
-`services/rag-api/migrations/005_007_v2_course_platform.sql` is the operations-readable SQL record;
+`services/rag-api/migrations/005_007_v2_course_platform.sql`, `008_user_course_storage_quotas.sql`,
+and `009_course_language_preference.sql` are the operations-readable SQL records;
 it is not blindly runnable because SQLite lacks portable `ADD COLUMN IF NOT EXISTS`.
 
 Versions 1-4 add conversation ownership/history/routing and structured chunk metadata. V5 adds
 course owner/type/visibility/update fields, V6 teaching profiles and conversation profile pinning,
-and V7 publication state/audit records. Existing courses become official/public/published; existing
+V7 publication state/audit records, V8 document byte accounting, and V9 the course language default.
+Existing courses become official/public/published; existing
 documents, chunks, embeddings, conversations, messages and IDs remain.
 
 ## Rehearsal evidence
 
 An ignored copy of the local RAG database was initialized twice. Both runs completed with schema
-versions 1-7, `PRAGMA integrity_check = ok`, no `foreign_key_check` rows, and unchanged core counts:
-2 courses, 66 documents, 1,936 chunks, 13 conversations and 26 messages. New profile/publication
+versions 1-9, `PRAGMA integrity_check = ok`, no `foreign_key_check` rows, and unchanged core counts:
+3 courses, 67 documents, 1,937 chunks, 17 conversations and 34 messages. New profile/publication
 tables were empty. This verifies additive/idempotent behavior against the available local data; it
 does not prove the unknown production database.
 
