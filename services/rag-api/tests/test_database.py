@@ -106,9 +106,13 @@ def test_legacy_conversations_are_quarantined_and_migration_is_repeatable(
             "FROM conversations WHERE id = 'legacy-conv'"
         ).fetchone()
         migrations = connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0]
+        message_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(messages)")
+        }
 
     assert tuple(conversation) == ("legacy_orphaned", "New Conversation", "auto")
-    assert migrations == 2
+    assert migrations == 3
+    assert "metadata_json" in message_columns
 
 
 def test_v2_conversation_migration_preserves_messages_and_derives_title(
@@ -160,7 +164,9 @@ def test_v2_conversation_migration_preserves_messages_and_derives_title(
         conversation = connection.execute(
             "SELECT title, preferred_language FROM conversations WHERE id = 'conv-1'"
         ).fetchone()
-        message_count = connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+        message = connection.execute(
+            "SELECT metadata_json FROM messages WHERE id = 'msg-1'"
+        ).fetchone()
         versions = [
             row[0] for row in connection.execute(
                 "SELECT version FROM schema_migrations ORDER BY version"
@@ -169,8 +175,8 @@ def test_v2_conversation_migration_preserves_messages_and_derives_title(
 
     assert conversation["title"].startswith("DBSCAN 中 core point")
     assert conversation["preferred_language"] == "auto"
-    assert message_count == 1
-    assert versions == [1, 2]
+    assert message["metadata_json"] == "{}"
+    assert versions == [1, 2, 3]
 
 
 def test_deployment_path_environment_aliases_are_honored(

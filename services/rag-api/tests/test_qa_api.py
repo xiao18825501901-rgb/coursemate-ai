@@ -169,6 +169,11 @@ def test_general_conversation_bypasses_empty_course_refusal(tmp_path: Path) -> N
             json={"courseId": "cs3481", "question": "你好"},
             headers={"Authorization": "Bearer token-a"},
         )
+        conversation_id = parse_sse(response.text)[0][1]["conversationId"]
+        restored = client.get(
+            f"/api/conversations/{conversation_id}",
+            headers={"Authorization": "Bearer token-a"},
+        )
 
     events = parse_sse(response.text)
     meta = events[0][1]
@@ -178,6 +183,9 @@ def test_general_conversation_bypasses_empty_course_refusal(tmp_path: Path) -> N
     assert meta["retrievedChunks"] == 0
     assert provider.calls[0][1] == ""
     assert "Do not claim that general guidance came from course material" in provider.calls[0][2]
+    assistant = restored.json()["messages"][-1]
+    assert assistant["metadata"]["queryIntent"] == "GENERAL_CONVERSATION"
+    assert assistant["metadata"]["groundingMode"] == "general"
 
 
 def test_tutoring_can_use_labeled_general_knowledge_when_course_has_no_hit(
@@ -203,6 +211,25 @@ def test_tutoring_can_use_labeled_general_knowledge_when_course_has_no_hit(
     assert meta["groundingMode"] == "mixed"
     assert "Supplementary explanation" in provider.calls[0][2]
     assert "analogy" not in provider.calls[0][2]
+
+
+def test_course_meta_uses_trusted_metadata_without_retrieval_citations(tmp_path: Path) -> None:
+    provider = FakeAnswerProvider(["This course has one indexed document: lighting.md."])
+    with make_client(tmp_path, provider) as client:
+        client.headers["Authorization"] = "Bearer admin-token"
+        create_course_and_document(client)
+        response = client.post(
+            "/api/qa/chat",
+            json={"courseId": "cs3481", "question": "这门课有哪些资料？"},
+            headers={"Authorization": "Bearer token-a"},
+        )
+
+    events = parse_sse(response.text)
+    assert [name for name, _ in events] == ["meta", "delta", "done"]
+    assert events[0][1]["queryIntent"] == "COURSE_META"
+    assert events[0][1]["groundingMode"] == "metadata"
+    assert "TRUSTED COURSE METADATA" in provider.calls[0][1]
+    assert "lighting.md" in provider.calls[0][1]
 
 
 def test_repeated_confusion_changes_teaching_strategy_and_rewrites_retrieval(

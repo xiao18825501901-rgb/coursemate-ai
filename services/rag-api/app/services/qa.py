@@ -88,7 +88,7 @@ class QaService:
                 raise ApiError(404, "CONVERSATION_NOT_FOUND", "The conversation was not found.")
             messages = connection.execute(
                 """
-                SELECT id, role, content, citations_json, created_at
+                SELECT id, role, content, citations_json, metadata_json, created_at
                 FROM messages
                 WHERE conversation_id = ?
                 ORDER BY created_at, rowid
@@ -108,6 +108,7 @@ class QaService:
                     "role": row["role"],
                     "content": row["content"],
                     "citations": json.loads(row["citations_json"]),
+                    "metadata": json.loads(row["metadata_json"]),
                     "created_at": row["created_at"],
                 }
                 for row in messages
@@ -327,18 +328,21 @@ class QaService:
         conversation_id: str,
         content: str,
         citations: list[dict[str, object]],
+        metadata: dict[str, object],
     ) -> None:
         with self.database.connect() as connection:
             connection.execute(
                 """
-                INSERT INTO messages (id, conversation_id, role, content, citations_json)
-                VALUES (?, ?, 'assistant', ?, ?)
+                INSERT INTO messages (
+                    id, conversation_id, role, content, citations_json, metadata_json
+                ) VALUES (?, ?, 'assistant', ?, ?, ?)
                 """,
                 (
                     f"msg_{uuid4().hex}",
                     conversation_id,
                     content,
                     json.dumps(citations, ensure_ascii=False, separators=(",", ":")),
+                    json.dumps(metadata, ensure_ascii=False, separators=(",", ":")),
                 ),
             )
             connection.execute(
@@ -397,6 +401,14 @@ class QaService:
             QueryIntent.COURSE_META: "metadata",
             QueryIntent.AMBIGUOUS: "grounded",
         }[route.intent]
+        response_metadata: dict[str, object] = {
+            "queryIntent": route.intent.value,
+            "groundingMode": grounding_mode,
+            "retrievalQueryRewritten": rewrite.was_rewritten
+            if route.uses_course_retrieval
+            else False,
+            "teachingApproach": teaching_approach.value if teaching_approach else None,
+        }
         yield encode_sse(
             "meta",
             {
@@ -404,12 +416,7 @@ class QaService:
                 "conversationId": conversation_id,
                 "courseId": course_id,
                 "retrievedChunks": len(included_hits),
-                "queryIntent": route.intent.value,
-                "groundingMode": grounding_mode,
-                "retrievalQueryRewritten": rewrite.was_rewritten
-                if route.uses_course_retrieval
-                else False,
-                "teachingApproach": teaching_approach.value if teaching_approach else None,
+                **response_metadata,
             },
         )
         if not included_hits and route.intent in {
@@ -420,6 +427,7 @@ class QaService:
                 conversation_id=conversation_id,
                 content=NO_SUPPORT_MESSAGE,
                 citations=[],
+                metadata=response_metadata,
             )
             yield encode_sse("delta", {"text": NO_SUPPORT_MESSAGE})
             yield encode_sse("done", {"requestId": request_id})
@@ -451,6 +459,7 @@ class QaService:
                 conversation_id=conversation_id,
                 content=answer_text,
                 citations=citations,
+                metadata=response_metadata,
             )
             for citation in citations:
                 yield encode_sse("citation", citation)

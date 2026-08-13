@@ -143,6 +143,7 @@ class ConversationMessage(ApiModel):
     role: str
     content: str
     citations: list[dict[str, object]]
+    metadata: dict[str, object]
     created_at: datetime
 
 

@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS messages (
     role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
     content TEXT NOT NULL CHECK (length(trim(content)) > 0),
     citations_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(citations_json)),
+    metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
@@ -181,23 +182,35 @@ class Database:
             if not v2_applied:
                 connection.executescript(
                     """
-                UPDATE conversations
-                SET title = COALESCE(
-                    NULLIF(substr((
-                        SELECT trim(content)
-                        FROM messages
-                        WHERE messages.conversation_id = conversations.id
-                          AND messages.role = 'user'
-                        ORDER BY messages.created_at, messages.rowid
-                        LIMIT 1
-                    ), 1, 80), ''),
-                    'New Conversation'
-                )
-                WHERE title = 'New Conversation';
-                INSERT OR IGNORE INTO schema_migrations (version, name)
-                VALUES (2, 'conversation history metadata');
+                    UPDATE conversations
+                    SET title = COALESCE(
+                        NULLIF(substr((
+                            SELECT trim(content)
+                            FROM messages
+                            WHERE messages.conversation_id = conversations.id
+                              AND messages.role = 'user'
+                            ORDER BY messages.created_at, messages.rowid
+                            LIMIT 1
+                        ), 1, 80), ''),
+                        'New Conversation'
+                    )
+                    WHERE title = 'New Conversation';
+                    INSERT OR IGNORE INTO schema_migrations (version, name)
+                    VALUES (2, 'conversation history metadata');
                     """
                 )
+            message_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(messages)")
+            }
+            if "metadata_json" not in message_columns:
+                connection.execute(
+                    "ALTER TABLE messages ADD COLUMN metadata_json "
+                    "TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json))"
+                )
+            connection.execute(
+                "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?, ?)",
+                (3, "assistant message routing metadata"),
+            )
 
     def consume_rate_limit(
         self,
