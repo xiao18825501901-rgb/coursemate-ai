@@ -15,7 +15,14 @@ import {
   renameConversation,
   streamQa,
 } from "../services/ragApi";
-import type { Citation, ConversationSummary, Course, CourseDocument } from "../types/api";
+import type {
+  Citation,
+  ConversationSummary,
+  Course,
+  CourseDocument,
+  GroundingMode,
+  QaStreamMeta,
+} from "../types/api";
 
 
 interface ChatMessage {
@@ -45,6 +52,25 @@ function previousUserQuestion(
   return undefined;
 }
 
+const groundingLabels: Record<GroundingMode, { title: string; detail: string }> = {
+  grounded: {
+    title: "Course-material answer",
+    detail: "Claims are limited to retrieved course evidence; citations identify that evidence.",
+  },
+  mixed: {
+    title: "Course material + AI knowledge",
+    detail: "Citations support only the course-material portion, not supplementary AI knowledge.",
+  },
+  general: {
+    title: "General tutor conversation",
+    detail: "No course-material claim or citation is implied for this response.",
+  },
+  metadata: {
+    title: "Course information",
+    detail: "This response uses trusted course and document metadata, not retrieved excerpts.",
+  },
+};
+
 export function QaPage() {
   const { getToken } = useCourseMateAuth();
   const { courseId: routeCourseId, conversationId: routeConversationId } = useParams();
@@ -60,6 +86,7 @@ export function QaPage() {
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [planNotice, setPlanNotice] = useState("");
+  const [streamMeta, setStreamMeta] = useState<QaStreamMeta | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -68,6 +95,7 @@ export function QaPage() {
     setMessages([]);
     setQuestion("");
     setPlanNotice("");
+    setStreamMeta(null);
     setError(null);
     void listCourses(getToken)
       .then((page) => {
@@ -148,6 +176,9 @@ export function QaPage() {
     () => courses.find((course) => course.id === courseId) ?? null,
     [courseId, courses],
   );
+  const grounding = streamMeta?.groundingMode
+    ? groundingLabels[streamMeta.groundingMode]
+    : null;
 
   async function ask(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -161,6 +192,7 @@ export function QaPage() {
     ]);
     setQuestion("");
     setError(null);
+    setStreamMeta(null);
     setStreaming(true);
     const controller = new AbortController();
     abortRef.current = controller;
@@ -183,6 +215,7 @@ export function QaPage() {
               ),
             ),
           onMeta: (data) => {
+            setStreamMeta(data);
             if (typeof data.conversationId !== "string" || routeConversationId) return;
             navigate(`/qa/${courseId}/${data.conversationId}`, { replace: true });
           },
@@ -320,8 +353,14 @@ export function QaPage() {
 
         <section className="chat-panel" aria-labelledby="qa-chat-title">
           <div className="chat-panel-header">
-            <div><span className="online-indicator" />Grounded mode</div>
+            <div><span className="online-indicator" />AI tutor</div>
             <h2 id="qa-chat-title">Conversation</h2>
+            {grounding && (
+              <div className={`grounding-banner grounding-${streamMeta?.groundingMode}`} role="status">
+                <strong>{grounding.title}</strong>
+                <span>{grounding.detail}</span>
+              </div>
+            )}
           </div>
           <div className="message-log" role="log" aria-live="polite" aria-relevant="additions text">
             {messages.length === 0 ? (

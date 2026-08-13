@@ -73,6 +73,26 @@ export interface ConversationDetail extends Omit<ConversationSummary, "messageCo
   messages: ConversationMessage[];
 }
 
+export type QueryIntent =
+  | "COURSE_GROUNDED"
+  | "COURSE_TUTORING"
+  | "GENERAL_CONVERSATION"
+  | "COURSE_META"
+  | "AMBIGUOUS";
+
+export type GroundingMode = "grounded" | "mixed" | "general" | "metadata";
+
+export interface QaStreamMeta {
+  requestId?: string;
+  conversationId?: string;
+  courseId?: string;
+  retrievedChunks?: number;
+  queryIntent?: QueryIntent;
+  groundingMode?: GroundingMode;
+  retrievalQueryRewritten?: boolean;
+  teachingApproach?: "formal" | "analogy" | "worked_example" | "socratic" | null;
+}
+
 export type TaskStatus = "todo" | "in_progress" | "completed";
 export type TaskPriority = "low" | "medium" | "high";
 

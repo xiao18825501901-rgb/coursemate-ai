@@ -75,6 +75,11 @@ describe("QaPage", () => {
 
   it("streams an answer, renders its citation, and saves it as a task", async () => {
     vi.mocked(streamQa).mockImplementation(async (_getToken, _courseId, _question, callbacks) => {
+      callbacks.onMeta?.({
+        queryIntent: "COURSE_TUTORING",
+        groundingMode: "mixed",
+        retrievedChunks: 1,
+      });
       callbacks.onDelta("The Phong model combines ambient, diffuse, and specular terms.");
       callbacks.onCitation({
         sourceLabel: "S1",
@@ -103,6 +108,8 @@ describe("QaPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Ask" }));
 
     expect(await screen.findByText(/ambient, diffuse, and specular/i)).toBeVisible();
+    expect(screen.getByText("Course material + AI knowledge")).toBeVisible();
+    expect(screen.getByText(/citations support only the course-material portion/i)).toBeVisible();
     expect(screen.getByText("lecture-07.pdf")).toBeVisible();
     fireEvent.click(screen.getByText("lecture-07.pdf"));
     expect(screen.getByText(/keyword \+ vector/i)).toBeVisible();
@@ -141,6 +148,33 @@ describe("QaPage", () => {
       expect(screen.queryByText(/CS3481-only DBSCAN answer/i)).not.toBeInTheDocument();
     });
     expect(screen.getByText(/Start with a specific question/i)).toBeVisible();
+  });
+
+  it("labels a general tutor conversation without implying course grounding", async () => {
+    vi.mocked(streamQa).mockImplementation(async (_getToken, _courseId, _question, callbacks) => {
+      callbacks.onMeta?.({
+        queryIntent: "GENERAL_CONVERSATION",
+        groundingMode: "general",
+        retrievedChunks: 0,
+      });
+      callbacks.onDelta("Hi! Let's make today's study plan manageable.");
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/qa/cs3481"]}>
+        <Routes><Route path="/qa/:courseId" element={<QaPage />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("option", { name: "Computer Graphics" })).toBeVisible();
+    fireEvent.change(screen.getByLabelText(/ask a course question/i), {
+      target: { value: "Hello" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+
+    expect(await screen.findByText(/make today's study plan manageable/i)).toBeVisible();
+    expect(screen.getByText("General tutor conversation")).toBeVisible();
+    expect(screen.getByText(/No course-material claim or citation is implied/i)).toBeVisible();
   });
 
   it("does not overwrite a live stream when the server assigns its conversation route", async () => {

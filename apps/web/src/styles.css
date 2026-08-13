@@ -767,6 +767,33 @@ button:disabled,
   text-transform: uppercase;
 }
 
+.chat-panel-header .grounding-banner {
+  display: grid;
+  gap: 0.1rem;
+  margin-top: 0.6rem;
+  padding: 0.55rem 0.7rem;
+  border-left: 3px solid var(--accent);
+  color: var(--ink);
+  background: var(--accent-soft);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.grounding-banner strong {
+  font-weight: 900;
+}
+
+.grounding-banner span {
+  color: var(--ink-soft);
+}
+
+.chat-panel-header .grounding-general {
+  border-left-color: var(--signal);
+  background: #f6e3dd;
+}
+
 .online-indicator {
   width: 0.5rem;
   height: 0.5rem;

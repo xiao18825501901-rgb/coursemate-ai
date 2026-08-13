@@ -8,6 +8,7 @@ import type {
   CourseDocument,
   LanguagePreference,
   Page,
+  QaStreamMeta,
 } from "../types/api";
 
 
@@ -51,7 +52,7 @@ export class SseDecoder {
 }
 
 export interface QaStreamCallbacks {
-  onMeta?: (data: Record<string, unknown>) => void;
+  onMeta?: (data: QaStreamMeta) => void;
   onDelta: (text: string) => void;
   onCitation: (citation: Citation) => void;
   onDone?: () => void;
@@ -174,7 +175,7 @@ export async function streamQa(
   const sseDecoder = new SseDecoder();
 
   const dispatch = (item: SseEvent): void => {
-    if (item.event === "meta") callbacks.onMeta?.(item.data);
+    if (item.event === "meta") callbacks.onMeta?.(item.data as QaStreamMeta);
     if (item.event === "delta" && typeof item.data.text === "string") {
       callbacks.onDelta(item.data.text);
     }
