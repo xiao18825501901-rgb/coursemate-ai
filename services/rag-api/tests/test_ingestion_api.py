@@ -322,6 +322,126 @@ def test_owner_can_delete_document_but_other_user_cannot(client: TestClient) -> 
     )
 
 
+def test_user_course_count_quota_is_configurable_and_admin_is_exempt(tmp_path: Path) -> None:
+    quota_settings = Settings(
+        database_path=tmp_path / "rag.sqlite3",
+        upload_dir=tmp_path / "uploads",
+        user_course_max_courses=1,
+        admin_user_ids="user-admin",
+    )
+    with TestClient(
+        create_app(
+            settings=quota_settings,
+            embedding_provider=FakeEmbeddingProvider(),
+            auth_verifier=FakeAuthVerifier(),
+        )
+    ) as quota_client:
+        first = quota_client.post(
+            "/api/courses",
+            json={"id": "mine-one", "name": "Mine one"},
+            headers={"Authorization": "Bearer user-token"},
+        )
+        exceeded = quota_client.post(
+            "/api/courses",
+            json={"id": "mine-two", "name": "Mine two"},
+            headers={"Authorization": "Bearer user-token"},
+        )
+        admin = quota_client.post(
+            "/api/courses",
+            json={"id": "official-one", "name": "Official"},
+            headers={"Authorization": "Bearer admin-token"},
+        )
+
+    assert first.status_code == 201
+    assert exceeded.status_code == 429
+    assert exceeded.json()["error"]["code"] == "COURSE_QUOTA_EXCEEDED"
+    assert admin.status_code == 201
+
+
+def test_file_count_and_total_upload_quotas_are_owner_scoped(tmp_path: Path) -> None:
+    quota_settings = Settings(
+        database_path=tmp_path / "rag.sqlite3",
+        upload_dir=tmp_path / "uploads",
+        max_upload_bytes=1_024,
+        user_course_max_files=1,
+        user_course_max_total_upload_bytes=1_024,
+        admin_user_ids="user-admin",
+    )
+    with TestClient(
+        create_app(
+            settings=quota_settings,
+            embedding_provider=FakeEmbeddingProvider(),
+            auth_verifier=FakeAuthVerifier(),
+        )
+    ) as quota_client:
+        for token, course_id in (
+            ("Bearer user-token", "user-a-one"),
+            ("Bearer user-token", "user-a-two"),
+            ("Bearer user-b-token", "user-b-one"),
+        ):
+            assert quota_client.post(
+                "/api/courses",
+                json={"id": course_id, "name": course_id},
+                headers={"Authorization": token},
+            ).status_code == 201
+
+        first = quota_client.post(
+            "/api/courses/user-a-one/documents",
+            files={"file": ("one.md", b"# One\n\n" + b"a" * 692, "text/markdown")},
+            headers={"Authorization": "Bearer user-token"},
+        )
+        file_count = quota_client.post(
+            "/api/courses/user-a-one/documents",
+            files={"file": ("two.md", b"different", "text/markdown")},
+            headers={"Authorization": "Bearer user-token"},
+        )
+        total_bytes = quota_client.post(
+            "/api/courses/user-a-two/documents",
+            files={"file": ("more.md", b"# More\n\n" + b"b" * 392, "text/markdown")},
+            headers={"Authorization": "Bearer user-token"},
+        )
+        other_owner = quota_client.post(
+            "/api/courses/user-b-one/documents",
+            files={"file": ("other.md", b"# Other\n\n" + b"c" * 390, "text/markdown")},
+            headers={"Authorization": "Bearer user-b-token"},
+        )
+
+    assert first.status_code == 202
+    assert first.json()["document"]["byteSize"] == 699
+    assert file_count.status_code == 429
+    assert file_count.json()["error"]["code"] == "COURSE_FILE_QUOTA_EXCEEDED"
+    assert total_bytes.status_code == 413
+    assert total_bytes.json()["error"]["code"] == "USER_STORAGE_QUOTA_EXCEEDED"
+    assert other_owner.status_code == 202
+
+
+def test_user_upload_storage_path_is_namespaced_by_owner_course_and_document(
+    client: TestClient, settings: Settings
+) -> None:
+    client.headers["Authorization"] = "Bearer user-token"
+    assert client.post(
+        "/api/courses",
+        json={"id": "path-course", "name": "Paths"},
+    ).status_code == 201
+    upload = client.post(
+        "/api/courses/path-course/documents",
+        files={"file": ("notes.md", b"# Safe path", "text/markdown")},
+    )
+    document_id = upload.json()["document"]["id"]
+    with client.app.state.database.connect() as connection:
+        stored = Path(
+            connection.execute(
+                "SELECT stored_path FROM documents WHERE id = ?", (document_id,)
+            ).fetchone()["stored_path"]
+        )
+
+    relative = stored.resolve().relative_to(settings.upload_dir.resolve())
+    assert relative.parts[0] == "users"
+    assert relative.parts[1] != "user-a"
+    assert relative.parts[2] == "path-course"
+    assert relative.stem == document_id
+
+
 def test_cors_preflight_allows_authorization_header(client: TestClient) -> None:
     response = client.options(
         "/api/courses",

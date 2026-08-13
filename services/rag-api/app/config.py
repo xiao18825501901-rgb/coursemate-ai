@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     chunk_overlap: int = Field(default=200, ge=0, le=4_000)
     top_k: int = Field(default=6, ge=1, le=30)
     max_upload_bytes: int = Field(default=20 * 1024 * 1024, ge=1_024, le=100 * 1024 * 1024)
+    user_course_max_courses: int = Field(default=10, ge=1, le=1_000)
+    user_course_max_files: int = Field(default=50, ge=1, le=10_000)
+    user_course_max_total_upload_bytes: int = Field(
+        default=500 * 1024 * 1024,
+        ge=1_024,
+        le=100 * 1024 * 1024 * 1024,
+    )
     max_context_chars: int = Field(default=18_000, ge=1_000, le=100_000)
 
     @model_validator(mode="after")

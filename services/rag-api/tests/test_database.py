@@ -115,7 +115,7 @@ def test_legacy_conversations_are_quarantined_and_migration_is_repeatable(
         ).fetchone()
 
     assert tuple(conversation) == ("legacy_orphaned", "New Conversation", "auto")
-    assert migrations == 7
+    assert migrations == 8
     assert tuple(course[:3]) == (None, "official", "public")
     assert course["updated_at"]
     assert "metadata_json" in message_columns
@@ -131,7 +131,7 @@ def test_legacy_conversations_are_quarantined_and_migration_is_repeatable(
         ]
 
     assert {"metadata_json", "parent_key"}.issubset(chunk_columns)
-    assert versions == [1, 2, 3, 4, 5, 6, 7]
+    assert versions == [1, 2, 3, 4, 5, 6, 7, 8]
 
 
 def test_database_repairs_empty_course_timestamp_after_migration(tmp_path: Path) -> None:
@@ -153,6 +153,43 @@ def test_database_repairs_empty_course_timestamp_after_migration(tmp_path: Path)
         ).fetchone()["updated_at"]
 
     assert updated_at
+
+
+def test_storage_quota_migration_backfills_existing_file_size(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    database = Database(settings)
+    database.initialize()
+    stored = settings.upload_dir / "legacy.md"
+    stored.write_bytes(b"legacy bytes")
+    with database.connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO courses (id, name, description)
+            VALUES ('legacy-storage', 'Legacy storage', '')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO documents (
+                id, course_id, filename, stored_path, media_type, extension, sha256,
+                byte_size, status
+            ) VALUES (?, 'legacy-storage', 'legacy.md', ?, 'text/markdown', '.md', ?, 0, 'ready')
+            """,
+            ("legacy-document", str(stored), "a" * 64),
+        )
+
+    database.initialize()
+
+    with database.connect() as connection:
+        byte_size = connection.execute(
+            "SELECT byte_size FROM documents WHERE id = 'legacy-document'"
+        ).fetchone()["byte_size"]
+        version = connection.execute(
+            "SELECT name FROM schema_migrations WHERE version = 8"
+        ).fetchone()["name"]
+
+    assert byte_size == len(b"legacy bytes")
+    assert version == "user course storage quotas"
 
 
 def test_v2_conversation_migration_preserves_messages_and_derives_title(
@@ -216,7 +253,7 @@ def test_v2_conversation_migration_preserves_messages_and_derives_title(
     assert conversation["title"].startswith("DBSCAN 中 core point")
     assert conversation["preferred_language"] == "auto"
     assert message["metadata_json"] == "{}"
-    assert versions == [1, 2, 3, 4, 5, 6, 7]
+    assert versions == [1, 2, 3, 4, 5, 6, 7, 8]
 
 
 def test_deployment_path_environment_aliases_are_honored(

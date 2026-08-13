@@ -42,6 +42,12 @@ services:
         sync: false
       - key: RAG_QA_REQUESTS_PER_MINUTE
         value: 10
+      - key: USER_COURSE_MAX_COURSES
+        value: 10
+      - key: USER_COURSE_MAX_FILES
+        value: 50
+      - key: USER_COURSE_MAX_TOTAL_UPLOAD_BYTES
+        value: 524288000
       - key: APP_ENV
         value: production
 

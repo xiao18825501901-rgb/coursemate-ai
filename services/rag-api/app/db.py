@@ -1,6 +1,7 @@
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 
 from app.config import Settings
 
@@ -30,6 +31,7 @@ CREATE TABLE IF NOT EXISTS documents (
     media_type TEXT NOT NULL,
     extension TEXT NOT NULL,
     sha256 TEXT NOT NULL CHECK (length(sha256) = 64),
+    byte_size INTEGER NOT NULL DEFAULT 0 CHECK (byte_size >= 0),
     status TEXT NOT NULL
         CHECK (status IN ('pending', 'processing', 'ready', 'failed', 'unsupported')),
     chunk_count INTEGER NOT NULL DEFAULT 0 CHECK (chunk_count >= 0),
@@ -301,6 +303,30 @@ class Database:
             connection.execute(
                 "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?, ?)",
                 (7, "consent based course publication workflow"),
+            )
+            document_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(documents)")
+            }
+            if "byte_size" not in document_columns:
+                connection.execute(
+                    "ALTER TABLE documents ADD COLUMN byte_size INTEGER NOT NULL DEFAULT 0 "
+                    "CHECK (byte_size >= 0)"
+                )
+            for document in connection.execute(
+                "SELECT id, stored_path FROM documents WHERE byte_size = 0"
+            ).fetchall():
+                stored_path = Path(document["stored_path"])
+                try:
+                    byte_size = stored_path.stat().st_size
+                except OSError:
+                    continue
+                connection.execute(
+                    "UPDATE documents SET byte_size = ? WHERE id = ?",
+                    (byte_size, document["id"]),
+                )
+            connection.execute(
+                "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?, ?)",
+                (8, "user course storage quotas"),
             )
             if not v2_applied:
                 connection.executescript(

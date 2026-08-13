@@ -1,4 +1,5 @@
 -- CourseMate AI V2 migration reference for SQLite schema versions 5-7.
+-- Version 8 is recorded separately in 008_user_course_storage_quotas.sql.
 --
 -- IMPORTANT: app.db.Database.initialize() is the executable, idempotent migrator.
 -- SQLite has no portable `ADD COLUMN IF NOT EXISTS`, so do not apply this file

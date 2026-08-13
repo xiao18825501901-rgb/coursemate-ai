@@ -159,6 +159,7 @@ class Document(ApiModel):
     media_type: str
     extension: str
     sha256: str
+    byte_size: int
     status: DocumentStatus
     chunk_count: int
     error_message: str | None

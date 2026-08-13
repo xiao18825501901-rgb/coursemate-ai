@@ -1,7 +1,6 @@
 import hashlib
 import json
 import logging
-import shutil
 import sqlite3
 from pathlib import Path
 from uuid import uuid4
@@ -27,6 +26,12 @@ from app.rag.loaders import LOADERS, load_document
 
 LOGGER = logging.getLogger(__name__)
 EMBEDDING_BATCH_SIZE = 10
+
+
+def _storage_owner_segment(owner_user_id: str) -> str:
+    """Create a stable opaque path segment without exposing the identity provider subject."""
+
+    return hashlib.sha256(owner_user_id.encode("utf-8")).hexdigest()[:32]
 
 MEDIA_TYPES: dict[str, set[str]] = {
     ".md": {"text/markdown", "text/plain", "application/octet-stream"},
@@ -80,6 +85,20 @@ class IngestionService:
         owner = None if is_admin else owner_user_id
         try:
             with self.database.connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                if not is_admin:
+                    owned_courses = connection.execute(
+                        "SELECT COUNT(*) FROM courses "
+                        "WHERE owner_user_id = ? AND course_type = 'user'",
+                        (owner_user_id,),
+                    ).fetchone()[0]
+                    if owned_courses >= self.settings.user_course_max_courses:
+                        raise ApiError(
+                            429,
+                            "COURSE_QUOTA_EXCEEDED",
+                            "The private-course quota has been reached.",
+                            details={"limit": self.settings.user_course_max_courses},
+                        )
                 connection.execute(
                     """
                     INSERT INTO courses (
@@ -159,7 +178,7 @@ class IngestionService:
             ).fetchone()[0]
             rows = connection.execute(
                 """
-                SELECT id, course_id, filename, media_type, extension, sha256, status,
+                SELECT id, course_id, filename, media_type, extension, sha256, byte_size, status,
                     chunk_count, error_message, created_at, updated_at
                 FROM documents
                 WHERE course_id = ?
@@ -241,11 +260,16 @@ class IngestionService:
             course_id, owner_user_id=owner_user_id, is_admin=is_admin, write=True
         )
         with self.database.connect() as connection:
+            paths = [
+                Path(row["stored_path"])
+                for row in connection.execute(
+                    "SELECT stored_path FROM documents WHERE course_id = ?", (course_id,)
+                ).fetchall()
+            ]
             connection.execute("DELETE FROM courses WHERE id = ?", (course_id,))
-        upload_root = self.settings.upload_dir.resolve()
-        course_directory = (upload_root / course_id).resolve()
-        if course_directory.parent == upload_root and course_directory.is_dir():
-            shutil.rmtree(course_directory)
+        for path in paths:
+            self._delete_stored_file(path)
+        self._remove_empty_upload_parents(paths)
 
     def delete_document(
         self,
@@ -266,15 +290,31 @@ class IngestionService:
             if row is None:
                 raise ApiError(404, "DOCUMENT_NOT_FOUND", "The document was not found.")
             connection.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+        self._delete_stored_file(Path(row["stored_path"]))
+        self._remove_empty_upload_parents([Path(row["stored_path"])])
+
+    def _delete_stored_file(self, path: Path) -> None:
         upload_root = self.settings.upload_dir.resolve()
-        stored_path = Path(row["stored_path"]).resolve()
+        stored_path = path.resolve()
         try:
             stored_path.relative_to(upload_root)
         except ValueError:
-            LOGGER.error("Refused to delete document path outside upload root: %s", document_id)
+            LOGGER.error("Refused to delete document path outside upload root")
             return
         stored_path.unlink(missing_ok=True)
         stored_path.with_name(f"{stored_path.name}.ocr.md").unlink(missing_ok=True)
+
+    def _remove_empty_upload_parents(self, paths: list[Path]) -> None:
+        upload_root = self.settings.upload_dir.resolve()
+        for path in paths:
+            parent = path.resolve().parent
+            while parent != upload_root:
+                try:
+                    parent.relative_to(upload_root)
+                    parent.rmdir()
+                except (OSError, ValueError):
+                    break
+                parent = parent.parent
 
     def get_document(self, document_id: str) -> Document:
         return self._get_document(document_id)
@@ -334,10 +374,52 @@ class IngestionService:
         digest = hashlib.sha256(content).hexdigest()
         document_id = f"doc_{uuid4().hex}"
         job_id = f"job_{uuid4().hex}"
-        destination = self.settings.upload_dir / course_id / f"{document_id}{extension}"
-        destination.parent.mkdir(parents=True, exist_ok=True)
-
+        course = self._require_course(
+            course_id, owner_user_id=owner_user_id, is_admin=is_admin, write=True
+        )
+        if course["course_type"] == "user":
+            owner_segment = _storage_owner_segment(str(course["owner_user_id"]))
+            destination = (
+                self.settings.upload_dir
+                / "users"
+                / owner_segment
+                / course_id
+                / f"{document_id}{extension}"
+            )
+        else:
+            destination = (
+                self.settings.upload_dir / "official" / course_id / f"{document_id}{extension}"
+            )
         with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if not is_admin and course["course_type"] == "user":
+                document_count = connection.execute(
+                    "SELECT COUNT(*) FROM documents WHERE course_id = ?",
+                    (course_id,),
+                ).fetchone()[0]
+                if document_count >= self.settings.user_course_max_files:
+                    raise ApiError(
+                        429,
+                        "COURSE_FILE_QUOTA_EXCEEDED",
+                        "The course file quota has been reached.",
+                        details={"limit": self.settings.user_course_max_files},
+                    )
+                used_bytes = connection.execute(
+                    "SELECT COALESCE(SUM(documents.byte_size), 0) FROM documents "
+                    "JOIN courses ON courses.id = documents.course_id "
+                    "WHERE courses.owner_user_id = ? AND courses.course_type = 'user'",
+                    (owner_user_id,),
+                ).fetchone()[0]
+                if used_bytes + len(content) > self.settings.user_course_max_total_upload_bytes:
+                    raise ApiError(
+                        413,
+                        "USER_STORAGE_QUOTA_EXCEEDED",
+                        "The total private-course upload quota would be exceeded.",
+                        details={
+                            "limitBytes": self.settings.user_course_max_total_upload_bytes,
+                            "usedBytes": used_bytes,
+                        },
+                    )
             duplicate = connection.execute(
                 "SELECT id FROM documents WHERE course_id = ? AND sha256 = ?",
                 (course_id, digest),
@@ -349,12 +431,14 @@ class IngestionService:
                     "This course already contains a document with the same content.",
                     details={"documentId": duplicate["id"]},
                 )
+            destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(content)
             connection.execute(
                 """
                 INSERT INTO documents (
-                    id, course_id, filename, stored_path, media_type, extension, sha256, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+                    id, course_id, filename, stored_path, media_type, extension, sha256,
+                    byte_size, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                 """,
                 (
                     document_id,
@@ -364,6 +448,7 @@ class IngestionService:
                     media_type,
                     extension,
                     digest,
+                    len(content),
                 ),
             )
             connection.execute(
@@ -530,7 +615,7 @@ class IngestionService:
         with self.database.connect() as connection:
             row = connection.execute(
                 """
-                SELECT id, course_id, filename, media_type, extension, sha256, status,
+                SELECT id, course_id, filename, media_type, extension, sha256, byte_size, status,
                     chunk_count, error_message, created_at, updated_at
                 FROM documents WHERE id = ?
                 """,
