@@ -111,8 +111,21 @@ def test_legacy_conversations_are_quarantined_and_migration_is_repeatable(
         }
 
     assert tuple(conversation) == ("legacy_orphaned", "New Conversation", "auto")
-    assert migrations == 3
+    assert migrations == 4
     assert "metadata_json" in message_columns
+
+    with database.connect() as connection:
+        chunk_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(chunks)")
+        }
+        versions = [
+            row[0] for row in connection.execute(
+                "SELECT version FROM schema_migrations ORDER BY version"
+            )
+        ]
+
+    assert {"metadata_json", "parent_key"}.issubset(chunk_columns)
+    assert versions == [1, 2, 3, 4]
 
 
 def test_v2_conversation_migration_preserves_messages_and_derives_title(
@@ -176,7 +189,7 @@ def test_v2_conversation_migration_preserves_messages_and_derives_title(
     assert conversation["title"].startswith("DBSCAN 中 core point")
     assert conversation["preferred_language"] == "auto"
     assert message["metadata_json"] == "{}"
-    assert versions == [1, 2, 3]
+    assert versions == [1, 2, 3, 4]
 
 
 def test_deployment_path_environment_aliases_are_honored(

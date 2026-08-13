@@ -264,8 +264,8 @@ class IngestionService:
                         """
                         INSERT INTO chunks (
                             id, document_id, course_id, ordinal, content, locator_type,
-                            locator_value, section, embedding
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            locator_value, section, embedding, metadata_json, parent_key
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             f"chk_{uuid4().hex}",
@@ -277,6 +277,8 @@ class IngestionService:
                             chunk.locator_value,
                             chunk.section,
                             json.dumps(embedding, separators=(",", ":")),
+                            json.dumps(chunk.metadata, ensure_ascii=False, separators=(",", ":")),
+                            chunk.parent_key,
                         ),
                     )
                 connection.execute(

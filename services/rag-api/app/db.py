@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS chunks (
     locator_type TEXT NOT NULL,
     locator_value TEXT NOT NULL,
     section TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
+    parent_key TEXT,
     embedding TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     UNIQUE (document_id, ordinal)
@@ -210,6 +212,24 @@ class Database:
             connection.execute(
                 "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?, ?)",
                 (3, "assistant message routing metadata"),
+            )
+            chunk_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(chunks)")
+            }
+            if "metadata_json" not in chunk_columns:
+                connection.execute(
+                    "ALTER TABLE chunks ADD COLUMN metadata_json "
+                    "TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json))"
+                )
+            if "parent_key" not in chunk_columns:
+                connection.execute("ALTER TABLE chunks ADD COLUMN parent_key TEXT")
+            connection.executescript(
+                """
+                CREATE INDEX IF NOT EXISTS idx_chunks_course_parent
+                ON chunks(course_id, parent_key, ordinal);
+                INSERT OR IGNORE INTO schema_migrations (version, name)
+                VALUES (4, 'structured chunk metadata');
+                """
             )
 
     def consume_rate_limit(

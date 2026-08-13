@@ -70,6 +70,8 @@ def _search_hit(row: sqlite3.Row, *, score: float, channel: str) -> SearchHit:
         section=row["section"],
         score=score,
         channels=(channel,),
+        metadata=json.loads(row["metadata_json"]),
+        parent_key=row["parent_key"],
     )
 
 
@@ -94,6 +96,8 @@ class ChunkRepository:
                     c.locator_type,
                     c.locator_value,
                     c.section,
+                    c.metadata_json,
+                    c.parent_key,
                     bm25(chunks_fts) AS rank
                 FROM chunks_fts
                 JOIN chunks AS c ON c.rowid = chunks_fts.rowid
@@ -132,6 +136,8 @@ class ChunkRepository:
                     c.locator_type,
                     c.locator_value,
                     c.section,
+                    c.metadata_json,
+                    c.parent_key,
                     c.embedding
                 FROM chunks AS c
                 JOIN documents AS d ON d.id = c.document_id
