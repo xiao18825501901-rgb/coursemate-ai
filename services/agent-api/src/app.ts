@@ -22,6 +22,7 @@ export interface AppDependencies {
   webOrigin: string;
   authStrategy: AuthStrategy;
   modelRateLimiter: ModelRateLimiter;
+  readinessCheck: () => boolean;
 }
 
 function requireUser(request: Request, strategy: AuthStrategy): string {
@@ -94,6 +95,10 @@ export function createApp(dependencies: AppDependencies): express.Express {
   );
 
   application.get("/health", (_request, response) => {
+    if (!dependencies.readinessCheck()) {
+      response.status(503).json({ status: "unavailable", service: "agent-api" });
+      return;
+    }
     response.json({ status: "ok", service: "agent-api" });
   });
 

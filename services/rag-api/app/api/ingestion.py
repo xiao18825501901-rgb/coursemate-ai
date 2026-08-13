@@ -34,7 +34,10 @@ def _service(request: Request) -> IngestionService:
 
 
 @router.get("/health", response_model=Health)
-def health() -> Health:
+def health(request: Request, response: Response) -> Health:
+    if not request.app.state.database.is_ready():
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return Health(status="unavailable", service="rag-api")
     return Health(status="ok", service="rag-api")
 
 

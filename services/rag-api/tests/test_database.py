@@ -76,6 +76,32 @@ def test_database_initializes_relational_and_fts_schema(tmp_path: Path) -> None:
     assert settings.upload_dir.is_dir()
 
 
+def test_readiness_is_read_only_when_database_disappears(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    database = Database(settings)
+    database.initialize()
+    assert database.is_ready() is True
+
+    settings.database_path.unlink()
+
+    assert database.is_ready() is False
+    assert settings.database_path.exists() is False
+
+
+def test_readiness_requires_upload_storage_and_latest_migration(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    database = Database(settings)
+    database.initialize()
+
+    settings.upload_dir.rmdir()
+    assert database.is_ready() is False
+
+    settings.upload_dir.mkdir()
+    with database.connect() as connection:
+        connection.execute("DELETE FROM schema_migrations WHERE version = 10")
+    assert database.is_ready() is False
+
+
 def test_legacy_conversations_are_quarantined_and_migration_is_repeatable(
     tmp_path: Path,
 ) -> None:

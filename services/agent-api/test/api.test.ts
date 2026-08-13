@@ -61,6 +61,7 @@ describe("Agent API", () => {
       webOrigin: "http://localhost:5173",
       authStrategy,
       modelRateLimiter: allowModelRequests,
+      readinessCheck: () => true,
     });
 
     const response = await request(app)
@@ -76,6 +77,26 @@ describe("Agent API", () => {
     expect(response.headers["x-powered-by"]).toBeUndefined();
   });
 
+  it("returns 503 without leaking details when persistent state is unavailable", async () => {
+    const app = createApp({
+      repository,
+      agentService: new AgentService(new FakeModelClient([]), new ToolExecutor(repository), {
+        model: "test-model",
+        maxToolRounds: 4,
+      }),
+      webOrigin: "http://localhost:5173",
+      authStrategy,
+      modelRateLimiter: allowModelRequests,
+      readinessCheck: () => false,
+    });
+
+    const response = await request(app).get("/health");
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual({ status: "unavailable", service: "agent-api" });
+    expect(response.text).not.toContain("sqlite");
+  });
+
   it("supports REST create, list filters, patch, completion, and deletion", async () => {
     const app = createApp({
       repository,
@@ -86,6 +107,7 @@ describe("Agent API", () => {
       webOrigin: "http://localhost:5173",
       authStrategy,
       modelRateLimiter: allowModelRequests,
+      readinessCheck: () => true,
     });
 
     const created = await request(app).post("/api/tasks").set("Authorization", "Bearer token-a").send({
@@ -140,6 +162,7 @@ describe("Agent API", () => {
       webOrigin: "http://localhost:5173",
       authStrategy,
       modelRateLimiter: allowModelRequests,
+      readinessCheck: () => true,
     });
 
     const response = await request(app)
@@ -163,6 +186,7 @@ describe("Agent API", () => {
       webOrigin: "http://localhost:5173",
       authStrategy,
       modelRateLimiter: allowModelRequests,
+      readinessCheck: () => true,
     });
 
     const invalid = await request(app).post("/api/tasks").set("Authorization", "Bearer token-a").send({
@@ -190,6 +214,7 @@ describe("Agent API", () => {
       webOrigin: "http://localhost:5173",
       authStrategy,
       modelRateLimiter: allowModelRequests,
+      readinessCheck: () => true,
     });
 
     const missing = await request(app).get("/api/tasks");
@@ -210,6 +235,7 @@ describe("Agent API", () => {
       webOrigin: "http://localhost:5173",
       authStrategy,
       modelRateLimiter: allowModelRequests,
+      readinessCheck: () => true,
     });
 
     const created = await request(app)
@@ -239,6 +265,7 @@ describe("Agent API", () => {
       webOrigin: "http://localhost:5173",
       authStrategy,
       modelRateLimiter: allowModelRequests,
+      readinessCheck: () => true,
     });
 
     const response = await request(app)
@@ -273,6 +300,7 @@ describe("Agent API", () => {
       webOrigin: "http://localhost:5173",
       authStrategy,
       modelRateLimiter,
+      readinessCheck: () => true,
     });
 
     const firstA = await request(app).post("/api/agent/chat").set("Authorization", "Bearer token-a").send({ message: "Hello" });

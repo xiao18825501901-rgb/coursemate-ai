@@ -81,6 +81,19 @@ def test_health_and_course_pagination(client: TestClient) -> None:
     assert courses.json()["items"][0]["id"] == "cs3481"
 
 
+def test_health_returns_503_when_persistent_state_is_not_ready(
+    client: TestClient,
+) -> None:
+    with client.app.state.database.connect() as connection:
+        connection.execute("DELETE FROM schema_migrations WHERE version = 10")
+
+    response = client.get("/health")
+
+    assert response.status_code == 503
+    assert response.json() == {"status": "unavailable", "service": "rag-api"}
+    assert "path" not in response.text.casefold()
+
+
 def test_api_responses_include_production_security_headers(client: TestClient) -> None:
     response = client.get("/health")
 

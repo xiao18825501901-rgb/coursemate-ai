@@ -437,6 +437,23 @@ class Database:
                 """
             )
 
+    def is_ready(self) -> bool:
+        if not self.upload_dir.is_dir():
+            return False
+        connection: sqlite3.Connection | None = None
+        try:
+            database_uri = f"{self.path.resolve().as_uri()}?mode=ro"
+            connection = sqlite3.connect(database_uri, uri=True, timeout=10)
+            connection.execute("PRAGMA busy_timeout = 10000")
+            return connection.execute(
+                "SELECT 1 FROM schema_migrations WHERE version = 10"
+            ).fetchone() is not None
+        except sqlite3.Error:
+            return False
+        finally:
+            if connection is not None:
+                connection.close()
+
     def consume_rate_limit(
         self,
         *,
