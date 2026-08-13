@@ -159,3 +159,42 @@ def test_embedding_runner_refuses_without_explicit_billable_opt_in(
     assert "Refusing provider calls" in process.stdout
     assert "not-a-real-key" not in process.stdout + process.stderr
     assert not output.exists()
+
+
+def test_embedding_runner_rejects_unsafe_base_url_before_provider_client(
+    tmp_path: Path,
+) -> None:
+    process = subprocess.run(
+        [
+            sys.executable,
+            str(RUNNER),
+            "--provider",
+            "test-provider",
+            "--model",
+            "test-model",
+            "--base-url",
+            "http://secret-provider.example/v1",
+            "--api-key-env",
+            "EMBEDDING_TEST_KEY",
+            "--database",
+            str(CORPUS_DATABASE),
+            "--output",
+            str(tmp_path / "embedding.json"),
+            "--input-price-per-million",
+            "1",
+            "--max-total-cost",
+            "1",
+            "--currency",
+            "USD",
+            "--allow-billable",
+        ],
+        check=False,
+        capture_output=True,
+        env={**os.environ, "EMBEDDING_TEST_KEY": "not-a-real-key"},
+        text=True,
+    )
+
+    assert process.returncode == 2
+    assert "invalid or unsafe" in process.stdout
+    assert "secret-provider" not in process.stdout + process.stderr
+    assert "not-a-real-key" not in process.stdout + process.stderr

@@ -33,6 +33,7 @@ from app.evaluation.model_benchmark import (
     run_benchmark,
     summarize_results,
 )
+from app.evaluation.provider_safety import validate_provider_base_url
 
 MAX_OUTPUT_TOKENS = 1_200
 PROTOCOL_OVERHEAD_TOKENS = 512
@@ -142,6 +143,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-cost", type=float, required=True)
     parser.add_argument("--currency", required=True)
     parser.add_argument("--allow-billable", action="store_true")
+    parser.add_argument("--allow-insecure-loopback", action="store_true")
     return parser.parse_args()
 
 
@@ -175,6 +177,14 @@ def main() -> int:
         return 2
     if re.fullmatch(r"[A-Z]{3}", args.currency) is None:
         print("--currency must be a three-letter uppercase ISO 4217 code.")
+        return 2
+    try:
+        base_url = validate_provider_base_url(
+            args.base_url,
+            allow_insecure_loopback=args.allow_insecure_loopback,
+        )
+    except ValueError as error:
+        print(str(error))
         return 2
     tool_schema_bytes = len(json.dumps(TASK_TOOLS, ensure_ascii=False).encode())
     try:
@@ -210,11 +220,10 @@ def main() -> int:
         print("Refusing to overwrite an existing benchmark checkpoint.")
         return 2
 
-    client = OpenAI(
-        api_key=api_key,
-        timeout=60.0,
-        max_retries=0,
-        **({"base_url": args.base_url} if args.base_url else {}),
+    client = (
+        OpenAI(api_key=api_key, timeout=60.0, max_retries=0, base_url=base_url)
+        if base_url
+        else OpenAI(api_key=api_key, timeout=60.0, max_retries=0)
     )
 
     def call_provider(case: BenchmarkCase) -> BenchmarkResult:

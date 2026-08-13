@@ -19,6 +19,7 @@ from app.evaluation.model_benchmark import (
     run_benchmark,
     summarize_results,
 )
+from app.evaluation.provider_safety import validate_provider_base_url
 
 DATASET = Path(__file__).parents[3] / "benchmarks" / "tutor-model-cases.json"
 RUNNER = Path(__file__).parents[3] / "scripts" / "run_model_benchmark.py"
@@ -208,6 +209,42 @@ def test_benchmark_cost_ceiling_is_conservative_and_requires_real_prices() -> No
 
 
 @pytest.mark.parametrize(
+    "url",
+    [
+        "http://provider.example/v1",
+        "https://user:secret@provider.example/v1",
+        "https://provider.example/v1?key=secret",
+        "https://provider.example/v1#fragment",
+        "https://[broken",
+        "https://provider.example/\x00",
+    ],
+)
+def test_provider_base_url_rejects_unsafe_secret_destinations(url: str) -> None:
+    with pytest.raises(ValueError, match="Provider base URL is invalid or unsafe"):
+        validate_provider_base_url(url, allow_insecure_loopback=False)
+
+
+def test_provider_base_url_allows_https_and_explicit_loopback_development() -> None:
+    assert (
+        validate_provider_base_url(
+            "https://provider.example/compatible-mode/v1",
+            allow_insecure_loopback=False,
+        )
+        == "https://provider.example/compatible-mode/v1"
+    )
+    assert (
+        validate_provider_base_url(
+            "http://127.0.0.1:11434/v1", allow_insecure_loopback=True
+        )
+        == "http://127.0.0.1:11434/v1"
+    )
+    with pytest.raises(ValueError):
+        validate_provider_base_url(
+            "http://provider.example/v1", allow_insecure_loopback=True
+        )
+
+
+@pytest.mark.parametrize(
     ("input_tokens", "output_tokens", "input_price", "output_price"),
     [
         ([-1], 100, 1.0, 1.0),
@@ -303,4 +340,45 @@ def test_runner_refuses_existing_output_before_constructing_provider_client(
     assert process.returncode == 2
     assert "Refusing to overwrite" in process.stdout
     assert output.read_text(encoding="utf-8") == '{"evidence": "preserve"}'
+    assert "not-a-real-key" not in process.stdout + process.stderr
+
+
+def test_model_runner_rejects_unsafe_base_url_before_provider_client(
+    tmp_path: Path,
+) -> None:
+    process = subprocess.run(
+        [
+            sys.executable,
+            str(RUNNER),
+            "--provider",
+            "test-provider",
+            "--model",
+            "test-model",
+            "--base-url",
+            "http://secret-provider.example/v1",
+            "--api-key-env",
+            "BENCHMARK_TEST_KEY",
+            "--output",
+            str(tmp_path / "model.json"),
+            "--limit",
+            "1",
+            "--input-price-per-million",
+            "1",
+            "--output-price-per-million",
+            "1",
+            "--max-cost",
+            "1",
+            "--currency",
+            "USD",
+            "--allow-billable",
+        ],
+        check=False,
+        capture_output=True,
+        env={**os.environ, "BENCHMARK_TEST_KEY": "not-a-real-key"},
+        text=True,
+    )
+
+    assert process.returncode == 2
+    assert "invalid or unsafe" in process.stdout
+    assert "secret-provider" not in process.stdout + process.stderr
     assert "not-a-real-key" not in process.stdout + process.stderr
