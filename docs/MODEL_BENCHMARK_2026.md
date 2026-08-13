@@ -32,8 +32,11 @@ Only the first two levels are complete. Anything stronger is recorded as unknown
 - Scoring library: `services/rag-api/app/evaluation/model_benchmark.py`.
 - Tests: `services/rag-api/tests/test_model_benchmark.py`.
 
-The runner exits before creating a client unless `--allow-billable` is explicitly supplied. It never
-writes API keys to results. Automatic checks are intentionally narrow; a human must still score
+The runner exits before creating a client unless `--allow-billable` is explicitly supplied. A live
+run also requires explicit input/output prices, currency and `--max-cost`. Before constructing the
+SDK client it computes a deliberately conservative whole-run ceiling (one UTF-8 byte per possible
+input token, tool-schema/protocol allowance, and the full output-token cap) and refuses a run above
+the approved maximum. It never writes API keys to results. Automatic checks are intentionally narrow; a human must still score
 retrieval relevance, source and citation correctness, teaching depth, step-by-step quality, Chinese
 quality, follow-up coherence, hallucination, and instruction adherence.
 
@@ -46,6 +49,10 @@ services\rag-api\.venv\Scripts\python.exe scripts\run_model_benchmark.py `
   --base-url "https://provider.example/v1" `
   --api-key-env "CANDIDATE_API_KEY" `
   --output "work\benchmarks\candidate.json" `
+  --input-price-per-million <verified-current-price> `
+  --output-price-per-million <verified-current-price> `
+  --max-cost <approved-maximum> `
+  --currency <ISO-4217-code> `
   --allow-billable
 ```
 
@@ -54,6 +61,10 @@ Responses stream and record time-to-first-token, total latency, P50/P95, and str
 tool cases remain non-streaming so their function-call output can be scored directly. The client
 uses a 60-second timeout and zero SDK retries so the benchmark never hides a second billable attempt.
 Repeat each candidate at least three times before treating the latency percentiles as stable.
+Output paths are non-overwriting. Each completed case is atomically checkpointed; a provider
+failure preserves already-paid evidence without an automatic resume or retry that could double
+charge. A successful final artifact records its currency, approved maximum, preflight ceiling and
+actual token-based cost estimate. Use a new output path for every repetition.
 
 ## Current first-party capability matrix
 
@@ -131,7 +142,7 @@ production switch.
 ## Stage 5 acceptance
 
 - 50-case eval dataset: **PASS**
-- fail-closed, credential-safe runner: **PASS**
+- fail-closed, credential-safe, budget-capped and checkpointed runner: **PASS**
 - independent tutor / Agent / embedding variables with legacy fallback: **PASS**
 - local Responses/configuration contract tests: **PASS**
 - real provider quality, latency, cost comparison: **BLOCKED — paid calls not authorized**

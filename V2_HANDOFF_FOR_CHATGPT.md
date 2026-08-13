@@ -135,7 +135,7 @@ backup, deploy incrementally and append only verified facts to
 
 ## 14. Verification and next safe work
 
-The final local evidence is 167 RAG tests, 29 Web tests, 51 Agent tests, Ruff, strict Mypy 40 files,
+The final local evidence is 175 RAG tests, 29 Web tests, 51 Agent tests, Ruff, strict Mypy 41 files,
 both TypeScript checks/builds and Chrome 4/4. Review `docs/V2_TEST_REPORT.md`. The next authorized
 release work is production evidence collection and credential rotation; the next quality work that
 requires new authorization is the billable 50-case model benchmark. Immutable external publication
