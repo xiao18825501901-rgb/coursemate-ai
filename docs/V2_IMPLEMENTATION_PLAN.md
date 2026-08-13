@@ -1,5 +1,13 @@
 # CourseMate AI V2 Implementation Plan
 
+## Release-candidate status (2026-08-13)
+
+Stages 0-8 and Stage 9 source hardening, review, migration rehearsal, backup/restore package, full
+regression and handoff are complete on `feature/coursemate-v2-ai-tutor`. The billable Stage 5 live
+model comparison and Stage 9 production deployment/smoke are intentionally not complete because the
+request forbids unapproved paid calls and no reachable production/control-plane access was present.
+See `V2_TEST_REPORT.md` for the acceptance matrix; criteria G and N remain not passed.
+
 This plan implements `docs/specs/V2_PLATFORM_SPEC.md` through small vertical slices. Every task has an acceptance gate and touches no more than five primary files unless explicitly split.
 
 ## Stage 0 — Baseline and Contracts

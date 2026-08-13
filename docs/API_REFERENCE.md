@@ -117,3 +117,49 @@ The API may return 502 for an unavailable/model failure. Direct task CRUD remain
 ## Operational controls
 
 The Agent accepts JSON bodies up to 64 KiB and applies 120 requests per minute per client. Both APIs allow only the configured WEB_ORIGIN through CORS. Agent responses use Helmet headers; RAG adds nosniff, DENY framing, and no-referrer headers.
+
+## V2 RAG resource additions
+
+All routes below require a verified session. Foreign private/owner resources return 404. JSON remains
+camelCase and strict.
+
+```text
+PATCH  /api/courses/:courseId
+DELETE /api/courses/:courseId
+DELETE /api/courses/:courseId/documents/:documentId
+
+GET    /api/conversations?courseId=&page=&pageSize=
+POST   /api/conversations
+GET    /api/conversations/:conversationId
+PATCH  /api/conversations/:conversationId
+DELETE /api/conversations/:conversationId
+
+POST   /api/teaching-profiles/preview
+GET    /api/courses/:courseId/teaching-profiles
+POST   /api/courses/:courseId/teaching-profiles
+
+POST   /api/courses/:courseId/publication-requests
+GET    /api/admin/publication-requests                 administrator
+POST   /api/admin/publication-requests/:requestId/review administrator
+DELETE /api/admin/courses/:courseId/publication        administrator
+POST   /api/admin/retrieval/diagnostics                administrator
+```
+
+Ordinary course creation always produces a private owned course; administrator creation produces an
+official published course. `POST /api/qa/chat` accepts optional `conversationId` and returns intent,
+retrieval strategy, language, rewritten query, example mode and teaching-profile version in safe SSE
+metadata. Published courses are community-readable but owner mutations return
+`409 PUBLISHED_COURSE_LOCKED` until administrator unpublish.
+
+Publication submission requires:
+
+```json
+{
+  "shareMaterialsConsent": true,
+  "rightsConfirmation": true,
+  "consentVersion": "v1"
+}
+```
+
+Review accepts `{ "decision": "approve|reject", "reviewNote": "..." }`. Raw owner/reviewer IDs and
+server storage paths are excluded from responses.

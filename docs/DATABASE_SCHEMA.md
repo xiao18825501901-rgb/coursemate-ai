@@ -1,5 +1,25 @@
 # Database Schema
 
+> V2 addendum: the executable schema is `services/rag-api/app/db.py`; additive versions 5-7 are
+> recorded in `services/rag-api/migrations/005_007_v2_course_platform.sql` and operationally explained
+> in `docs/V2_DATABASE_MIGRATION.md`.
+
+## V2 RAG additions
+
+- `courses`: `owner_user_id`, `course_type`, `visibility`, `publication_status`, `published_at`, and
+  `updated_at`. Existing rows migrate to official/public/published; user rows are private by default.
+- `conversations`: durable `title`, `preferred_language`, owner and optional pinned
+  `teaching_profile_version`.
+- `messages`: `metadata_json` stores safe router/retrieval/teaching metadata beside citations.
+- `chunks`: `metadata_json` and `parent_key` support exact question/subpart context.
+- `course_teaching_profiles`: immutable typed versions, generated preference prompt and audit creator.
+- `course_publication_requests`: dual consent, pending/approved/rejected/withdrawn state and review
+  timestamps/actors/notes.
+
+Indexes cover visibility/owner/update ordering, profile course/version, publication status/submission,
+conversation owner/course/update and chunk course/parent/ordinal. Foreign-key cascades remove child
+records when an explicitly authorized course/conversation/document is deleted.
+
 ## Ownership
 
 - data/rag.sqlite3 is opened only by the Python RAG service.

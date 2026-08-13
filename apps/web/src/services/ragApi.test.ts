@@ -16,6 +16,7 @@ import {
   updateCourse,
   uploadDocument,
 } from "./ragApi";
+import type { TeachingProfilePreview } from "../types/api";
 
 
 describe("SseDecoder", () => {
@@ -140,13 +141,14 @@ describe("private course API", () => {
   it("does not send read-only prompt preview fields when saving a profile", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: "profile_1" })));
     vi.stubGlobal("fetch", fetchMock);
-    await saveTeachingProfile(vi.fn().mockResolvedValue("token-a"), "my-course", {
+    const preview: TeachingProfilePreview = {
       language: "en", studentLevel: "beginner", learningGoal: "Learn",
       teachingStyles: ["step-by-step"], answerDepth: "balanced",
       examplePreference: "when-helpful", exercisePolicy: "offer", examOrientation: false,
       citationPreference: "standard", mathDetailLevel: "standard", terminologyStyle: "plain",
       customRequirements: "", generatedPrompt: "read-only preview",
-    });
+    };
+    await saveTeachingProfile(vi.fn().mockResolvedValue("token-a"), "my-course", preview);
 
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     expect(body.generatedPrompt).toBeUndefined();
