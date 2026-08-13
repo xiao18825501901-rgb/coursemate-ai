@@ -25,12 +25,24 @@ New profile/publication
 tables were empty. This verifies additive/idempotent behavior against the available local data; it
 does not prove the unknown production database.
 
+A second, full local recovery rehearsal used the current executable scripts and a later local
+checkpoint. The backup contained the RAG database, an Agent database, and 68 uploaded files
+(124,209,844 bytes). The RAG source/backup/restore copies matched at 3 courses, 67 documents,
+1,937 chunks, 27 conversations and 62 messages; the Agent backup/restore copies matched at 2 tasks.
+Both restored databases reported `integrity_check = ok`, zero foreign-key violations and the
+expected migration versions (RAG 1-10; Agent 1). Every restored upload path and SHA-256 matched the
+source. The Agent source was the latest completed deterministic E2E database because this checkout
+does not contain a durable production Agent database; this is local recovery evidence only.
+
 ## Production procedure
 
 1. Put the release in maintenance/read-only mode and record current commit/service/env names without
    printing values.
-2. Run `ops/backup_v2.sh` with explicit database, upload and backup-root paths. Preserve the output
-   directory off-host and record its hashes.
+2. Run `ops/backup_v2.sh` with explicit `RAG_DATABASE_PATH`, `AGENT_DATABASE_PATH`,
+   `RAG_UPLOAD_DIR`, and `BACKUP_ROOT`. The script uses SQLite online backup for both databases,
+   archives uploads without following symlinks, verifies both SQLite copies, writes a versioned
+   manifest and SHA-256 set, and publishes only by atomic rename. Preserve the completed output
+   directory in access-controlled, immutable off-host storage.
 3. Run `ops/restore_v2.sh` into a new isolated directory and start the release against that copy.
 4. Initialize twice; verify integrity/foreign keys, versions, row counts, FTS count, document hashes
    and the presence/count of uploaded files.
@@ -40,11 +52,19 @@ does not prove the unknown production database.
 
 Do not copy only the main SQLite file while a live WAL database is active. Use SQLite online backup
 or stop the writer and treat database/WAL/SHM consistently. Uploads and DB must be restored from the
-same checkpoint.
+same maintenance checkpoint. A hidden `.partial` directory means the operation failed and is not a
+usable backup or restore; inspect it without exposing private data, then remove it according to the
+incident/evidence policy.
+
+`ops/restore_v2.sh` refuses an existing target and a target inside the backup. It validates the
+complete checksum set, manifest version/count/byte totals, rejects duplicate/traversal/symlink or
+special archive members, and rechecks both databases before atomically publishing the isolated
+restore. Checksums detect corruption but are not signatures: access to the backup store must remain
+restricted and tamper-evident.
 
 ## Rollback
 
 On integrity, authorization, citation or error-rate failure, stop the new writer, deploy the prior
-commit and restore the verified pre-release database plus uploads as one unit. Do not attempt to
+commit and restore the verified pre-release RAG database, Agent database and uploads as one unit. Do not attempt to
 drop additive columns in place. If no V2 writes occurred, the prior binary can ignore additive
 schema; once V2 user/profile/publication writes exist, use the full snapshot restore.

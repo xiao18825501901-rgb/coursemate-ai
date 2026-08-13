@@ -7,17 +7,20 @@ deterministic test providers. No billable model call was made.
 
 | Gate | Result |
 |---|---|
-| RAG pytest | **146 passed**, 1 non-failing dependency warning |
-| RAG Ruff | **passed** for app, tests and both Python operational scripts |
-| RAG strict Mypy | **passed**, 39 source files |
+| RAG pytest | **163 passed**, 1 non-failing dependency warning |
+| RAG Ruff | **passed** for app, tests and all three Python operational scripts |
+| RAG/monitor strict Mypy | **passed**, 40 source files |
 | Web Vitest | **29 passed** across 6 files |
-| Agent Vitest | **48 passed** across 8 files |
+| Agent Vitest | **51 passed** across 9 files |
 | Web/Agent TypeScript | **passed** |
 | Web production build | **passed**, 310.12 kB JS / 90.85 kB gzip |
 | Agent production build | **passed** |
 | Playwright Chrome | **4/4 passed** |
 | npm production dependency audit | **0 vulnerabilities** |
 | Migration-on-copy | **integrity ok**, no FK violations, versions 1-10, 8 activity triggers, second run idempotent |
+| Full backup/isolated restore | **passed** for RAG DB + Agent DB + 68 uploads; hashes/counts/integrity/FKs matched |
+| API readiness/security headers | **passed** including generic 503, read-only missing-DB behavior, HSTS/CSP/Permissions Policy |
+| Monitoring probe | **passed** for fresh/stale/incomplete backup handling and HTTPS fail-closed behavior |
 | Tracked credential-pattern scan | **no match** |
 
 The warning is Starlette's TestClient transport deprecation; it does not change behavior and its
@@ -42,6 +45,8 @@ course/conversation/profile/task isolation; file validation/deletion; profile ve
 owner withdrawal and dual-consent/admin publication; post-publication owner lock;
 course/file/byte quotas; course language inheritance; and all legacy Agent tools.
 Course activity timestamps are also verified for document, conversation and profile changes.
+The operational tests additionally cover incomplete backups, checksum tampering, unsafe/duplicate
+archive members, manifest count/size budgets, non-overwrite restore and distinct database paths.
 
 ## Acceptance status
 

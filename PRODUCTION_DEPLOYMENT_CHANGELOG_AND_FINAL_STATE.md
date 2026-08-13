@@ -9,6 +9,10 @@
 - Added private user courses, secure ingestion/deletion, teaching-profile versions/prompt builder,
   dual-consent administrator publication and post-review mutation locking.
 - Added schema versions 5-7, SQL record, migration-on-copy evidence and backup/isolated-restore tools.
+- Expanded recovery to one verified unit containing both SQLite databases and uploads; hardened
+  archive extraction, checksums, manifests, non-overwrite publication and persistent-state health.
+- Added production API/static security headers and regression coverage. Frontend CSP remains gated
+  on verified production Clerk/API origins.
 - Passed the complete local source/build/browser gates recorded in `docs/V2_TEST_REPORT.md`.
 
 ## Final production truth

@@ -19,7 +19,7 @@ runtime evidence.
 | Sections 57-63: publication/community | PASS except optional clone | consent, withdraw, admin file review, lock/read-only; clone deferred for licensing |
 | Sections 64-68: database models | PASS | additive schema versions 1-10 and migration-on-copy |
 | Sections 69-76: tutor flows/UX | PASS | API/component/Chrome journeys and responsive test |
-| Sections 77-86: evaluation/tests | PASS locally | 50-case data/harness plus 146/29/48/4 automated gates |
+| Sections 77-86: evaluation/tests | PASS locally | 50-case data/harness plus 163/29/51/4 automated gates |
 | Sections 87-90: production | LOCAL PASS / EXTERNAL BLOCKED | config/runbook/rollback pass; live deploy/smoke not executed |
 | Sections 91-92: handoff/file packs | PASS | root handoff and `docs/file-request-packs/README.md` |
 
@@ -63,9 +63,9 @@ release. Do not change either label without current external evidence.
 
 ## Verified release evidence
 
-- RAG: 146 pytest, Ruff, strict Mypy (39 files).
+- RAG/operations: 163 pytest, Ruff, strict Mypy (40 files).
 - Web: 29 Vitest, TypeScript, production build (310.12 kB JS / 90.85 kB gzip).
-- Agent: 48 Vitest, TypeScript and production build.
+- Agent: 51 Vitest, TypeScript and production build.
 - Browser: Chrome 4/4, including three completed QA turns, refresh/fresh-context deterministic
   login recovery, and the private-course journey. Real Clerk logout/login remains part of
   production smoke.
@@ -73,10 +73,13 @@ release. Do not change either label without current external evidence.
 - Migration copy: versions 1-10, eight activity triggers, integrity `ok`, zero foreign-key
   violations, two-run idempotence; 3 courses, 67 documents, 1,937 chunks, 19 conversations,
   38 messages.
+- Full local recovery rehearsal: RAG DB + Agent DB + 68 uploads; restored paths/SHA-256 and row
+  counts matched, both databases had integrity `ok` and zero foreign-key violations. The Agent
+  source was a deterministic E2E sample, not an unknown production database.
 
 ## Required external next actions
 
 1. Rotate the provider credential previously at risk and update only backend secret storage.
-2. Supply redacted production inventory/access and prove a restorable DB + uploads backup.
+2. Supply redacted production inventory/access and prove a restorable RAG DB + Agent DB + uploads backup.
 3. Authorize a bounded budget/model list before running the live 50-case benchmark.
 4. Only then deploy incrementally, execute production smoke tests, monitor, and append evidence.

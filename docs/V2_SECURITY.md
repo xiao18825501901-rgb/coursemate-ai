@@ -17,13 +17,18 @@ test.
 - Course/file/owner-byte quotas are configurable and checked atomically; user storage namespaces use
   opaque owner hashes and server-generated document names.
 - SQL uses parameters. SQLite foreign keys, busy timeout, WAL and indexes are configured.
-- CORS accepts one configured origin. RAG emits nosniff/frame-deny/no-referrer; Agent uses Helmet and
-  request limits.
+- CORS accepts one configured origin. RAG emits HSTS in production plus a deny-all API CSP,
+  nosniff, frame-deny, no-referrer and restrictive Permissions Policy. Agent uses Helmet/HSTS,
+  restrictive Permissions Policy and request limits. Netlify emits HSTS, nosniff, frame-deny,
+  no-referrer and restrictive Permissions Policy for the static frontend.
 - Model/provider secrets are backend-only `SecretStr`/environment values. Tracked-source scans found
   no credential-pattern match. API models exclude stored paths and sensitive owner/reviewer IDs.
 - Course content, history, profile notes and model outputs are treated as untrusted at the prompt and
   typed boundary.
 - QA and Agent model calls have per-owner minute limits; Agent tool rounds and body size are bounded.
+- Health checks fail closed on missing schema migrations; the RAG database probe is read-only and
+  cannot recreate a missing database. Backup/restore covers both databases and uploads with
+  checksums, safe archive extraction, SQLite integrity/FK checks and non-overwrite semantics.
 
 ## Required production gates
 
@@ -31,11 +36,16 @@ test.
    only the backend secret store. Never paste the replacement into Git, logs or this report.
 2. Confirm exact `WEB_ORIGIN`, Clerk production keys, administrator IDs, database/upload paths and
    provider region/model through redacted runtime inspection.
-3. Add Caddy HSTS/TLS headers, request/body limits and log redaction; verify UFW exposes only SSH,
-   HTTP and HTTPS as intended.
+3. Verify Caddy TLS/header behavior does not weaken or duplicate application headers, configure
+   request/body limits and log redaction, and verify UFW exposes only SSH, HTTP and HTTPS as intended.
 4. Run dependency vulnerability checks in the deployment network and resolve critical/high findings.
-5. Configure disk, error-rate, latency, backup-age and ingestion-failure monitoring.
+5. Schedule `ops/monitor_v2.sh` for API health/latency, disk and completed-backup age, and alert on
+   its nonzero exit. Configure error-rate, p95 latency, repeated-429 and ingestion-failure alerts in
+   the production log/metrics platform; those require live runtime integration.
 6. Do not expose the populated local course corpus unless rights are confirmed.
+7. Add a frontend CSP only after the exact production Clerk, RAG and Agent origins are known; then
+   smoke login, token refresh and both APIs. A guessed CSP can break authentication or create an
+   unsafe wildcard policy.
 
 ## Accepted/known limitations
 
