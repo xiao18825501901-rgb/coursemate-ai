@@ -294,6 +294,37 @@ class TeachingProfilePage(ApiModel):
     items: list[TeachingProfile]
 
 
+class PublicationSubmit(ApiModel):
+    share_materials_consent: bool
+    rights_confirmation: bool
+    consent_version: str = Field(pattern=r"^v[1-9][0-9]*$")
+
+
+class PublicationReview(ApiModel):
+    decision: str = Field(pattern=r"^(approve|reject)$")
+    review_note: str = Field(default="", max_length=1_000)
+
+
+class PublicationRequest(ApiModel):
+    id: str
+    course_id: str
+    course_name: str
+    owner_user_id: str = Field(exclude=True)
+    status: str
+    share_materials_consent: bool
+    rights_confirmation: bool
+    consent_version: str
+    consented_at: datetime
+    submitted_at: datetime
+    reviewed_at: datetime | None
+    reviewed_by_user_id: str | None = Field(exclude=True)
+    review_note: str
+
+
+class PublicationRequestPage(ApiModel):
+    items: list[PublicationRequest]
+
+
 class ConversationMessage(ApiModel):
     id: str
     role: str

@@ -76,6 +76,7 @@ class IngestionService:
     ) -> Course:
         course_type = "official" if is_admin else "user"
         visibility = "public" if is_admin else "private"
+        publication_status = "published" if is_admin else "private"
         owner = None if is_admin else owner_user_id
         try:
             with self.database.connect() as connection:
@@ -83,10 +84,22 @@ class IngestionService:
                     """
                     INSERT INTO courses (
                         id, name, description, owner_user_id, course_type, visibility,
-                        updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                        publication_status, published_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?,
+                        CASE WHEN ? = 'published'
+                            THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE NULL END,
+                        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
                     """,
-                    (payload.id, payload.name, payload.description, owner, course_type, visibility),
+                    (
+                        payload.id,
+                        payload.name,
+                        payload.description,
+                        owner,
+                        course_type,
+                        visibility,
+                        publication_status,
+                        publication_status,
+                    ),
                 )
                 row = connection.execute(
                     "SELECT * FROM courses WHERE id = ?", (payload.id,)

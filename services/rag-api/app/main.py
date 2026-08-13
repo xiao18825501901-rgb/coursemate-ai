@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.ingestion import router as ingestion_router
+from app.api.publication import router as publication_router
 from app.api.qa import router as qa_router
 from app.api.teaching_profiles import router as teaching_profiles_router
 from app.auth import AuthVerifier, ClerkAuthVerifier, TestAuthVerifier
@@ -27,6 +28,7 @@ from app.rag.embeddings import (
 from app.rag.retrieval import HybridRetriever
 from app.repositories.chunks import ChunkRepository
 from app.services.ingestion import IngestionService, MissingEmbeddingProvider
+from app.services.publication import PublicationService
 from app.services.qa import QaService
 from app.services.teaching_profiles import TeachingProfileService
 
@@ -94,6 +96,7 @@ def create_app(
     application.state.database = database
     teaching_profile_service = TeachingProfileService(database)
     application.state.teaching_profile_service = teaching_profile_service
+    application.state.publication_service = PublicationService(database)
     application.state.settings = resolved_settings
     application.state.auth_verifier = (
         auth_verifier
@@ -173,4 +176,5 @@ def create_app(
     application.include_router(ingestion_router)
     application.include_router(qa_router)
     application.include_router(teaching_profiles_router)
+    application.include_router(publication_router)
     return application
