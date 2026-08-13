@@ -60,8 +60,12 @@ services\rag-api\.venv\Scripts\python.exe scripts\run_model_benchmark.py `
 ```
 
 Run a small compatibility canary first (`--limit 2`), then all 50 cases. Non-tool cases use the
-Responses stream and record time-to-first-token, total latency, P50/P95, and streaming support;
-tool cases remain non-streaming so their function-call output can be scored directly. The client
+Responses stream and record time-to-first-token, total latency, P50/P95, and streaming support.
+The five Agent cases use the same strict task schemas and instructions as the production Agent,
+declare an exact expected tool sequence, simulate content-free tool results, replay every original
+`call_id`, and require a final natural-language response. They validate JSON argument shape,
+tool name/order, and multi-round Responses compatibility without mutating any real task database.
+The preflight cost ceiling reserves all three possible Agent response rounds. The client
 uses a 60-second timeout and zero SDK retries so the benchmark never hides a second billable attempt.
 Repeat each candidate at least three times before treating the latency percentiles as stable.
 Output paths are non-overwriting. Each completed case is atomically checkpointed; a provider

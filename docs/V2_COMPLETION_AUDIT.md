@@ -19,7 +19,7 @@ runtime evidence.
 | Sections 57-63: publication/community | PASS except optional clone | consent, withdraw, admin file review, lock/read-only; clone deferred for licensing |
 | Sections 64-68: database models | PASS | additive schema versions 1-10 and migration-on-copy |
 | Sections 69-76: tutor flows/UX | PASS | API/component/Chrome journeys and responsive test |
-| Sections 77-86: evaluation/tests | PASS locally | generation + embedding harnesses plus 190/29/51/4 automated gates |
+| Sections 77-86: evaluation/tests | PASS locally | generation + embedding harnesses plus 194/29/51/4 automated gates |
 | Sections 87-90: production | LOCAL PASS / EXTERNAL BLOCKED | config/runbook/rollback pass; live deploy/smoke not executed |
 | Sections 91-92: handoff/file packs | PASS | root handoff and `docs/file-request-packs/README.md` |
 
@@ -63,7 +63,7 @@ release. Do not change either label without current external evidence.
 
 ## Verified release evidence
 
-- RAG/operations: 190 pytest, Ruff, strict Mypy (44 files including both benchmark CLIs).
+- RAG/operations: 194 pytest, Ruff, strict Mypy (45 files including both benchmark CLIs).
 - Web: 29 Vitest, TypeScript, production build (310.12 kB JS / 90.85 kB gzip).
 - Agent: 51 Vitest, TypeScript and production build.
 - Browser: Chrome 4/4, including three completed QA turns, refresh/fresh-context deterministic
