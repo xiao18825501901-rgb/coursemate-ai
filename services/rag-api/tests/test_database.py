@@ -115,7 +115,7 @@ def test_legacy_conversations_are_quarantined_and_migration_is_repeatable(
         ).fetchone()
 
     assert tuple(conversation) == ("legacy_orphaned", "New Conversation", "auto")
-    assert migrations == 9
+    assert migrations == 10
     assert tuple(course[:3]) == (None, "official", "public")
     assert course["updated_at"]
     assert "metadata_json" in message_columns
@@ -131,7 +131,7 @@ def test_legacy_conversations_are_quarantined_and_migration_is_repeatable(
         ]
 
     assert {"metadata_json", "parent_key"}.issubset(chunk_columns)
-    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 
 def test_database_repairs_empty_course_timestamp_after_migration(tmp_path: Path) -> None:
@@ -253,7 +253,7 @@ def test_v2_conversation_migration_preserves_messages_and_derives_title(
     assert conversation["title"].startswith("DBSCAN 中 core point")
     assert conversation["preferred_language"] == "auto"
     assert message["metadata_json"] == "{}"
-    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 
 def test_deployment_path_environment_aliases_are_honored(
@@ -328,3 +328,76 @@ def test_chunk_fts_is_synchronized_and_document_delete_cascades(tmp_path: Path) 
     assert [row["chunk_id"] for row in hits] == ["chunk-1"]
     assert remaining_chunks == 0
     assert remaining_fts == 0
+
+
+def test_course_activity_tracks_documents_conversations_and_profiles(tmp_path: Path) -> None:
+    database = Database(make_settings(tmp_path))
+    database.initialize()
+
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO courses (id, name, description, updated_at) VALUES (?, ?, ?, ?)",
+            ("activity-course", "Activity", "", "2000-01-01T00:00:00.000Z"),
+        )
+        connection.execute(
+            """
+            INSERT INTO documents (
+                id, course_id, filename, stored_path, media_type, extension, sha256, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "activity-doc",
+                "activity-course",
+                "notes.md",
+                "uploads/notes.md",
+                "text/markdown",
+                ".md",
+                "c" * 64,
+                "pending",
+            ),
+        )
+        after_document = connection.execute(
+            "SELECT updated_at FROM courses WHERE id = 'activity-course'"
+        ).fetchone()["updated_at"]
+
+        connection.execute(
+            "UPDATE courses SET updated_at = ? WHERE id = ?",
+            ("2000-01-01T00:00:00.000Z", "activity-course"),
+        )
+        connection.execute(
+            """
+            INSERT INTO conversations (id, owner_user_id, course_id, title)
+            VALUES (?, ?, ?, ?)
+            """,
+            ("activity-conversation", "user-a", "activity-course", "Activity chat"),
+        )
+        after_conversation = connection.execute(
+            "SELECT updated_at FROM courses WHERE id = 'activity-course'"
+        ).fetchone()["updated_at"]
+
+        connection.execute(
+            "UPDATE courses SET updated_at = ? WHERE id = ?",
+            ("2000-01-01T00:00:00.000Z", "activity-course"),
+        )
+        connection.execute(
+            """
+            INSERT INTO course_teaching_profiles (
+                id, course_id, version, created_by_user_id, language, student_level,
+                learning_goal, teaching_styles_json, answer_depth, example_preference,
+                exercise_policy, exam_orientation, citation_preference, math_detail_level,
+                terminology_style, custom_requirements, generated_prompt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "activity-profile", "activity-course", 1, "user-a", "auto", "beginner",
+                "Learn", '["step-by-step"]', "balanced", "when-helpful", "offer", 0,
+                "standard", "standard", "plain", "", "Teach step by step",
+            ),
+        )
+        after_profile = connection.execute(
+            "SELECT updated_at FROM courses WHERE id = 'activity-course'"
+        ).fetchone()["updated_at"]
+
+    assert after_document != "2000-01-01T00:00:00.000Z"
+    assert after_conversation != "2000-01-01T00:00:00.000Z"
+    assert after_profile != "2000-01-01T00:00:00.000Z"
