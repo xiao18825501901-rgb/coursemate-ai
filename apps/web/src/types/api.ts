@@ -47,6 +47,7 @@ export interface CourseDocument {
   mediaType: string;
   extension: string;
   sha256: string;
+  byteSize: number;
   status: DocumentStatus;
   chunkCount: number;
   errorMessage: string | null;

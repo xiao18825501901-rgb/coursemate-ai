@@ -62,3 +62,22 @@ def save_profile(
         owner_user_id=user.user_id,
         is_admin=user.is_admin,
     )
+
+
+@router.post(
+    "/api/courses/{course_id}/teaching-profiles/{version}/restore",
+    response_model=TeachingProfile,
+    status_code=status.HTTP_201_CREATED,
+)
+def restore_profile(
+    course_id: str,
+    version: int,
+    request: Request,
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+) -> TeachingProfile:
+    return _service(request).restore(
+        course_id,
+        version,
+        owner_user_id=user.user_id,
+        is_admin=user.is_admin,
+    )

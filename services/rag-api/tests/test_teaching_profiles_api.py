@@ -147,3 +147,48 @@ def test_conversation_keeps_the_profile_version_it_started_with(tmp_path: Path) 
     assert "Version one goal" in provider.instructions[0]
     assert "Version one goal" in provider.instructions[1]
     assert "Version two goal" not in provider.instructions[1]
+
+
+def test_owner_can_restore_historical_profile_as_new_audited_version(tmp_path: Path) -> None:
+    provider = FakeAnswerProvider()
+    with client_for(tmp_path, provider) as client:
+        headers = {"Authorization": "Bearer user-a"}
+        client.post(
+            "/api/courses",
+            json={"id": "private-course", "name": "Private"},
+            headers=headers,
+        )
+        client.post(
+            "/api/courses/private-course/teaching-profiles",
+            json=profile_payload("Original goal"),
+            headers=headers,
+        )
+        client.post(
+            "/api/courses/private-course/teaching-profiles",
+            json=profile_payload("Replacement goal"),
+            headers=headers,
+        )
+        restored = client.post(
+            "/api/courses/private-course/teaching-profiles/1/restore",
+            headers=headers,
+        )
+        versions = client.get(
+            "/api/courses/private-course/teaching-profiles",
+            headers=headers,
+        )
+        foreign = client.post(
+            "/api/courses/private-course/teaching-profiles/1/restore",
+            headers={"Authorization": "Bearer user-b"},
+        )
+        missing = client.post(
+            "/api/courses/private-course/teaching-profiles/99/restore",
+            headers=headers,
+        )
+
+    assert restored.status_code == 201
+    assert restored.json()["version"] == 3
+    assert restored.json()["learningGoal"] == "Original goal"
+    assert [item["version"] for item in versions.json()["items"]] == [3, 2, 1]
+    assert foreign.status_code == 404
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "PROFILE_NOT_FOUND"

@@ -163,6 +163,62 @@ class TeachingProfileService:
             raise ApiError(500, "PROFILE_SAVE_FAILED", "Teaching profile could not be saved.")
         return self._profile(row)
 
+    def restore(
+        self,
+        course_id: str,
+        version: int,
+        *,
+        owner_user_id: str,
+        is_admin: bool,
+    ) -> TeachingProfile:
+        require_course_access(
+            self.database,
+            course_id,
+            owner_user_id=owner_user_id,
+            is_admin=is_admin,
+            write=True,
+        )
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            source = connection.execute(
+                "SELECT * FROM course_teaching_profiles "
+                "WHERE course_id = ? AND version = ?",
+                (course_id, version),
+            ).fetchone()
+            if source is None:
+                raise ApiError(404, "PROFILE_NOT_FOUND", "The teaching profile was not found.")
+            new_version = int(
+                connection.execute(
+                    "SELECT COALESCE(MAX(version), 0) + 1 FROM course_teaching_profiles "
+                    "WHERE course_id = ?",
+                    (course_id,),
+                ).fetchone()[0]
+            )
+            profile_id = f"profile_{uuid4().hex}"
+            connection.execute(
+                """
+                INSERT INTO course_teaching_profiles (
+                    id, course_id, version, created_by_user_id, language, student_level,
+                    learning_goal, teaching_styles_json, answer_depth, example_preference,
+                    exercise_policy, exam_orientation, citation_preference, math_detail_level,
+                    terminology_style, custom_requirements, generated_prompt
+                )
+                SELECT ?, course_id, ?, ?, language, student_level, learning_goal,
+                    teaching_styles_json, answer_depth, example_preference, exercise_policy,
+                    exam_orientation, citation_preference, math_detail_level, terminology_style,
+                    custom_requirements, generated_prompt
+                FROM course_teaching_profiles
+                WHERE course_id = ? AND version = ?
+                """,
+                (profile_id, new_version, owner_user_id, course_id, version),
+            )
+            row = connection.execute(
+                "SELECT * FROM course_teaching_profiles WHERE id = ?", (profile_id,)
+            ).fetchone()
+        if row is None:
+            raise ApiError(500, "PROFILE_RESTORE_FAILED", "The profile could not be restored.")
+        return self._profile(row)
+
     def prompt_for_conversation(
         self, course_id: str, conversation_id: str
     ) -> tuple[str | None, int | None]:

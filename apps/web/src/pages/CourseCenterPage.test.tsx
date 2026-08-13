@@ -12,6 +12,7 @@ import {
   listDocuments,
   listTeachingProfiles,
   previewTeachingProfile,
+  restoreTeachingProfile,
   saveTeachingProfile,
   submitPublicationRequest,
   updateCourse,
@@ -30,6 +31,7 @@ vi.mock("../services/ragApi", () => ({
   listDocuments: vi.fn(),
   listTeachingProfiles: vi.fn(),
   previewTeachingProfile: vi.fn(),
+  restoreTeachingProfile: vi.fn(),
   saveTeachingProfile: vi.fn(),
   submitPublicationRequest: vi.fn(),
   updateCourse: vi.fn(),
@@ -49,6 +51,16 @@ const mine = {
   isOwner: true, canManage: true,
   publicationStatus: "private" as const, publishedAt: null,
   createdAt: "2026-08-13T00:00:00Z", updatedAt: "2026-08-13T00:00:00Z",
+};
+const profile = {
+  id: "profile_1", courseId: "my-course", version: 1,
+  language: "zh-CN" as const, studentLevel: "beginner" as const, learningGoal: "Pass the exam",
+  teachingStyles: ["intuition-first", "worked-examples"] as const, answerDepth: "detailed" as const,
+  examplePreference: "worked" as const, exercisePolicy: "always" as const, examOrientation: true,
+  citationPreference: "detailed" as const, mathDetailLevel: "full" as const,
+  terminologyStyle: "bilingual" as const, customRequirements: "Explain why first",
+  generatedPrompt: "Structured preview", createdAt: "2026-08-13T00:00:00Z",
+  updatedAt: "2026-08-13T00:00:00Z",
 };
 
 function renderRoutes(initialEntry = "/courses") {
@@ -110,7 +122,7 @@ describe("CourseSettingsPage", () => {
     vi.mocked(uploadDocument).mockResolvedValue({
       document: {
         id: "doc_1", courseId: "my-course", filename: "notes.md", mediaType: "text/markdown",
-        extension: ".md", sha256: "a".repeat(64), status: "pending", chunkCount: 0,
+        extension: ".md", sha256: "a".repeat(64), byteSize: 7, status: "pending", chunkCount: 0,
         errorMessage: null, createdAt: "2026-08-13T00:00:00Z", updatedAt: "2026-08-13T00:00:00Z",
       },
       job: {
@@ -129,14 +141,15 @@ describe("CourseSettingsPage", () => {
       citationPreference: "detailed", mathDetailLevel: "full", terminologyStyle: "bilingual",
       customRequirements: "Explain why first", generatedPrompt: "Structured preview",
     });
-    vi.mocked(saveTeachingProfile).mockResolvedValue({
-      id: "profile_1", courseId: "my-course", version: 1,
-      language: "zh-CN", studentLevel: "beginner", learningGoal: "Pass the exam",
-      teachingStyles: ["intuition-first", "worked-examples"], answerDepth: "detailed",
-      examplePreference: "worked", exercisePolicy: "always", examOrientation: true,
-      citationPreference: "detailed", mathDetailLevel: "full", terminologyStyle: "bilingual",
-      customRequirements: "Explain why first", generatedPrompt: "Structured preview",
-      createdAt: "2026-08-13T00:00:00Z", updatedAt: "2026-08-13T00:00:00Z",
+    vi.mocked(saveTeachingProfile).mockResolvedValue({ ...profile, teachingStyles: [...profile.teachingStyles] });
+    vi.mocked(restoreTeachingProfile).mockResolvedValue({
+      id: "profile_3", courseId: "my-course", version: 3,
+      language: "zh-CN", studentLevel: "beginner", learningGoal: "Earlier goal",
+      teachingStyles: ["intuition-first"], answerDepth: "balanced",
+      examplePreference: "when-helpful", exercisePolicy: "offer", examOrientation: false,
+      citationPreference: "standard", mathDetailLevel: "standard", terminologyStyle: "bilingual",
+      customRequirements: "", generatedPrompt: "Restored preview",
+      createdAt: "2026-08-13T00:00:02Z", updatedAt: "2026-08-13T00:00:02Z",
     });
     vi.mocked(submitPublicationRequest).mockResolvedValue({
       id: "publication_1", courseId: "my-course", courseName: "My Course",
@@ -167,6 +180,23 @@ describe("CourseSettingsPage", () => {
 
     await waitFor(() => expect(saveTeachingProfile).toHaveBeenCalled());
     expect(screen.getByText(/new conversations use v1/i)).toBeVisible();
+  });
+
+  it("restores a historical teaching profile as a new version", async () => {
+    vi.mocked(listTeachingProfiles).mockResolvedValue({
+      items: [
+        { ...profile, teachingStyles: [...profile.teachingStyles], id: "profile_2", version: 2, learningGoal: "Latest goal" },
+        { ...profile, teachingStyles: [...profile.teachingStyles], id: "profile_1", version: 1, learningGoal: "Earlier goal" },
+      ],
+    });
+    renderRoutes("/courses/my-course/settings");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Restore as new version" }));
+
+    await waitFor(() => expect(restoreTeachingProfile).toHaveBeenCalledWith(
+      expect.any(Function), "my-course", 1,
+    ));
+    expect(screen.getByText(/new conversations use v3/i)).toBeVisible();
   });
 
   it("requires both publication confirmations before submission", async () => {

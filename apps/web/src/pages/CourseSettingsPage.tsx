@@ -10,6 +10,7 @@ import {
   listDocuments,
   listTeachingProfiles,
   previewTeachingProfile,
+  restoreTeachingProfile,
   saveTeachingProfile,
   submitPublicationRequest,
   updateCourse,
@@ -114,6 +115,13 @@ export function CourseSettingsPage() {
     } catch (caught: unknown) { setError(message(caught)); }
   }
 
+  async function restoreProfile(version: number) {
+    try {
+      const restored = await restoreTeachingProfile(getToken, courseId, version);
+      setProfiles((current) => [restored, ...current]);
+    } catch (caught: unknown) { setError(message(caught)); }
+  }
+
   async function requestPublication() {
     try {
       await submitPublicationRequest(getToken, courseId);
@@ -154,7 +162,15 @@ export function CourseSettingsPage() {
           <pre>{profilePreview.generatedPrompt}</pre>
           <button className="button button-primary" onClick={() => void saveProfile()} type="button">Save as new version</button>
         </div>}
-        {profiles[0] && <p className="profile-version-note">New conversations use v{profiles[0].version}; existing conversations retain the version they started with.</p>}
+        {profiles[0] && <>
+          <p className="profile-version-note">New conversations use v{profiles[0].version}; existing conversations retain the version they started with.</p>
+          <ul className="settings-document-list" aria-label="Teaching profile version history">
+            {profiles.map((profile, index) => <li key={profile.id}>
+              <span><strong>Version {profile.version}</strong><small>{profile.learningGoal}</small></span>
+              {index > 0 && <button className="text-button" onClick={() => void restoreProfile(profile.version)} type="button">Restore as new version</button>}
+            </li>)}
+          </ul>
+        </>}
       </section>
       <section className="settings-panel publication-panel">
         <div className="panel-heading"><h2>Publication</h2><span>{course?.publicationStatus ?? "private"}</span></div>

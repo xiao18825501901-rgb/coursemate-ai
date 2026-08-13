@@ -266,6 +266,18 @@ export async function saveTeachingProfile(
   );
 }
 
+export async function restoreTeachingProfile(
+  getToken: GetSessionToken,
+  courseId: string,
+  version: number,
+): Promise<TeachingProfile> {
+  return requestJson<TeachingProfile>(
+    getToken,
+    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/teaching-profiles/${version}/restore`,
+    { method: "POST" },
+  );
+}
+
 export async function submitPublicationRequest(
   getToken: GetSessionToken,
   courseId: string,
