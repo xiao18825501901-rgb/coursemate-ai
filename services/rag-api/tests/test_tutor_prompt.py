@@ -1,4 +1,5 @@
-from app.rag.prompt import build_turn_input, build_tutor_instructions
+from app.rag.prompt import build_context_with_hits, build_turn_input, build_tutor_instructions
+from app.rag.types import SearchHit
 from app.tutor.rewrite import ConversationTurn
 from app.tutor.routing import QueryIntent
 from app.tutor.strategy import TeachingApproach
@@ -66,3 +67,82 @@ def test_direct_answer_request_uses_concise_example_policy() -> None:
 
     assert "Give the requested result directly" in instructions
     assert "Step-by-step solution" not in instructions
+
+
+def _context_hit(
+    chunk_id: str,
+    content: str,
+    *,
+    parent_key: str | None = None,
+    channels: tuple[str, ...] = ("keyword",),
+) -> SearchHit:
+    return SearchHit(
+        chunk_id=chunk_id,
+        document_id="doc-1",
+        course_id="cs3481",
+        filename="assignment_2.pdf",
+        content=content,
+        locator_type="page",
+        locator_value="1",
+        section="Page 1",
+        score=1.0,
+        channels=channels,
+        metadata={
+            "heading_path": "Question 1(b)",
+            "question_number": "1",
+            "question_part": "b",
+        },
+        parent_key=parent_key,
+    )
+
+
+def test_context_builder_deduplicates_chunks_and_keeps_source_labels_contiguous() -> None:
+    duplicate = "Question 1 asks for the K-means result."
+    context, included = build_context_with_hits(
+        [
+            _context_hit("chunk-1", duplicate),
+            _context_hit("chunk-2", f"  {duplicate}  "),
+            _context_hit("chunk-3", "A distinct supporting explanation."),
+        ],
+        max_chars=2_000,
+    )
+
+    assert [hit.chunk_id for hit in included] == ["chunk-1", "chunk-3"]
+    assert context.count(duplicate) == 1
+    assert "[S1]" in context
+    assert "[S2]" in context
+    assert "[S3]" not in context
+
+
+def test_context_builder_formats_structure_and_compresses_repeated_parent_stem() -> None:
+    stem = "Question 1 shared RGB table and instructions. " * 5
+    context, included = build_context_with_hits(
+        [
+            _context_hit("target", f"{stem}\n(b) Explain the result.", parent_key="a2:q1"),
+            _context_hit(
+                "sibling",
+                f"{stem}\n(a) Calculate the centroids.",
+                parent_key="a2:q1",
+                channels=("parent_context",),
+            ),
+        ],
+        max_chars=2_000,
+    )
+
+    assert len(included) == 2
+    assert context.count("Question 1 shared RGB table") == 5
+    assert "heading=Question 1(b)" in context
+    assert "channels=parent_context" in context
+    assert "shared parent stem already supplied" in context
+
+
+def test_tutor_prompt_declares_non_overridable_hierarchy_and_uncertainty_policy() -> None:
+    instructions = build_tutor_instructions(
+        "Answer in English.",
+        intent=QueryIntent.COURSE_TUTORING,
+    )
+
+    assert "Prompt hierarchy" in instructions
+    assert "Platform and security rules" in instructions
+    assert "Retrieved course context" in instructions
+    assert "Never fabricate a missing premise" in instructions
