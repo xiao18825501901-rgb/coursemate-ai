@@ -61,16 +61,48 @@ def _verify_sqlite(path: Path) -> None:
         )
 
 
-def _extract_uploads(archive_path: Path, destination: Path) -> None:
+def _extract_uploads(
+    archive_path: Path,
+    destination: Path,
+    *,
+    expected_file_count: int,
+    expected_total_bytes: int,
+) -> None:
+    file_count = 0
+    total_bytes = 0
     with tarfile.open(archive_path, "r:gz") as archive:
-        for member in archive.getmembers():
+        members = archive.getmembers()
+        validated: list[tuple[tarfile.TarInfo, PurePosixPath]] = []
+        seen_paths: set[PurePosixPath] = set()
+        for member in members:
             if "\\" in member.name:
                 raise ValueError(f"Unsafe upload archive path: {member.name}")
             member_path = PurePosixPath(member.name)
-            if member_path.is_absolute() or ".." in member_path.parts:
+            if (
+                not member_path.parts
+                or member_path == PurePosixPath(".")
+                or member_path.is_absolute()
+                or ".." in member_path.parts
+            ):
                 raise ValueError(f"Unsafe upload archive path: {member.name}")
+            if member_path in seen_paths:
+                raise ValueError(f"Duplicate upload archive path: {member.name}")
+            seen_paths.add(member_path)
             if not member.isfile() and not member.isdir():
                 raise ValueError(f"Unsupported upload archive member: {member.name}")
+            if member.size < 0:
+                raise ValueError(f"Invalid upload archive member size: {member.name}")
+            validated.append((member, member_path))
+            if member.isfile():
+                file_count += 1
+                total_bytes += member.size
+        if (
+            file_count != expected_file_count
+            or total_bytes != expected_total_bytes
+        ):
+            raise ValueError("Upload archive does not match the backup manifest.")
+
+        for member, member_path in validated:
             target = destination.joinpath(*member_path.parts)
             if member.isdir():
                 target.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -104,6 +136,17 @@ def restore_backup() -> Path:
     manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
     if manifest.get("formatVersion") != 1:
         raise ValueError("Unsupported backup manifest version.")
+    expected_file_count = manifest.get("uploadFileCount")
+    expected_total_bytes = manifest.get("uploadTotalBytes")
+    if (
+        not isinstance(expected_file_count, int)
+        or isinstance(expected_file_count, bool)
+        or expected_file_count < 0
+        or not isinstance(expected_total_bytes, int)
+        or isinstance(expected_total_bytes, bool)
+        or expected_total_bytes < 0
+    ):
+        raise ValueError("Backup upload manifest is invalid.")
 
     partial_target = target.with_name(f".{target.name}.{uuid4().hex}.partial")
     if partial_target.exists():
@@ -116,7 +159,12 @@ def restore_backup() -> Path:
             destination = partial_target / name
             shutil.copyfile(source / name, destination)
             _verify_sqlite(destination)
-        _extract_uploads(source / "uploads.tar.gz", uploads_target)
+        _extract_uploads(
+            source / "uploads.tar.gz",
+            uploads_target,
+            expected_file_count=expected_file_count,
+            expected_total_bytes=expected_total_bytes,
+        )
         partial_target.replace(target)
     except Exception:
         # A .partial directory is deliberately retained for operator forensics and can

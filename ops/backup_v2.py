@@ -59,7 +59,7 @@ def _sqlite_check(path: Path) -> tuple[str, list[tuple[object, ...]]]:
     return integrity, foreign_keys
 
 
-def _archive_uploads(upload_root: Path, destination: Path) -> int:
+def _archive_uploads(upload_root: Path, destination: Path) -> tuple[int, int]:
     members = sorted(upload_root.rglob("*"), key=lambda path: path.as_posix())
     for member in members:
         if member.is_symlink():
@@ -69,7 +69,8 @@ def _archive_uploads(upload_root: Path, destination: Path) -> int:
     with tarfile.open(destination, "w:gz") as archive:
         for member in members:
             archive.add(member, arcname=member.relative_to(upload_root), recursive=False)
-    return sum(member.is_file() for member in members)
+    files = [member for member in members if member.is_file()]
+    return len(files), sum(member.stat().st_size for member in files)
 
 
 def _sha256(path: Path) -> str:
@@ -83,6 +84,8 @@ def _sha256(path: Path) -> str:
 def create_backup() -> Path:
     rag_database = _required_path("RAG_DATABASE_PATH")
     agent_database = _required_path("AGENT_DATABASE_PATH")
+    if rag_database == agent_database:
+        raise ValueError("RAG_DATABASE_PATH and AGENT_DATABASE_PATH must be different files.")
     upload_root = _required_path("RAG_UPLOAD_DIR", directory=True)
     backup_root_raw = os.environ.get("BACKUP_ROOT", "").strip()
     if not backup_root_raw:
@@ -100,7 +103,7 @@ def create_backup() -> Path:
     try:
         _sqlite_backup(rag_database, partial_destination / "rag.sqlite3")
         _sqlite_backup(agent_database, partial_destination / "agent.sqlite3")
-        upload_file_count = _archive_uploads(
+        upload_file_count, upload_total_bytes = _archive_uploads(
             upload_root, partial_destination / "uploads.tar.gz"
         )
         check_lines: list[str] = []
@@ -124,6 +127,7 @@ def create_backup() -> Path:
                 "uploads": "uploads.tar.gz",
             },
             "uploadFileCount": upload_file_count,
+            "uploadTotalBytes": upload_total_bytes,
             "verification": {
                 "sqliteIntegrity": "ok",
                 "foreignKeyViolations": 0,
