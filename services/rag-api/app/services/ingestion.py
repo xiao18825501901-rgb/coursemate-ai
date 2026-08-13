@@ -1,17 +1,20 @@
 import hashlib
 import json
 import logging
+import shutil
 import sqlite3
 from pathlib import Path
 from uuid import uuid4
 
 from app.config import Settings
+from app.course_access import require_course_access
 from app.db import Database
 from app.errors import ApiError
 from app.models import (
     Course,
     CourseCreate,
     CoursePage,
+    CourseUpdate,
     Document,
     DocumentPage,
     IngestionJob,
@@ -57,12 +60,33 @@ class IngestionService:
         self.settings = settings
         self.embedding_provider = embedding_provider
 
-    def create_course(self, payload: CourseCreate) -> Course:
+    @staticmethod
+    def _course(row: sqlite3.Row, *, owner_user_id: str | None, is_admin: bool) -> Course:
+        values = dict(row)
+        values["is_owner"] = bool(owner_user_id and row["owner_user_id"] == owner_user_id)
+        values["can_manage"] = is_admin or values["is_owner"]
+        return Course.model_validate(values)
+
+    def create_course(
+        self,
+        payload: CourseCreate,
+        *,
+        owner_user_id: str | None = None,
+        is_admin: bool = True,
+    ) -> Course:
+        course_type = "official" if is_admin else "user"
+        visibility = "public" if is_admin else "private"
+        owner = None if is_admin else owner_user_id
         try:
             with self.database.connect() as connection:
                 connection.execute(
-                    "INSERT INTO courses (id, name, description) VALUES (?, ?, ?)",
-                    (payload.id, payload.name, payload.description),
+                    """
+                    INSERT INTO courses (
+                        id, name, description, owner_user_id, course_type, visibility,
+                        updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                    """,
+                    (payload.id, payload.name, payload.description, owner, course_type, visibility),
                 )
                 row = connection.execute(
                     "SELECT * FROM courses WHERE id = ?", (payload.id,)
@@ -71,25 +95,50 @@ class IngestionService:
             raise ApiError(409, "COURSE_EXISTS", "A course with this ID already exists.") from error
         if row is None:
             raise RuntimeError("Created course could not be loaded")
-        return Course.model_validate(dict(row))
+        return self._course(row, owner_user_id=owner_user_id, is_admin=is_admin)
 
-    def list_courses(self, *, page: int, page_size: int) -> CoursePage:
+    def list_courses(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        owner_user_id: str | None = None,
+        is_admin: bool = True,
+    ) -> CoursePage:
         offset = (page - 1) * page_size
+        where = "1 = 1" if is_admin else "(visibility = 'public' OR owner_user_id = ?)"
+        parameters: tuple[object, ...] = () if is_admin else (owner_user_id,)
         with self.database.connect() as connection:
-            total = connection.execute("SELECT COUNT(*) FROM courses").fetchone()[0]
+            total = connection.execute(
+                f"SELECT COUNT(*) FROM courses WHERE {where}", parameters
+            ).fetchone()[0]
             rows = connection.execute(
-                "SELECT * FROM courses ORDER BY id LIMIT ? OFFSET ?",
-                (page_size, offset),
+                f"""
+                SELECT * FROM courses WHERE {where}
+                ORDER BY updated_at DESC, id LIMIT ? OFFSET ?
+                """,
+                (*parameters, page_size, offset),
             ).fetchall()
         return CoursePage(
-            items=[Course.model_validate(dict(row)) for row in rows],
+            items=[
+                self._course(row, owner_user_id=owner_user_id, is_admin=is_admin)
+                for row in rows
+            ],
             page=page,
             page_size=page_size,
             total=total,
         )
 
-    def list_documents(self, course_id: str, *, page: int, page_size: int) -> DocumentPage:
-        self._require_course(course_id)
+    def list_documents(
+        self,
+        course_id: str,
+        *,
+        page: int,
+        page_size: int,
+        owner_user_id: str | None = None,
+        is_admin: bool = True,
+    ) -> DocumentPage:
+        self._require_course(course_id, owner_user_id=owner_user_id, is_admin=is_admin)
         offset = (page - 1) * page_size
         with self.database.connect() as connection:
             total = connection.execute(
@@ -113,14 +162,106 @@ class IngestionService:
             total=total,
         )
 
-    def get_job(self, job_id: str) -> IngestionJob:
+    def get_job(
+        self,
+        job_id: str,
+        *,
+        owner_user_id: str | None = None,
+        is_admin: bool = True,
+    ) -> IngestionJob:
         with self.database.connect() as connection:
             row = connection.execute(
-                "SELECT * FROM ingestion_jobs WHERE id = ?", (job_id,)
+                """
+                SELECT ingestion_jobs.*, documents.course_id
+                FROM ingestion_jobs
+                JOIN documents ON documents.id = ingestion_jobs.document_id
+                WHERE ingestion_jobs.id = ?
+                """,
+                (job_id,),
             ).fetchone()
         if row is None:
             raise ApiError(404, "JOB_NOT_FOUND", "The ingestion job was not found.")
-        return IngestionJob.model_validate(dict(row))
+        self._require_course(
+            row["course_id"], owner_user_id=owner_user_id, is_admin=is_admin
+        )
+        return IngestionJob.model_validate(
+            {key: row[key] for key in IngestionJob.model_fields}
+        )
+
+    def update_course(
+        self,
+        course_id: str,
+        payload: CourseUpdate,
+        *,
+        owner_user_id: str,
+        is_admin: bool,
+    ) -> Course:
+        self._require_course(
+            course_id, owner_user_id=owner_user_id, is_admin=is_admin, write=True
+        )
+        changes = payload.model_dump(exclude_none=True)
+        if not changes:
+            raise ApiError(422, "EMPTY_UPDATE", "At least one course field is required.")
+        assignments = [f"{field} = ?" for field in changes]
+        with self.database.connect() as connection:
+            connection.execute(
+                f"""
+                UPDATE courses SET {', '.join(assignments)},
+                    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                WHERE id = ?
+                """,
+                (*changes.values(), course_id),
+            )
+            row = connection.execute("SELECT * FROM courses WHERE id = ?", (course_id,)).fetchone()
+        if row is None:
+            raise RuntimeError("Updated course could not be loaded")
+        return self._course(row, owner_user_id=owner_user_id, is_admin=is_admin)
+
+    def delete_course(
+        self,
+        course_id: str,
+        *,
+        owner_user_id: str,
+        is_admin: bool,
+    ) -> None:
+        self._require_course(
+            course_id, owner_user_id=owner_user_id, is_admin=is_admin, write=True
+        )
+        with self.database.connect() as connection:
+            connection.execute("DELETE FROM courses WHERE id = ?", (course_id,))
+        upload_root = self.settings.upload_dir.resolve()
+        course_directory = (upload_root / course_id).resolve()
+        if course_directory.parent == upload_root and course_directory.is_dir():
+            shutil.rmtree(course_directory)
+
+    def delete_document(
+        self,
+        course_id: str,
+        document_id: str,
+        *,
+        owner_user_id: str,
+        is_admin: bool,
+    ) -> None:
+        self._require_course(
+            course_id, owner_user_id=owner_user_id, is_admin=is_admin, write=True
+        )
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT stored_path FROM documents WHERE id = ? AND course_id = ?",
+                (document_id, course_id),
+            ).fetchone()
+            if row is None:
+                raise ApiError(404, "DOCUMENT_NOT_FOUND", "The document was not found.")
+            connection.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+        upload_root = self.settings.upload_dir.resolve()
+        stored_path = Path(row["stored_path"]).resolve()
+        try:
+            stored_path.relative_to(upload_root)
+        except ValueError:
+            LOGGER.error("Refused to delete document path outside upload root: %s", document_id)
+            return
+        stored_path.unlink(missing_ok=True)
+        stored_path.with_name(f"{stored_path.name}.ocr.md").unlink(missing_ok=True)
 
     def get_document(self, document_id: str) -> Document:
         return self._get_document(document_id)
@@ -170,8 +311,12 @@ class IngestionService:
         filename: str,
         media_type: str,
         content: bytes,
+        owner_user_id: str | None = None,
+        is_admin: bool = True,
     ) -> UploadAccepted:
-        self._require_course(course_id)
+        self._require_course(
+            course_id, owner_user_id=owner_user_id, is_admin=is_admin, write=True
+        )
         extension = self._validate_upload(filename, media_type, content)
         digest = hashlib.sha256(content).hexdigest()
         document_id = f"doc_{uuid4().hex}"
@@ -352,11 +497,21 @@ class IngestionService:
             raise ApiError(400, "INVALID_FILE_CONTENT", "The file is not an Office ZIP document.")
         return extension
 
-    def _require_course(self, course_id: str) -> None:
-        with self.database.connect() as connection:
-            row = connection.execute("SELECT 1 FROM courses WHERE id = ?", (course_id,)).fetchone()
-        if row is None:
-            raise ApiError(404, "COURSE_NOT_FOUND", "The course was not found.")
+    def _require_course(
+        self,
+        course_id: str,
+        *,
+        owner_user_id: str | None = None,
+        is_admin: bool = True,
+        write: bool = False,
+    ) -> sqlite3.Row:
+        return require_course_access(
+            self.database,
+            course_id,
+            owner_user_id=owner_user_id,
+            is_admin=is_admin,
+            write=write,
+        )
 
     def _get_document(self, document_id: str) -> Document:
         with self.database.connect() as connection:

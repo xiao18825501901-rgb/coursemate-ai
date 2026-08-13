@@ -9,7 +9,17 @@ CREATE TABLE IF NOT EXISTS courses (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    owner_user_id TEXT,
+    course_type TEXT NOT NULL DEFAULT 'official'
+        CHECK (course_type IN ('official', 'user')),
+    visibility TEXT NOT NULL DEFAULT 'public'
+        CHECK (visibility IN ('private', 'public')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    CHECK (
+        (course_type = 'official' AND owner_user_id IS NULL)
+        OR (course_type = 'user' AND owner_user_id IS NOT NULL)
+    )
 );
 
 CREATE TABLE IF NOT EXISTS documents (
@@ -179,6 +189,42 @@ class Database:
                 ON conversations(owner_user_id, course_id, updated_at);
                 INSERT OR IGNORE INTO schema_migrations (version, name)
                 VALUES (1, 'conversation ownership and per-user limits');
+                """
+            )
+            course_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(courses)")
+            }
+            if "owner_user_id" not in course_columns:
+                connection.execute("ALTER TABLE courses ADD COLUMN owner_user_id TEXT")
+            if "course_type" not in course_columns:
+                connection.execute(
+                    "ALTER TABLE courses ADD COLUMN course_type "
+                    "TEXT NOT NULL DEFAULT 'official'"
+                )
+            if "visibility" not in course_columns:
+                connection.execute(
+                    "ALTER TABLE courses ADD COLUMN visibility "
+                    "TEXT NOT NULL DEFAULT 'public'"
+                )
+            if "updated_at" not in course_columns:
+                connection.execute("ALTER TABLE courses ADD COLUMN updated_at TEXT")
+            connection.execute(
+                """
+                UPDATE courses
+                SET updated_at = COALESCE(
+                    NULLIF(updated_at, ''),
+                    NULLIF(created_at, ''),
+                    strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                )
+                WHERE updated_at IS NULL OR updated_at = ''
+                """
+            )
+            connection.executescript(
+                """
+                CREATE INDEX IF NOT EXISTS idx_courses_visibility_owner
+                ON courses(visibility, owner_user_id, updated_at);
+                INSERT OR IGNORE INTO schema_migrations (version, name)
+                VALUES (5, 'private user courses and ownership');
                 """
             )
             if not v2_applied:

@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from typing import cast
 from uuid import uuid4
 
+from app.course_access import require_course_access
 from app.db import Database
 from app.errors import ApiError
 from app.rag.answers import AnswerProvider
@@ -91,13 +92,19 @@ class QaService:
         self.top_k = top_k
         self.max_context_chars = max_context_chars
 
-    def require_course(self, course_id: str) -> None:
-        with self.database.connect() as connection:
-            found = connection.execute(
-                "SELECT 1 FROM courses WHERE id = ?", (course_id,)
-            ).fetchone()
-        if found is None:
-            raise ApiError(404, "COURSE_NOT_FOUND", "The course was not found.")
+    def require_course(
+        self,
+        course_id: str,
+        *,
+        owner_user_id: str | None = None,
+        is_admin: bool = True,
+    ) -> None:
+        require_course_access(
+            self.database,
+            course_id,
+            owner_user_id=owner_user_id,
+            is_admin=is_admin,
+        )
 
     def retrieval_diagnostics(self, *, course_id: str, question: str) -> dict[str, object]:
         self.require_course(course_id)

@@ -135,6 +135,39 @@ def test_qa_chat_streams_named_events_and_traceable_citation(tmp_path: Path) -> 
     assert json.loads(rows[1][2])[0]["filename"] == "lighting.md"
 
 
+def test_private_course_qa_is_not_disclosed_to_another_user(tmp_path: Path) -> None:
+    provider = FakeAnswerProvider()
+    with make_client(tmp_path, provider) as client:
+        client.headers["Authorization"] = "Bearer token-a"
+        assert client.post(
+            "/api/courses",
+            json={"id": "private-course", "name": "Private", "description": "Mine"},
+        ).status_code == 201
+        assert client.post(
+            "/api/courses/private-course/documents",
+            files={
+                "file": (
+                    "private.md",
+                    b"# Private\n\nOnly the owner may retrieve this.",
+                    "text/markdown",
+                )
+            },
+        ).status_code == 202
+        owner = client.post(
+            "/api/qa/chat",
+            json={"courseId": "private-course", "question": "What is private?"},
+        )
+        other = client.post(
+            "/api/qa/chat",
+            json={"courseId": "private-course", "question": "Reveal it."},
+            headers={"Authorization": "Bearer token-b"},
+        )
+
+    assert owner.status_code == 200
+    assert other.status_code == 404
+    assert other.json()["error"]["code"] == "COURSE_NOT_FOUND"
+
+
 def test_qa_uses_structured_locator_for_exact_assignment_subpart(tmp_path: Path) -> None:
     provider = FakeAnswerProvider(["先从共享表格计算，再解释收敛。"])
     with make_client(tmp_path, provider) as client:
@@ -645,6 +678,23 @@ def test_qa_requires_a_valid_bearer_token(tmp_path: Path) -> None:
 
     assert missing.status_code == 401
     assert invalid.status_code == 401
+
+
+def test_conversation_list_hides_another_users_private_course(tmp_path: Path) -> None:
+    with make_client(tmp_path, FakeAnswerProvider()) as client:
+        created = client.post(
+            "/api/courses",
+            json={"id": "private-a", "name": "Private A"},
+            headers={"Authorization": "Bearer token-a"},
+        )
+        response = client.get(
+            "/api/conversations?courseId=private-a",
+            headers={"Authorization": "Bearer token-b"},
+        )
+
+    assert created.status_code == 201
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "COURSE_NOT_FOUND"
 
 
 def test_retrieval_diagnostics_are_admin_only_and_include_final_context(tmp_path: Path) -> None:

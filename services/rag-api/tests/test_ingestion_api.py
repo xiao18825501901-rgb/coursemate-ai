@@ -28,6 +28,7 @@ class FakeAuthVerifier:
         tokens = {
             "Bearer admin-token": "user-admin",
             "Bearer user-token": "user-a",
+            "Bearer user-b-token": "user-b",
         }
         return tokens.get(request.headers.get("authorization", ""))
 
@@ -78,6 +79,16 @@ def test_health_and_course_pagination(client: TestClient) -> None:
     assert courses.status_code == 200
     assert courses.json()["total"] == 1
     assert courses.json()["items"][0]["id"] == "cs3481"
+
+
+def test_course_name_cannot_be_blank(client: TestClient) -> None:
+    response = client.post(
+        "/api/courses",
+        json={"id": "blank-name", "name": "   ", "description": "No name"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
 def test_markdown_upload_completes_real_ingestion_pipeline(
@@ -201,7 +212,7 @@ def test_authentication_admin_boundary_and_shared_read_access(client: TestClient
     client.headers["Authorization"] = "Bearer user-token"
 
     shared_read = client.get("/api/courses")
-    forbidden_write = client.post(
+    private_course = client.post(
         "/api/courses",
         json={"id": "ge2324", "name": "GE2324", "description": "Notes"},
     )
@@ -211,10 +222,104 @@ def test_authentication_admin_boundary_and_shared_read_access(client: TestClient
 
     assert shared_read.status_code == 200
     assert shared_read.json()["items"][0]["id"] == "cs3481"
-    assert forbidden_write.status_code == 403
-    assert forbidden_write.json()["error"]["code"] == "ADMIN_REQUIRED"
+    assert private_course.status_code == 201
+    assert private_course.json()["courseType"] == "user"
+    assert private_course.json()["visibility"] == "private"
+    assert private_course.json()["isOwner"] is True
+    assert private_course.json()["canManage"] is True
+    assert "ownerUserId" not in private_course.json()
     assert missing.status_code == 401
     assert invalid.status_code == 401
+
+
+def test_private_course_is_visible_and_mutable_only_by_owner_or_admin(
+    client: TestClient,
+) -> None:
+    client.headers["Authorization"] = "Bearer user-token"
+    created = client.post(
+        "/api/courses",
+        json={"id": "private-course", "name": "Private Course", "description": "Mine"},
+    )
+    owner_list = client.get("/api/courses")
+    owner_upload = client.post(
+        "/api/courses/private-course/documents",
+        files={"file": ("notes.md", b"# Private\n\nOwner only.", "text/markdown")},
+    )
+
+    assert created.status_code == 201
+    assert owner_list.json()["items"][0]["id"] == "private-course"
+    assert owner_upload.status_code == 202
+
+    client.headers["Authorization"] = "Bearer user-b-token"
+    other_list = client.get("/api/courses")
+    other_documents = client.get("/api/courses/private-course/documents")
+    other_upload = client.post(
+        "/api/courses/private-course/documents",
+        files={"file": ("stolen.md", b"# No", "text/markdown")},
+    )
+    other_job = client.get(f"/api/ingestion-jobs/{owner_upload.json()['job']['id']}")
+
+    assert other_list.status_code == 200
+    assert other_list.json()["total"] == 0
+    assert other_documents.status_code == 404
+    assert other_upload.status_code == 404
+    assert other_job.status_code == 404
+
+    client.headers["Authorization"] = "Bearer admin-token"
+    assert client.get("/api/courses/private-course/documents").status_code == 200
+
+
+def test_owner_can_update_and_delete_private_course(client: TestClient) -> None:
+    client.headers["Authorization"] = "Bearer user-token"
+    assert client.post(
+        "/api/courses",
+        json={"id": "editable-course", "name": "Draft", "description": "Mine"},
+    ).status_code == 201
+
+    updated = client.patch(
+        "/api/courses/editable-course",
+        json={"name": "Updated", "description": "Revised"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "Updated"
+
+    client.headers["Authorization"] = "Bearer user-b-token"
+    assert client.patch(
+        "/api/courses/editable-course", json={"name": "Stolen"}
+    ).status_code == 404
+    assert client.delete("/api/courses/editable-course").status_code == 404
+
+    client.headers["Authorization"] = "Bearer user-token"
+    assert client.delete("/api/courses/editable-course").status_code == 204
+    assert client.get("/api/courses/editable-course/documents").status_code == 404
+
+
+def test_owner_can_delete_document_but_other_user_cannot(client: TestClient) -> None:
+    client.headers["Authorization"] = "Bearer user-token"
+    assert client.post(
+        "/api/courses",
+        json={"id": "document-course", "name": "Documents", "description": "Mine"},
+    ).status_code == 201
+    upload = client.post(
+        "/api/courses/document-course/documents",
+        files={"file": ("notes.md", b"# Notes\n\nDelete me.", "text/markdown")},
+    )
+    document_id = upload.json()["document"]["id"]
+
+    client.headers["Authorization"] = "Bearer user-b-token"
+    assert client.delete(
+        f"/api/courses/document-course/documents/{document_id}"
+    ).status_code == 404
+
+    client.headers["Authorization"] = "Bearer user-token"
+    assert client.delete(
+        f"/api/courses/document-course/documents/{document_id}"
+    ).status_code == 204
+    assert client.get("/api/courses/document-course/documents").json()["total"] == 0
+    assert not any(
+        candidate.name.startswith(document_id)
+        for candidate in client.app.state.settings.upload_dir.rglob("*")
+    )
 
 
 def test_cors_preflight_allows_authorization_header(client: TestClient) -> None:

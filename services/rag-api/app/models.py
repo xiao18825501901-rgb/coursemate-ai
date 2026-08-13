@@ -40,14 +40,51 @@ class LanguagePreference(StrEnum):
     BILINGUAL = "bilingual"
 
 
+class CourseType(StrEnum):
+    OFFICIAL = "official"
+    USER = "user"
+
+
+class CourseVisibility(StrEnum):
+    PRIVATE = "private"
+    PUBLIC = "public"
+
+
 class CourseCreate(ApiModel):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,49}$")
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(default="", max_length=1_000)
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("name cannot be blank")
+        return value.strip()
+
 
 class Course(CourseCreate):
+    owner_user_id: str | None = Field(exclude=True)
+    course_type: CourseType
+    visibility: CourseVisibility
+    is_owner: bool = False
+    can_manage: bool = False
     created_at: datetime
+    updated_at: datetime
+
+
+class CourseUpdate(ApiModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=1_000)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not value.strip():
+            raise ValueError("name cannot be blank")
+        return value.strip()
 
 
 class CoursePage(ApiModel):

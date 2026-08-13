@@ -109,9 +109,15 @@ def test_legacy_conversations_are_quarantined_and_migration_is_repeatable(
         message_columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(messages)")
         }
+        course = connection.execute(
+            "SELECT owner_user_id, course_type, visibility, updated_at "
+            "FROM courses WHERE id = 'cs3481'"
+        ).fetchone()
 
     assert tuple(conversation) == ("legacy_orphaned", "New Conversation", "auto")
-    assert migrations == 4
+    assert migrations == 5
+    assert tuple(course[:3]) == (None, "official", "public")
+    assert course["updated_at"]
     assert "metadata_json" in message_columns
 
     with database.connect() as connection:
@@ -125,7 +131,28 @@ def test_legacy_conversations_are_quarantined_and_migration_is_repeatable(
         ]
 
     assert {"metadata_json", "parent_key"}.issubset(chunk_columns)
-    assert versions == [1, 2, 3, 4]
+    assert versions == [1, 2, 3, 4, 5]
+
+
+def test_database_repairs_empty_course_timestamp_after_migration(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    database = Database(settings)
+    database.initialize()
+
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO courses (id, name, description) VALUES ('legacy', 'Legacy', '')"
+        )
+        connection.execute("UPDATE courses SET updated_at = '' WHERE id = 'legacy'")
+
+    database.initialize()
+
+    with database.connect() as connection:
+        updated_at = connection.execute(
+            "SELECT updated_at FROM courses WHERE id = 'legacy'"
+        ).fetchone()["updated_at"]
+
+    assert updated_at
 
 
 def test_v2_conversation_migration_preserves_messages_and_derives_title(
@@ -189,7 +216,7 @@ def test_v2_conversation_migration_preserves_messages_and_derives_title(
     assert conversation["title"].startswith("DBSCAN 中 core point")
     assert conversation["preferred_language"] == "auto"
     assert message["metadata_json"] == "{}"
-    assert versions == [1, 2, 3, 4]
+    assert versions == [1, 2, 3, 4, 5]
 
 
 def test_deployment_path_environment_aliases_are_honored(

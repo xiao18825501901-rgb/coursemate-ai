@@ -25,6 +25,9 @@ def retrieval_diagnostics(
     request: Request,
     user: Annotated[AuthenticatedUser, Depends(require_admin)],
 ) -> dict[str, object]:
+    _service(request).require_course(
+        payload.course_id, owner_user_id=user.user_id, is_admin=user.is_admin
+    )
     return _service(request).retrieval_diagnostics(
         course_id=payload.course_id,
         question=payload.question,
@@ -44,7 +47,12 @@ def list_conversations(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, alias="pageSize", ge=1, le=100),
 ) -> dict[str, object]:
-    return _service(request).list_conversations(
+    service = _service(request)
+    if course_id is not None:
+        service.require_course(
+            course_id, owner_user_id=user.user_id, is_admin=user.is_admin
+        )
+    return service.list_conversations(
         owner_user_id=user.user_id,
         course_id=course_id,
         page=page,
@@ -63,7 +71,9 @@ def create_conversation(
     user: Annotated[AuthenticatedUser, Depends(require_user)],
 ) -> dict[str, object]:
     service = _service(request)
-    service.require_course(payload.course_id)
+    service.require_course(
+        payload.course_id, owner_user_id=user.user_id, is_admin=user.is_admin
+    )
     return service.create_conversation(
         owner_user_id=user.user_id,
         course_id=payload.course_id,
@@ -120,7 +130,9 @@ def chat(
     user: Annotated[AuthenticatedUser, Depends(require_user)],
 ) -> StreamingResponse:
     service = _service(request)
-    service.require_course(payload.course_id)
+    service.require_course(
+        payload.course_id, owner_user_id=user.user_id, is_admin=user.is_admin
+    )
     if payload.conversation_id is not None:
         service.require_conversation(
             owner_user_id=user.user_id,
