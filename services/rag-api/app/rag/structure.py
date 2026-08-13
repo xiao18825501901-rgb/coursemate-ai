@@ -74,7 +74,36 @@ def extract_structured_blocks(
             **previous.metadata,
             "source_locator": f"{section.locator_type} {section.locator_value}",
         }
-        return [StructuredBlock(section.text.strip(), continuation_metadata, previous.parent_key)]
+        parts = list(QUESTION_PART.finditer(section.text))
+        if not parts:
+            return [
+                StructuredBlock(
+                    section.text.strip(), continuation_metadata, previous.parent_key
+                )
+            ]
+        continuation_blocks: list[StructuredBlock] = []
+        stem = section.text[: parts[0].start()].strip()
+        if stem:
+            continuation_blocks.append(
+                StructuredBlock(stem, continuation_metadata, previous.parent_key)
+            )
+        question_number = str(previous.metadata.get("question_number") or "")
+        for index, part in enumerate(parts):
+            part_end = parts[index + 1].start() if index + 1 < len(parts) else len(section.text)
+            part_name = (part.group("paren_part") or part.group("plain_part")).casefold()
+            part_metadata = {
+                **continuation_metadata,
+                "question_part": part_name,
+                "heading_path": f"Question {question_number}({part_name})",
+            }
+            continuation_blocks.append(
+                StructuredBlock(
+                    section.text[part.start() : part_end].strip(),
+                    part_metadata,
+                    previous.parent_key,
+                )
+            )
+        return continuation_blocks
     blocks: list[StructuredBlock] = []
     document_header = section.text[: questions[0].start()].strip()
     if previous is not None and document_header:

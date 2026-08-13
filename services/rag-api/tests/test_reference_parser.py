@@ -47,3 +47,10 @@ def test_parses_page_slide_and_does_not_invent_missing_question() -> None:
     assert slide.document_kind is DocumentKind.LECTURE
     assert slide.document_number == "3"
     assert slide.slide_number == 12
+
+
+def test_parses_numeric_assignment_subpart() -> None:
+    reference = parse_query_reference("CS_3481_Assignment_2.pdf Question 3(2)")
+
+    assert reference.question_number == "3"
+    assert reference.question_part == "2"

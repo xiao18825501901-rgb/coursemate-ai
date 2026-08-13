@@ -37,7 +37,7 @@ KIND_PATTERNS: tuple[tuple[DocumentKind, re.Pattern[str]], ...] = (
 QUESTION = re.compile(
     r"(?:(?:question|quest(?:ion)?|q)\s*(?P<number_en>[0-9]+|[ivxlcdm]+)"
     r"|第\s*(?P<number_zh>[0-9]+|[ivxlcdm]+)\s*题)"
-    r"(?:\s*[\(\uFF08]?\s*(?P<part>[a-z])\s*[\)\uFF09]?)?",
+    r"(?:\s*[\(\uFF08]?\s*(?P<part>[a-z]|\d+)\s*[\)\uFF09]?)?",
     re.IGNORECASE,
 )
 PAGE = re.compile(

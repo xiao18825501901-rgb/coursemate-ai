@@ -129,6 +129,23 @@ def test_real_tutorial_reference_includes_cross_page_question_context(
 
 
 @pytest.mark.golden
+def test_real_cs3481_cross_page_numeric_subpart_is_exact(
+    real_corpus_repository: ChunkRepository,
+) -> None:
+    hits = real_corpus_repository.structured_search(
+        "cs3481",
+        parse_query_reference("CS_3481_Assignment_2.pdf Question 3(2)"),
+        limit=8,
+    )
+
+    assert hits
+    assert hits[0].metadata["question_number"] == "3"
+    assert hits[0].metadata["question_part"] == "2"
+    assert hits[0].locator_value == "2"
+    assert "Compute the test statistic" in hits[0].content
+
+
+@pytest.mark.golden
 def test_real_exact_locator_is_course_isolated(
     real_corpus_repository: ChunkRepository,
 ) -> None:
