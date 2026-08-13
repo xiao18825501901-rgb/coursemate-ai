@@ -49,6 +49,30 @@ export interface Citation {
   channels: string[];
 }
 
+export type LanguagePreference = "auto" | "zh-CN" | "en" | "bilingual";
+
+export interface ConversationSummary {
+  id: string;
+  courseId: string;
+  title: string;
+  preferredLanguage: LanguagePreference;
+  messageCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConversationMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  citations: Citation[];
+  createdAt: string;
+}
+
+export interface ConversationDetail extends Omit<ConversationSummary, "messageCount"> {
+  messages: ConversationMessage[];
+}
+
 export type TaskStatus = "todo" | "in_progress" | "completed";
 export type TaskPriority = "low" | "medium" | "high";
 

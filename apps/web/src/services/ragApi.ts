@@ -1,6 +1,14 @@
 import type { GetSessionToken } from "../auth/AuthProvider";
 import { authenticatedFetch, requireOk, requestJson } from "./http";
-import type { Citation, Course, CourseDocument, Page } from "../types/api";
+import type {
+  Citation,
+  ConversationDetail,
+  ConversationSummary,
+  Course,
+  CourseDocument,
+  LanguagePreference,
+  Page,
+} from "../types/api";
 
 
 const RAG_API = import.meta.env.VITE_RAG_API_URL ?? "http://localhost:8000";
@@ -63,6 +71,67 @@ export async function listDocuments(
   );
 }
 
+export async function listConversations(
+  getToken: GetSessionToken,
+  courseId: string,
+): Promise<Page<ConversationSummary>> {
+  return requestJson<Page<ConversationSummary>>(
+    getToken,
+    `${RAG_API}/api/conversations?courseId=${encodeURIComponent(courseId)}&page=1&pageSize=100`,
+  );
+}
+
+export async function createConversation(
+  getToken: GetSessionToken,
+  courseId: string,
+  preferredLanguage: LanguagePreference = "auto",
+): Promise<ConversationSummary> {
+  return requestJson<ConversationSummary>(getToken, `${RAG_API}/api/conversations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ courseId, preferredLanguage }),
+  });
+}
+
+export async function getConversation(
+  getToken: GetSessionToken,
+  conversationId: string,
+): Promise<ConversationDetail> {
+  return requestJson<ConversationDetail>(
+    getToken,
+    `${RAG_API}/api/conversations/${encodeURIComponent(conversationId)}`,
+  );
+}
+
+export async function renameConversation(
+  getToken: GetSessionToken,
+  conversationId: string,
+  title: string,
+): Promise<ConversationSummary> {
+  return requestJson<ConversationSummary>(
+    getToken,
+    `${RAG_API}/api/conversations/${encodeURIComponent(conversationId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    },
+  );
+}
+
+export async function deleteConversation(
+  getToken: GetSessionToken,
+  conversationId: string,
+): Promise<void> {
+  await requireOk(
+    await authenticatedFetch(
+      getToken,
+      `${RAG_API}/api/conversations/${encodeURIComponent(conversationId)}`,
+      { method: "DELETE" },
+    ),
+  );
+}
+
 export async function uploadDocument(
   getToken: GetSessionToken,
   courseId: string,
@@ -84,11 +153,16 @@ export async function streamQa(
   question: string,
   callbacks: QaStreamCallbacks,
   signal?: AbortSignal,
+  conversationId?: string,
 ): Promise<void> {
   const request: RequestInit = {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ courseId, question }),
+    body: JSON.stringify({
+      courseId,
+      question,
+      ...(conversationId === undefined ? {} : { conversationId }),
+    }),
   };
   if (signal !== undefined) request.signal = signal;
   const response = await requireOk(
