@@ -66,6 +66,7 @@ export interface ConversationMessage {
   role: "user" | "assistant";
   content: string;
   citations: Citation[];
+  metadata?: QaStreamMeta;
   createdAt: string;
 }
 

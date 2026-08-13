@@ -31,6 +31,7 @@ interface ChatMessage {
   text: string;
   question?: string;
   citations: Citation[];
+  metadata?: QaStreamMeta;
 }
 
 function messageId(): string {
@@ -86,7 +87,6 @@ export function QaPage() {
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [planNotice, setPlanNotice] = useState("");
-  const [streamMeta, setStreamMeta] = useState<QaStreamMeta | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -95,7 +95,6 @@ export function QaPage() {
     setMessages([]);
     setQuestion("");
     setPlanNotice("");
-    setStreamMeta(null);
     setError(null);
     void listCourses(getToken)
       .then((page) => {
@@ -162,6 +161,7 @@ export function QaPage() {
             role: message.role,
             text: message.content,
             citations: message.citations,
+            ...(message.metadata === undefined ? {} : { metadata: message.metadata }),
             ...(question === undefined ? {} : { question }),
           };
         }));
@@ -176,10 +176,6 @@ export function QaPage() {
     () => courses.find((course) => course.id === courseId) ?? null,
     [courseId, courses],
   );
-  const grounding = streamMeta?.groundingMode
-    ? groundingLabels[streamMeta.groundingMode]
-    : null;
-
   async function ask(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const trimmed = question.trim();
@@ -192,7 +188,6 @@ export function QaPage() {
     ]);
     setQuestion("");
     setError(null);
-    setStreamMeta(null);
     setStreaming(true);
     const controller = new AbortController();
     abortRef.current = controller;
@@ -215,7 +210,9 @@ export function QaPage() {
               ),
             ),
           onMeta: (data) => {
-            setStreamMeta(data);
+            setMessages((items) => items.map((item) => (
+              item.id === answerId ? { ...item, metadata: data } : item
+            )));
             if (typeof data.conversationId !== "string" || routeConversationId) return;
             navigate(`/qa/${courseId}/${data.conversationId}`, { replace: true });
           },
@@ -355,12 +352,6 @@ export function QaPage() {
           <div className="chat-panel-header">
             <div><span className="online-indicator" />AI tutor</div>
             <h2 id="qa-chat-title">Conversation</h2>
-            {grounding && (
-              <div className={`grounding-banner grounding-${streamMeta?.groundingMode}`} role="status">
-                <strong>{grounding.title}</strong>
-                <span>{grounding.detail}</span>
-              </div>
-            )}
           </div>
           <div className="message-log" role="log" aria-live="polite" aria-relevant="additions text">
             {messages.length === 0 ? (
@@ -373,6 +364,15 @@ export function QaPage() {
               messages.map((message) => (
                 <article className={`message message-${message.role}`} key={message.id}>
                   <span className="message-role">{message.role === "user" ? "You" : "CourseMate"}</span>
+                  {message.role === "assistant" && message.metadata?.groundingMode && (
+                    <div
+                      className={`grounding-banner grounding-${message.metadata.groundingMode}`}
+                      role="status"
+                    >
+                      <strong>{groundingLabels[message.metadata.groundingMode].title}</strong>
+                      <span>{groundingLabels[message.metadata.groundingMode].detail}</span>
+                    </div>
+                  )}
                   <p>{message.text || (streaming ? "Reading your sources…" : "No answer returned.")}</p>
                   <CitationList citations={message.citations} />
                   {message.role === "assistant" && message.text && !streaming && (

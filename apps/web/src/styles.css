@@ -767,7 +767,7 @@ button:disabled,
   text-transform: uppercase;
 }
 
-.chat-panel-header .grounding-banner {
+.grounding-banner {
   display: grid;
   gap: 0.1rem;
   margin-top: 0.6rem;
@@ -789,7 +789,7 @@ button:disabled,
   color: var(--ink-soft);
 }
 
-.chat-panel-header .grounding-general {
+.grounding-general {
   border-left-color: var(--signal);
   background: #f6e3dd;
 }

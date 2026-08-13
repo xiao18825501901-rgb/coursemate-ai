@@ -249,7 +249,14 @@ describe("QaPage", () => {
       updatedAt: "2026-08-13T00:01:00Z",
       messages: [
         { id: "m1", role: "user", content: "什么是核心点？", citations: [], createdAt: "2026-08-13T00:00:00Z" },
-        { id: "m2", role: "assistant", content: "核心点（core point）…", citations: [], createdAt: "2026-08-13T00:01:00Z" },
+        {
+          id: "m2",
+          role: "assistant",
+          content: "核心点（core point）…",
+          citations: [],
+          metadata: { queryIntent: "COURSE_TUTORING", groundingMode: "mixed" },
+          createdAt: "2026-08-13T00:01:00Z",
+        },
       ],
     });
     vi.mocked(streamQa).mockImplementation(async (
@@ -266,6 +273,7 @@ describe("QaPage", () => {
     );
 
     expect(await screen.findByText("核心点（core point）…")).toBeVisible();
+    expect(screen.getByText("Course material + AI knowledge")).toBeVisible();
     fireEvent.change(screen.getByLabelText(/ask a course question/i), {
       target: { value: "我还是没听懂" },
     });
