@@ -12,6 +12,7 @@ from app.rag.answers import AnswerProvider
 from app.rag.prompt import build_context_with_hits, build_turn_input, build_tutor_instructions
 from app.rag.retrieval import HybridRetriever
 from app.rag.types import SearchHit
+from app.services.teaching_profiles import TeachingProfileService
 from app.tutor.language import LanguagePreference, detect_language, language_instruction
 from app.tutor.references import parse_query_reference
 from app.tutor.rewrite import ConversationTurn, rewrite_retrieval_query
@@ -85,12 +86,14 @@ class QaService:
         *,
         top_k: int,
         max_context_chars: int,
+        teaching_profiles: TeachingProfileService | None = None,
     ) -> None:
         self.database = database
         self.retriever = retriever
         self.answer_provider = answer_provider
         self.top_k = top_k
         self.max_context_chars = max_context_chars
+        self.teaching_profiles = teaching_profiles or TeachingProfileService(database)
 
     def require_course(
         self,
@@ -503,6 +506,10 @@ class QaService:
             "teachingApproach": teaching_approach.value if teaching_approach else None,
             "exampleMode": example_mode,
         }
+        profile_prompt, profile_version = self.teaching_profiles.prompt_for_conversation(
+            course_id, conversation_id
+        )
+        response_metadata["teachingProfileVersion"] = profile_version
         yield encode_sse(
             "meta",
             {
@@ -534,6 +541,7 @@ class QaService:
                 intent=route.intent,
                 teaching_approach=teaching_approach,
                 example_mode=example_mode,
+                teaching_profile=profile_prompt,
             )
             for delta in self.answer_provider.stream_answer(
                 question=build_turn_input(question, history),

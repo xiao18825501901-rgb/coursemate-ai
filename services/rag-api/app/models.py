@@ -50,6 +50,62 @@ class CourseVisibility(StrEnum):
     PUBLIC = "public"
 
 
+class PublicationStatus(StrEnum):
+    PRIVATE = "private"
+    PENDING = "pending"
+    PUBLISHED = "published"
+    REJECTED = "rejected"
+
+
+class StudentLevel(StrEnum):
+    BEGINNER = "beginner"
+    INTERMEDIATE = "intermediate"
+    ADVANCED = "advanced"
+
+
+class AnswerDepth(StrEnum):
+    CONCISE = "concise"
+    BALANCED = "balanced"
+    DETAILED = "detailed"
+
+
+class ExamplePreference(StrEnum):
+    MINIMAL = "minimal"
+    WHEN_HELPFUL = "when-helpful"
+    WORKED = "worked"
+
+
+class ExercisePolicy(StrEnum):
+    NONE = "none"
+    OFFER = "offer"
+    ALWAYS = "always"
+
+
+class CitationPreference(StrEnum):
+    STANDARD = "standard"
+    DETAILED = "detailed"
+
+
+class MathDetailLevel(StrEnum):
+    LIGHT = "light"
+    STANDARD = "standard"
+    FULL = "full"
+
+
+class TerminologyStyle(StrEnum):
+    PLAIN = "plain"
+    BILINGUAL = "bilingual"
+    FORMAL = "formal"
+
+
+class TeachingStyle(StrEnum):
+    INTUITION_FIRST = "intuition-first"
+    STEP_BY_STEP = "step-by-step"
+    SOCRATIC = "socratic"
+    ANALOGY = "analogy"
+    WORKED_EXAMPLES = "worked-examples"
+
+
 class CourseCreate(ApiModel):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,49}$")
     name: str = Field(min_length=1, max_length=120)
@@ -67,6 +123,8 @@ class Course(CourseCreate):
     owner_user_id: str | None = Field(exclude=True)
     course_type: CourseType
     visibility: CourseVisibility
+    publication_status: PublicationStatus
+    published_at: datetime | None
     is_owner: bool = False
     can_manage: bool = False
     created_at: datetime
@@ -178,6 +236,62 @@ class ConversationPage(ApiModel):
     page: int
     page_size: int
     total: int
+
+
+class TeachingProfileInput(ApiModel):
+    language: LanguagePreference = LanguagePreference.AUTO
+    student_level: StudentLevel = StudentLevel.INTERMEDIATE
+    learning_goal: str = Field(
+        default="Understand the course material", min_length=1, max_length=240
+    )
+    teaching_styles: list[TeachingStyle] = Field(
+        default_factory=lambda: [TeachingStyle.INTUITION_FIRST, TeachingStyle.STEP_BY_STEP],
+        min_length=1,
+        max_length=5,
+    )
+    answer_depth: AnswerDepth = AnswerDepth.BALANCED
+    example_preference: ExamplePreference = ExamplePreference.WHEN_HELPFUL
+    exercise_policy: ExercisePolicy = ExercisePolicy.OFFER
+    exam_orientation: bool = False
+    citation_preference: CitationPreference = CitationPreference.STANDARD
+    math_detail_level: MathDetailLevel = MathDetailLevel.STANDARD
+    terminology_style: TerminologyStyle = TerminologyStyle.BILINGUAL
+    custom_requirements: str = Field(default="", max_length=1_000)
+
+    @field_validator("learning_goal")
+    @classmethod
+    def normalize_goal(cls, value: str) -> str:
+        normalized = " ".join(value.strip().split())
+        if not normalized:
+            raise ValueError("learning goal cannot be blank")
+        return normalized
+
+    @field_validator("teaching_styles")
+    @classmethod
+    def unique_styles(cls, value: list[TeachingStyle]) -> list[TeachingStyle]:
+        if len(set(value)) != len(value):
+            raise ValueError("teaching styles must be unique")
+        return value
+
+
+class TeachingProfileBuilderRequest(ApiModel):
+    requirement: str = Field(min_length=3, max_length=1_000)
+
+
+class TeachingProfilePreview(TeachingProfileInput):
+    generated_prompt: str
+
+
+class TeachingProfile(TeachingProfilePreview):
+    id: str
+    course_id: str
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class TeachingProfilePage(ApiModel):
+    items: list[TeachingProfile]
 
 
 class ConversationMessage(ApiModel):

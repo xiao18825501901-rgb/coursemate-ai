@@ -77,6 +77,7 @@ def build_tutor_instructions(
     intent: QueryIntent = QueryIntent.COURSE_GROUNDED,
     teaching_approach: TeachingApproach | None = None,
     example_mode: str | None = None,
+    teaching_profile: str | None = None,
 ) -> str:
     """Compose trusted tutor policies without mixing them into retrieved material."""
 
@@ -93,6 +94,8 @@ def build_tutor_instructions(
         )
     if example_mode is not None:
         parts.append(f"Example-solving policy:\n{EXAMPLE_MODE_INSTRUCTIONS[example_mode]}")
+    if teaching_profile is not None:
+        parts.append(f"Course teaching profile:\n{teaching_profile}")
     return "\n\n".join(parts)
 
 BEGIN_CONTEXT = "--- BEGIN UNTRUSTED COURSE MATERIAL ---\n"

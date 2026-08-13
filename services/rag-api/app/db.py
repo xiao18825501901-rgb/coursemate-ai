@@ -107,6 +107,50 @@ CREATE TABLE IF NOT EXISTS rate_limit_windows (
     PRIMARY KEY (owner_user_id, action, window_start)
 );
 
+CREATE TABLE IF NOT EXISTS course_teaching_profiles (
+    id TEXT PRIMARY KEY,
+    course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL CHECK (version >= 1),
+    created_by_user_id TEXT NOT NULL,
+    language TEXT NOT NULL CHECK (language IN ('auto', 'zh-CN', 'en', 'bilingual')),
+    student_level TEXT NOT NULL CHECK (student_level IN ('beginner', 'intermediate', 'advanced')),
+    learning_goal TEXT NOT NULL,
+    teaching_styles_json TEXT NOT NULL CHECK (json_valid(teaching_styles_json)),
+    answer_depth TEXT NOT NULL CHECK (answer_depth IN ('concise', 'balanced', 'detailed')),
+    example_preference TEXT NOT NULL
+        CHECK (example_preference IN ('minimal', 'when-helpful', 'worked')),
+    exercise_policy TEXT NOT NULL CHECK (exercise_policy IN ('none', 'offer', 'always')),
+    exam_orientation INTEGER NOT NULL DEFAULT 0 CHECK (exam_orientation IN (0, 1)),
+    citation_preference TEXT NOT NULL CHECK (citation_preference IN ('standard', 'detailed')),
+    math_detail_level TEXT NOT NULL CHECK (math_detail_level IN ('light', 'standard', 'full')),
+    terminology_style TEXT NOT NULL CHECK (terminology_style IN ('plain', 'bilingual', 'formal')),
+    custom_requirements TEXT NOT NULL DEFAULT '',
+    generated_prompt TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (course_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS course_publication_requests (
+    id TEXT PRIMARY KEY,
+    course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    owner_user_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected', 'withdrawn')),
+    share_materials_consent INTEGER NOT NULL CHECK (share_materials_consent = 1),
+    rights_confirmation INTEGER NOT NULL CHECK (rights_confirmation = 1),
+    consent_version TEXT NOT NULL,
+    consented_at TEXT NOT NULL,
+    submitted_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    reviewed_at TEXT,
+    reviewed_by_user_id TEXT,
+    review_note TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_profiles_course_version
+ON course_teaching_profiles(course_id, version DESC);
+CREATE INDEX IF NOT EXISTS idx_publication_status_submitted
+ON course_publication_requests(status, submitted_at);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
     content,
     chunk_id UNINDEXED,
@@ -226,6 +270,37 @@ class Database:
                 INSERT OR IGNORE INTO schema_migrations (version, name)
                 VALUES (5, 'private user courses and ownership');
                 """
+            )
+            conversation_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(conversations)")
+            }
+            if "teaching_profile_version" not in conversation_columns:
+                connection.execute(
+                    "ALTER TABLE conversations ADD COLUMN teaching_profile_version INTEGER"
+                )
+            connection.execute(
+                "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?, ?)",
+                (6, "versioned course teaching profiles"),
+            )
+            if "publication_status" not in course_columns:
+                connection.execute(
+                    "ALTER TABLE courses ADD COLUMN publication_status "
+                    "TEXT NOT NULL DEFAULT 'private'"
+                )
+                connection.execute(
+                    "UPDATE courses SET publication_status = 'published' "
+                    "WHERE course_type = 'official'"
+                )
+            if "published_at" not in course_columns:
+                connection.execute("ALTER TABLE courses ADD COLUMN published_at TEXT")
+                connection.execute(
+                    "UPDATE courses SET published_at = created_at "
+                    "WHERE course_type = 'official'"
+                )
+            connection.execute(
+                "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?, ?)",
+                (7, "consent based course publication workflow"),
             )
             if not v2_applied:
                 connection.executescript(
