@@ -17,6 +17,7 @@ import {
   submitPublicationRequest,
   updateCourse,
   uploadDocument,
+  withdrawPublicationRequest,
 } from "../services/ragApi";
 import { CourseCenterPage } from "./CourseCenterPage";
 import { CourseSettingsPage } from "./CourseSettingsPage";
@@ -36,6 +37,7 @@ vi.mock("../services/ragApi", () => ({
   submitPublicationRequest: vi.fn(),
   updateCourse: vi.fn(),
   uploadDocument: vi.fn(),
+  withdrawPublicationRequest: vi.fn(),
 }));
 
 const official = {
@@ -211,5 +213,22 @@ describe("CourseSettingsPage", () => {
     await waitFor(() => expect(submitPublicationRequest).toHaveBeenCalledWith(
       expect.any(Function), "my-course",
     ));
+  });
+
+  it("allows the owner to withdraw a pending publication review", async () => {
+    vi.mocked(withdrawPublicationRequest).mockResolvedValue();
+    vi.mocked(listCourses)
+      .mockResolvedValueOnce({
+        items: [{ ...mine, publicationStatus: "pending" }], page: 1, pageSize: 100, total: 1,
+      })
+      .mockResolvedValueOnce({ items: [mine], page: 1, pageSize: 100, total: 1 });
+    renderRoutes("/courses/my-course/settings");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw publication request" }));
+
+    await waitFor(() => expect(withdrawPublicationRequest).toHaveBeenCalledWith(
+      expect.any(Function), "my-course",
+    ));
+    expect(await screen.findByRole("button", { name: "Submit for admin review" })).toBeVisible();
   });
 });

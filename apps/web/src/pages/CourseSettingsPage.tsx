@@ -15,6 +15,7 @@ import {
   submitPublicationRequest,
   updateCourse,
   uploadDocument,
+  withdrawPublicationRequest,
 } from "../services/ragApi";
 import type {
   Course,
@@ -129,6 +130,13 @@ export function CourseSettingsPage() {
     } catch (caught: unknown) { setError(message(caught)); }
   }
 
+  async function withdrawPublication() {
+    try {
+      await withdrawPublicationRequest(getToken, courseId);
+      await refresh();
+    } catch (caught: unknown) { setError(message(caught)); }
+  }
+
   return <div className="page narrow-page">
     <header className="page-intro compact-intro">
       <span className="eyebrow">Private course settings</span>
@@ -175,7 +183,7 @@ export function CourseSettingsPage() {
       <section className="settings-panel publication-panel">
         <div className="panel-heading"><h2>Publication</h2><span>{course?.publicationStatus ?? "private"}</span></div>
         <p>Publication exposes the course title, description, source files, derived chunks, and teaching profile to every signed-in user. Your account identifier is not displayed.</p>
-        {course?.publicationStatus === "pending" ? <div className="privacy-notice"><strong>Review pending</strong><span>The course remains private until an administrator approves it.</span></div> : <>
+        {course?.publicationStatus === "pending" ? <div className="privacy-notice"><strong>Review pending</strong><span>The course remains private until an administrator approves it.</span><button className="text-button danger-text" onClick={() => void withdrawPublication()} type="button">Withdraw publication request</button></div> : <>
           <label className="consent-row"><input checked={shareConsent} onChange={(event) => setShareConsent(event.target.checked)} type="checkbox" /><span>I want to publish and share this course, including its materials and derived teaching data.</span></label>
           <label className="consent-row"><input checked={rightsConfirmation} onChange={(event) => setRightsConfirmation(event.target.checked)} type="checkbox" /><span>I confirm I have permission to share these materials and have checked them for private information.</span></label>
           <button className="button button-secondary" disabled={!shareConsent || !rightsConfirmation} onClick={() => void requestPublication()} type="button">Submit for admin review</button>

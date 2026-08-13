@@ -297,6 +297,17 @@ export async function submitPublicationRequest(
   );
 }
 
+export async function withdrawPublicationRequest(
+  getToken: GetSessionToken,
+  courseId: string,
+): Promise<void> {
+  await requireOk(await authenticatedFetch(
+    getToken,
+    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/publication-requests/current`,
+    { method: "DELETE" },
+  ));
+}
+
 export async function listPendingPublications(
   getToken: GetSessionToken,
 ): Promise<{ items: PublicationRequest[] }> {

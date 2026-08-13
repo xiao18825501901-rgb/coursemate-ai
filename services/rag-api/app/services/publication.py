@@ -96,6 +96,40 @@ class PublicationService:
             ).fetchall()
         return [self._request(row) for row in rows]
 
+    def withdraw(
+        self,
+        course_id: str,
+        *,
+        owner_user_id: str,
+        is_admin: bool,
+    ) -> None:
+        course = require_course_access(
+            self.database,
+            course_id,
+            owner_user_id=owner_user_id,
+            is_admin=is_admin,
+        )
+        if course["course_type"] != "user" or course["owner_user_id"] != owner_user_id:
+            raise ApiError(404, "COURSE_NOT_FOUND", "The course was not found.")
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            pending = connection.execute(
+                "SELECT id FROM course_publication_requests "
+                "WHERE course_id = ? AND owner_user_id = ? AND status = 'pending'",
+                (course_id, owner_user_id),
+            ).fetchone()
+            if pending is None:
+                raise ApiError(404, "PUBLICATION_NOT_FOUND", "Pending request was not found.")
+            connection.execute(
+                "UPDATE course_publication_requests SET status = 'withdrawn' WHERE id = ?",
+                (pending["id"],),
+            )
+            connection.execute(
+                "UPDATE courses SET publication_status = 'private', visibility = 'private', "
+                "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+                (course_id,),
+            )
+
     def review(
         self,
         request_id: str,

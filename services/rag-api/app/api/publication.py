@@ -38,6 +38,23 @@ def submit_publication(
     )
 
 
+@router.delete(
+    "/api/courses/{course_id}/publication-requests/current",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def withdraw_publication(
+    course_id: str,
+    request: Request,
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+) -> Response:
+    _service(request).withdraw(
+        course_id,
+        owner_user_id=user.user_id,
+        is_admin=user.is_admin,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/api/admin/publication-requests", response_model=PublicationRequestPage)
 def pending_publications(
     request: Request,

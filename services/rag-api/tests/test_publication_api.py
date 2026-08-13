@@ -96,6 +96,47 @@ def test_pending_and_rejected_courses_remain_private(tmp_path: Path) -> None:
     assert hidden_rejected.json()["total"] == 0
 
 
+def test_owner_can_withdraw_pending_request_but_other_user_cannot(tmp_path: Path) -> None:
+    with client_for(tmp_path) as client:
+        create_private_course(client)
+        pending = submit(client)
+        denied = client.delete(
+            "/api/courses/community-candidate/publication-requests/current",
+            headers={"Authorization": "Bearer other"},
+        )
+        withdrawn = client.delete(
+            "/api/courses/community-candidate/publication-requests/current",
+            headers={"Authorization": "Bearer owner"},
+        )
+        course = client.get(
+            "/api/courses", headers={"Authorization": "Bearer owner"}
+        )
+        admin_queue = client.get(
+            "/api/admin/publication-requests",
+            headers={"Authorization": "Bearer admin"},
+        )
+        resubmitted = submit(client)
+
+    assert pending.status_code == 201
+    assert denied.status_code == 404
+    assert withdrawn.status_code == 204
+    assert course.json()["items"][0]["publicationStatus"] == "private"
+    assert admin_queue.json()["items"] == []
+    assert resubmitted.status_code == 201
+
+
+def test_only_pending_request_can_be_withdrawn(tmp_path: Path) -> None:
+    with client_for(tmp_path) as client:
+        create_private_course(client)
+        missing = client.delete(
+            "/api/courses/community-candidate/publication-requests/current",
+            headers={"Authorization": "Bearer owner"},
+        )
+
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "PUBLICATION_NOT_FOUND"
+
+
 def test_only_admin_approval_makes_course_public_and_read_only(tmp_path: Path) -> None:
     with client_for(tmp_path) as client:
         create_private_course(client)

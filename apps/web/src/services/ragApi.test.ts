@@ -15,6 +15,7 @@ import {
   streamQa,
   updateCourse,
   uploadDocument,
+  withdrawPublicationRequest,
 } from "./ragApi";
 import type { TeachingProfilePreview } from "../types/api";
 
@@ -153,5 +154,20 @@ describe("private course API", () => {
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     expect(body.generatedPrompt).toBeUndefined();
     expect(body.learningGoal).toBe("Learn");
+  });
+
+  it("withdraws only the current course publication request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await withdrawPublicationRequest(
+      vi.fn().mockResolvedValue("token-a"),
+      "my-course",
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/courses/my-course/publication-requests/current"),
+      expect.objectContaining({ method: "DELETE" }),
+    );
   });
 });
