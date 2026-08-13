@@ -113,7 +113,7 @@ unpublish. Cross-owner file cloning is deferred pending a license/attribution po
 **Problem:** production data must survive course/profile/publication additions.
 **New architecture:** additive idempotent introspection-based migration; operations SQL record;
 online backup plus isolated restore rehearsal.
-**New code:** `app/db.py`, migrations 005-009, `ops/*.sh`.
+**New code:** `app/db.py`, migrations 005-010, `ops/*.sh`.
 **Why:** SQLite cannot safely apply unconditional `ADD COLUMN`; executable migration checks actual
 schema and repairs historical null timestamps. A local copied DB passed two runs/integrity/counts.
 
@@ -135,7 +135,7 @@ backup, deploy incrementally and append only verified facts to
 
 ## 14. Verification and next safe work
 
-The final local evidence is 143 RAG tests, 29 Web tests, 48 Agent tests, Ruff, strict Mypy 39 files,
+The final local evidence is 144 RAG tests, 29 Web tests, 48 Agent tests, Ruff, strict Mypy 39 files,
 both TypeScript checks/builds and Chrome 4/4. Review `docs/V2_TEST_REPORT.md`. The next authorized
 release work is production evidence collection and credential rotation; the next quality work that
 requires new authorization is the billable 50-case model benchmark. Immutable external publication

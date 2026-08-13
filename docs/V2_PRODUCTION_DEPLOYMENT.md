@@ -38,7 +38,8 @@ working Alibaba topology with the stale Render blueprint merely because it exist
 2. Deploy backend code with public course creation/publication access operationally restricted to an
    internal test account if no feature-flag service exists.
 3. Stop the writer, take a final backup, start one RAG instance and let the idempotent migrator run.
-4. Verify `/health`, schema versions 1-9, integrity/FK checks and pre/post row/file counts.
+4. Verify `/health`, schema versions 1-10, eight activity triggers, integrity/FK checks and
+   pre/post row/file counts.
 5. Smoke one official course, Chinese general greeting, exact locator, history reload, Agent task,
    private A/B isolation, private upload/profile and publication reject/approve/unpublish.
 6. Deploy Netlify with production `VITE_*` endpoints and Clerk publishable key; never backend keys.

@@ -17,7 +17,7 @@ needs five files to preserve the contract, implementation and test evidence.
 | V2-09 Teaching Profile | `app/models.py`, `app/api/teaching_profiles.py`, `app/services/teaching_profiles.py`, `test_teaching_profiles_api.py` |
 | V2-10 Prompt Builder | `app/services/teaching_profiles.py`, `CourseSettingsPage.tsx`, `ragApi.ts`, `ragApi.test.ts` |
 | V2-11 Publication | `app/api/publication.py`, `app/services/publication.py`, `AdminPublicationPage.tsx`, `test_publication_api.py` |
-| V2-12 Database | `app/db.py`, `005_007_v2_course_platform.sql`, `008_user_course_storage_quotas.sql`, `009_course_language_preference.sql`, `test_database.py`, `V2_DATABASE_MIGRATION.md` |
+| V2-12 Database | `app/db.py`, `005_007_v2_course_platform.sql`, `008_user_course_storage_quotas.sql`, `009_course_language_preference.sql`, `010_course_activity_timestamps.sql`, `test_database.py`, `V2_DATABASE_MIGRATION.md` |
 | V2-13 Tests | `tests/e2e/coursemate.spec.ts`, `V2_TEST_REPORT.md`, `playwright.config.ts` |
 | V2-14 Production | `V2_PRODUCTION_DEPLOYMENT.md`, `backup_v2.sh`, `restore_v2.sh`, `.env.example`, `netlify.toml` |
 

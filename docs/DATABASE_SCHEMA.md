@@ -1,6 +1,6 @@
 # Database Schema
 
-> V2 addendum: the executable schema is `services/rag-api/app/db.py`; additive versions 5-9 are
+> V2 addendum: the executable schema is `services/rag-api/app/db.py`; additive versions 5-10 are
 > recorded in `services/rag-api/migrations/` and operationally explained
 > in `docs/V2_DATABASE_MIGRATION.md`.
 
@@ -22,6 +22,8 @@
 Indexes cover visibility/owner/update ordering, profile course/version, publication status/submission,
 conversation owner/course/update and chunk course/parent/ordinal. Foreign-key cascades remove child
 records when an explicitly authorized course/conversation/document is deleted.
+Activity triggers advance `courses.updated_at` for document, conversation and teaching-profile
+changes so Course Home “Updated” ordering represents learning-space activity rather than metadata edits only.
 
 ## Ownership
 

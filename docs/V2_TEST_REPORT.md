@@ -7,7 +7,7 @@ deterministic test providers. No billable model call was made.
 
 | Gate | Result |
 |---|---|
-| RAG pytest | **143 passed**, 2 non-failing dependency/cache warnings |
+| RAG pytest | **144 passed**, 2 non-failing dependency/cache warnings |
 | RAG Ruff | **passed** for app, tests and both Python operational scripts |
 | RAG strict Mypy | **passed**, 39 source files |
 | Web Vitest | **29 passed** across 6 files |
@@ -17,7 +17,7 @@ deterministic test providers. No billable model call was made.
 | Agent production build | **passed** |
 | Playwright Chrome | **4/4 passed** |
 | npm production dependency audit | **0 vulnerabilities** |
-| Migration-on-copy | **integrity ok**, no FK violations, versions 1-9, second run idempotent |
+| Migration-on-copy | **integrity ok**, no FK violations, versions 1-10, 8 activity triggers, second run idempotent |
 | Tracked credential-pattern scan | **no match** |
 
 The warnings are Starlette's TestClient transport deprecation and a sandbox-denied pytest cache
@@ -40,6 +40,7 @@ and hybrid fallback; citation truth; prompt injection hierarchy; admin-only diag
 course/conversation/profile/task isolation; file validation/deletion; profile version pinning/restore;
 owner withdrawal and dual-consent/admin publication; post-publication owner lock;
 course/file/byte quotas; course language inheritance; and all legacy Agent tools.
+Course activity timestamps are also verified for document, conversation and profile changes.
 
 ## Acceptance status
 

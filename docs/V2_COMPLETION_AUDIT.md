@@ -17,9 +17,9 @@ runtime evidence.
 | Sections 43-50: private courses/storage | PASS | ownership, upload validation, atomic quotas, isolated paths, safe deletion |
 | Sections 51-56: teaching profiles | PASS | strict profiles, builder, immutable versions, restore-as-new-version |
 | Sections 57-63: publication/community | PASS except optional clone | consent, withdraw, admin file review, lock/read-only; clone deferred for licensing |
-| Sections 64-68: database models | PASS | additive schema versions 1-9 and migration-on-copy |
+| Sections 64-68: database models | PASS | additive schema versions 1-10 and migration-on-copy |
 | Sections 69-76: tutor flows/UX | PASS | API/component/Chrome journeys and responsive test |
-| Sections 77-86: evaluation/tests | PASS locally | 50-case data/harness plus 143/29/48/4 automated gates |
+| Sections 77-86: evaluation/tests | PASS locally | 50-case data/harness plus 144/29/48/4 automated gates |
 | Sections 87-90: production | LOCAL PASS / EXTERNAL BLOCKED | config/runbook/rollback pass; live deploy/smoke not executed |
 | Sections 91-92: handoff/file packs | PASS | root handoff and `docs/file-request-packs/README.md` |
 
@@ -46,7 +46,7 @@ runtime evidence.
 | 56 | PASS | version history and owner-safe restore that appends a new version |
 | 57-62 | PASS | dual consent, pending withdrawal, admin file inspection/decision, public read-only lock |
 | 63 | OPTIONAL-DEFERRED | file clone/fork requires a license, attribution and consent policy first |
-| 64-68 | PASS | schema audit/models/migrations 1-9; owner and audit relations covered |
+| 64-68 | PASS | schema audit/models/migrations 1-10; owner, activity and audit relations covered |
 | 69-72 | PASS | documented and tested grounded, exact, general and follow-up flows |
 | 73-76 | PASS | grouped Course Home; file count/index/recent activity; QA and Settings workspaces |
 | 77-79 | PASS locally | versioned 50-case dataset, rubric, deterministic regression threshold |
@@ -63,13 +63,14 @@ release. Do not change either label without current external evidence.
 
 ## Verified release evidence
 
-- RAG: 143 pytest, Ruff, strict Mypy (39 files).
+- RAG: 144 pytest, Ruff, strict Mypy (39 files).
 - Web: 29 Vitest, TypeScript, production build (310.12 kB JS / 90.85 kB gzip).
 - Agent: 48 Vitest, TypeScript and production build.
 - Browser: Chrome 4/4, including conversation refresh/new-page recovery and private-course journey.
 - Supply chain: npm production dependency audit, 0 vulnerabilities.
-- Migration copy: versions 1-9, integrity `ok`, zero foreign-key violations, two-run idempotence;
-  3 courses, 67 documents, 1,937 chunks, 17 conversations, 34 messages.
+- Migration copy: versions 1-10, eight activity triggers, integrity `ok`, zero foreign-key
+  violations, two-run idempotence; 3 courses, 67 documents, 1,937 chunks, 19 conversations,
+  38 messages.
 
 ## Required external next actions
 
