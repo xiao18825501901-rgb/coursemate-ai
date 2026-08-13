@@ -8,6 +8,7 @@ requires-python = ">=3.11"
 addopts = "-ra --strict-markers"
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = ["golden: tests against the local read-only real CourseMate corpus"]
 
 [tool.ruff]
 line-length = 100
