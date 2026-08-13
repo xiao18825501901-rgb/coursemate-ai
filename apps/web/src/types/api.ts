@@ -17,7 +17,23 @@ export interface Course {
   id: string;
   name: string;
   description: string;
+  courseType: "official" | "user";
+  visibility: "private" | "public";
+  isOwner: boolean;
+  canManage: boolean;
   createdAt: string;
+  updatedAt: string;
+}
+
+export interface CourseCreateInput {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export interface CourseUpdateInput {
+  name?: string;
+  description?: string;
 }
 
 export type DocumentStatus = "pending" | "processing" | "ready" | "failed" | "unsupported";
@@ -34,6 +50,21 @@ export interface CourseDocument {
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface IngestionJob {
+  id: string;
+  documentId: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  processedChunks: number;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UploadAccepted {
+  document: CourseDocument;
+  job: IngestionJob;
 }
 
 export interface Citation {

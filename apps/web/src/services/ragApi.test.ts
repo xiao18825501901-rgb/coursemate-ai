@@ -1,13 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  createCourse,
   createConversation,
+  deleteCourse,
   deleteConversation,
+  deleteDocument,
+  getIngestionJob,
   getConversation,
   listConversations,
   renameConversation,
   SseDecoder,
   streamQa,
+  updateCourse,
+  uploadDocument,
 } from "./ragApi";
 
 
@@ -92,5 +98,41 @@ describe("conversation API", () => {
       question: "继续解释",
       conversationId: "conv_123",
     });
+  });
+});
+
+describe("private course API", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("uses authenticated course, upload, job, and deletion endpoints", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "my-course" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "my-course", name: "Updated" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        document: { id: "doc_1" },
+        job: { id: "job_1", status: "queued" },
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "job_1", status: "completed" })))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const getToken = vi.fn().mockResolvedValue("token-a");
+
+    await createCourse(getToken, { id: "my-course", name: "Mine", description: "" });
+    await updateCourse(getToken, "my-course", { name: "Updated" });
+    await uploadDocument(getToken, "my-course", new File(["notes"], "notes.md"));
+    await getIngestionJob(getToken, "job_1");
+    await deleteDocument(getToken, "my-course", "doc_1");
+    await deleteCourse(getToken, "my-course");
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method ?? "GET"]))
+      .toEqual([
+        [expect.stringContaining("/api/courses"), "POST"],
+        [expect.stringContaining("/api/courses/my-course"), "PATCH"],
+        [expect.stringContaining("/api/courses/my-course/documents"), "POST"],
+        [expect.stringContaining("/api/ingestion-jobs/job_1"), "GET"],
+        [expect.stringContaining("/api/courses/my-course/documents/doc_1"), "DELETE"],
+        [expect.stringContaining("/api/courses/my-course"), "DELETE"],
+      ]);
   });
 });

@@ -7,6 +7,7 @@ const homeNavigation = { to: "/", label: "Home", end: true };
 const aboutNavigation = { to: "/about", label: "About", end: true };
 const publicNavigation = [homeNavigation, aboutNavigation];
 const privateNavigation = [
+  { to: "/courses", label: "Courses", end: false },
   { to: "/qa", label: "Course QA", end: false },
   { to: "/tasks", label: "Study plan", end: false },
   { to: "/documents", label: "Documents", end: false },

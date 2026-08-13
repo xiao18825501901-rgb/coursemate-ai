@@ -33,14 +33,24 @@ const course = {
   id: "cs3481",
   name: "Computer Graphics",
   description: "CS3481 materials",
+  courseType: "official" as const,
+  visibility: "public" as const,
+  isOwner: false,
+  canManage: false,
   createdAt: "2026-08-11T00:00:00Z",
+  updatedAt: "2026-08-11T00:00:00Z",
 };
 
 const geCourse = {
   id: "ge2324",
   name: "Data Science as a Human Science",
   description: "GE2324 materials",
+  courseType: "official" as const,
+  visibility: "public" as const,
+  isOwner: false,
+  canManage: false,
   createdAt: "2026-08-11T00:00:00Z",
+  updatedAt: "2026-08-11T00:00:00Z",
 };
 
 describe("QaPage", () => {

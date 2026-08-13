@@ -5,10 +5,14 @@ import type {
   ConversationDetail,
   ConversationSummary,
   Course,
+  CourseCreateInput,
   CourseDocument,
+  CourseUpdateInput,
+  IngestionJob,
   LanguagePreference,
   Page,
   QaStreamMeta,
+  UploadAccepted,
 } from "../types/api";
 
 
@@ -60,6 +64,44 @@ export interface QaStreamCallbacks {
 
 export async function listCourses(getToken: GetSessionToken): Promise<Page<Course>> {
   return requestJson<Page<Course>>(getToken, `${RAG_API}/api/courses?page=1&pageSize=100`);
+}
+
+export async function createCourse(
+  getToken: GetSessionToken,
+  input: CourseCreateInput,
+): Promise<Course> {
+  return requestJson<Course>(getToken, `${RAG_API}/api/courses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function updateCourse(
+  getToken: GetSessionToken,
+  courseId: string,
+  input: CourseUpdateInput,
+): Promise<Course> {
+  return requestJson<Course>(
+    getToken,
+    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export async function deleteCourse(
+  getToken: GetSessionToken,
+  courseId: string,
+): Promise<void> {
+  await requireOk(await authenticatedFetch(
+    getToken,
+    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}`,
+    { method: "DELETE" },
+  ));
 }
 
 export async function listDocuments(
@@ -137,15 +179,36 @@ export async function uploadDocument(
   getToken: GetSessionToken,
   courseId: string,
   file: File,
-): Promise<void> {
+): Promise<UploadAccepted> {
   const body = new FormData();
   body.append("file", file);
-  await requireOk(
-    await authenticatedFetch(getToken, `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/documents`, {
-      method: "POST",
-      body,
-    }),
+  return requestJson<UploadAccepted>(
+    getToken,
+    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/documents`,
+    { method: "POST", body },
   );
+}
+
+export async function getIngestionJob(
+  getToken: GetSessionToken,
+  jobId: string,
+): Promise<IngestionJob> {
+  return requestJson<IngestionJob>(
+    getToken,
+    `${RAG_API}/api/ingestion-jobs/${encodeURIComponent(jobId)}`,
+  );
+}
+
+export async function deleteDocument(
+  getToken: GetSessionToken,
+  courseId: string,
+  documentId: string,
+): Promise<void> {
+  await requireOk(await authenticatedFetch(
+    getToken,
+    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/documents/${encodeURIComponent(documentId)}`,
+    { method: "DELETE" },
+  ));
 }
 
 export async function streamQa(

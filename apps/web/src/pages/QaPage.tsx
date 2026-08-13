@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { CitationList } from "../components/CitationList";
 import { ConversationSidebar } from "../components/ConversationSidebar";
@@ -345,7 +345,13 @@ export function QaPage() {
               ))}
             </ul>
           )}
-          <p className="managed-corpus-note">Course sources are managed by CourseMate administrators.</p>
+          {currentCourse?.canManage ? (
+            <Link className="text-button" to={`/courses/${currentCourse.id}/settings`}>
+              Manage course and sources
+            </Link>
+          ) : (
+            <p className="managed-corpus-note">Official course sources are read-only.</p>
+          )}
         </aside>
 
         <section className="chat-panel" aria-labelledby="qa-chat-title">

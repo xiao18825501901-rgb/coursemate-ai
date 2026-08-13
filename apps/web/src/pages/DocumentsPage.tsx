@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { useCourseMateAuth } from "../auth/AuthProvider";
 import { listCourses, listDocuments } from "../services/ragApi";
@@ -39,7 +40,7 @@ export function DocumentsPage() {
         <div className="source-groups">
           {sources.map(({ course, documents }) => (
             <section className="source-group" key={course.id}>
-              <header><div><span className="course-pill">{course.id.toUpperCase()}</span><h2>{course.name}</h2><p>{course.description}</p></div><span className="managed-corpus-note">Admin managed</span></header>
+              <header><div><span className="course-pill">{course.id.toUpperCase()}</span><h2>{course.name}</h2><p>{course.description}</p></div>{course.canManage ? <Link className="text-button" to={`/courses/${course.id}/settings`}>Manage course</Link> : <span className="managed-corpus-note">Official · read-only</span>}</header>
               <div className="source-table" role="table" aria-label={`${course.name} documents`}>
                 <div className="source-table-head" role="row"><span role="columnheader">Document</span><span role="columnheader">State</span><span role="columnheader">Chunks</span></div>
                 {documents.length === 0 ? <p className="panel-empty">No documents yet.</p> : documents.map((document) => <div className="source-table-row" role="row" key={document.id}><span role="cell"><strong>{document.filename}</strong><small>{document.extension.toUpperCase()}</small></span><span role="cell" className={`status-text status-${document.status}`}>{document.status}</span><span role="cell">{document.chunkCount}</span></div>)}
