@@ -1,9 +1,18 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createTask } from "../services/agentApi";
-import { listCourses, listDocuments, streamQa } from "../services/ragApi";
+import {
+  createConversation,
+  deleteConversation,
+  getConversation,
+  listConversations,
+  listCourses,
+  listDocuments,
+  renameConversation,
+  streamQa,
+} from "../services/ragApi";
 import { QaPage } from "./QaPage";
 
 
@@ -11,6 +20,11 @@ vi.mock("../services/agentApi", () => ({ createTask: vi.fn() }));
 vi.mock("../services/ragApi", () => ({
   listCourses: vi.fn(),
   listDocuments: vi.fn(),
+  listConversations: vi.fn(),
+  createConversation: vi.fn(),
+  getConversation: vi.fn(),
+  renameConversation: vi.fn(),
+  deleteConversation: vi.fn(),
   streamQa: vi.fn(),
   uploadDocument: vi.fn(),
 }));
@@ -33,6 +47,17 @@ describe("QaPage", () => {
   beforeEach(() => {
     vi.mocked(listCourses).mockResolvedValue({ items: [course, geCourse], page: 1, pageSize: 100, total: 2 });
     vi.mocked(listDocuments).mockResolvedValue({ items: [], page: 1, pageSize: 100, total: 0 });
+    vi.mocked(listConversations).mockResolvedValue({ items: [], page: 1, pageSize: 100, total: 0 });
+    vi.mocked(createConversation).mockResolvedValue({
+      id: "conv_new",
+      courseId: "cs3481",
+      title: "New Conversation",
+      preferredLanguage: "auto",
+      messageCount: 0,
+      createdAt: "2026-08-13T00:00:00Z",
+      updatedAt: "2026-08-13T00:00:00Z",
+    });
+    vi.mocked(deleteConversation).mockResolvedValue();
     vi.mocked(createTask).mockResolvedValue({
       id: "task-1",
       title: "Review lighting",
@@ -116,5 +141,168 @@ describe("QaPage", () => {
       expect(screen.queryByText(/CS3481-only DBSCAN answer/i)).not.toBeInTheDocument();
     });
     expect(screen.getByText(/Start with a specific question/i)).toBeVisible();
+  });
+
+  it("does not overwrite a live stream when the server assigns its conversation route", async () => {
+    let finishStream: (() => void) | undefined;
+    vi.mocked(getConversation).mockResolvedValue({
+      id: "conv_stream",
+      courseId: "cs3481",
+      title: "Streaming answer",
+      preferredLanguage: "auto",
+      createdAt: "2026-08-13T00:00:00Z",
+      updatedAt: "2026-08-13T00:01:00Z",
+      messages: [
+        { id: "m1", role: "user", content: "Explain lighting.", citations: [], createdAt: "2026-08-13T00:00:00Z" },
+        { id: "m2", role: "assistant", content: "Complete streamed answer.", citations: [], createdAt: "2026-08-13T00:01:00Z" },
+      ],
+    });
+    vi.mocked(streamQa).mockImplementation(async (_getToken, _courseId, _question, callbacks) => {
+      callbacks.onMeta?.({ conversationId: "conv_stream" });
+      await new Promise<void>((resolve) => {
+        finishStream = resolve;
+      });
+      callbacks.onDelta("Complete streamed answer.");
+      callbacks.onDone?.();
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/qa/cs3481"]}>
+        <Routes>
+          <Route path="/qa/:courseId" element={<QaPage />} />
+          <Route path="/qa/:courseId/:conversationId" element={<QaPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("option", { name: "Computer Graphics" })).toBeVisible();
+    fireEvent.change(screen.getByLabelText(/ask a course question/i), {
+      target: { value: "Explain lighting." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    await waitFor(() => expect(finishStream).toBeTypeOf("function"));
+    expect(getConversation).not.toHaveBeenCalled();
+
+    await act(async () => finishStream?.());
+    expect(await screen.findByText("Complete streamed answer.")).toBeVisible();
+    await waitFor(() => expect(getConversation).toHaveBeenCalledWith(
+      expect.any(Function),
+      "conv_stream",
+    ));
+  });
+
+  it("restores an old conversation from the route and can continue it", async () => {
+    vi.mocked(listConversations).mockResolvedValue({
+      items: [{
+        id: "conv_123",
+        courseId: "cs3481",
+        title: "DBSCAN Core Point",
+        preferredLanguage: "zh-CN",
+        messageCount: 2,
+        createdAt: "2026-08-13T00:00:00Z",
+        updatedAt: "2026-08-13T00:01:00Z",
+      }],
+      page: 1,
+      pageSize: 100,
+      total: 1,
+    });
+    vi.mocked(getConversation).mockResolvedValue({
+      id: "conv_123",
+      courseId: "cs3481",
+      title: "DBSCAN Core Point",
+      preferredLanguage: "zh-CN",
+      createdAt: "2026-08-13T00:00:00Z",
+      updatedAt: "2026-08-13T00:01:00Z",
+      messages: [
+        { id: "m1", role: "user", content: "什么是核心点？", citations: [], createdAt: "2026-08-13T00:00:00Z" },
+        { id: "m2", role: "assistant", content: "核心点（core point）…", citations: [], createdAt: "2026-08-13T00:01:00Z" },
+      ],
+    });
+    vi.mocked(streamQa).mockImplementation(async (
+      _getToken,
+      _courseId,
+      _question,
+      callbacks,
+    ) => callbacks.onDelta("换一种解释。"));
+
+    render(
+      <MemoryRouter initialEntries={["/qa/cs3481/conv_123"]}>
+        <Routes><Route path="/qa/:courseId/:conversationId" element={<QaPage />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("核心点（core point）…")).toBeVisible();
+    fireEvent.change(screen.getByLabelText(/ask a course question/i), {
+      target: { value: "我还是没听懂" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+
+    expect(await screen.findByText("换一种解释。")).toBeVisible();
+    expect(streamQa).toHaveBeenLastCalledWith(
+      expect.any(Function),
+      "cs3481",
+      "我还是没听懂",
+      expect.any(Object),
+      expect.any(AbortSignal),
+      "conv_123",
+    );
+  });
+
+  it("creates, renames, and deletes conversations from the history sidebar", async () => {
+    vi.mocked(listConversations).mockResolvedValue({
+      items: [{
+        id: "conv_123",
+        courseId: "cs3481",
+        title: "Old title",
+        preferredLanguage: "auto",
+        messageCount: 2,
+        createdAt: "2026-08-13T00:00:00Z",
+        updatedAt: "2026-08-13T00:01:00Z",
+      }],
+      page: 1,
+      pageSize: 100,
+      total: 1,
+    });
+    vi.mocked(renameConversation).mockResolvedValue({
+      id: "conv_123",
+      courseId: "cs3481",
+      title: "DBSCAN tutorial",
+      preferredLanguage: "auto",
+      messageCount: 2,
+      createdAt: "2026-08-13T00:00:00Z",
+      updatedAt: "2026-08-13T00:02:00Z",
+    });
+    vi.spyOn(window, "prompt").mockReturnValue("DBSCAN tutorial");
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(
+      <MemoryRouter initialEntries={["/qa/cs3481"]}>
+        <Routes>
+          <Route path="/qa/:courseId" element={<QaPage />} />
+          <Route path="/qa/:courseId/:conversationId" element={<QaPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("button", { name: "Open Old title" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /new chat/i }));
+    await waitFor(() => expect(createConversation).toHaveBeenCalledWith(
+      expect.any(Function),
+      "cs3481",
+      "auto",
+    ));
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename Old title" }));
+    await waitFor(() => expect(renameConversation).toHaveBeenCalledWith(
+      expect.any(Function),
+      "conv_123",
+      "DBSCAN tutorial",
+    ));
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete DBSCAN tutorial" }));
+    await waitFor(() => expect(deleteConversation).toHaveBeenCalledWith(
+      expect.any(Function),
+      "conv_123",
+    ));
   });
 });

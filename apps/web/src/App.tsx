@@ -20,6 +20,7 @@ export function AppRoutes() {
         <Route element={<ProtectedRoute />}>
           <Route element={<QaPage />} path="qa" />
           <Route element={<QaPage />} path="qa/:courseId" />
+          <Route element={<QaPage />} path="qa/:courseId/:conversationId" />
           <Route element={<TasksPage />} path="tasks" />
           <Route element={<DocumentsPage />} path="documents" />
         </Route>
