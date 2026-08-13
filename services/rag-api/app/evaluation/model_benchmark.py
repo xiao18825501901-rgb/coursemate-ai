@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections import Counter
 from collections.abc import Callable, Iterable
@@ -11,6 +12,49 @@ from typing import Any
 
 class BillableRunNotAuthorized(RuntimeError):
     """Raised before any provider call unless billing is explicitly authorized."""
+
+
+def conservative_input_token_ceiling(
+    instructions: str,
+    prompt: str,
+    *,
+    protocol_overhead_tokens: int,
+) -> int:
+    """Return a tokenizer-independent upper bound using one UTF-8 byte per token."""
+    if protocol_overhead_tokens < 0:
+        raise ValueError("Protocol overhead tokens cannot be negative.")
+    return (
+        len(instructions.encode()) + len(prompt.encode()) + protocol_overhead_tokens
+    )
+
+
+def calculate_cost_ceiling(
+    input_token_ceilings: Iterable[int],
+    *,
+    max_output_tokens_per_case: int,
+    input_price_per_million: float,
+    output_price_per_million: float,
+) -> float:
+    """Calculate the maximum authorized cost before constructing a provider client."""
+    ceilings = list(input_token_ceilings)
+    if not ceilings or any(value < 0 for value in ceilings):
+        raise ValueError("Input token ceilings must be non-negative and non-empty.")
+    if max_output_tokens_per_case <= 0:
+        raise ValueError("Maximum output tokens per case must be positive.")
+    if not math.isfinite(input_price_per_million) or not math.isfinite(
+        output_price_per_million
+    ):
+        raise ValueError("Benchmark prices must be finite.")
+    if input_price_per_million < 0 or output_price_per_million < 0:
+        raise ValueError("Benchmark prices cannot be negative.")
+    if input_price_per_million == 0 and output_price_per_million == 0:
+        raise ValueError("Set at least one benchmark price before authorizing billable calls.")
+    total_output_ceiling = len(ceilings) * max_output_tokens_per_case
+    cost = (
+        sum(ceilings) * input_price_per_million
+        + total_output_ceiling * output_price_per_million
+    ) / 1_000_000
+    return round(cost, 8)
 
 
 @dataclass(frozen=True)
@@ -172,12 +216,18 @@ def run_benchmark(
     provider: Callable[[BenchmarkCase], BenchmarkResult],
     *,
     allow_billable: bool,
+    on_result: Callable[[list[BenchmarkResult]], None] | None = None,
 ) -> list[BenchmarkResult]:
     if not allow_billable:
         raise BillableRunNotAuthorized(
             "Refusing provider calls without explicit --allow-billable authorization."
         )
-    return [provider(case) for case in cases]
+    results: list[BenchmarkResult] = []
+    for case in cases:
+        results.append(provider(case))
+        if on_result is not None:
+            on_result(list(results))
+    return results
 
 
 def summarize_results(
