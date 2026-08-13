@@ -101,13 +101,76 @@ def test_legacy_conversations_are_quarantined_and_migration_is_repeatable(
     database.initialize()
     database.initialize()
     with database.connect() as connection:
-        owner = connection.execute(
-            "SELECT owner_user_id FROM conversations WHERE id = 'legacy-conv'"
-        ).fetchone()[0]
+        conversation = connection.execute(
+            "SELECT owner_user_id, title, preferred_language "
+            "FROM conversations WHERE id = 'legacy-conv'"
+        ).fetchone()
         migrations = connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0]
 
-    assert owner == "legacy_orphaned"
-    assert migrations == 1
+    assert tuple(conversation) == ("legacy_orphaned", "New Conversation", "auto")
+    assert migrations == 2
+
+
+def test_v2_conversation_migration_preserves_messages_and_derives_title(
+    tmp_path: Path,
+) -> None:
+    settings = make_settings(tmp_path)
+    database = Database(settings)
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    import sqlite3
+
+    with sqlite3.connect(settings.database_path) as connection:
+        connection.executescript(
+            """
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE courses (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE conversations (
+                id TEXT PRIMARY KEY,
+                owner_user_id TEXT NOT NULL,
+                course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+                created_at TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE messages (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+                content TEXT NOT NULL,
+                citations_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL DEFAULT ''
+            );
+            INSERT INTO courses VALUES ('cs3481', 'CS3481', '', '');
+            INSERT INTO conversations VALUES ('conv-1', 'user-a', 'cs3481', '', '');
+            INSERT INTO messages VALUES (
+                'msg-1', 'conv-1', 'user',
+                'DBSCAN 中 core point 到底是什么？请一步一步解释。', '[]', ''
+            );
+            """
+        )
+
+    database.initialize()
+    database.initialize()
+
+    with database.connect() as connection:
+        conversation = connection.execute(
+            "SELECT title, preferred_language FROM conversations WHERE id = 'conv-1'"
+        ).fetchone()
+        message_count = connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+        versions = [
+            row[0] for row in connection.execute(
+                "SELECT version FROM schema_migrations ORDER BY version"
+            )
+        ]
+
+    assert conversation["title"].startswith("DBSCAN 中 core point")
+    assert conversation["preferred_language"] == "auto"
+    assert message_count == 1
+    assert versions == [1, 2]
 
 
 def test_deployment_path_environment_aliases_are_honored(

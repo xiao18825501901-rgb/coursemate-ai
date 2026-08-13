@@ -57,6 +57,10 @@ CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
     owner_user_id TEXT NOT NULL,
     course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    title TEXT NOT NULL DEFAULT 'New Conversation'
+        CHECK (length(trim(title)) BETWEEN 1 AND 120),
+    preferred_language TEXT NOT NULL DEFAULT 'auto'
+        CHECK (preferred_language IN ('auto', 'zh-CN', 'en', 'bilingual')),
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
@@ -145,10 +149,24 @@ class Database:
             columns = {
                 row["name"] for row in connection.execute("PRAGMA table_info(conversations)")
             }
+            v2_applied = connection.execute(
+                "SELECT 1 FROM schema_migrations WHERE version = 2"
+            ).fetchone() is not None
             if "owner_user_id" not in columns:
                 connection.execute(
                     "ALTER TABLE conversations ADD COLUMN owner_user_id "
                     "TEXT NOT NULL DEFAULT 'legacy_orphaned'"
+                )
+            if "title" not in columns:
+                connection.execute(
+                    "ALTER TABLE conversations ADD COLUMN title "
+                    "TEXT NOT NULL DEFAULT 'New Conversation'"
+                )
+            if "preferred_language" not in columns:
+                connection.execute(
+                    "ALTER TABLE conversations ADD COLUMN preferred_language "
+                    "TEXT NOT NULL DEFAULT 'auto' "
+                    "CHECK (preferred_language IN ('auto', 'zh-CN', 'en', 'bilingual'))"
                 )
             connection.executescript(
                 """
@@ -160,6 +178,26 @@ class Database:
                 VALUES (1, 'conversation ownership and per-user limits');
                 """
             )
+            if not v2_applied:
+                connection.executescript(
+                    """
+                UPDATE conversations
+                SET title = COALESCE(
+                    NULLIF(substr((
+                        SELECT trim(content)
+                        FROM messages
+                        WHERE messages.conversation_id = conversations.id
+                          AND messages.role = 'user'
+                        ORDER BY messages.created_at, messages.rowid
+                        LIMIT 1
+                    ), 1, 80), ''),
+                    'New Conversation'
+                )
+                WHERE title = 'New Conversation';
+                INSERT OR IGNORE INTO schema_migrations (version, name)
+                VALUES (2, 'conversation history metadata');
+                    """
+                )
 
     def consume_rate_limit(
         self,

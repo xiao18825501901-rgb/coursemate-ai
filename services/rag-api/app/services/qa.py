@@ -14,6 +14,12 @@ LOGGER = logging.getLogger(__name__)
 NO_SUPPORT_MESSAGE = (
     "I couldn't find enough evidence in the selected course materials to answer that question."
 )
+DEFAULT_CONVERSATION_TITLE = "New Conversation"
+
+
+def conversation_title(question: str, *, max_length: int = 80) -> str:
+    normalized = " ".join(question.strip().split())
+    return normalized[:max_length].rstrip() or DEFAULT_CONVERSATION_TITLE
 
 
 def encode_sse(event: str, data: dict[str, object]) -> str:
@@ -67,7 +73,7 @@ class QaService:
         with self.database.connect() as connection:
             conversation = connection.execute(
                 """
-                SELECT id, course_id, created_at, updated_at
+                SELECT id, course_id, title, preferred_language, created_at, updated_at
                 FROM conversations
                 WHERE id = ? AND owner_user_id = ?
                 """,
@@ -87,6 +93,8 @@ class QaService:
         return {
             "id": conversation["id"],
             "course_id": conversation["course_id"],
+            "title": conversation["title"],
+            "preferred_language": conversation["preferred_language"],
             "created_at": conversation["created_at"],
             "updated_at": conversation["updated_at"],
             "messages": [
@@ -101,21 +109,155 @@ class QaService:
             ],
         }
 
-    def _start_conversation(
-        self, *, owner_user_id: str, course_id: str, question: str
-    ) -> str:
+    def require_conversation(
+        self, *, owner_user_id: str, course_id: str, conversation_id: str
+    ) -> None:
+        with self.database.connect() as connection:
+            found = connection.execute(
+                """
+                SELECT 1 FROM conversations
+                WHERE id = ? AND owner_user_id = ? AND course_id = ?
+                """,
+                (conversation_id, owner_user_id, course_id),
+            ).fetchone()
+        if found is None:
+            raise ApiError(404, "CONVERSATION_NOT_FOUND", "The conversation was not found.")
+
+    def create_conversation(
+        self, *, owner_user_id: str, course_id: str, preferred_language: str = "auto"
+    ) -> dict[str, object]:
         conversation_id = f"conv_{uuid4().hex}"
         with self.database.connect() as connection:
-            connection.execute(
-                "INSERT INTO conversations (id, owner_user_id, course_id) VALUES (?, ?, ?)",
-                (conversation_id, owner_user_id, course_id),
+            row = connection.execute(
+                """
+                INSERT INTO conversations (
+                    id, owner_user_id, course_id, title, preferred_language
+                ) VALUES (?, ?, ?, ?, ?)
+                RETURNING id, course_id, title, preferred_language, created_at, updated_at
+                """,
+                (
+                    conversation_id,
+                    owner_user_id,
+                    course_id,
+                    DEFAULT_CONVERSATION_TITLE,
+                    preferred_language,
+                ),
+            ).fetchone()
+        assert row is not None
+        return {
+            **dict(row),
+            "message_count": 0,
+        }
+
+    def list_conversations(
+        self,
+        *,
+        owner_user_id: str,
+        course_id: str | None,
+        page: int,
+        page_size: int,
+    ) -> dict[str, object]:
+        where = "owner_user_id = ?"
+        parameters: list[object] = [owner_user_id]
+        if course_id is not None:
+            where += " AND course_id = ?"
+            parameters.append(course_id)
+        offset = (page - 1) * page_size
+        with self.database.connect() as connection:
+            total = connection.execute(
+                f"SELECT COUNT(*) FROM conversations WHERE {where}",  # noqa: S608
+                parameters,
+            ).fetchone()[0]
+            rows = connection.execute(
+                f"""
+                SELECT conversations.id, conversations.course_id,
+                       conversations.title, conversations.preferred_language,
+                       conversations.created_at, conversations.updated_at,
+                       COUNT(messages.id) AS message_count
+                FROM conversations
+                LEFT JOIN messages ON messages.conversation_id = conversations.id
+                WHERE conversations.{where}
+                GROUP BY conversations.id
+                ORDER BY conversations.updated_at DESC, conversations.id DESC
+                LIMIT ? OFFSET ?
+                """,  # noqa: S608
+                [*parameters, page_size, offset],
+            ).fetchall()
+        return {
+            "items": [dict(row) for row in rows],
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+        }
+
+    def rename_conversation(
+        self, *, owner_user_id: str, conversation_id: str, title: str
+    ) -> dict[str, object]:
+        normalized = " ".join(title.strip().split())
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                UPDATE conversations
+                SET title = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                WHERE id = ? AND owner_user_id = ?
+                RETURNING id, course_id, title, preferred_language, created_at, updated_at
+                """,
+                (normalized, conversation_id, owner_user_id),
+            ).fetchone()
+            if row is None:
+                raise ApiError(404, "CONVERSATION_NOT_FOUND", "The conversation was not found.")
+            message_count = connection.execute(
+                "SELECT COUNT(*) FROM messages WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchone()[0]
+        return {**dict(row), "message_count": message_count}
+
+    def delete_conversation(self, *, owner_user_id: str, conversation_id: str) -> None:
+        with self.database.connect() as connection:
+            result = connection.execute(
+                "DELETE FROM conversations WHERE id = ? AND owner_user_id = ?",
+                (conversation_id, owner_user_id),
             )
+            if result.rowcount == 0:
+                raise ApiError(404, "CONVERSATION_NOT_FOUND", "The conversation was not found.")
+
+    def _record_question(
+        self,
+        *,
+        owner_user_id: str,
+        course_id: str,
+        question: str,
+        conversation_id: str | None,
+    ) -> str:
+        if conversation_id is None:
+            created = self.create_conversation(
+                owner_user_id=owner_user_id,
+                course_id=course_id,
+            )
+            conversation_id = str(created["id"])
+        title = conversation_title(question)
+        with self.database.connect() as connection:
             connection.execute(
                 """
                 INSERT INTO messages (id, conversation_id, role, content)
                 VALUES (?, ?, 'user', ?)
                 """,
                 (f"msg_{uuid4().hex}", conversation_id, question),
+            )
+            connection.execute(
+                """
+                UPDATE conversations
+                SET title = CASE WHEN title = ? THEN ? ELSE title END,
+                    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                WHERE id = ? AND owner_user_id = ? AND course_id = ?
+                """,
+                (
+                    DEFAULT_CONVERSATION_TITLE,
+                    title,
+                    conversation_id,
+                    owner_user_id,
+                    course_id,
+                ),
             )
         return conversation_id
 
@@ -149,13 +291,19 @@ class QaService:
             )
 
     def stream(
-        self, *, owner_user_id: str, course_id: str, question: str
+        self,
+        *,
+        owner_user_id: str,
+        course_id: str,
+        question: str,
+        conversation_id: str | None = None,
     ) -> Iterator[str]:
         request_id = f"qa_{uuid4().hex}"
-        conversation_id = self._start_conversation(
+        conversation_id = self._record_question(
             owner_user_id=owner_user_id,
             course_id=course_id,
             question=question,
+            conversation_id=conversation_id,
         )
         hits = self.retriever.retrieve(
             course_id=course_id,

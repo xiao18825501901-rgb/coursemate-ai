@@ -252,6 +252,133 @@ def test_conversation_history_is_owner_scoped(tmp_path: Path) -> None:
     assert other.json()["error"]["code"] == "CONVERSATION_NOT_FOUND"
 
 
+def test_conversation_crud_and_continuation_are_owner_scoped(tmp_path: Path) -> None:
+    provider = FakeAnswerProvider(["第一轮回答。"])
+    with make_client(tmp_path, provider) as client:
+        client.headers["Authorization"] = "Bearer admin-token"
+        create_course_and_document(client)
+        client.headers["Authorization"] = "Bearer token-a"
+
+        created = client.post(
+            "/api/conversations",
+            json={"courseId": "cs3481", "preferredLanguage": "zh-CN"},
+        )
+        conversation_id = created.json()["id"]
+        first = client.post(
+            "/api/qa/chat",
+            json={
+                "courseId": "cs3481",
+                "conversationId": conversation_id,
+                "question": "什么是 DBSCAN 的核心点？",
+            },
+        )
+        provider.deltas = ["第二轮回答。"]
+        second = client.post(
+            "/api/qa/chat",
+            json={
+                "courseId": "cs3481",
+                "conversationId": conversation_id,
+                "question": "你能用中文一步一步教我做这道题吗？",
+            },
+        )
+        listing = client.get("/api/conversations?courseId=cs3481&page=1&pageSize=20")
+        detail = client.get(f"/api/conversations/{conversation_id}")
+        renamed = client.patch(
+            f"/api/conversations/{conversation_id}",
+            json={"title": "DBSCAN 核心点教学"},
+        )
+        foreign_get = client.get(
+            f"/api/conversations/{conversation_id}",
+            headers={"Authorization": "Bearer token-b"},
+        )
+        foreign_delete = client.delete(
+            f"/api/conversations/{conversation_id}",
+            headers={"Authorization": "Bearer token-b"},
+        )
+        deleted = client.delete(f"/api/conversations/{conversation_id}")
+        missing = client.get(f"/api/conversations/{conversation_id}")
+
+    assert created.status_code == 201
+    assert created.json()["preferredLanguage"] == "zh-CN"
+    assert [parse_sse(response.text)[0][1]["conversationId"] for response in (first, second)] == [
+        conversation_id,
+        conversation_id,
+    ]
+    assert listing.status_code == 200
+    assert listing.json()["total"] == 1
+    assert listing.json()["items"][0]["messageCount"] == 4
+    assert listing.json()["items"][0]["title"].startswith("什么是 DBSCAN")
+    assert [message["role"] for message in detail.json()["messages"]] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    assert renamed.status_code == 200
+    assert renamed.json()["title"] == "DBSCAN 核心点教学"
+    assert foreign_get.status_code == 404
+    assert foreign_delete.status_code == 404
+    assert deleted.status_code == 204
+    assert missing.status_code == 404
+
+
+def test_conversation_continuation_rejects_cross_owner_and_cross_course(
+    tmp_path: Path,
+) -> None:
+    with make_client(tmp_path, FakeAnswerProvider()) as client:
+        client.headers["Authorization"] = "Bearer admin-token"
+        create_course_and_document(client, "cs3481")
+        create_course_and_document(client, "ge2324")
+        created = client.post(
+            "/api/conversations",
+            json={"courseId": "cs3481"},
+            headers={"Authorization": "Bearer token-a"},
+        )
+        conversation_id = created.json()["id"]
+        foreign = client.post(
+            "/api/qa/chat",
+            json={
+                "courseId": "cs3481",
+                "conversationId": conversation_id,
+                "question": "Explain it.",
+            },
+            headers={"Authorization": "Bearer token-b"},
+        )
+        wrong_course = client.post(
+            "/api/qa/chat",
+            json={
+                "courseId": "ge2324",
+                "conversationId": conversation_id,
+                "question": "Explain it.",
+            },
+            headers={"Authorization": "Bearer token-a"},
+        )
+
+    assert foreign.status_code == 404
+    assert wrong_course.status_code == 404
+    assert foreign.json()["error"]["code"] == "CONVERSATION_NOT_FOUND"
+    assert wrong_course.json()["error"]["code"] == "CONVERSATION_NOT_FOUND"
+
+
+def test_conversation_rename_rejects_blank_title(tmp_path: Path) -> None:
+    with make_client(tmp_path, FakeAnswerProvider()) as client:
+        client.headers["Authorization"] = "Bearer admin-token"
+        create_course_and_document(client)
+        created = client.post(
+            "/api/conversations",
+            json={"courseId": "cs3481"},
+            headers={"Authorization": "Bearer token-a"},
+        )
+        response = client.patch(
+            f"/api/conversations/{created.json()['id']}",
+            json={"title": "   "},
+            headers={"Authorization": "Bearer token-a"},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
 def test_qa_rate_limit_is_per_authenticated_user(tmp_path: Path) -> None:
     with make_client(tmp_path, FakeAnswerProvider(), qa_limit=1) as client:
         client.headers["Authorization"] = "Bearer admin-token"

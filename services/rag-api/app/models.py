@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def to_camel(value: str) -> str:
@@ -31,6 +31,13 @@ class JobStatus(StrEnum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class LanguagePreference(StrEnum):
+    AUTO = "auto"
+    CHINESE = "zh-CN"
+    ENGLISH = "en"
+    BILINGUAL = "bilingual"
 
 
 class CourseCreate(ApiModel):
@@ -93,7 +100,42 @@ class Health(ApiModel):
 
 class QaChatRequest(ApiModel):
     course_id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,49}$")
+    conversation_id: str | None = Field(default=None, pattern=r"^conv_[a-f0-9]{32}$")
     question: str = Field(min_length=1, max_length=2_000)
+
+
+class ConversationCreate(ApiModel):
+    course_id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,49}$")
+    preferred_language: LanguagePreference = LanguagePreference.AUTO
+
+
+class ConversationUpdate(ApiModel):
+    title: str = Field(min_length=1, max_length=120)
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str) -> str:
+        normalized = " ".join(value.strip().split())
+        if not normalized:
+            raise ValueError("title must contain visible text")
+        return normalized
+
+
+class ConversationSummary(ApiModel):
+    id: str
+    course_id: str
+    title: str
+    preferred_language: LanguagePreference
+    message_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConversationPage(ApiModel):
+    items: list[ConversationSummary]
+    page: int
+    page_size: int
+    total: int
 
 
 class ConversationMessage(ApiModel):
@@ -107,6 +149,8 @@ class ConversationMessage(ApiModel):
 class ConversationDetail(ApiModel):
     id: str
     course_id: str
+    title: str
+    preferred_language: LanguagePreference
     created_at: datetime
     updated_at: datetime
     messages: list[ConversationMessage]
