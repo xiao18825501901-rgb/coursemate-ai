@@ -7,6 +7,7 @@ const repositoryRoot = process.cwd();
 const nodeExecutable = "C:\\Users\\Hp\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe";
 const pythonExecutable = path.join(repositoryRoot, "services", "rag-api", ".venv", "Scripts", "python.exe");
 const chromeExecutable = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+const e2eUserId = `e2e-user-${process.pid}`;
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -30,7 +31,7 @@ export default defineConfig({
         ...process.env,
         RAG_PROVIDER_MODE: "deterministic",
         APP_ENV: "test",
-        AUTH_TEST_USER_ID: "e2e-user",
+        AUTH_TEST_USER_ID: e2eUserId,
         ADMIN_USER_IDS: "",
         WEB_ORIGIN: "http://127.0.0.1:5173",
       },
@@ -48,7 +49,7 @@ export default defineConfig({
         AGENT_DATABASE_PATH: path.join(repositoryRoot, "work", `e2e-agent-${process.pid}.sqlite3`),
         AGENT_PROVIDER_MODE: "deterministic",
         NODE_ENV: "test",
-        AUTH_TEST_USER_ID: "e2e-user",
+        AUTH_TEST_USER_ID: e2eUserId,
         AGENT_PORT: "8001",
         WEB_ORIGIN: "http://127.0.0.1:5173",
       },

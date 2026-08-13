@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 
 test("keeps answers course-scoped, persists across a fresh login context, and adds one to the plan", async ({ browser, page }) => {
+  test.setTimeout(60_000);
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error" || message.type() === "warning") consoleErrors.push(message.text());
@@ -12,20 +13,34 @@ test("keeps answers course-scoped, persists across a fresh login context, and ad
   const courseSelect = page.getByLabel("Course", { exact: true });
   await expect(courseSelect).toHaveValue("cs3481");
 
-  await page.getByLabel("Ask a course question").fill(
+  const questions = [
     "How does DBSCAN identify a core point?",
-  );
-  await page.getByRole("button", { name: "Ask", exact: true }).click();
+    "Why does MinPts matter in DBSCAN?",
+    "Give me a small DBSCAN example.",
+  ];
+  const askButton = page.getByRole("button", { name: "Ask", exact: true });
+  for (const [index, question] of questions.entries()) {
+    await page.getByLabel("Ask a course question").fill(question);
+    await expect(askButton).toBeEnabled();
+    await askButton.click();
+    await expect(page.locator(".message-assistant")).toHaveCount(index + 1);
+    await expect(page.getByRole("button", { name: /Add to study plan/i })).toHaveCount(index + 1);
+  }
+  await expect(page.locator(".message-user")).toHaveCount(3);
   await expect(page.locator(".message-assistant > p").first()).toContainText("DBSCAN");
   await expect(page.locator(".citation-list").first()).toBeVisible();
 
   const persistedConversationUrl = page.url();
   await page.reload();
+  await expect(page.locator(".message-user")).toHaveCount(3);
+  await expect(page.locator(".message-assistant")).toHaveCount(3);
   await expect(page.locator(".message-assistant > p").first()).toContainText("DBSCAN");
   await expect(page.locator(".citation-list").first()).toBeVisible();
   const reopenedContext = await browser.newContext();
   const reopenedPage = await reopenedContext.newPage();
   await reopenedPage.goto(persistedConversationUrl);
+  await expect(reopenedPage.locator(".message-user")).toHaveCount(3);
+  await expect(reopenedPage.locator(".message-assistant")).toHaveCount(3);
   await expect(reopenedPage.locator(".message-assistant > p").first()).toContainText("DBSCAN");
   await reopenedContext.close();
 
