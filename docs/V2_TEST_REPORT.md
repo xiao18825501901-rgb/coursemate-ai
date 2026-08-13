@@ -26,7 +26,7 @@ write; neither changes behavior. Dependency migration should be scheduled delibe
 ## Browser journeys
 
 1. Switches official courses, streams a course-scoped answer with citation, proves history survives
-   refresh and a newly opened page in the same authenticated context, and adds a task.
+   refresh and a fresh browser context using the deterministic login-equivalent adapter, and adds a task.
 2. Creates a task through the Function Calling Agent, then edits and completes it.
 3. Uses navigation and core actions at a 390 px viewport.
 4. Creates a private course, uploads/indexes a document, previews/saves a teaching profile, gives

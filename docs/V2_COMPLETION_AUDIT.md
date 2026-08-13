@@ -10,7 +10,7 @@ runtime evidence.
 | Scope | Result | Evidence boundary |
 |---|---|---|
 | Sections 0-4: truth, safety, baseline, branch | PASS | V2 baseline/spec/gap analysis and isolated branch |
-| Sections 5-12: language/history | PASS | course language defaults, owner-scoped durable conversations, UI + Chrome reopen |
+| Sections 5-12: language/history | PASS locally | course defaults, owner-scoped history, refresh + fresh-context login equivalent |
 | Sections 13-20: RAG-aware tutor | PASS (contract) | deterministic router, transparent grounding, progressive strategy |
 | Sections 21-35: exact retrieval/teaching | PASS | structured metadata/locator, context builder, golden/eval tests |
 | Sections 36-42: providers/benchmark/fallback | PARTIAL / EXTERNAL | abstraction, research and harness pass; live paid benchmark and winner do not |
@@ -30,7 +30,7 @@ runtime evidence.
 | 0-2 | PASS | Git/source treated as truth; production writes gated; no secret committed |
 | 3-4 | PASS | `V2_BASELINE.md`, `V2_CURRENT_GAP_ANALYSIS.md`, feature branch |
 | 5-7 | PASS | `tutor/language.py`, `courses.preferred_language`, conversation inheritance tests |
-| 8-12 | PASS | conversation CRUD/continuation/auto-title, sidebar, refresh and new-page Chrome test |
+| 8-12 | PASS locally | CRUD/continuation/auto-title, refresh and fresh-context deterministic login; real Clerk relogin remains production smoke |
 | 13-17 | PASS | router modes, general bypass, evidence/supplement labels and citation rules |
 | 18-20 | PASS | strategy progression, bounded history, profile-pinned student context |
 | 21-28 | PASS | reference parser, structured ingestion, parent/adjacent context, exact golden tests |
@@ -66,7 +66,8 @@ release. Do not change either label without current external evidence.
 - RAG: 144 pytest, Ruff, strict Mypy (39 files).
 - Web: 29 Vitest, TypeScript, production build (310.12 kB JS / 90.85 kB gzip).
 - Agent: 48 Vitest, TypeScript and production build.
-- Browser: Chrome 4/4, including conversation refresh/new-page recovery and private-course journey.
+- Browser: Chrome 4/4, including refresh/fresh-context deterministic login recovery and the
+  private-course journey. Real Clerk logout/login remains part of production smoke.
 - Supply chain: npm production dependency audit, 0 vulnerabilities.
 - Migration copy: versions 1-10, eight activity triggers, integrity `ok`, zero foreign-key
   violations, two-run idempotence; 3 courses, 67 documents, 1,937 chunks, 19 conversations,

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 
-test("keeps answers course-scoped, streams citations, and adds one to the plan", async ({ page }) => {
+test("keeps answers course-scoped, persists across a fresh login context, and adds one to the plan", async ({ browser, page }) => {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error" || message.type() === "warning") consoleErrors.push(message.text());
@@ -23,10 +23,11 @@ test("keeps answers course-scoped, streams citations, and adds one to the plan",
   await page.reload();
   await expect(page.locator(".message-assistant > p").first()).toContainText("DBSCAN");
   await expect(page.locator(".citation-list").first()).toBeVisible();
-  const reopenedPage = await page.context().newPage();
+  const reopenedContext = await browser.newContext();
+  const reopenedPage = await reopenedContext.newPage();
   await reopenedPage.goto(persistedConversationUrl);
   await expect(reopenedPage.locator(".message-assistant > p").first()).toContainText("DBSCAN");
-  await reopenedPage.close();
+  await reopenedContext.close();
 
   await courseSelect.selectOption("ge2324");
   await expect(page).toHaveURL(/\/qa\/ge2324$/);
