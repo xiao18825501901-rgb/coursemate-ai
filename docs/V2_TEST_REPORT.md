@@ -7,7 +7,7 @@ deterministic test providers. No billable model call was made.
 
 | Gate | Result |
 |---|---|
-| RAG pytest | **181 passed**, 1 non-failing dependency warning |
+| RAG pytest | **190 passed**, 1 non-failing dependency warning |
 | RAG Ruff | **passed** for app, tests and all three Python operational scripts |
 | RAG/monitor strict Mypy | **passed**, 40 source files |
 | Web Vitest | **29 passed** across 6 files |
@@ -24,6 +24,7 @@ deterministic test providers. No billable model call was made.
 | File request packs | **passed** for V2-01 through V2-14, 1-5 existing repository files per pack |
 | Billable benchmark safety | **passed** for explicit opt-in, conservative cost ceiling, price/currency validation, per-case checkpoint and non-overwrite output |
 | Embedding benchmark harness | **passed** for 8 real official-course judgments, course-scoped Recall@K/MRR, content-free output and pre-client billing gates |
+| Benchmark provider URL safety | **passed** for HTTPS-only external endpoints, no userinfo/query/fragment/control characters and explicit loopback-only HTTP |
 | Tracked credential-pattern scan | **no match** |
 
 The warning is Starlette's TestClient transport deprecation; it does not change behavior and its

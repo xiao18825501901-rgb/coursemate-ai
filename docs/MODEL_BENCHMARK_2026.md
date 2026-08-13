@@ -69,6 +69,11 @@ failure preserves already-paid evidence without an automatic resume or retry tha
 charge. A successful final artifact records its currency, approved maximum, preflight ceiling and
 actual token-based cost estimate. Use a new output path for every repetition.
 
+Custom provider base URLs must use HTTPS and cannot contain credentials, query strings, fragments
+or control characters. Plain HTTP is available only for an explicitly enabled loopback development
+server (`--allow-insecure-loopback`); it is never allowed for an external host. This validation runs
+before either benchmark constructs a client, so an API key cannot be sent to an unsafe destination.
+
 ## Current first-party capability matrix
 
 | Candidate | Current official model evidence | Responses API | Tool calls / schema | Context | CourseMate status |
