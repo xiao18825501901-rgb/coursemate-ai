@@ -179,6 +179,27 @@ def test_qa_uses_structured_locator_for_exact_assignment_subpart(tmp_path: Path)
     assert citation["channels"] == ["locator"]
     assert "Explain convergence" in str(citation["excerpt"])
     assert "Calculate the centroid" in provider.calls[0][1]
+    assert "What the question is asking" in provider.calls[0][2]
+
+
+def test_explicit_direct_answer_request_uses_concise_example_policy(tmp_path: Path) -> None:
+    provider = FakeAnswerProvider(["The result is 42."])
+    with make_client(tmp_path, provider) as client:
+        client.headers["Authorization"] = "Bearer admin-token"
+        create_course_and_document(client)
+        response = client.post(
+            "/api/qa/chat",
+            json={
+                "courseId": "cs3481",
+                "question": "直接给答案：lighting.md Question 1",
+            },
+            headers={"Authorization": "Bearer token-a"},
+        )
+
+    meta = parse_sse(response.text)[0][1]
+    assert response.status_code == 200
+    assert meta["exampleMode"] == "direct"
+    assert "Give the requested result directly" in provider.calls[0][2]
 
 
 def test_empty_course_streams_no_support_without_calling_model(tmp_path: Path) -> None:

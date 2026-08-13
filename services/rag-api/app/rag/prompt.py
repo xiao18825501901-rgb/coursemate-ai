@@ -45,12 +45,25 @@ TEACHING_APPROACH_INSTRUCTIONS = {
     ),
 }
 
+EXAMPLE_MODE_INSTRUCTIONS = {
+    "guided": (
+        "For a referenced exercise, teach in this order: What the question is asking; "
+        "Required concepts; Step-by-step solution; Final answer; Why the method works; "
+        "Common mistakes. Do not skip reasoning merely because the answer is available."
+    ),
+    "direct": (
+        "Give the requested result directly with only the minimum derivation needed for "
+        "verification. Keep citations and uncertainty truthful."
+    ),
+}
+
 
 def build_tutor_instructions(
     language_policy: str,
     *,
     intent: QueryIntent = QueryIntent.COURSE_GROUNDED,
     teaching_approach: TeachingApproach | None = None,
+    example_mode: str | None = None,
 ) -> str:
     """Compose trusted tutor policies without mixing them into retrieved material."""
 
@@ -65,6 +78,8 @@ def build_tutor_instructions(
             f"({teaching_approach.value}):\n"
             f"{TEACHING_APPROACH_INSTRUCTIONS[teaching_approach]}"
         )
+    if example_mode is not None:
+        parts.append(f"Example-solving policy:\n{EXAMPLE_MODE_INSTRUCTIONS[example_mode]}")
     return "\n\n".join(parts)
 
 BEGIN_CONTEXT = "--- BEGIN UNTRUSTED COURSE MATERIAL ---\n"

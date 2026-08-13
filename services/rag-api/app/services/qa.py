@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from collections.abc import Iterator
 from typing import cast
 from uuid import uuid4
@@ -21,6 +22,10 @@ NO_SUPPORT_MESSAGE = (
     "I couldn't find enough evidence in the selected course materials to answer that question."
 )
 DEFAULT_CONVERSATION_TITLE = "New Conversation"
+DIRECT_ANSWER = re.compile(
+    r"(?:直接(?:给|告诉).{0,4}答案|只要答案|just\s+(?:give\s+me\s+)?the\s+answer)",
+    re.IGNORECASE,
+)
 
 
 def conversation_title(question: str, *, max_length: int = 80) -> str:
@@ -368,6 +373,11 @@ class QaService:
         route = route_query(question)
         rewrite = rewrite_retrieval_query(question, history)
         retrieval_query = rewrite.query if route.uses_course_retrieval else question
+        query_reference = parse_query_reference(retrieval_query)
+        is_referenced_example = query_reference.question_number is not None
+        example_mode = (
+            "direct" if is_referenced_example and DIRECT_ANSWER.search(question) else "guided"
+        ) if is_referenced_example else None
         teaching_approach: TeachingApproach | None = None
         if route.intent is QueryIntent.COURSE_TUTORING:
             teaching_approach = choose_teaching_approach(
@@ -380,10 +390,9 @@ class QaService:
             conversation_id=conversation_id,
         )
         if route.uses_course_retrieval:
-            reference = parse_query_reference(retrieval_query)
             hits = self.retriever.retrieve_structured(
                 course_id=course_id,
-                reference=reference,
+                reference=query_reference,
                 top_k=self.top_k,
             )
             retrieval_strategy = "structured_locator" if hits else "hybrid"
@@ -420,6 +429,7 @@ class QaService:
             else False,
             "retrievalStrategy": retrieval_strategy,
             "teachingApproach": teaching_approach.value if teaching_approach else None,
+            "exampleMode": example_mode,
         }
         yield encode_sse(
             "meta",
@@ -451,6 +461,7 @@ class QaService:
                 language_instruction(preferred_language, detect_language(question)),
                 intent=route.intent,
                 teaching_approach=teaching_approach,
+                example_mode=example_mode,
             )
             for delta in self.answer_provider.stream_answer(
                 question=build_turn_input(question, history),

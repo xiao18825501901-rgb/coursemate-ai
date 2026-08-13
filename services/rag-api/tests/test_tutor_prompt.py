@@ -41,3 +41,28 @@ def test_general_prompt_and_bounded_turn_input_do_not_pretend_to_be_grounded() -
     assert "Do not claim that general guidance came from course material" in instructions
     assert "UNTRUSTED CONVERSATION HISTORY" in turn_input
     assert len(turn_input) < 500
+
+
+def test_example_tutor_defaults_to_a_complete_teaching_sequence() -> None:
+    instructions = build_tutor_instructions(
+        "请用中文回答。",
+        intent=QueryIntent.COURSE_TUTORING,
+        example_mode="guided",
+    )
+
+    assert "What the question is asking" in instructions
+    assert "Required concepts" in instructions
+    assert "Step-by-step solution" in instructions
+    assert "Why the method works" in instructions
+    assert "Common mistakes" in instructions
+
+
+def test_direct_answer_request_uses_concise_example_policy() -> None:
+    instructions = build_tutor_instructions(
+        "Answer in English.",
+        intent=QueryIntent.COURSE_TUTORING,
+        example_mode="direct",
+    )
+
+    assert "Give the requested result directly" in instructions
+    assert "Step-by-step solution" not in instructions
