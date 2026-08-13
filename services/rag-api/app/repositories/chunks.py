@@ -1,6 +1,7 @@
 import json
 import re
 import sqlite3
+from dataclasses import replace
 
 from app.db import Database
 from app.rag.embeddings import cosine_similarity
@@ -184,10 +185,50 @@ class ChunkRepository:
                 """,  # noqa: S608 -- fragments are fixed above; values stay parameterized.
                 parameters,
             ).fetchall()
-        return [
+        exact_hits = [
             _search_hit(row, score=1.0, channel="locator")
             for row in rows
         ]
+        if not exact_hits or not reference.question_part or limit <= len(exact_hits):
+            return exact_hits
+        parent_keys = list(
+            dict.fromkeys(hit.parent_key for hit in exact_hits if hit.parent_key is not None)
+        )
+        if not parent_keys:
+            return exact_hits
+        placeholders = ", ".join("?" for _ in parent_keys)
+        remaining = limit - len(exact_hits)
+        excluded_ids = {hit.chunk_id for hit in exact_hits}
+        with self.database.connect() as connection:
+            parent_rows = connection.execute(
+                f"""
+                SELECT
+                    c.id AS chunk_id,
+                    c.document_id,
+                    c.course_id,
+                    d.filename,
+                    c.content,
+                    c.locator_type,
+                    c.locator_value,
+                    c.section,
+                    c.metadata_json,
+                    c.parent_key
+                FROM chunks AS c
+                JOIN documents AS d ON d.id = c.document_id
+                WHERE c.course_id = ? AND c.parent_key IN ({placeholders})
+                ORDER BY d.filename COLLATE NOCASE, c.ordinal, c.id
+                """,  # noqa: S608 -- placeholder count derives from matched parent rows.
+                [course_id, *parent_keys],
+            ).fetchall()
+        parent_hits = [
+            replace(
+                _search_hit(row, score=0.5, channel="parent_context"),
+                channels=("parent_context",),
+            )
+            for row in parent_rows
+            if row["chunk_id"] not in excluded_ids
+        ][:remaining]
+        return [*exact_hits, *parent_hits]
 
     def vector_search(
         self,

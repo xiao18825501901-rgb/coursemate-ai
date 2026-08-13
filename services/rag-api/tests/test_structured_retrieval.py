@@ -152,8 +152,9 @@ def test_exact_filename_question_and_part_are_resolved_without_cross_course_leak
         limit=5,
     )
 
-    assert [hit.chunk_id for hit in hits] == ["ge-q1c"]
+    assert [hit.chunk_id for hit in hits] == ["ge-q1c", "ge-q1a"]
     assert hits[0].channels == ("locator",)
+    assert hits[1].channels == ("parent_context",)
     assert all(hit.course_id == "ge2324" for hit in hits)
 
 

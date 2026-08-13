@@ -174,11 +174,11 @@ def test_qa_uses_structured_locator_for_exact_assignment_subpart(tmp_path: Path)
     citation = next(data for name, data in events if name == "citation")
     assert response.status_code == 200
     assert meta["retrievalStrategy"] == "structured_locator"
-    assert meta["retrievedChunks"] == 1
+    assert meta["retrievedChunks"] == 2
     assert citation["filename"] == "assignment_2.md"
     assert citation["channels"] == ["locator"]
     assert "Explain convergence" in str(citation["excerpt"])
-    assert "Calculate the centroid" not in provider.calls[0][1]
+    assert "Calculate the centroid" in provider.calls[0][1]
 
 
 def test_empty_course_streams_no_support_without_calling_model(tmp_path: Path) -> None:
