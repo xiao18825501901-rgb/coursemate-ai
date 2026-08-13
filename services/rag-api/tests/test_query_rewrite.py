@@ -14,6 +14,21 @@ def test_rewrites_short_follow_up_with_previous_user_topic() -> None:
     assert "DBSCAN" in result.query
     assert "为什么" in result.query
 
+    confusion = rewrite_retrieval_query("我还是不懂", history)
+    assert confusion.was_rewritten is True
+    assert "DBSCAN" in confusion.query
+
+    repeated = rewrite_retrieval_query(
+        "还是没明白",
+        [
+            *history,
+            ConversationTurn(role="user", content="我还是不懂"),
+            ConversationTurn(role="assistant", content="我们换个类比。"),
+        ],
+    )
+    assert repeated.was_rewritten is True
+    assert "DBSCAN" in repeated.query
+
 
 def test_keeps_standalone_question_unchanged_and_bounds_rewrite() -> None:
     standalone = "According to lecture 7, compare ambient and diffuse lighting."

@@ -17,6 +17,7 @@ class RewriteResult:
 
 FOLLOW_UP = re.compile(
     r"^(?:为什么|怎么|然后呢|那呢|这个呢|为什么呢|"
+    r"我?还是?(?:不懂|没懂|没明白)|能再换一种吗|"
     r"what\s+about\s+(?:it|that)|why|how|and\s+then)[?？.!！。\s]*$",
     re.IGNORECASE,
 )
@@ -37,7 +38,9 @@ def rewrite_retrieval_query(
         (
             " ".join(turn.content.strip().split())
             for turn in reversed(history)
-            if turn.role == "user" and turn.content.strip()
+            if turn.role == "user"
+            and turn.content.strip()
+            and not FOLLOW_UP.match(" ".join(turn.content.strip().split()))
         ),
         "",
     )
@@ -46,4 +49,3 @@ def rewrite_retrieval_query(
     prefix = f"{topic} — follow-up: "
     available = max(max_chars - len(prefix), 0)
     return RewriteResult(f"{prefix}{normalized[:available]}"[:max_chars], True)
-
