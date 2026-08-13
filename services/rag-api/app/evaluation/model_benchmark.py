@@ -67,10 +67,11 @@ class BenchmarkCase:
     must_not_contain: tuple[str, ...]
     expects_tool_call: bool
     coverage: tuple[str, ...] = ()
+    expected_tool_sequence: tuple[str, ...] = ()
 
     @classmethod
     def minimal(cls, case_id: str, category: str, prompt: str) -> BenchmarkCase:
-        return cls(case_id, category, prompt, "auto", (), (), False, ())
+        return cls(case_id, category, prompt, "auto", (), (), False, (), ())
 
     @classmethod
     def from_mapping(cls, value: dict[str, Any]) -> BenchmarkCase:
@@ -83,6 +84,9 @@ class BenchmarkCase:
             must_not_contain=tuple(str(item) for item in value.get("must_not_contain", [])),
             expects_tool_call=bool(value.get("expects_tool_call", False)),
             coverage=tuple(str(item) for item in value.get("coverage", [])),
+            expected_tool_sequence=tuple(
+                str(item) for item in value.get("expected_tool_sequence", [])
+            ),
         )
 
 
@@ -104,6 +108,10 @@ class BenchmarkResult:
     streaming_tested: bool = False
     streaming_supported: bool = False
     time_to_first_token_ms: float | None = None
+    tool_sequence: tuple[str, ...] = ()
+    tool_schema_valid: bool = False
+    call_id_replayed: bool = False
+    final_response_received: bool = False
 
     @classmethod
     def from_response(
@@ -118,6 +126,10 @@ class BenchmarkResult:
         streaming_tested: bool = False,
         streaming_supported: bool = False,
         time_to_first_token_ms: float | None = None,
+        tool_sequence: tuple[str, ...] = (),
+        tool_schema_valid: bool = False,
+        call_id_replayed: bool = False,
+        final_response_received: bool = False,
     ) -> BenchmarkResult:
         folded = response_text.casefold()
         checks = {
@@ -130,6 +142,11 @@ class BenchmarkResult:
             "language": case.expected_language not in {"zh-CN", "zh"}
             or _looks_chinese(response_text),
             "tool_call": not case.expects_tool_call or tool_called,
+            "tool_sequence": not case.expects_tool_call
+            or tool_sequence == case.expected_tool_sequence,
+            "tool_schema": not case.expects_tool_call or tool_schema_valid,
+            "call_id_replay": not case.expects_tool_call or call_id_replayed,
+            "final_response": not case.expects_tool_call or final_response_received,
         }
         return cls(
             case_id=case.id,
@@ -148,6 +165,10 @@ class BenchmarkResult:
                 if time_to_first_token_ms is not None
                 else None
             ),
+            tool_sequence=tool_sequence,
+            tool_schema_valid=tool_schema_valid,
+            call_id_replayed=call_id_replayed,
+            final_response_received=final_response_received,
         )
 
 
@@ -208,6 +229,10 @@ def load_benchmark_cases(path: Path) -> list[BenchmarkCase]:
     identifiers = [case.id for case in cases]
     if len(identifiers) != len(set(identifiers)):
         raise ValueError("Benchmark case IDs must be unique.")
+    if any(case.expects_tool_call != bool(case.expected_tool_sequence) for case in cases):
+        raise ValueError(
+            "Tool cases must define a non-empty expected_tool_sequence, and text cases must not."
+        )
     return cases
 
 

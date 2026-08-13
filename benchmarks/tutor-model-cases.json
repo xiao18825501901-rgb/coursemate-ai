@@ -53,9 +53,9 @@
   {"id":"profile-04","category":"prompt_customization","prompt":"教学偏好：中英双语、考试导向、指出常见错误。讲解 t-test。","expected_language":"zh-CN","must_contain_any":["t-test","常见错误"],"must_not_contain":[],"expects_tool_call":false},
   {"id":"profile-05","category":"prompt_customization","prompt":"Turn this requirement into a structured profile: I am a beginner preparing for CS3481 and need step-by-step examples.","expected_language":"en","must_contain_any":["beginner","step-by-step"],"must_not_contain":[],"expects_tool_call":false},
 
-  {"id":"tool-01","category":"agent_tools","prompt":"Create a high-priority task to revise CS3481 clustering tomorrow.","expected_language":"en","must_contain_any":[],"must_not_contain":[],"expects_tool_call":true},
-  {"id":"tool-02","category":"agent_tools","prompt":"Find my incomplete GE2324 tasks.","expected_language":"en","must_contain_any":[],"must_not_contain":[],"expects_tool_call":true},
-  {"id":"tool-03","category":"agent_tools","prompt":"Mark the unique task named Review DBSCAN as complete.","expected_language":"en","must_contain_any":[],"must_not_contain":[],"expects_tool_call":true},
-  {"id":"tool-04","category":"agent_tools","prompt":"Change the priority of my unique regression task to low.","expected_language":"en","must_contain_any":[],"must_not_contain":[],"expects_tool_call":true},
-  {"id":"tool-05","category":"agent_tools","prompt":"Delete the unique task called obsolete practice set.","expected_language":"en","must_contain_any":[],"must_not_contain":[],"expects_tool_call":true}
+  {"id":"tool-01","category":"agent_tools","prompt":"Create a high-priority task to revise CS3481 clustering on 2030-01-15.","expected_language":"en","must_contain_any":[],"must_not_contain":[],"expects_tool_call":true,"expected_tool_sequence":["createTask"]},
+  {"id":"tool-02","category":"agent_tools","prompt":"Find my incomplete GE2324 tasks.","expected_language":"en","must_contain_any":[],"must_not_contain":[],"expects_tool_call":true,"expected_tool_sequence":["searchTask"]},
+  {"id":"tool-03","category":"agent_tools","prompt":"Mark the unique task named Review DBSCAN as complete.","expected_language":"en","must_contain_any":[],"must_not_contain":[],"expects_tool_call":true,"expected_tool_sequence":["searchTask","completeTask"]},
+  {"id":"tool-04","category":"agent_tools","prompt":"Change the priority of my unique regression task to low.","expected_language":"en","must_contain_any":[],"must_not_contain":[],"expects_tool_call":true,"expected_tool_sequence":["searchTask","updateTask"]},
+  {"id":"tool-05","category":"agent_tools","prompt":"Delete the unique task called obsolete practice set.","expected_language":"en","must_contain_any":[],"must_not_contain":[],"expects_tool_call":true,"expected_tool_sequence":["searchTask","deleteTask"]}
 ]

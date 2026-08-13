@@ -23,6 +23,12 @@ ROOT = Path(__file__).resolve().parents[1]
 RAG_SERVICE = ROOT / "services" / "rag-api"
 sys.path.insert(0, str(RAG_SERVICE))
 
+from app.evaluation.agent_tool_benchmark import (
+    AGENT_INSTRUCTIONS,
+    MAX_AGENT_RESPONSE_ROUNDS,
+    TASK_TOOLS,
+    run_agent_tool_conversation,
+)
 from app.evaluation.model_benchmark import (
     BenchmarkCase,
     BenchmarkResult,
@@ -50,81 +56,6 @@ def _write_json_atomically(path: Path, payload: dict[str, Any]) -> None:
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     temporary.replace(path)
-
-TASK_TOOLS: list[dict[str, Any]] = [
-    {
-        "type": "function",
-        "name": "createTask",
-        "description": "Create a study task for the authenticated user.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "title": {"type": "string"},
-                "courseId": {"type": ["string", "null"]},
-                "priority": {
-                    "type": ["string", "null"],
-                    "enum": ["high", "medium", "low", None],
-                },
-                "dueDate": {"type": ["string", "null"]},
-            },
-            "required": ["title", "courseId", "priority", "dueDate"],
-            "additionalProperties": False,
-        },
-        "strict": True,
-    },
-    {
-        "type": "function",
-        "name": "searchTask",
-        "description": "Find study tasks owned by the authenticated user.",
-        "parameters": {
-            "type": "object",
-            "properties": {"query": {"type": ["string", "null"]}},
-            "required": ["query"],
-            "additionalProperties": False,
-        },
-        "strict": True,
-    },
-    {
-        "type": "function",
-        "name": "completeTask",
-        "description": "Complete a uniquely identified study task.",
-        "parameters": {
-            "type": "object",
-            "properties": {"taskId": {"type": "string"}},
-            "required": ["taskId"],
-            "additionalProperties": False,
-        },
-        "strict": True,
-    },
-    {
-        "type": "function",
-        "name": "updateTask",
-        "description": "Update a uniquely identified study task.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "taskId": {"type": "string"},
-                "priority": {"type": "string", "enum": ["high", "medium", "low"]},
-            },
-            "required": ["taskId", "priority"],
-            "additionalProperties": False,
-        },
-        "strict": True,
-    },
-    {
-        "type": "function",
-        "name": "deleteTask",
-        "description": "Delete a uniquely identified study task.",
-        "parameters": {
-            "type": "object",
-            "properties": {"taskId": {"type": "string"}},
-            "required": ["taskId"],
-            "additionalProperties": False,
-        },
-        "strict": True,
-    },
-]
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -187,19 +118,29 @@ def main() -> int:
         print(str(error))
         return 2
     tool_schema_bytes = len(json.dumps(TASK_TOOLS, ensure_ascii=False).encode())
-    try:
-        cost_ceiling = calculate_cost_ceiling(
-            [
+    input_token_ceilings: list[int] = []
+    for case in cases:
+        if not case.expects_tool_call:
+            input_token_ceilings.append(
                 conservative_input_token_ceiling(
                     SYSTEM_INSTRUCTIONS,
                     case.prompt,
-                    protocol_overhead_tokens=(
-                        PROTOCOL_OVERHEAD_TOKENS
-                        + (tool_schema_bytes if case.expects_tool_call else 0)
-                    ),
+                    protocol_overhead_tokens=PROTOCOL_OVERHEAD_TOKENS,
                 )
-                for case in cases
-            ],
+            )
+            continue
+        base_ceiling = conservative_input_token_ceiling(
+            AGENT_INSTRUCTIONS,
+            case.prompt,
+            protocol_overhead_tokens=PROTOCOL_OVERHEAD_TOKENS + tool_schema_bytes,
+        )
+        input_token_ceilings.extend(
+            base_ceiling + round_index * (MAX_OUTPUT_TOKENS + PROTOCOL_OVERHEAD_TOKENS)
+            for round_index in range(MAX_AGENT_RESPONSE_ROUNDS)
+        )
+    try:
+        cost_ceiling = calculate_cost_ceiling(
+            input_token_ceilings,
             max_output_tokens_per_case=MAX_OUTPUT_TOKENS,
             input_price_per_million=args.input_price_per_million,
             output_price_per_million=args.output_price_per_million,
@@ -236,41 +177,45 @@ def main() -> int:
             "store": False,
         }
         if case.expects_tool_call:
+            request.pop("input")
+            request["instructions"] = AGENT_INSTRUCTIONS
             request["tools"] = TASK_TOOLS
             request["parallel_tool_calls"] = False
-        if case.expects_tool_call:
-            response = client.responses.create(**request)
+
+            def create_response(input_items: list[Any]) -> Any:
+                return client.responses.create(**request, input=input_items)
+
+            agent_sample = run_agent_tool_conversation(case.prompt, create_response)
             elapsed_ms = (time.perf_counter() - started) * 1_000
-            output = list(response.output)
-            tool_called = any(
-                getattr(item, "type", "") == "function_call" for item in output
-            )
-            usage = response.usage
             return BenchmarkResult.from_response(
                 case,
-                response.output_text,
-                tool_called,
+                agent_sample.text,
+                bool(agent_sample.tool_sequence),
                 elapsed_ms,
-                getattr(usage, "input_tokens", 0) if usage else 0,
-                getattr(usage, "output_tokens", 0) if usage else 0,
+                agent_sample.input_tokens,
+                agent_sample.output_tokens,
+                tool_sequence=agent_sample.tool_sequence,
+                tool_schema_valid=agent_sample.tool_schema_valid,
+                call_id_replayed=agent_sample.call_id_replayed,
+                final_response_received=agent_sample.final_response_received,
             )
 
         stream = client.responses.create(**request, stream=True)
-        sample = consume_text_stream(
+        stream_sample = consume_text_stream(
             stream,
             started_at=started,
             clock=time.perf_counter,
         )
         return BenchmarkResult.from_response(
             case,
-            sample.text,
+            stream_sample.text,
             False,
-            sample.latency_ms,
-            sample.input_tokens,
-            sample.output_tokens,
+            stream_sample.latency_ms,
+            stream_sample.input_tokens,
+            stream_sample.output_tokens,
             streaming_tested=True,
             streaming_supported=True,
-            time_to_first_token_ms=sample.time_to_first_token_ms,
+            time_to_first_token_ms=stream_sample.time_to_first_token_ms,
         )
 
     def summarize(completed: list[BenchmarkResult]) -> dict[str, Any]:

@@ -8,6 +8,13 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.evaluation.agent_tool_benchmark import (
+    MAX_AGENT_RESPONSE_ROUNDS,
+    TASK_TOOLS,
+    run_agent_tool_conversation,
+    simulated_tool_output,
+    validate_tool_arguments,
+)
 from app.evaluation.model_benchmark import (
     BenchmarkCase,
     BenchmarkResult,
@@ -53,6 +60,17 @@ def test_v2_benchmark_dataset_has_50_cases_and_required_coverage() -> None:
         "multi_user_security",
         "prompt_customization",
     }.issubset({label for case in cases for label in case.coverage})
+    assert {
+        case.id: case.expected_tool_sequence
+        for case in cases
+        if case.expects_tool_call
+    } == {
+        "tool-01": ("createTask",),
+        "tool-02": ("searchTask",),
+        "tool-03": ("searchTask", "completeTask"),
+        "tool-04": ("searchTask", "updateTask"),
+        "tool-05": ("searchTask", "deleteTask"),
+    }
 
 
 def test_benchmark_refuses_network_calls_without_explicit_billable_opt_in() -> None:
@@ -124,7 +142,7 @@ def test_automated_scoring_and_summary_do_not_include_credentials() -> None:
     assert "secret" not in rendered.casefold()
 
 
-def test_tool_case_requires_a_function_call() -> None:
+def test_tool_case_requires_expected_valid_replayed_sequence_and_final_response() -> None:
     case = BenchmarkCase(
         id="tool-1",
         category="agent_tools",
@@ -133,13 +151,155 @@ def test_tool_case_requires_a_function_call() -> None:
         must_contain_any=(),
         must_not_contain=(),
         expects_tool_call=True,
+        expected_tool_sequence=("createTask",),
     )
 
     without_call = BenchmarkResult.from_response(case, "Done.", False, 10, 3, 2)
-    with_call = BenchmarkResult.from_response(case, "", True, 10, 3, 2)
+    wrong_call = BenchmarkResult.from_response(
+        case,
+        "Done.",
+        True,
+        10,
+        3,
+        2,
+        tool_sequence=("deleteTask",),
+        tool_schema_valid=True,
+        call_id_replayed=True,
+        final_response_received=True,
+    )
+    valid_call = BenchmarkResult.from_response(
+        case,
+        "Created.",
+        True,
+        10,
+        3,
+        2,
+        tool_sequence=("createTask",),
+        tool_schema_valid=True,
+        call_id_replayed=True,
+        final_response_received=True,
+    )
 
     assert without_call.automated_pass is False
-    assert with_call.automated_pass is True
+    assert wrong_call.automated_pass is False
+    assert valid_call.automated_pass is True
+
+
+def test_agent_tool_contract_matches_production_shapes_and_rejects_bad_json() -> None:
+    assert [tool["name"] for tool in TASK_TOOLS] == [
+        "createTask",
+        "searchTask",
+        "updateTask",
+        "completeTask",
+        "deleteTask",
+    ]
+    assert {
+        tool["name"]: tool["parameters"]["required"] for tool in TASK_TOOLS
+    } == {
+        "createTask": [
+            "title",
+            "notes",
+            "courseId",
+            "priority",
+            "dueDate",
+            "sourceCitation",
+        ],
+        "searchTask": ["query", "courseId", "status", "page", "pageSize"],
+        "updateTask": [
+            "taskId",
+            "updateFields",
+            "title",
+            "notes",
+            "courseId",
+            "status",
+            "priority",
+            "dueDate",
+        ],
+        "completeTask": ["taskId"],
+        "deleteTask": ["taskId"],
+    }
+    valid_search = {
+        "query": "Review DBSCAN",
+        "courseId": None,
+        "status": None,
+        "page": 1,
+        "pageSize": 20,
+    }
+    assert validate_tool_arguments("searchTask", valid_search) is True
+    assert validate_tool_arguments("searchTask", {**valid_search, "ownerUserId": "other"}) is False
+    assert validate_tool_arguments("searchTask", {**valid_search, "page": "1"}) is False
+    assert validate_tool_arguments("unknownTool", {}) is False
+
+
+def test_agent_tool_simulator_is_content_safe_and_supports_multi_round_replay() -> None:
+    result = simulated_tool_output("searchTask")
+    rendered = json.dumps(result)
+
+    assert result["ok"] is True
+    assert result["data"]["items"][0]["id"] == "benchmark-task-1"
+    assert "prompt" not in rendered.casefold()
+    assert "course content" not in rendered.casefold()
+    assert MAX_AGENT_RESPONSE_ROUNDS >= 3
+
+
+def test_agent_tool_conversation_replays_exact_call_ids_and_collects_usage() -> None:
+    responses = iter(
+        [
+            SimpleNamespace(
+                output_text="",
+                output=[
+                    SimpleNamespace(
+                        type="function_call",
+                        call_id="search-call-1",
+                        name="searchTask",
+                        arguments=json.dumps(
+                            {
+                                "query": "Review DBSCAN",
+                                "courseId": None,
+                                "status": None,
+                                "page": 1,
+                                "pageSize": 20,
+                            }
+                        ),
+                    )
+                ],
+                usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+            ),
+            SimpleNamespace(
+                output_text="",
+                output=[
+                    SimpleNamespace(
+                        type="function_call",
+                        call_id="complete-call-2",
+                        name="completeTask",
+                        arguments=json.dumps({"taskId": "benchmark-task-1"}),
+                    )
+                ],
+                usage=SimpleNamespace(input_tokens=20, output_tokens=5),
+            ),
+            SimpleNamespace(
+                output_text="Completed Review DBSCAN.",
+                output=[],
+                usage=SimpleNamespace(input_tokens=25, output_tokens=4),
+            ),
+        ]
+    )
+    submitted_inputs: list[list[object]] = []
+
+    def create_response(input_items: list[object]) -> object:
+        submitted_inputs.append(input_items)
+        return next(responses)
+
+    sample = run_agent_tool_conversation("Complete Review DBSCAN", create_response)
+
+    assert sample.tool_sequence == ("searchTask", "completeTask")
+    assert sample.tool_schema_valid is True
+    assert sample.call_id_replayed is True
+    assert sample.final_response_received is True
+    assert sample.input_tokens == 55
+    assert sample.output_tokens == 14
+    assert submitted_inputs[1][-1]["call_id"] == "search-call-1"
+    assert submitted_inputs[2][-1]["call_id"] == "complete-call-2"
 
 
 def test_stream_sampling_records_ttft_text_and_usage() -> None:
@@ -300,6 +460,46 @@ def test_runner_refuses_over_budget_before_constructing_provider_client(
     assert "exceeds approved maximum" in process.stdout
     assert "not-a-real-key" not in process.stdout + process.stderr
     assert not (tmp_path / "must-not-exist.json").exists()
+
+
+def test_runner_budgets_for_all_agent_tool_rounds_before_provider_client(
+    tmp_path: Path,
+) -> None:
+    process = subprocess.run(
+        [
+            sys.executable,
+            str(RUNNER),
+            "--provider",
+            "test-provider",
+            "--model",
+            "test-model",
+            "--api-key-env",
+            "BENCHMARK_TEST_KEY",
+            "--output",
+            str(tmp_path / "must-not-exist.json"),
+            "--category",
+            "agent_tools",
+            "--limit",
+            "1",
+            "--input-price-per-million",
+            "1",
+            "--output-price-per-million",
+            "1",
+            "--max-cost",
+            "0.01",
+            "--currency",
+            "USD",
+            "--allow-billable",
+        ],
+        check=False,
+        capture_output=True,
+        env={**os.environ, "BENCHMARK_TEST_KEY": "not-a-real-key"},
+        text=True,
+    )
+
+    assert process.returncode == 2
+    assert "exceeds approved maximum" in process.stdout
+    assert "not-a-real-key" not in process.stdout + process.stderr
 
 
 def test_runner_refuses_existing_output_before_constructing_provider_client(
