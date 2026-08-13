@@ -6,7 +6,7 @@ import {
   deleteCourse,
   deleteDocument,
   getIngestionJob,
-  listCourses,
+  getCourse,
   listDocuments,
   listTeachingProfiles,
   previewTeachingProfile,
@@ -47,13 +47,12 @@ export function CourseSettingsPage() {
   const [rightsConfirmation, setRightsConfirmation] = useState(false);
 
   async function refresh() {
-    const [coursePage, documentPage, profilePage] = await Promise.all([
-      listCourses(getToken),
+    const [found, documentPage, profilePage] = await Promise.all([
+      getCourse(getToken, courseId),
       listDocuments(getToken, courseId),
       listTeachingProfiles(getToken, courseId),
     ]);
-    const found = coursePage.items.find((item) => item.id === courseId && item.canManage);
-    if (!found) throw new Error("This course is not available for management.");
+    if (!found.canManage) throw new Error("This course is not available for management.");
     setCourse(found);
     setName(found.name);
     setDescription(found.description);

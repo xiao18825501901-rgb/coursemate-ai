@@ -61,6 +61,19 @@ def list_courses(
     )
 
 
+@router.get("/api/courses/{course_id}", response_model=Course)
+def get_course(
+    course_id: str,
+    request: Request,
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+) -> Course:
+    return _service(request).get_course(
+        course_id,
+        owner_user_id=user.user_id,
+        is_admin=user.is_admin,
+    )
+
+
 @router.patch("/api/courses/{course_id}", response_model=Course)
 def update_course(
     course_id: str,

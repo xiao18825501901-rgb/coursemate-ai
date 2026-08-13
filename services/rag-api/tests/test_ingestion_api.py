@@ -81,6 +81,29 @@ def test_health_and_course_pagination(client: TestClient) -> None:
     assert courses.json()["items"][0]["id"] == "cs3481"
 
 
+def test_course_detail_obeys_private_visibility_policy(client: TestClient) -> None:
+    client.headers["Authorization"] = "Bearer user-token"
+    assert client.post(
+        "/api/courses",
+        json={"id": "detail-course", "name": "Detail"},
+    ).status_code == 201
+    owner = client.get("/api/courses/detail-course")
+    other = client.get(
+        "/api/courses/detail-course",
+        headers={"Authorization": "Bearer user-b-token"},
+    )
+    admin = client.get(
+        "/api/courses/detail-course",
+        headers={"Authorization": "Bearer admin-token"},
+    )
+
+    assert owner.status_code == 200
+    assert owner.json()["isOwner"] is True
+    assert other.status_code == 404
+    assert admin.status_code == 200
+    assert admin.json()["canManage"] is True
+
+
 def test_course_name_cannot_be_blank(client: TestClient) -> None:
     response = client.post(
         "/api/courses",

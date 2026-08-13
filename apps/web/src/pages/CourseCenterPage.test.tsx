@@ -8,6 +8,7 @@ import {
   deleteCourse,
   deleteDocument,
   getIngestionJob,
+  getCourse,
   listCourses,
   listDocuments,
   listTeachingProfiles,
@@ -28,6 +29,7 @@ vi.mock("../services/ragApi", () => ({
   deleteCourse: vi.fn(),
   deleteDocument: vi.fn(),
   getIngestionJob: vi.fn(),
+  getCourse: vi.fn(),
   listCourses: vi.fn(),
   listDocuments: vi.fn(),
   listTeachingProfiles: vi.fn(),
@@ -116,7 +118,7 @@ describe("CourseCenterPage", () => {
 
 describe("CourseSettingsPage", () => {
   beforeEach(() => {
-    vi.mocked(listCourses).mockResolvedValue({ items: [mine], page: 1, pageSize: 100, total: 1 });
+    vi.mocked(getCourse).mockResolvedValue(mine);
     vi.mocked(listDocuments).mockResolvedValue({ items: [], page: 1, pageSize: 100, total: 0 });
     vi.mocked(updateCourse).mockResolvedValue({ ...mine, name: "Updated" });
     vi.mocked(deleteCourse).mockResolvedValue();
@@ -217,11 +219,9 @@ describe("CourseSettingsPage", () => {
 
   it("allows the owner to withdraw a pending publication review", async () => {
     vi.mocked(withdrawPublicationRequest).mockResolvedValue();
-    vi.mocked(listCourses)
-      .mockResolvedValueOnce({
-        items: [{ ...mine, publicationStatus: "pending" }], page: 1, pageSize: 100, total: 1,
-      })
-      .mockResolvedValueOnce({ items: [mine], page: 1, pageSize: 100, total: 1 });
+    vi.mocked(getCourse)
+      .mockResolvedValueOnce({ ...mine, publicationStatus: "pending" })
+      .mockResolvedValueOnce(mine);
     renderRoutes("/courses/my-course/settings");
 
     fireEvent.click(await screen.findByRole("button", { name: "Withdraw publication request" }));

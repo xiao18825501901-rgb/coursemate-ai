@@ -70,6 +70,16 @@ export async function listCourses(getToken: GetSessionToken): Promise<Page<Cours
   return requestJson<Page<Course>>(getToken, `${RAG_API}/api/courses?page=1&pageSize=100`);
 }
 
+export async function getCourse(
+  getToken: GetSessionToken,
+  courseId: string,
+): Promise<Course> {
+  return requestJson<Course>(
+    getToken,
+    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}`,
+  );
+}
+
 export async function createCourse(
   getToken: GetSessionToken,
   input: CourseCreateInput,

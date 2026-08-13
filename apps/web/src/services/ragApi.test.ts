@@ -7,6 +7,7 @@ import {
   deleteConversation,
   deleteDocument,
   getIngestionJob,
+  getCourse,
   getConversation,
   listConversations,
   renameConversation,
@@ -137,6 +138,15 @@ describe("private course API", () => {
         [expect.stringContaining("/api/courses/my-course/documents/doc_1"), "DELETE"],
         [expect.stringContaining("/api/courses/my-course"), "DELETE"],
       ]);
+  });
+
+  it("loads one course by its encoded resource id", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: "my course" })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getCourse(vi.fn().mockResolvedValue("token-a"), "my course");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/api/courses/my%20course");
   });
 
   it("does not send read-only prompt preview fields when saving a profile", async () => {

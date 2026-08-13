@@ -161,6 +161,20 @@ class IngestionService:
             total=total,
         )
 
+    def get_course(
+        self,
+        course_id: str,
+        *,
+        owner_user_id: str,
+        is_admin: bool,
+    ) -> Course:
+        row = self._require_course(
+            course_id,
+            owner_user_id=owner_user_id,
+            is_admin=is_admin,
+        )
+        return self._course(row, owner_user_id=owner_user_id, is_admin=is_admin)
+
     def list_documents(
         self,
         course_id: str,
