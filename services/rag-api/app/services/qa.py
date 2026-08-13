@@ -7,10 +7,13 @@ from uuid import uuid4
 from app.db import Database
 from app.errors import ApiError
 from app.rag.answers import AnswerProvider
-from app.rag.prompt import build_context_with_hits, build_tutor_instructions
+from app.rag.prompt import build_context_with_hits, build_turn_input, build_tutor_instructions
 from app.rag.retrieval import HybridRetriever
 from app.rag.types import SearchHit
 from app.tutor.language import LanguagePreference, detect_language, language_instruction
+from app.tutor.rewrite import ConversationTurn, rewrite_retrieval_query
+from app.tutor.routing import QueryIntent, route_query
+from app.tutor.strategy import TeachingApproach, choose_teaching_approach
 
 LOGGER = logging.getLogger(__name__)
 NO_SUPPORT_MESSAGE = (
@@ -223,6 +226,55 @@ class QaService:
             if result.rowcount == 0:
                 raise ApiError(404, "CONVERSATION_NOT_FOUND", "The conversation was not found.")
 
+    def _recent_history(self, conversation_id: str | None) -> list[ConversationTurn]:
+        if conversation_id is None:
+            return []
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT role, content
+                FROM messages
+                WHERE conversation_id = ? AND role IN ('user', 'assistant')
+                ORDER BY created_at DESC, rowid DESC
+                LIMIT 12
+                """,
+                (conversation_id,),
+            ).fetchall()
+        return [
+            ConversationTurn(role=row["role"], content=row["content"])
+            for row in reversed(rows)
+        ]
+
+    def _course_metadata_context(self, course_id: str) -> str:
+        with self.database.connect() as connection:
+            course = connection.execute(
+                "SELECT name, description FROM courses WHERE id = ?",
+                (course_id,),
+            ).fetchone()
+            documents = connection.execute(
+                """
+                SELECT filename, status, chunk_count
+                FROM documents
+                WHERE course_id = ?
+                ORDER BY filename, id
+                LIMIT 100
+                """,
+                (course_id,),
+            ).fetchall()
+        assert course is not None
+        lines = [
+            "--- BEGIN TRUSTED COURSE METADATA ---",
+            f"course: {course['name']}",
+            f"description: {course['description']}",
+            f"document_count: {len(documents)}",
+        ]
+        lines.extend(
+            f"document: {row['filename']}; status={row['status']}; chunks={row['chunk_count']}"
+            for row in documents
+        )
+        lines.append("--- END TRUSTED COURSE METADATA ---")
+        return "\n".join(lines)
+
     def _record_question(
         self,
         *,
@@ -307,21 +359,44 @@ class QaService:
         conversation_id: str | None = None,
     ) -> Iterator[str]:
         request_id = f"qa_{uuid4().hex}"
+        history = self._recent_history(conversation_id)
+        route = route_query(question)
+        rewrite = rewrite_retrieval_query(question, history)
+        retrieval_query = rewrite.query if route.uses_course_retrieval else question
+        teaching_approach: TeachingApproach | None = None
+        if route.intent is QueryIntent.COURSE_TUTORING:
+            teaching_approach = choose_teaching_approach(
+                [*history, ConversationTurn(role="user", content=question)]
+            )
         conversation_id, preferred_language = self._record_question(
             owner_user_id=owner_user_id,
             course_id=course_id,
             question=question,
             conversation_id=conversation_id,
         )
-        hits = self.retriever.retrieve(
-            course_id=course_id,
-            query=question,
-            top_k=self.top_k,
-        )
-        context, included_hits = build_context_with_hits(
-            hits,
-            max_chars=self.max_context_chars,
-        )
+        if route.uses_course_retrieval:
+            hits = self.retriever.retrieve(
+                course_id=course_id,
+                query=retrieval_query,
+                top_k=self.top_k,
+            )
+            context, included_hits = build_context_with_hits(
+                hits,
+                max_chars=self.max_context_chars,
+            )
+        elif route.intent is QueryIntent.COURSE_META:
+            context = self._course_metadata_context(course_id)
+            included_hits = []
+        else:
+            context = ""
+            included_hits = []
+        grounding_mode = {
+            QueryIntent.COURSE_GROUNDED: "grounded",
+            QueryIntent.COURSE_TUTORING: "mixed",
+            QueryIntent.GENERAL_CONVERSATION: "general",
+            QueryIntent.COURSE_META: "metadata",
+            QueryIntent.AMBIGUOUS: "grounded",
+        }[route.intent]
         yield encode_sse(
             "meta",
             {
@@ -329,9 +404,18 @@ class QaService:
                 "conversationId": conversation_id,
                 "courseId": course_id,
                 "retrievedChunks": len(included_hits),
+                "queryIntent": route.intent.value,
+                "groundingMode": grounding_mode,
+                "retrievalQueryRewritten": rewrite.was_rewritten
+                if route.uses_course_retrieval
+                else False,
+                "teachingApproach": teaching_approach.value if teaching_approach else None,
             },
         )
-        if not included_hits:
+        if not included_hits and route.intent in {
+            QueryIntent.COURSE_GROUNDED,
+            QueryIntent.AMBIGUOUS,
+        }:
             self._record_answer(
                 conversation_id=conversation_id,
                 content=NO_SUPPORT_MESSAGE,
@@ -344,10 +428,12 @@ class QaService:
         try:
             answer_parts: list[str] = []
             instructions = build_tutor_instructions(
-                language_instruction(preferred_language, detect_language(question))
+                language_instruction(preferred_language, detect_language(question)),
+                intent=route.intent,
+                teaching_approach=teaching_approach,
             )
             for delta in self.answer_provider.stream_answer(
-                question=question,
+                question=build_turn_input(question, history),
                 context=context,
                 instructions=instructions,
             ):

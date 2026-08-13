@@ -156,6 +156,99 @@ def test_empty_course_streams_no_support_without_calling_model(tmp_path: Path) -
     assert provider.calls == []
 
 
+def test_general_conversation_bypasses_empty_course_refusal(tmp_path: Path) -> None:
+    provider = FakeAnswerProvider(["你好！我们可以先定一个轻量的学习目标。"])
+    with make_client(tmp_path, provider) as client:
+        client.headers["Authorization"] = "Bearer admin-token"
+        client.post(
+            "/api/courses",
+            json={"id": "cs3481", "name": "Computer Graphics", "description": ""},
+        )
+        response = client.post(
+            "/api/qa/chat",
+            json={"courseId": "cs3481", "question": "你好"},
+            headers={"Authorization": "Bearer token-a"},
+        )
+
+    events = parse_sse(response.text)
+    meta = events[0][1]
+    assert [name for name, _ in events] == ["meta", "delta", "done"]
+    assert meta["queryIntent"] == "GENERAL_CONVERSATION"
+    assert meta["groundingMode"] == "general"
+    assert meta["retrievedChunks"] == 0
+    assert provider.calls[0][1] == ""
+    assert "Do not claim that general guidance came from course material" in provider.calls[0][2]
+
+
+def test_tutoring_can_use_labeled_general_knowledge_when_course_has_no_hit(
+    tmp_path: Path,
+) -> None:
+    provider = FakeAnswerProvider(["补充理解：先用一个邻居投票的类比。"])
+    with make_client(tmp_path, provider) as client:
+        client.headers["Authorization"] = "Bearer admin-token"
+        client.post(
+            "/api/courses",
+            json={"id": "cs3481", "name": "Computer Graphics", "description": ""},
+        )
+        response = client.post(
+            "/api/qa/chat",
+            json={"courseId": "cs3481", "question": "为什么要定义 core point？"},
+            headers={"Authorization": "Bearer token-a"},
+        )
+
+    events = parse_sse(response.text)
+    meta = events[0][1]
+    assert [name for name, _ in events] == ["meta", "delta", "done"]
+    assert meta["queryIntent"] == "COURSE_TUTORING"
+    assert meta["groundingMode"] == "mixed"
+    assert "Supplementary explanation" in provider.calls[0][2]
+    assert "analogy" not in provider.calls[0][2]
+
+
+def test_repeated_confusion_changes_teaching_strategy_and_rewrites_retrieval(
+    tmp_path: Path,
+) -> None:
+    provider = FakeAnswerProvider(["Core points satisfy a neighborhood threshold."])
+    with make_client(tmp_path, provider) as client:
+        client.headers["Authorization"] = "Bearer admin-token"
+        create_course_and_document(client)
+        first = client.post(
+            "/api/qa/chat",
+            json={"courseId": "cs3481", "question": "What is a core point?"},
+            headers={"Authorization": "Bearer token-a"},
+        )
+        conversation_id = parse_sse(first.text)[0][1]["conversationId"]
+        provider.deltas = ["换个类比来理解。"]
+        second = client.post(
+            "/api/qa/chat",
+            json={
+                "courseId": "cs3481",
+                "conversationId": conversation_id,
+                "question": "我还是不懂",
+            },
+            headers={"Authorization": "Bearer token-a"},
+        )
+        provider.deltas = ["我们做一个小例题。"]
+        third = client.post(
+            "/api/qa/chat",
+            json={
+                "courseId": "cs3481",
+                "conversationId": conversation_id,
+                "question": "还是没明白",
+            },
+            headers={"Authorization": "Bearer token-a"},
+        )
+
+    second_meta = parse_sse(second.text)[0][1]
+    third_meta = parse_sse(third.text)[0][1]
+    assert second_meta["teachingApproach"] == "analogy"
+    assert second_meta["retrievalQueryRewritten"] is True
+    assert third_meta["teachingApproach"] == "worked_example"
+    assert "concrete analogy" in provider.calls[1][2]
+    assert "small worked example" in provider.calls[2][2]
+    assert "UNTRUSTED CONVERSATION HISTORY" in provider.calls[2][0]
+
+
 def test_model_failure_becomes_sse_error_event(tmp_path: Path) -> None:
     provider = FakeAnswerProvider(fail=True)
     with make_client(tmp_path, provider) as client:
