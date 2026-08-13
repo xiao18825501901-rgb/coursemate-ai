@@ -1,0 +1,97 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from app.evaluation.model_benchmark import (
+    BenchmarkCase,
+    BenchmarkResult,
+    BillableRunNotAuthorized,
+    load_benchmark_cases,
+    run_benchmark,
+    summarize_results,
+)
+
+DATASET = Path(__file__).parents[3] / "benchmarks" / "tutor-model-cases.json"
+
+
+def test_v2_benchmark_dataset_has_50_cases_and_required_coverage() -> None:
+    cases = load_benchmark_cases(DATASET)
+
+    assert len(cases) == 50
+    assert {
+        "chinese_tutoring",
+        "english_tutoring",
+        "grounded_qa",
+        "exact_locator",
+        "multi_turn",
+        "general_chat",
+        "course_isolation",
+        "private_course",
+        "prompt_customization",
+        "agent_tools",
+    }.issubset({case.category for case in cases})
+
+
+def test_benchmark_refuses_network_calls_without_explicit_billable_opt_in() -> None:
+    called = False
+
+    def provider(case: BenchmarkCase) -> BenchmarkResult:
+        nonlocal called
+        called = True
+        return BenchmarkResult.from_response(case, "unused", False, 1.0, 1, 1)
+
+    with pytest.raises(BillableRunNotAuthorized):
+        run_benchmark(
+            [BenchmarkCase.minimal("case-1", "general_chat", "hello")],
+            provider,
+            allow_billable=False,
+        )
+
+    assert called is False
+
+
+def test_automated_scoring_and_summary_do_not_include_credentials() -> None:
+    case = BenchmarkCase(
+        id="zh-1",
+        category="chinese_tutoring",
+        prompt="什么是核心点？",
+        expected_language="zh-CN",
+        must_contain_any=("核心点",),
+        must_not_contain=("资料中没有",),
+        expects_tool_call=False,
+    )
+
+    result = BenchmarkResult.from_response(
+        case,
+        "核心点需要在邻域内达到最小样本数。",
+        False,
+        123.0,
+        12,
+        18,
+    )
+    summary = summarize_results([result], provider="candidate-a", model="model-a")
+    rendered = json.dumps(summary, ensure_ascii=False)
+
+    assert result.automated_pass is True
+    assert summary["automated_pass_rate"] == 1.0
+    assert "api_key" not in rendered.casefold()
+    assert "secret" not in rendered.casefold()
+
+
+def test_tool_case_requires_a_function_call() -> None:
+    case = BenchmarkCase(
+        id="tool-1",
+        category="agent_tools",
+        prompt="Create a task to revise clustering.",
+        expected_language="en",
+        must_contain_any=(),
+        must_not_contain=(),
+        expects_tool_call=True,
+    )
+
+    without_call = BenchmarkResult.from_response(case, "Done.", False, 10, 3, 2)
+    with_call = BenchmarkResult.from_response(case, "", True, 10, 3, 2)
+
+    assert without_call.automated_pass is False
+    assert with_call.automated_pass is True

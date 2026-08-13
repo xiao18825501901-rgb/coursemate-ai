@@ -1,0 +1,139 @@
+# CourseMate AI V2 Model Benchmark (2026-08-13)
+
+## Decision status
+
+**Live quality benchmark: NOT RUN. Final model selection: NOT APPROVED.**
+
+This is deliberate. Every candidate endpoint is billable, and the V2 authorization explicitly
+forbids paid actions without separate approval. The repository now contains a reproducible 50-case
+benchmark and a fail-closed runner, but no model was contacted and no quality, latency, or real cost
+result is claimed.
+
+The current deploy template still expresses the previous migration intent—Qwen for tutor and Agent,
+and Alibaba `text-embedding-v4` for embeddings—but it is not evidence of the actual `qqttai.com`
+runtime. No SSH access or production environment files were available in this workspace.
+
+## Evidence levels
+
+- **Official-doc qualified:** capability exists according to current first-party documentation.
+- **Local contract verified:** CourseMate's SDK/configuration behavior is covered by automated tests.
+- **Live verified:** the exact account, region, model, endpoint, and workload were exercised.
+- **Production verified:** the deployed service was observed and smoke-tested.
+
+Only the first two levels are complete. Anything stronger is recorded as unknown.
+
+## Benchmark assets
+
+- Dataset: `benchmarks/tutor-model-cases.json` — exactly 50 cases across Chinese and English
+  tutoring, grounded QA, exact locators, multi-turn teaching, general chat, course isolation,
+  private-course authorization, prompt customization, and Agent tools.
+- Candidate template: `benchmarks/model-candidates.example.json`.
+- Runner: `scripts/run_model_benchmark.py`.
+- Scoring library: `services/rag-api/app/evaluation/model_benchmark.py`.
+- Tests: `services/rag-api/tests/test_model_benchmark.py`.
+
+The runner exits before creating a client unless `--allow-billable` is explicitly supplied. It never
+writes API keys to results. Automatic checks are intentionally narrow; a human must still score
+retrieval relevance, source and citation correctness, teaching depth, step-by-step quality, Chinese
+quality, follow-up coherence, hallucination, and instruction adherence.
+
+Example after billing is approved:
+
+```powershell
+services\rag-api\.venv\Scripts\python.exe scripts\run_model_benchmark.py `
+  --provider "candidate" `
+  --model "candidate-model" `
+  --base-url "https://provider.example/v1" `
+  --api-key-env "CANDIDATE_API_KEY" `
+  --output "work\benchmarks\candidate.json" `
+  --allow-billable
+```
+
+Run a small compatibility canary first (`--limit 2`), then all 50 cases. Repeat each candidate at
+least three times for useful latency percentiles; this initial runner reports mean latency and raw
+per-case samples.
+
+## Current first-party capability matrix
+
+| Candidate | Current official model evidence | Responses API | Tool calls / schema | Context | CourseMate status |
+|---|---|---:|---:|---:|---|
+| Alibaba / Qwen | Qwen 3.7 Plus and newer variants are listed by region | Documented | Must be canary-tested on the exact endpoint | up to 1M by pricing tier | Eligible; previous config intent only |
+| DeepSeek | `deepseek-v4-flash`, `deepseek-v4-pro` | Documented | JSON and tool calls documented | 1M | Eligible; no live account test |
+| Moonshot / Kimi | Kimi K3, K2.7 Code, K2.6 | Chat Completions documented | strict tools documented | K3: 1M | Adapter required for current Responses-only code |
+| Zhipu / GLM | GLM-5.2 | Not established from reviewed page | function calling and JSON documented | 1M | Adapter/canary required |
+| Volcengine / Doubao | Doubao Seed 2.0 family | Documented | Responses function calling documented | model-dependent | Eligible; no live account test |
+| MiniMax | MiniMax M3 / M2.7 / M2.5 | Not established from reviewed page | tool generation and OpenAI SDK access documented | M3: 1M | Adapter/canary required |
+| OpenAI | GPT-5.6 Luna (current code default) | Native | Native | model-dependent | Local SDK contract only; no live call |
+
+Important: “OpenAI compatible” does not necessarily mean “OpenAI Responses compatible.” Kimi's
+official API page is Chat Completions; GLM and MiniMax documentation reviewed here does not prove the
+exact Responses event contract CourseMate consumes. They remain valid benchmark candidates only
+after an adapter or a successful canary.
+
+## Embedding decision
+
+Alibaba's current `text-embedding-v4` documentation says it is multilingual, supports configurable
+64–2048 dimensions, and is priced in Singapore at CNY 0.514 per million input tokens. CourseMate's
+existing embedding client and batch-of-10 behavior remain locally tested. However, changing an
+embedding model or dimension requires full corpus re-embedding and retrieval regression; never mix
+vectors from different model/dimension contracts in one index.
+
+**Provisional embedding candidate:** `text-embedding-v4` in the same compliant region as the corpus.
+
+**Final status:** pending real corpus retrieval comparison against the current embedding baseline.
+
+## Provisional deployment positions (not benchmark winners)
+
+- **Tutor:** keep the currently configured Qwen 3.7 Plus intent until a 50-case live comparison
+  shows a better quality/cost/latency trade-off. This minimizes migration risk; it is not a claim that
+  Qwen won.
+- **Agent:** use only a model whose exact endpoint passes all tool cases and multi-round call-id replay.
+  Qwen, DeepSeek V4, and Doubao have documented Responses paths and are the first canary candidates.
+- **Embedding:** `text-embedding-v4` is the first candidate because of multilingual retrieval support,
+  deployment-region alignment, and low documented input cost.
+- **Fallback:** disabled by default. A fallback provider is not selected until both primary and
+  fallback pass the same benchmark and a cost ceiling is approved.
+
+## Fallback safety design
+
+Do not silently retry a full generation on another paid provider. A later fallback implementation
+must include all of the following:
+
+1. one short connect/read timeout and no retry for validation/auth/rate-limit failures;
+2. at most one cross-provider attempt for explicitly classified transient failures;
+3. idempotency protection for Agent tools—model fallback occurs before executing any mutation;
+4. circuit state with cooldown to stop repeated double charges;
+5. structured logs containing provider, model, request ID, latency, token usage and failure class, but
+   never prompts containing private course text or credentials;
+6. per-request and monthly cost ceilings plus a feature flag to disable fallback instantly.
+
+Until those controls exist, `primary failure -> explicit error` is safer than automatic double billing.
+
+## Official sources reviewed
+
+- Alibaba model availability/pricing: https://help.aliyun.com/zh/model-studio/model-pricing
+- Alibaba Responses API: https://help.aliyun.com/zh/model-studio/openai-responses-api/
+- Alibaba `text-embedding-v4`: https://help.aliyun.com/zh/model-studio/text-embedding-v4
+- DeepSeek model/pricing and Responses/tool support: https://api-docs.deepseek.com/quick_start/pricing/
+- Kimi Chat Completions/tool API: https://platform.kimi.ai/docs/api/chat
+- Kimi model/pricing overview: https://platform.kimi.ai/docs/pricing/chat
+- GLM-5.2 capabilities: https://docs.bigmodel.cn/cn/guide/models/text/glm-5.2
+- Doubao Responses tool calling: https://www.volcengine.com/docs/82379/1958524?lang=zh
+- Doubao pricing: https://www.volcengine.com/docs/84458/1585097?lang=zh&redirect=1
+- MiniMax API/model overview: https://platform.minimaxi.com/docs/api-reference/api-overview
+- OpenAI model guide: https://developers.openai.com/api/docs/models
+
+Prices and model aliases are time-sensitive. Recheck these pages immediately before any paid run or
+production switch.
+
+## Stage 5 acceptance
+
+- 50-case eval dataset: **PASS**
+- fail-closed, credential-safe runner: **PASS**
+- independent tutor / Agent / embedding variables with legacy fallback: **PASS**
+- local Responses/configuration contract tests: **PASS**
+- real provider quality, latency, cost comparison: **BLOCKED — paid calls not authorized**
+- final recommended winners and production migration: **BLOCKED — benchmark evidence absent**
+
+Therefore final acceptance criterion G remains **NOT PASS**. No provider change should be represented
+as benchmark-driven until real result artifacts and human rubric scores are committed.

@@ -1,0 +1,26 @@
+[
+  {
+    "provider": "Alibaba Cloud Model Studio (Singapore)",
+    "model": "qwen3.7-plus",
+    "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    "api_key_env": "DASHSCOPE_API_KEY",
+    "api_style": "responses",
+    "status": "eligible-for-live-benchmark"
+  },
+  {
+    "provider": "Volcengine Ark (Beijing)",
+    "model": "doubao-seed-2-0-lite-260215",
+    "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+    "api_key_env": "ARK_API_KEY",
+    "api_style": "responses",
+    "status": "eligible-for-live-benchmark"
+  },
+  {
+    "provider": "OpenAI",
+    "model": "gpt-5.6-luna",
+    "base_url": null,
+    "api_key_env": "OPENAI_API_KEY",
+    "api_style": "responses",
+    "status": "eligible-for-live-benchmark"
+  }
+]
