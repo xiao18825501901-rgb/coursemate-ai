@@ -50,4 +50,21 @@ describe("Agent security configuration", () => {
 
     expect(loadConfig(environment).openaiBaseUrl).toBeUndefined();
   });
+
+  it("supports independent Agent provider variables", () => {
+    const config = loadConfig({
+      CLERK_PUBLISHABLE_KEY: "pk_test_example",
+      CLERK_SECRET_KEY: "sk_test_example",
+      OPENAI_API_KEY: "legacy-key",
+      OPENAI_BASE_URL: "https://legacy.example/v1",
+      OPENAI_CHAT_MODEL: "legacy-model",
+      AGENT_MODEL_API_KEY: "agent-key",
+      AGENT_MODEL_BASE_URL: "https://agent.example/v1",
+      AGENT_MODEL_NAME: "agent-model",
+    });
+
+    expect(config.openaiApiKey).toBe("agent-key");
+    expect(config.openaiBaseUrl).toBe("https://agent.example/v1");
+    expect(config.openaiChatModel).toBe("agent-model");
+  });
 });

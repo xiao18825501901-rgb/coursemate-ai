@@ -52,19 +52,21 @@ def create_app(
         raise RuntimeError("CLERK_SECRET_KEY or CLERK_JWT_KEY is required.")
     database = Database(resolved_settings)
     database.initialize()
-    secret = resolved_settings.openai_api_key
-    api_key = secret.get_secret_value() if secret else ""
+    embedding_secret = resolved_settings.rag_embedding_api_key
+    embedding_api_key = embedding_secret.get_secret_value() if embedding_secret else ""
+    chat_secret = resolved_settings.rag_chat_api_key
+    chat_api_key = chat_secret.get_secret_value() if chat_secret else ""
     if embedding_provider is None:
         if resolved_settings.rag_provider_mode == "deterministic":
             embedding_provider = DeterministicEmbeddingProvider()
         else:
             embedding_provider = (
                 OpenAIEmbeddingProvider(
-                    api_key=api_key,
-                    model=resolved_settings.openai_embedding_model,
-                    base_url=resolved_settings.openai_base_url,
+                    api_key=embedding_api_key,
+                    model=resolved_settings.rag_embedding_model,
+                    base_url=resolved_settings.rag_embedding_base_url,
                 )
-                if api_key
+                if embedding_api_key
                 else MissingEmbeddingProvider()
             )
     if answer_provider is None:
@@ -73,11 +75,11 @@ def create_app(
         else:
             answer_provider = (
                 OpenAIAnswerProvider(
-                    api_key=api_key,
-                    model=resolved_settings.openai_chat_model,
-                    base_url=resolved_settings.openai_base_url,
+                    api_key=chat_api_key,
+                    model=resolved_settings.rag_chat_model,
+                    base_url=resolved_settings.rag_chat_base_url,
                 )
-                if api_key
+                if chat_api_key
                 else MissingAnswerProvider()
             )
 

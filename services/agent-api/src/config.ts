@@ -47,9 +47,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AgentC
       configuredPath === ":memory:" ? configuredPath : path.resolve(process.cwd(), configuredPath),
     port: boundedInteger(environment.AGENT_PORT ?? environment.PORT, 8001, 1, 65_535),
     webOrigin: environment.WEB_ORIGIN ?? "http://localhost:5173",
-    openaiApiKey: environment.OPENAI_API_KEY ?? "",
-    openaiBaseUrl: environment.OPENAI_BASE_URL || undefined,
-    openaiChatModel: environment.OPENAI_CHAT_MODEL ?? "gpt-5.6-luna",
+    openaiApiKey: environment.AGENT_MODEL_API_KEY ?? environment.OPENAI_API_KEY ?? "",
+    openaiBaseUrl:
+      environment.AGENT_MODEL_BASE_URL || environment.OPENAI_BASE_URL || undefined,
+    openaiChatModel:
+      environment.AGENT_MODEL_NAME ?? environment.OPENAI_CHAT_MODEL ?? "gpt-5.6-luna",
     maxToolRounds: boundedInteger(environment.AGENT_MAX_TOOL_ROUNDS, 4, 1, 10),
     providerMode,
     clerkPublishableKey,

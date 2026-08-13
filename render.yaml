@@ -20,13 +20,17 @@ services:
         value: /var/data/uploads
       - key: RAG_PROVIDER_MODE
         value: openai
-      - key: OPENAI_API_KEY
+      - key: RAG_CHAT_API_KEY
         sync: false
-      - key: OPENAI_BASE_URL
+      - key: RAG_CHAT_BASE_URL
         value: https://ws-fcszqpvmuz5bcq72.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
-      - key: OPENAI_CHAT_MODEL
+      - key: RAG_CHAT_MODEL
         value: qwen3.7-plus
-      - key: OPENAI_EMBEDDING_MODEL
+      - key: RAG_EMBEDDING_API_KEY
+        sync: false
+      - key: RAG_EMBEDDING_BASE_URL
+        value: https://ws-fcszqpvmuz5bcq72.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+      - key: RAG_EMBEDDING_MODEL
         value: text-embedding-v4
       - key: WEB_ORIGIN
         sync: false
@@ -59,11 +63,11 @@ services:
         value: /var/data/agent.sqlite3
       - key: AGENT_PROVIDER_MODE
         value: openai
-      - key: OPENAI_API_KEY
+      - key: AGENT_MODEL_API_KEY
         sync: false
-      - key: OPENAI_BASE_URL
+      - key: AGENT_MODEL_BASE_URL
         value: https://ws-fcszqpvmuz5bcq72.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
-      - key: OPENAI_CHAT_MODEL
+      - key: AGENT_MODEL_NAME
         value: qwen3.7-plus
       - key: WEB_ORIGIN
         sync: false
