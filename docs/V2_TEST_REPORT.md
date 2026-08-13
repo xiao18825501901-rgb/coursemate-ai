@@ -7,7 +7,7 @@ deterministic test providers. No billable model call was made.
 
 | Gate | Result |
 |---|---|
-| RAG pytest | **144 passed**, 2 non-failing dependency/cache warnings |
+| RAG pytest | **146 passed**, 1 non-failing dependency warning |
 | RAG Ruff | **passed** for app, tests and both Python operational scripts |
 | RAG strict Mypy | **passed**, 39 source files |
 | Web Vitest | **29 passed** across 6 files |
@@ -20,13 +20,14 @@ deterministic test providers. No billable model call was made.
 | Migration-on-copy | **integrity ok**, no FK violations, versions 1-10, 8 activity triggers, second run idempotent |
 | Tracked credential-pattern scan | **no match** |
 
-The warnings are Starlette's TestClient transport deprecation and a sandbox-denied pytest cache
-write; neither changes behavior. Dependency migration should be scheduled deliberately.
+The warning is Starlette's TestClient transport deprecation; it does not change behavior and its
+dependency migration should be scheduled deliberately.
 
 ## Browser journeys
 
-1. Switches official courses, streams a course-scoped answer with citation, proves history survives
-   refresh and a fresh browser context using the deterministic login-equivalent adapter, and adds a task.
+1. Asks three consecutive course-scoped questions, waits for each completed streamed/cited answer,
+   proves all three turns survive refresh and a fresh browser context using the deterministic
+   login-equivalent adapter, then switches official courses and adds an answer to the study plan.
 2. Creates a task through the Function Calling Agent, then edits and completes it.
 3. Uses navigation and core actions at a 390 px viewport.
 4. Creates a private course, uploads/indexes a document, previews/saves a teaching profile, gives

@@ -19,7 +19,7 @@ runtime evidence.
 | Sections 57-63: publication/community | PASS except optional clone | consent, withdraw, admin file review, lock/read-only; clone deferred for licensing |
 | Sections 64-68: database models | PASS | additive schema versions 1-10 and migration-on-copy |
 | Sections 69-76: tutor flows/UX | PASS | API/component/Chrome journeys and responsive test |
-| Sections 77-86: evaluation/tests | PASS locally | 50-case data/harness plus 144/29/48/4 automated gates |
+| Sections 77-86: evaluation/tests | PASS locally | 50-case data/harness plus 146/29/48/4 automated gates |
 | Sections 87-90: production | LOCAL PASS / EXTERNAL BLOCKED | config/runbook/rollback pass; live deploy/smoke not executed |
 | Sections 91-92: handoff/file packs | PASS | root handoff and `docs/file-request-packs/README.md` |
 
@@ -63,11 +63,12 @@ release. Do not change either label without current external evidence.
 
 ## Verified release evidence
 
-- RAG: 144 pytest, Ruff, strict Mypy (39 files).
+- RAG: 146 pytest, Ruff, strict Mypy (39 files).
 - Web: 29 Vitest, TypeScript, production build (310.12 kB JS / 90.85 kB gzip).
 - Agent: 48 Vitest, TypeScript and production build.
-- Browser: Chrome 4/4, including refresh/fresh-context deterministic login recovery and the
-  private-course journey. Real Clerk logout/login remains part of production smoke.
+- Browser: Chrome 4/4, including three completed QA turns, refresh/fresh-context deterministic
+  login recovery, and the private-course journey. Real Clerk logout/login remains part of
+  production smoke.
 - Supply chain: npm production dependency audit, 0 vulnerabilities.
 - Migration copy: versions 1-10, eight activity triggers, integrity `ok`, zero foreign-key
   violations, two-run idempotence; 3 courses, 67 documents, 1,937 chunks, 19 conversations,
