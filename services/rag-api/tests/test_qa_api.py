@@ -21,10 +21,12 @@ class FakeAnswerProvider:
     def __init__(self, deltas: list[str] | None = None, *, fail: bool = False) -> None:
         self.deltas = deltas or ["Phong ", "uses three lighting terms."]
         self.fail = fail
-        self.calls: list[tuple[str, str]] = []
+        self.calls: list[tuple[str, str, str]] = []
 
-    def stream_answer(self, *, question: str, context: str) -> Iterator[str]:
-        self.calls.append((question, context))
+    def stream_answer(
+        self, *, question: str, context: str, instructions: str
+    ) -> Iterator[str]:
+        self.calls.append((question, context, instructions))
         if self.fail:
             raise RuntimeError("provider unavailable")
         yield from self.deltas
@@ -122,6 +124,7 @@ def test_qa_chat_streams_named_events_and_traceable_citation(tmp_path: Path) -> 
     assert citation["locatorType"] == "section"
     assert "Phong" in str(citation["excerpt"])
     assert provider.calls and "UNTRUSTED COURSE MATERIAL" in provider.calls[0][1]
+    assert "natural English" in provider.calls[0][2]
     with sqlite3.connect(tmp_path / "rag.sqlite3") as connection:
         assert connection.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 1
         rows = connection.execute(
@@ -228,6 +231,26 @@ def test_deterministic_provider_mode_runs_without_an_openai_key(tmp_path: Path) 
     answer = "".join(str(data.get("text", "")) for name, data in events if name == "delta")
     assert "ambient diffuse and specular" in answer
     assert [name for name, _ in events][-2:] == ["citation", "done"]
+
+
+def test_chinese_question_receives_chinese_language_policy_without_changing_sse(
+    tmp_path: Path,
+) -> None:
+    provider = FakeAnswerProvider(["核心点（core point）是邻域内样本足够多的点。"])
+    with make_client(tmp_path, provider) as client:
+        client.headers["Authorization"] = "Bearer admin-token"
+        create_course_and_document(client)
+        response = client.post(
+            "/api/qa/chat",
+            json={"courseId": "cs3481", "question": "什么是 DBSCAN 的核心点？"},
+            headers={"Authorization": "Bearer token-a"},
+        )
+
+    events = parse_sse(response.text)
+    assert [name for name, _ in events] == ["meta", "delta", "citation", "done"]
+    assert "中文" in provider.calls[0][2]
+    assert "English technical term" in provider.calls[0][2]
+    assert next(data for name, data in events if name == "citation")["filename"] == "lighting.md"
 
 
 def test_conversation_history_is_owner_scoped(tmp_path: Path) -> None:

@@ -112,7 +112,9 @@ def test_application_passes_base_url_to_both_rag_providers(
         return DeterministicEmbeddingProvider()
 
     class AnswerStub:
-        def stream_answer(self, *, question: str, context: str) -> Any:
+        def stream_answer(
+            self, *, question: str, context: str, instructions: str
+        ) -> Any:
             yield "answer"
 
     def answer_factory(**kwargs: str | None) -> AnswerStub:

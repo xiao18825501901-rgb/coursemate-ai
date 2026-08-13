@@ -6,9 +6,10 @@ from uuid import uuid4
 from app.db import Database
 from app.errors import ApiError
 from app.rag.answers import AnswerProvider
-from app.rag.prompt import build_context_with_hits
+from app.rag.prompt import build_context_with_hits, build_tutor_instructions
 from app.rag.retrieval import HybridRetriever
 from app.rag.types import SearchHit
+from app.tutor.language import detect_language, language_instruction
 
 LOGGER = logging.getLogger(__name__)
 NO_SUPPORT_MESSAGE = (
@@ -335,7 +336,14 @@ class QaService:
 
         try:
             answer_parts: list[str] = []
-            for delta in self.answer_provider.stream_answer(question=question, context=context):
+            instructions = build_tutor_instructions(
+                language_instruction("auto", detect_language(question))
+            )
+            for delta in self.answer_provider.stream_answer(
+                question=question,
+                context=context,
+                instructions=instructions,
+            ):
                 if delta:
                     answer_parts.append(delta)
                     yield encode_sse("delta", {"text": delta})
