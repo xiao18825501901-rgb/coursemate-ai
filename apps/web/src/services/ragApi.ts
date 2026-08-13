@@ -241,13 +241,27 @@ export async function saveTeachingProfile(
   courseId: string,
   profile: TeachingProfileInput,
 ): Promise<TeachingProfile> {
+  const writableProfile: TeachingProfileInput = {
+    language: profile.language,
+    studentLevel: profile.studentLevel,
+    learningGoal: profile.learningGoal,
+    teachingStyles: profile.teachingStyles,
+    answerDepth: profile.answerDepth,
+    examplePreference: profile.examplePreference,
+    exercisePolicy: profile.exercisePolicy,
+    examOrientation: profile.examOrientation,
+    citationPreference: profile.citationPreference,
+    mathDetailLevel: profile.mathDetailLevel,
+    terminologyStyle: profile.terminologyStyle,
+    customRequirements: profile.customRequirements,
+  };
   return requestJson<TeachingProfile>(
     getToken,
     `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/teaching-profiles`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(profile),
+      body: JSON.stringify(writableProfile),
     },
   );
 }

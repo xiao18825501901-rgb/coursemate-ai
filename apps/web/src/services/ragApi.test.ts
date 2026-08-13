@@ -10,6 +10,7 @@ import {
   getConversation,
   listConversations,
   renameConversation,
+  saveTeachingProfile,
   SseDecoder,
   streamQa,
   updateCourse,
@@ -134,5 +135,21 @@ describe("private course API", () => {
         [expect.stringContaining("/api/courses/my-course/documents/doc_1"), "DELETE"],
         [expect.stringContaining("/api/courses/my-course"), "DELETE"],
       ]);
+  });
+
+  it("does not send read-only prompt preview fields when saving a profile", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: "profile_1" })));
+    vi.stubGlobal("fetch", fetchMock);
+    await saveTeachingProfile(vi.fn().mockResolvedValue("token-a"), "my-course", {
+      language: "en", studentLevel: "beginner", learningGoal: "Learn",
+      teachingStyles: ["step-by-step"], answerDepth: "balanced",
+      examplePreference: "when-helpful", exercisePolicy: "offer", examOrientation: false,
+      citationPreference: "standard", mathDetailLevel: "standard", terminologyStyle: "plain",
+      customRequirements: "", generatedPrompt: "read-only preview",
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body.generatedPrompt).toBeUndefined();
+    expect(body.learningGoal).toBe("Learn");
   });
 });

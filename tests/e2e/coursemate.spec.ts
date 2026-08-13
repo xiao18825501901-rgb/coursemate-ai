@@ -112,6 +112,17 @@ test("creates, indexes, teaches from, and deletes a private course", async ({ pa
   });
   await expect(page.getByRole("status")).toContainText("Indexed");
   await expect(page.getByText("private-notes.md", { exact: true })).toBeVisible();
+  await page.getByLabel("Learning and teaching requirements").fill(
+    "I am a beginner. Explain why first, then show a worked example.",
+  );
+  await page.getByRole("button", { name: "Build profile preview" }).click();
+  await expect(page.getByLabel("Teaching profile preview")).toBeVisible();
+  await page.getByRole("button", { name: "Save as new version" }).click();
+  await expect(page.getByText(/new conversations use v1/i)).toBeVisible();
+  await page.getByLabel(/I want to publish and share/i).check();
+  await page.getByLabel(/I confirm I have permission/i).check();
+  await page.getByRole("button", { name: "Submit for admin review" }).click();
+  await expect(page.getByText("Review pending")).toBeVisible();
   await page.screenshot({ path: "work/private-course-desktop.png", fullPage: true });
 
   await page.getByRole("link", { name: "Open tutor" }).click();
