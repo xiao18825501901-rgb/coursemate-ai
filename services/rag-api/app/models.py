@@ -104,6 +104,11 @@ class QaChatRequest(ApiModel):
     question: str = Field(min_length=1, max_length=2_000)
 
 
+class RetrievalDiagnosticsRequest(ApiModel):
+    course_id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,49}$")
+    question: str = Field(min_length=1, max_length=2_000)
+
+
 class ConversationCreate(ApiModel):
     course_id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,49}$")
     preferred_language: LanguagePreference = LanguagePreference.AUTO

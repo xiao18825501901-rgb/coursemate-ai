@@ -54,6 +54,27 @@ def _citation(item: SearchHit, index: int) -> dict[str, object]:
     }
 
 
+def _diagnostic_hit(item: SearchHit) -> dict[str, object]:
+    return {
+        "chunkId": item.chunk_id,
+        "documentId": item.document_id,
+        "courseId": item.course_id,
+        "filename": item.filename,
+        "locatorType": item.locator_type,
+        "locatorValue": item.locator_value,
+        "section": item.section,
+        "score": item.score,
+        "channels": list(item.channels),
+        "metadata": {
+            "".join(
+                [key.split("_")[0], *(part.capitalize() for part in key.split("_")[1:])]
+            ): value
+            for key, value in item.metadata.items()
+        },
+        "excerpt": item.content[:500],
+    }
+
+
 class QaService:
     def __init__(
         self,
@@ -77,6 +98,50 @@ class QaService:
             ).fetchone()
         if found is None:
             raise ApiError(404, "COURSE_NOT_FOUND", "The course was not found.")
+
+    def retrieval_diagnostics(self, *, course_id: str, question: str) -> dict[str, object]:
+        self.require_course(course_id)
+        reference = parse_query_reference(question)
+        diagnostics = self.retriever.diagnose(
+            course_id=course_id,
+            query=question,
+            reference=reference,
+            top_k=self.top_k,
+        )
+        selected = cast(list[SearchHit], diagnostics["selected"])
+        context, included = build_context_with_hits(
+            selected,
+            max_chars=self.max_context_chars,
+        )
+        return {
+            "query": question,
+            "retrievalStrategy": diagnostics["strategy"],
+            "reference": {
+                "document": reference.document,
+                "documentKind": reference.document_kind.value
+                if reference.document_kind
+                else None,
+                "documentNumber": reference.document_number,
+                "questionNumber": reference.question_number,
+                "questionPart": reference.question_part,
+                "pageNumber": reference.page_number,
+                "slideNumber": reference.slide_number,
+            },
+            "structuredCandidates": [
+                _diagnostic_hit(item)
+                for item in cast(list[SearchHit], diagnostics["structured"])
+            ],
+            "keywordCandidates": [
+                _diagnostic_hit(item)
+                for item in cast(list[SearchHit], diagnostics["keyword"])
+            ],
+            "vectorCandidates": [
+                _diagnostic_hit(item)
+                for item in cast(list[SearchHit], diagnostics["vector"])
+            ],
+            "selectedChunks": [_diagnostic_hit(item) for item in included],
+            "finalContext": context,
+        }
 
     def get_conversation(
         self, *, owner_user_id: str, conversation_id: str

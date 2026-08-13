@@ -645,3 +645,60 @@ def test_qa_requires_a_valid_bearer_token(tmp_path: Path) -> None:
 
     assert missing.status_code == 401
     assert invalid.status_code == 401
+
+
+def test_retrieval_diagnostics_are_admin_only_and_include_final_context(tmp_path: Path) -> None:
+    with make_client(tmp_path, FakeAnswerProvider()) as client:
+        client.headers["Authorization"] = "Bearer admin-token"
+        create_course_and_document(client)
+        allowed = client.post(
+            "/api/admin/retrieval/diagnostics",
+            json={"courseId": "cs3481", "question": "What terms does Phong use?"},
+        )
+        denied = client.post(
+            "/api/admin/retrieval/diagnostics",
+            json={"courseId": "cs3481", "question": "What terms does Phong use?"},
+            headers={"Authorization": "Bearer token-a"},
+        )
+
+    assert allowed.status_code == 200
+    body = allowed.json()
+    assert body["query"] == "What terms does Phong use?"
+    assert body["retrievalStrategy"] == "hybrid"
+    assert body["keywordCandidates"][0]["filename"] == "lighting.md"
+    assert body["vectorCandidates"][0]["filename"] == "lighting.md"
+    assert body["selectedChunks"][0]["channels"] == ["keyword", "vector"]
+    assert "UNTRUSTED COURSE MATERIAL" in body["finalContext"]
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "ADMIN_REQUIRED"
+
+
+def test_retrieval_diagnostics_report_exact_locator_candidates(tmp_path: Path) -> None:
+    with make_client(tmp_path, FakeAnswerProvider()) as client:
+        client.headers["Authorization"] = "Bearer admin-token"
+        assert client.post(
+            "/api/courses",
+            json={"id": "ge2324", "name": "GE2324", "description": "Data mining"},
+        ).status_code == 201
+        assert client.post(
+            "/api/courses/ge2324/documents",
+            files={
+                "file": (
+                    "assignment_2.md",
+                    b"# Assignment 2\n\nQuestion 1\n(a) Calculate it.\n(b) Explain it.",
+                    "text/markdown",
+                )
+            },
+        ).status_code == 202
+        response = client.post(
+            "/api/admin/retrieval/diagnostics",
+            json={"courseId": "ge2324", "question": "assignment_2.md Question 1(b)"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["retrievalStrategy"] == "structured_locator"
+    assert body["structuredCandidates"][0]["metadata"]["questionPart"] == "b"
+    assert body["structuredCandidates"][0]["channels"] == ["locator"]
+    assert body["keywordCandidates"] == []
+    assert body["vectorCandidates"] == []

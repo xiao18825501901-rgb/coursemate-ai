@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 
-from app.auth import AuthenticatedUser, require_user
+from app.auth import AuthenticatedUser, require_admin, require_user
 from app.models import (
     ConversationCreate,
     ConversationDetail,
@@ -12,10 +12,23 @@ from app.models import (
     ConversationSummary,
     ConversationUpdate,
     QaChatRequest,
+    RetrievalDiagnosticsRequest,
 )
 from app.services.qa import QaService
 
 router = APIRouter()
+
+
+@router.post("/api/admin/retrieval/diagnostics")
+def retrieval_diagnostics(
+    payload: RetrievalDiagnosticsRequest,
+    request: Request,
+    user: Annotated[AuthenticatedUser, Depends(require_admin)],
+) -> dict[str, object]:
+    return _service(request).retrieval_diagnostics(
+        course_id=payload.course_id,
+        question=payload.question,
+    )
 
 
 def _service(request: Request) -> QaService:
