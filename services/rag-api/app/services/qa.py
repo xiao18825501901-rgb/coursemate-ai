@@ -11,6 +11,7 @@ from app.rag.prompt import build_context_with_hits, build_turn_input, build_tuto
 from app.rag.retrieval import HybridRetriever
 from app.rag.types import SearchHit
 from app.tutor.language import LanguagePreference, detect_language, language_instruction
+from app.tutor.references import parse_query_reference
 from app.tutor.rewrite import ConversationTurn, rewrite_retrieval_query
 from app.tutor.routing import QueryIntent, route_query
 from app.tutor.strategy import TeachingApproach, choose_teaching_approach
@@ -379,11 +380,19 @@ class QaService:
             conversation_id=conversation_id,
         )
         if route.uses_course_retrieval:
-            hits = self.retriever.retrieve(
+            reference = parse_query_reference(retrieval_query)
+            hits = self.retriever.retrieve_structured(
                 course_id=course_id,
-                query=retrieval_query,
+                reference=reference,
                 top_k=self.top_k,
             )
+            retrieval_strategy = "structured_locator" if hits else "hybrid"
+            if not hits:
+                hits = self.retriever.retrieve(
+                    course_id=course_id,
+                    query=retrieval_query,
+                    top_k=self.top_k,
+                )
             context, included_hits = build_context_with_hits(
                 hits,
                 max_chars=self.max_context_chars,
@@ -391,9 +400,11 @@ class QaService:
         elif route.intent is QueryIntent.COURSE_META:
             context = self._course_metadata_context(course_id)
             included_hits = []
+            retrieval_strategy = "course_metadata"
         else:
             context = ""
             included_hits = []
+            retrieval_strategy = "not_applicable"
         grounding_mode = {
             QueryIntent.COURSE_GROUNDED: "grounded",
             QueryIntent.COURSE_TUTORING: "mixed",
@@ -407,6 +418,7 @@ class QaService:
             "retrievalQueryRewritten": rewrite.was_rewritten
             if route.uses_course_retrieval
             else False,
+            "retrievalStrategy": retrieval_strategy,
             "teachingApproach": teaching_approach.value if teaching_approach else None,
         }
         yield encode_sse(

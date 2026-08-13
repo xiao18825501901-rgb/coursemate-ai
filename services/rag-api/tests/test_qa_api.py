@@ -135,6 +135,52 @@ def test_qa_chat_streams_named_events_and_traceable_citation(tmp_path: Path) -> 
     assert json.loads(rows[1][2])[0]["filename"] == "lighting.md"
 
 
+def test_qa_uses_structured_locator_for_exact_assignment_subpart(tmp_path: Path) -> None:
+    provider = FakeAnswerProvider(["先从共享表格计算，再解释收敛。"])
+    with make_client(tmp_path, provider) as client:
+        client.headers["Authorization"] = "Bearer admin-token"
+        assert (
+            client.post(
+                "/api/courses",
+                json={"id": "ge2324", "name": "GE2324", "description": "Data mining"},
+            ).status_code
+            == 201
+        )
+        upload = client.post(
+            "/api/courses/ge2324/documents",
+            files={
+                "file": (
+                    "assignment_2.md",
+                    (
+                        b"# Assignment 2\n\nQuestion 1\nShared table.\n"
+                        b"(a) Calculate the centroid.\n(c) Explain convergence."
+                    ),
+                    "text/markdown",
+                )
+            },
+        )
+        assert upload.status_code == 202
+        response = client.post(
+            "/api/qa/chat",
+            json={
+                "courseId": "ge2324",
+                "question": "教我 assignment_2.md 的 Question 1(c)",
+            },
+            headers={"Authorization": "Bearer token-a"},
+        )
+
+    events = parse_sse(response.text)
+    meta = events[0][1]
+    citation = next(data for name, data in events if name == "citation")
+    assert response.status_code == 200
+    assert meta["retrievalStrategy"] == "structured_locator"
+    assert meta["retrievedChunks"] == 1
+    assert citation["filename"] == "assignment_2.md"
+    assert citation["channels"] == ["locator"]
+    assert "Explain convergence" in str(citation["excerpt"])
+    assert "Calculate the centroid" not in provider.calls[0][1]
+
+
 def test_empty_course_streams_no_support_without_calling_model(tmp_path: Path) -> None:
     provider = FakeAnswerProvider()
     with make_client(tmp_path, provider) as client:

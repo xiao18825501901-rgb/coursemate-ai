@@ -3,6 +3,7 @@ from dataclasses import replace
 from app.rag.embeddings import EmbeddingProvider
 from app.rag.types import SearchHit
 from app.repositories.chunks import ChunkRepository
+from app.tutor.references import QueryReference
 
 
 def reciprocal_rank_fusion(
@@ -72,3 +73,12 @@ class HybridRetriever:
             limit=candidate_limit,
         )
         return reciprocal_rank_fusion(keyword_hits, vector_hits, top_k=top_k)
+
+    def retrieve_structured(
+        self,
+        *,
+        course_id: str,
+        reference: QueryReference,
+        top_k: int,
+    ) -> list[SearchHit]:
+        return self.repository.structured_search(course_id, reference, limit=top_k)
