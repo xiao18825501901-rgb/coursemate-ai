@@ -21,7 +21,12 @@ EXPLICIT_QUESTION = re.compile(
     r"(?P<number>\d+|[ivxlcdm]+)\b[^\n]*"
 )
 NUMBERED_QUESTION = re.compile(r"(?m)^\s*(?P<number>\d+)[.)]\s+[^\n]+")
-QUESTION_PART = re.compile(r"(?im)^\s*[\(\uFF08](?P<part>[a-z])[\)\uFF09]\s*")
+QUESTION_PART = re.compile(
+    r"(?im)^\s*(?:"
+    r"[\(\uFF08](?P<paren_part>[a-z]|\d+)[\)\uFF09]"
+    r"|(?P<plain_part>[a-z])[.)]"
+    r")\s*"
+)
 
 
 def _kind_metadata(text: str) -> tuple[str | None, str | None]:
@@ -46,16 +51,41 @@ def _question_matches(text: str, kind: str | None) -> list[re.Match[str]]:
     return []
 
 
-def extract_structured_blocks(section: SourceSection) -> list[StructuredBlock]:
+def extract_structured_blocks(
+    section: SourceSection,
+    previous: StructuredBlock | None = None,
+) -> list[StructuredBlock]:
     """Extract question/part blocks only when the document exposes clear structure."""
 
     descriptor = "\n".join(value for value in (section.section, section.text) if value)
     kind, document_number = _kind_metadata(descriptor)
+    if previous is not None:
+        previous_kind = previous.metadata.get("document_kind")
+        previous_number = previous.metadata.get("document_number")
+        kind = kind or (str(previous_kind) if previous_kind else None)
+        document_number = document_number or (
+            str(previous_number) if previous_number else None
+        )
     questions = _question_matches(section.text, kind)
     if not questions:
-        return []
+        if previous is None:
+            return []
+        continuation_metadata = {
+            **previous.metadata,
+            "source_locator": f"{section.locator_type} {section.locator_value}",
+        }
+        return [StructuredBlock(section.text.strip(), continuation_metadata, previous.parent_key)]
     blocks: list[StructuredBlock] = []
     document_header = section.text[: questions[0].start()].strip()
+    if previous is not None and document_header:
+        continuation_metadata = {
+            **previous.metadata,
+            "source_locator": f"{section.locator_type} {section.locator_value}",
+        }
+        blocks.append(
+            StructuredBlock(document_header, continuation_metadata, previous.parent_key)
+        )
+        document_header = ""
     for index, question in enumerate(questions):
         end = questions[index + 1].start() if index + 1 < len(questions) else len(section.text)
         question_text = section.text[question.start() : end].strip()
@@ -85,7 +115,7 @@ def extract_structured_blocks(section: SourceSection) -> list[StructuredBlock]:
                 else len(question_text)
             )
             part_text = question_text[part.start() : part_end].strip()
-            part_name = part.group("part").casefold()
+            part_name = (part.group("paren_part") or part.group("plain_part")).casefold()
             part_metadata = {
                 **metadata,
                 "question_part": part_name,

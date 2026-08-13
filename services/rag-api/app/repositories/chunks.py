@@ -180,7 +180,13 @@ class ChunkRepository:
                 FROM chunks AS c
                 JOIN documents AS d ON d.id = c.document_id
                 WHERE {where}
-                ORDER BY d.filename COLLATE NOCASE, c.ordinal, c.id
+                ORDER BY
+                    CASE json_extract(c.metadata_json, '$.fragment_role')
+                        WHEN 'target' THEN 0 ELSE 1
+                    END,
+                    d.filename COLLATE NOCASE,
+                    c.ordinal,
+                    c.id
                 LIMIT ?
                 """,  # noqa: S608 -- fragments are fixed above; values stay parameterized.
                 parameters,

@@ -123,3 +123,71 @@ def test_document_kind_can_be_derived_from_markdown_heading() -> None:
         "assignment",
     ]
     assert [chunk.metadata["document_number"] for chunk in chunks] == ["2", "2"]
+
+
+def test_real_course_subpart_styles_are_recognized() -> None:
+    source = SourceSection(
+        text=(
+            "CS3481 Assignment 2\nQuestion 1\nShared instructions.\n"
+            "(1) Prepare the dataset.\n(2) Train the model.\n"
+            "Question 2\nShared table.\na) Calculate the statistic.\nb. Explain it."
+        ),
+        locator_type="page",
+        locator_value="1",
+        section="Page 1",
+    )
+
+    chunks = chunk_sections([source], chunk_size=300, overlap=10)
+
+    assert [chunk.metadata["question_part"] for chunk in chunks] == ["1", "2", "a", "b"]
+
+
+def test_tutorial_question_continuation_keeps_previous_parent_across_pages() -> None:
+    sections = [
+        SourceSection(
+            text="Tutorial 1\n2. The cosine similarity is defined as follows.",
+            locator_type="page",
+            locator_value="1",
+            section="Page 1",
+        ),
+        SourceSection(
+            text=(
+                "Calculate cosine similarity between article 1 and article 2.\n"
+                "3. Apply the inverse document frequency transformation."
+            ),
+            locator_type="page",
+            locator_value="2",
+            section="Page 2",
+        ),
+    ]
+
+    chunks = chunk_sections(sections, chunk_size=300, overlap=10)
+    question_two = [
+        chunk for chunk in chunks if chunk.metadata.get("question_number") == "2"
+    ]
+
+    assert len(question_two) == 2
+    assert question_two[1].locator_value == "2"
+    assert "Calculate cosine similarity" in question_two[1].content
+    assert chunks[-1].metadata["question_number"] == "3"
+    assert "Calculate cosine similarity" not in chunks[-1].content
+
+
+def test_long_question_stem_marks_the_subpart_fragment_as_target() -> None:
+    source = SourceSection(
+        text=(
+            "Assignment 2\nQuestion 1\n"
+            + "Shared table data. " * 30
+            + "\n(b) Do you get the same result?"
+        ),
+        locator_type="page",
+        locator_value="1",
+        section="Page 1",
+    )
+
+    chunks = chunk_sections([source], chunk_size=180, overlap=20)
+    target = [chunk for chunk in chunks if chunk.metadata.get("fragment_role") == "target"]
+
+    assert target
+    assert any("same result" in chunk.content for chunk in target)
+    assert any(chunk.metadata.get("fragment_role") == "parent" for chunk in chunks)
