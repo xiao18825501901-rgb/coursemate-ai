@@ -57,6 +57,9 @@ class BenchmarkResult:
     output_tokens: int
     automated_pass: bool
     checks: dict[str, bool]
+    streaming_tested: bool = False
+    streaming_supported: bool = False
+    time_to_first_token_ms: float | None = None
 
     @classmethod
     def from_response(
@@ -67,6 +70,10 @@ class BenchmarkResult:
         latency_ms: float,
         input_tokens: int,
         output_tokens: int,
+        *,
+        streaming_tested: bool = False,
+        streaming_supported: bool = False,
+        time_to_first_token_ms: float | None = None,
     ) -> BenchmarkResult:
         folded = response_text.casefold()
         checks = {
@@ -90,7 +97,63 @@ class BenchmarkResult:
             output_tokens=output_tokens,
             automated_pass=all(checks.values()),
             checks=checks,
+            streaming_tested=streaming_tested,
+            streaming_supported=streaming_supported,
+            time_to_first_token_ms=(
+                round(time_to_first_token_ms, 3)
+                if time_to_first_token_ms is not None
+                else None
+            ),
         )
+
+
+@dataclass(frozen=True)
+class StreamSample:
+    text: str
+    latency_ms: float
+    time_to_first_token_ms: float | None
+    input_tokens: int
+    output_tokens: int
+
+
+def consume_text_stream(
+    events: Iterable[Any],
+    *,
+    started_at: float,
+    clock: Callable[[], float],
+) -> StreamSample:
+    """Consume a Responses text stream and record transport-level timing evidence."""
+    text_parts: list[str] = []
+    first_token_at: float | None = None
+    input_tokens = 0
+    output_tokens = 0
+
+    for event in events:
+        event_type = getattr(event, "type", "")
+        if event_type == "response.output_text.delta":
+            if first_token_at is None:
+                first_token_at = clock()
+            text_parts.append(str(getattr(event, "delta", "")))
+        elif event_type == "response.completed":
+            usage = getattr(getattr(event, "response", None), "usage", None)
+            if usage is not None:
+                input_tokens = int(getattr(usage, "input_tokens", 0))
+                output_tokens = int(getattr(usage, "output_tokens", 0))
+        elif event_type in {"error", "response.failed", "response.incomplete"}:
+            raise RuntimeError(f"Model stream ended with {event_type}.")
+
+    finished_at = clock()
+    return StreamSample(
+        text="".join(text_parts),
+        latency_ms=round((finished_at - started_at) * 1_000, 3),
+        time_to_first_token_ms=(
+            round((first_token_at - started_at) * 1_000, 3)
+            if first_token_at is not None
+            else None
+        ),
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
 
 
 def load_benchmark_cases(path: Path) -> list[BenchmarkCase]:
@@ -137,6 +200,16 @@ def summarize_results(
         input_tokens * input_price_per_million
         + output_tokens * output_price_per_million
     ) / 1_000_000
+    latencies = [result.latency_ms for result in results]
+    time_to_first_token = [
+        result.time_to_first_token_ms
+        for result in results
+        if result.time_to_first_token_ms is not None
+    ]
+    streaming_tested = sum(result.streaming_tested for result in results)
+    streaming_supported = sum(
+        result.streaming_supported for result in results if result.streaming_tested
+    )
     return {
         "provider": provider,
         "model": model,
@@ -144,6 +217,11 @@ def summarize_results(
         "automated_pass_rate": passed / total if total else 0.0,
         "average_latency_ms": (
             sum(result.latency_ms for result in results) / total if total else 0.0
+        ),
+        "latency_ms": _metric_summary(latencies),
+        "time_to_first_token_ms": _metric_summary(time_to_first_token),
+        "streaming_support_rate": (
+            streaming_supported / streaming_tested if streaming_tested else None
         ),
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
@@ -165,4 +243,23 @@ def summarize_results(
             "instruction_adherence",
         ],
         "results": [asdict(result) for result in results],
+    }
+
+
+def _percentile(values: list[float], percentile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * percentile
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = position - lower
+    return round(ordered[lower] + (ordered[upper] - ordered[lower]) * fraction, 3)
+
+
+def _metric_summary(values: list[float]) -> dict[str, float | None]:
+    return {
+        "mean": round(sum(values) / len(values), 3) if values else None,
+        "p50": _percentile(values, 0.50),
+        "p95": _percentile(values, 0.95),
     }

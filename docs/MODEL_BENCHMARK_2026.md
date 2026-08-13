@@ -49,9 +49,11 @@ services\rag-api\.venv\Scripts\python.exe scripts\run_model_benchmark.py `
   --allow-billable
 ```
 
-Run a small compatibility canary first (`--limit 2`), then all 50 cases. Repeat each candidate at
-least three times for useful latency percentiles; this initial runner reports mean latency and raw
-per-case samples.
+Run a small compatibility canary first (`--limit 2`), then all 50 cases. Non-tool cases use the
+Responses stream and record time-to-first-token, total latency, P50/P95, and streaming support;
+tool cases remain non-streaming so their function-call output can be scored directly. The client
+uses a 60-second timeout and zero SDK retries so the benchmark never hides a second billable attempt.
+Repeat each candidate at least three times before treating the latency percentiles as stable.
 
 ## Current first-party capability matrix
 

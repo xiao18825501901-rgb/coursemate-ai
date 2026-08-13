@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -7,6 +8,7 @@ from app.evaluation.model_benchmark import (
     BenchmarkCase,
     BenchmarkResult,
     BillableRunNotAuthorized,
+    consume_text_stream,
     load_benchmark_cases,
     run_benchmark,
     summarize_results,
@@ -107,3 +109,45 @@ def test_tool_case_requires_a_function_call() -> None:
 
     assert without_call.automated_pass is False
     assert with_call.automated_pass is True
+
+
+def test_stream_sampling_records_ttft_text_and_usage() -> None:
+    times = iter([10.12, 10.40])
+    events = [
+        SimpleNamespace(type="response.created"),
+        SimpleNamespace(type="response.output_text.delta", delta="Hello "),
+        SimpleNamespace(type="response.output_text.delta", delta="student"),
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(
+                usage=SimpleNamespace(input_tokens=11, output_tokens=2)
+            ),
+        ),
+    ]
+
+    sample = consume_text_stream(events, started_at=10.0, clock=lambda: next(times))
+
+    assert sample.text == "Hello student"
+    assert sample.time_to_first_token_ms == 120.0
+    assert sample.latency_ms == 400.0
+    assert sample.input_tokens == 11
+    assert sample.output_tokens == 2
+
+
+def test_summary_reports_latency_and_streaming_percentiles() -> None:
+    case = BenchmarkCase.minimal("stream-1", "general_chat", "hello")
+    first = BenchmarkResult.from_response(
+        case, "hello", False, 100.0, 1, 1,
+        streaming_tested=True, streaming_supported=True, time_to_first_token_ms=20.0,
+    )
+    second = BenchmarkResult.from_response(
+        case, "hello", False, 300.0, 1, 1,
+        streaming_tested=True, streaming_supported=True, time_to_first_token_ms=60.0,
+    )
+
+    summary = summarize_results([first, second], provider="candidate", model="model")
+
+    assert summary["latency_ms"]["p50"] == 200.0
+    assert summary["latency_ms"]["p95"] == 290.0
+    assert summary["time_to_first_token_ms"]["p50"] == 40.0
+    assert summary["streaming_support_rate"] == 1.0

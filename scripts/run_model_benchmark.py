@@ -24,6 +24,7 @@ sys.path.insert(0, str(RAG_SERVICE))
 from app.evaluation.model_benchmark import (  # noqa: E402
     BenchmarkCase,
     BenchmarkResult,
+    consume_text_stream,
     load_benchmark_cases,
     run_benchmark,
     summarize_results,
@@ -141,7 +142,12 @@ def main() -> int:
         print("No benchmark cases selected.")
         return 2
 
-    client = OpenAI(api_key=api_key, **({"base_url": args.base_url} if args.base_url else {}))
+    client = OpenAI(
+        api_key=api_key,
+        timeout=60.0,
+        max_retries=0,
+        **({"base_url": args.base_url} if args.base_url else {}),
+    )
 
     def call_provider(case: BenchmarkCase) -> BenchmarkResult:
         started = time.perf_counter()
@@ -159,18 +165,39 @@ def main() -> int:
         if case.expects_tool_call:
             request["tools"] = TASK_TOOLS
             request["parallel_tool_calls"] = False
-        response = client.responses.create(**request)
-        elapsed_ms = (time.perf_counter() - started) * 1_000
-        output = list(response.output)
-        tool_called = any(getattr(item, "type", "") == "function_call" for item in output)
-        usage = response.usage
+        if case.expects_tool_call:
+            response = client.responses.create(**request)
+            elapsed_ms = (time.perf_counter() - started) * 1_000
+            output = list(response.output)
+            tool_called = any(
+                getattr(item, "type", "") == "function_call" for item in output
+            )
+            usage = response.usage
+            return BenchmarkResult.from_response(
+                case,
+                response.output_text,
+                tool_called,
+                elapsed_ms,
+                getattr(usage, "input_tokens", 0) if usage else 0,
+                getattr(usage, "output_tokens", 0) if usage else 0,
+            )
+
+        stream = client.responses.create(**request, stream=True)
+        sample = consume_text_stream(
+            stream,
+            started_at=started,
+            clock=time.perf_counter,
+        )
         return BenchmarkResult.from_response(
             case,
-            response.output_text,
-            tool_called,
-            elapsed_ms,
-            getattr(usage, "input_tokens", 0) if usage else 0,
-            getattr(usage, "output_tokens", 0) if usage else 0,
+            sample.text,
+            False,
+            sample.latency_ms,
+            sample.input_tokens,
+            sample.output_tokens,
+            streaming_tested=True,
+            streaming_supported=True,
+            time_to_first_token_ms=sample.time_to_first_token_ms,
         )
 
     results = run_benchmark(cases, call_provider, allow_billable=args.allow_billable)
