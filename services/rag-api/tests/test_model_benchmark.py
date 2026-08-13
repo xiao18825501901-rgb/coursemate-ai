@@ -31,6 +31,18 @@ def test_v2_benchmark_dataset_has_50_cases_and_required_coverage() -> None:
         "prompt_customization",
         "agent_tools",
     }.issubset({case.category for case in cases})
+    assert {
+        "language",
+        "rag",
+        "exact_locator",
+        "examples",
+        "multi_turn",
+        "general_conversation",
+        "course_isolation",
+        "private_course",
+        "multi_user_security",
+        "prompt_customization",
+    }.issubset({label for case in cases for label in case.coverage})
 
 
 def test_benchmark_refuses_network_calls_without_explicit_billable_opt_in() -> None:

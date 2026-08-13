@@ -22,10 +22,11 @@ class BenchmarkCase:
     must_contain_any: tuple[str, ...]
     must_not_contain: tuple[str, ...]
     expects_tool_call: bool
+    coverage: tuple[str, ...] = ()
 
     @classmethod
     def minimal(cls, case_id: str, category: str, prompt: str) -> BenchmarkCase:
-        return cls(case_id, category, prompt, "auto", (), (), False)
+        return cls(case_id, category, prompt, "auto", (), (), False, ())
 
     @classmethod
     def from_mapping(cls, value: dict[str, Any]) -> BenchmarkCase:
@@ -37,6 +38,7 @@ class BenchmarkCase:
             must_contain_any=tuple(str(item) for item in value.get("must_contain_any", [])),
             must_not_contain=tuple(str(item) for item in value.get("must_not_contain", [])),
             expects_tool_call=bool(value.get("expects_tool_call", False)),
+            coverage=tuple(str(item) for item in value.get("coverage", [])),
         )
 
 
