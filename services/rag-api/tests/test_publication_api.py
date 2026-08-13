@@ -123,6 +123,11 @@ def test_only_admin_approval_makes_course_public_and_read_only(tmp_path: Path) -
             files={"file": ("bad.md", b"bad", "text/markdown")},
             headers={"Authorization": "Bearer other"},
         )
+        owner_mutate = client.patch(
+            "/api/courses/community-candidate",
+            json={"name": "Changed after review"},
+            headers={"Authorization": "Bearer owner"},
+        )
 
     assert denied.status_code == 403
     assert approved.json()["status"] == "approved"
@@ -130,6 +135,8 @@ def test_only_admin_approval_makes_course_public_and_read_only(tmp_path: Path) -
     assert visible.json()["items"][0]["canManage"] is False
     assert mutate.status_code == 404
     assert upload.status_code == 404
+    assert owner_mutate.status_code == 409
+    assert owner_mutate.json()["error"]["code"] == "PUBLISHED_COURSE_LOCKED"
 
 
 def test_admin_can_unpublish_an_approved_course(tmp_path: Path) -> None:
@@ -148,6 +155,13 @@ def test_admin_can_unpublish_an_approved_course(tmp_path: Path) -> None:
         hidden = client.get(
             "/api/courses", headers={"Authorization": "Bearer other"}
         )
+        owner_edit = client.patch(
+            "/api/courses/community-candidate",
+            json={"name": "Editable after unpublish"},
+            headers={"Authorization": "Bearer owner"},
+        )
 
     assert unpublished.status_code == 204
     assert hidden.json()["total"] == 0
+    assert owner_edit.status_code == 200
+    assert owner_edit.json()["name"] == "Editable after unpublish"

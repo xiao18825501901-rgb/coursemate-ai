@@ -24,4 +24,10 @@ def require_course_access(
     )
     if not allowed:
         raise ApiError(404, "COURSE_NOT_FOUND", "The course was not found.")
+    if write and not is_admin and row["publication_status"] == "published":
+        raise ApiError(
+            409,
+            "PUBLISHED_COURSE_LOCKED",
+            "Unpublish this course before changing its reviewed content or settings.",
+        )
     return cast(sqlite3.Row, row)
