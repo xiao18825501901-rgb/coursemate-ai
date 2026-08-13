@@ -19,6 +19,15 @@ test("keeps answers course-scoped, streams citations, and adds one to the plan",
   await expect(page.locator(".message-assistant > p").first()).toContainText("DBSCAN");
   await expect(page.locator(".citation-list").first()).toBeVisible();
 
+  const persistedConversationUrl = page.url();
+  await page.reload();
+  await expect(page.locator(".message-assistant > p").first()).toContainText("DBSCAN");
+  await expect(page.locator(".citation-list").first()).toBeVisible();
+  const reopenedPage = await page.context().newPage();
+  await reopenedPage.goto(persistedConversationUrl);
+  await expect(reopenedPage.locator(".message-assistant > p").first()).toContainText("DBSCAN");
+  await reopenedPage.close();
+
   await courseSelect.selectOption("ge2324");
   await expect(page).toHaveURL(/\/qa\/ge2324$/);
   await expect(courseSelect).toHaveValue("ge2324");

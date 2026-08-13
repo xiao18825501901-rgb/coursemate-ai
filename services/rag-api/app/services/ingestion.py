@@ -3,6 +3,7 @@ import json
 import logging
 import sqlite3
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 from app.config import Settings
@@ -72,6 +73,36 @@ class IngestionService:
         values["can_manage"] = is_admin or values["is_owner"]
         return Course.model_validate(values)
 
+    def _load_course(self, course_id: str) -> sqlite3.Row:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT courses.*,
+                    (SELECT COUNT(*) FROM documents WHERE course_id = courses.id)
+                        AS document_count,
+                    CASE
+                        WHEN NOT EXISTS (
+                            SELECT 1 FROM documents WHERE course_id = courses.id
+                        ) THEN 'empty'
+                        WHEN EXISTS (
+                            SELECT 1 FROM documents
+                            WHERE course_id = courses.id AND status = 'failed'
+                        ) THEN 'failed'
+                        WHEN EXISTS (
+                            SELECT 1 FROM documents
+                            WHERE course_id = courses.id AND status != 'ready'
+                        ) THEN 'indexing'
+                        ELSE 'indexed'
+                    END AS index_status
+                FROM courses
+                WHERE courses.id = ?
+                """,
+                (course_id,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("Course could not be loaded")
+        return cast(sqlite3.Row, row)
+
     def create_course(
         self,
         payload: CourseCreate,
@@ -127,7 +158,9 @@ class IngestionService:
             raise ApiError(409, "COURSE_EXISTS", "A course with this ID already exists.") from error
         if row is None:
             raise RuntimeError("Created course could not be loaded")
-        return self._course(row, owner_user_id=owner_user_id, is_admin=is_admin)
+        return self._course(
+            self._load_course(payload.id), owner_user_id=owner_user_id, is_admin=is_admin
+        )
 
     def list_courses(
         self,
@@ -146,8 +179,21 @@ class IngestionService:
             ).fetchone()[0]
             rows = connection.execute(
                 f"""
-                SELECT * FROM courses WHERE {where}
-                ORDER BY updated_at DESC, id LIMIT ? OFFSET ?
+                SELECT courses.*,
+                    COUNT(documents.id) AS document_count,
+                    CASE
+                        WHEN COUNT(documents.id) = 0 THEN 'empty'
+                        WHEN SUM(CASE WHEN documents.status = 'failed' THEN 1 ELSE 0 END) > 0
+                            THEN 'failed'
+                        WHEN SUM(CASE WHEN documents.status != 'ready' THEN 1 ELSE 0 END) > 0
+                            THEN 'indexing'
+                        ELSE 'indexed'
+                    END AS index_status
+                FROM courses
+                LEFT JOIN documents ON documents.course_id = courses.id
+                WHERE {where}
+                GROUP BY courses.id
+                ORDER BY courses.updated_at DESC, courses.id LIMIT ? OFFSET ?
                 """,
                 (*parameters, page_size, offset),
             ).fetchall()
@@ -168,12 +214,14 @@ class IngestionService:
         owner_user_id: str,
         is_admin: bool,
     ) -> Course:
-        row = self._require_course(
+        self._require_course(
             course_id,
             owner_user_id=owner_user_id,
             is_admin=is_admin,
         )
-        return self._course(row, owner_user_id=owner_user_id, is_admin=is_admin)
+        return self._course(
+            self._load_course(course_id), owner_user_id=owner_user_id, is_admin=is_admin
+        )
 
     def list_documents(
         self,
@@ -250,7 +298,7 @@ class IngestionService:
             raise ApiError(422, "EMPTY_UPDATE", "At least one course field is required.")
         assignments = [f"{field} = ?" for field in changes]
         with self.database.connect() as connection:
-            connection.execute(
+            cursor = connection.execute(
                 f"""
                 UPDATE courses SET {', '.join(assignments)},
                     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -258,10 +306,11 @@ class IngestionService:
                 """,
                 (*changes.values(), course_id),
             )
-            row = connection.execute("SELECT * FROM courses WHERE id = ?", (course_id,)).fetchone()
-        if row is None:
+        if cursor.rowcount != 1:
             raise RuntimeError("Updated course could not be loaded")
-        return self._course(row, owner_user_id=owner_user_id, is_admin=is_admin)
+        return self._course(
+            self._load_course(course_id), owner_user_id=owner_user_id, is_admin=is_admin
+        )
 
     def delete_course(
         self,

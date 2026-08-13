@@ -48,6 +48,7 @@ const official = {
   isOwner: false, canManage: false,
   publicationStatus: "published" as const, publishedAt: "2026-08-11T00:00:00Z",
   preferredLanguage: "auto" as const,
+  documentCount: 0, indexStatus: "empty" as const,
   createdAt: "2026-08-11T00:00:00Z", updatedAt: "2026-08-11T00:00:00Z",
 };
 const mine = {
@@ -56,6 +57,7 @@ const mine = {
   isOwner: true, canManage: true,
   publicationStatus: "private" as const, publishedAt: null,
   preferredLanguage: "auto" as const,
+  documentCount: 0, indexStatus: "empty" as const,
   createdAt: "2026-08-13T00:00:00Z", updatedAt: "2026-08-13T00:00:00Z",
 };
 const profile = {
@@ -104,21 +106,12 @@ describe("CourseCenterPage", () => {
   });
 
   it("shows indexing and failure states with recent activity", async () => {
-    vi.mocked(listDocuments)
-      .mockResolvedValueOnce({
-        items: [{
-          id: "doc-ready", courseId: "cs3481", filename: "ready.md", mediaType: "text/markdown",
-          extension: ".md", sha256: "a".repeat(64), byteSize: 5, status: "ready", chunkCount: 1,
-          errorMessage: null, createdAt: "2026-08-13T00:00:00Z", updatedAt: "2026-08-13T00:00:00Z",
-        }], page: 1, pageSize: 100, total: 1,
-      })
-      .mockResolvedValueOnce({
-        items: [{
-          id: "doc-failed", courseId: "my-course", filename: "failed.md", mediaType: "text/markdown",
-          extension: ".md", sha256: "b".repeat(64), byteSize: 5, status: "failed", chunkCount: 0,
-          errorMessage: "Could not index", createdAt: "2026-08-13T00:00:00Z", updatedAt: "2026-08-13T00:00:00Z",
-        }], page: 1, pageSize: 100, total: 1,
-      });
+    vi.mocked(listCourses).mockResolvedValue({
+      items: [
+        { ...official, documentCount: 1, indexStatus: "indexed" },
+        { ...mine, documentCount: 1, indexStatus: "failed" },
+      ], page: 1, pageSize: 100, total: 2,
+    });
     renderRoutes();
 
     expect(await screen.findByText(/1 files · Indexed · Updated/i)).toBeVisible();

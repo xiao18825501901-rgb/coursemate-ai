@@ -2,24 +2,10 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { useCourseMateAuth } from "../auth/AuthProvider";
-import { createCourse, listCourses, listDocuments } from "../services/ragApi";
+import { createCourse, listCourses } from "../services/ragApi";
 import type { Course } from "../types/api";
 
-type CourseDocumentSummary = {
-  count: number;
-  status: "Empty" | "Indexing" | "Indexed" | "Failed";
-};
-
-function summarizeDocuments(statuses: string[]): CourseDocumentSummary {
-  if (statuses.length === 0) return { count: 0, status: "Empty" };
-  if (statuses.some((status) => status === "failed")) {
-    return { count: statuses.length, status: "Failed" };
-  }
-  if (statuses.some((status) => status !== "ready")) {
-    return { count: statuses.length, status: "Indexing" };
-  }
-  return { count: statuses.length, status: "Indexed" };
-}
+const indexLabels = { empty: "Empty", indexing: "Indexing", indexed: "Indexed", failed: "Failed" };
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Courses could not load.";
@@ -29,7 +15,6 @@ export function CourseCenterPage({ createMode = false }: { createMode?: boolean 
   const { getToken } = useCourseMateAuth();
   const navigate = useNavigate();
   const [courses, setCourses] = useState<Course[]>([]);
-  const [documentSummaries, setDocumentSummaries] = useState<Record<string, CourseDocumentSummary>>({});
   const [loading, setLoading] = useState(!createMode);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,14 +26,9 @@ export function CourseCenterPage({ createMode = false }: { createMode?: boolean 
     if (createMode) return;
     let active = true;
     void listCourses(getToken)
-      .then(async (page) => {
+      .then((page) => {
         if (!active) return;
         setCourses(page.items);
-        const summaries = await Promise.all(page.items.map(async (course) => {
-          const documents = await listDocuments(getToken, course.id);
-          return [course.id, summarizeDocuments(documents.items.map((item) => item.status))] as const;
-        }));
-        if (active) setDocumentSummaries(Object.fromEntries(summaries));
       })
       .catch((caught: unknown) => active && setError(errorMessage(caught)))
       .finally(() => active && setLoading(false));
@@ -103,7 +83,7 @@ export function CourseCenterPage({ createMode = false }: { createMode?: boolean 
     {items.length === 0 ? <div className="empty-panel">{empty}</div> : <div className="course-card-grid">{items.map((course) => <article className="course-card" key={course.id}>
       <div className="course-card-topline"><span className="course-pill">{course.id}</span><span className={`visibility-badge visibility-${course.visibility}`}>{course.visibility === "private" ? "Private by default" : course.courseType === "official" ? "Official" : "Community"}</span></div>
       <h3>{course.name}</h3><p>{course.description || "No description yet."}</p>
-      <small>{documentSummaries[course.id]?.count ?? 0} files · {documentSummaries[course.id]?.status ?? "Loading"} · Updated {new Date(course.updatedAt).toLocaleDateString()}</small>
+      <small>{course.documentCount ?? 0} files · {indexLabels[course.indexStatus ?? "empty"]} · Updated {new Date(course.updatedAt).toLocaleDateString()}</small>
       <div className="course-card-actions"><Link className="button button-primary" to={`/qa/${course.id}`}>Open tutor</Link>{course.canManage && <Link aria-label={`Manage ${course.name}`} className="button button-secondary" to={`/courses/${course.id}/settings`}>Settings</Link>}</div>
     </article>)}</div>}
   </section>;

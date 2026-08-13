@@ -125,6 +125,8 @@ class Course(CourseCreate):
     visibility: CourseVisibility
     publication_status: PublicationStatus
     preferred_language: LanguagePreference
+    document_count: int = 0
+    index_status: str = "empty"
     published_at: datetime | None
     is_owner: bool = False
     can_manage: bool = False

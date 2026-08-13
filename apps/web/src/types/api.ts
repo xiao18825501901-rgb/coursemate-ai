@@ -21,6 +21,8 @@ export interface Course {
   visibility: "private" | "public";
   publicationStatus: "private" | "pending" | "published" | "rejected";
   preferredLanguage: LanguagePreference;
+  documentCount?: number;
+  indexStatus?: "empty" | "indexing" | "indexed" | "failed";
   publishedAt: string | null;
   isOwner: boolean;
   canManage: boolean;

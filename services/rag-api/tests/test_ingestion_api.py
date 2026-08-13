@@ -140,6 +140,9 @@ def test_markdown_upload_completes_real_ingestion_pipeline(
     assert job.json()["processedChunks"] == 1
     assert documents.json()["items"][0]["status"] == "ready"
     assert documents.json()["items"][0]["chunkCount"] == 1
+    course = client.get("/api/courses").json()["items"][0]
+    assert course["documentCount"] == 1
+    assert course["indexStatus"] == "indexed"
     assert len(list(settings.upload_dir.rglob("*.md"))) == 1
 
 
