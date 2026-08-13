@@ -10,6 +10,9 @@ import {
   getIngestionJob,
   listCourses,
   listDocuments,
+  listTeachingProfiles,
+  previewTeachingProfile,
+  saveTeachingProfile,
   updateCourse,
   uploadDocument,
 } from "../services/ragApi";
@@ -24,6 +27,9 @@ vi.mock("../services/ragApi", () => ({
   getIngestionJob: vi.fn(),
   listCourses: vi.fn(),
   listDocuments: vi.fn(),
+  listTeachingProfiles: vi.fn(),
+  previewTeachingProfile: vi.fn(),
+  saveTeachingProfile: vi.fn(),
   updateCourse: vi.fn(),
   uploadDocument: vi.fn(),
 }));
@@ -32,12 +38,14 @@ const official = {
   id: "cs3481", name: "Computer Graphics", description: "Official notes",
   courseType: "official" as const, visibility: "public" as const,
   isOwner: false, canManage: false,
+  publicationStatus: "published" as const, publishedAt: "2026-08-11T00:00:00Z",
   createdAt: "2026-08-11T00:00:00Z", updatedAt: "2026-08-11T00:00:00Z",
 };
 const mine = {
   id: "my-course", name: "My Course", description: "Private notes",
   courseType: "user" as const, visibility: "private" as const,
   isOwner: true, canManage: true,
+  publicationStatus: "private" as const, publishedAt: null,
   createdAt: "2026-08-13T00:00:00Z", updatedAt: "2026-08-13T00:00:00Z",
 };
 
@@ -60,6 +68,7 @@ describe("CourseCenterPage", () => {
   beforeEach(() => {
     vi.mocked(listCourses).mockResolvedValue({ items: [official, mine], page: 1, pageSize: 100, total: 2 });
     vi.mocked(listDocuments).mockResolvedValue({ items: [], page: 1, pageSize: 100, total: 0 });
+    vi.mocked(listTeachingProfiles).mockResolvedValue({ items: [] });
   });
 
   it("groups official and private courses and exposes owner settings", async () => {
@@ -111,6 +120,22 @@ describe("CourseSettingsPage", () => {
       id: "job_1", documentId: "doc_1", status: "completed", processedChunks: 1,
       errorMessage: null, createdAt: "2026-08-13T00:00:00Z", updatedAt: "2026-08-13T00:00:01Z",
     });
+    vi.mocked(previewTeachingProfile).mockResolvedValue({
+      language: "zh-CN", studentLevel: "beginner", learningGoal: "Pass the exam",
+      teachingStyles: ["intuition-first", "worked-examples"], answerDepth: "detailed",
+      examplePreference: "worked", exercisePolicy: "always", examOrientation: true,
+      citationPreference: "detailed", mathDetailLevel: "full", terminologyStyle: "bilingual",
+      customRequirements: "Explain why first", generatedPrompt: "Structured preview",
+    });
+    vi.mocked(saveTeachingProfile).mockResolvedValue({
+      id: "profile_1", courseId: "my-course", version: 1,
+      language: "zh-CN", studentLevel: "beginner", learningGoal: "Pass the exam",
+      teachingStyles: ["intuition-first", "worked-examples"], answerDepth: "detailed",
+      examplePreference: "worked", exercisePolicy: "always", examOrientation: true,
+      citationPreference: "detailed", mathDetailLevel: "full", terminologyStyle: "bilingual",
+      customRequirements: "Explain why first", generatedPrompt: "Structured preview",
+      createdAt: "2026-08-13T00:00:00Z", updatedAt: "2026-08-13T00:00:00Z",
+    });
   });
 
   it("uploads a supported file and reports completed indexing", async () => {
@@ -121,5 +146,18 @@ describe("CourseSettingsPage", () => {
     expect(await screen.findByText(/indexed 1 chunk/i)).toBeVisible();
     expect(uploadDocument).toHaveBeenCalled();
     expect(getIngestionJob).toHaveBeenCalledWith(expect.any(Function), "job_1");
+  });
+
+  it("previews and saves a versioned teaching profile", async () => {
+    renderRoutes("/courses/my-course/settings");
+    fireEvent.change(await screen.findByLabelText("Learning and teaching requirements"), {
+      target: { value: "I am a beginner preparing for the exam" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Build profile preview" }));
+    expect(await screen.findByText("Structured preview")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Save as new version" }));
+
+    await waitFor(() => expect(saveTeachingProfile).toHaveBeenCalled());
+    expect(screen.getByText(/new conversations use v1/i)).toBeVisible();
   });
 });

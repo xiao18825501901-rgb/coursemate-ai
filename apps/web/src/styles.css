@@ -1262,6 +1262,30 @@ button:disabled,
   box-shadow: none;
 }
 
+.profile-preview {
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem;
+  border: 1px solid var(--accent);
+  background: var(--surface-soft);
+}
+
+.profile-preview pre {
+  margin: 0;
+  padding: 0.8rem;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font: inherit;
+  color: var(--muted);
+  background: var(--surface);
+}
+
+.profile-version-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .settings-document-list {
   margin: 0;
   padding: 0;

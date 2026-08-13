@@ -12,6 +12,9 @@ import type {
   LanguagePreference,
   Page,
   QaStreamMeta,
+  TeachingProfile,
+  TeachingProfileInput,
+  TeachingProfilePreview,
   UploadAccepted,
 } from "../types/api";
 
@@ -209,6 +212,43 @@ export async function deleteDocument(
     `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/documents/${encodeURIComponent(documentId)}`,
     { method: "DELETE" },
   ));
+}
+
+export async function previewTeachingProfile(
+  getToken: GetSessionToken,
+  requirement: string,
+): Promise<TeachingProfilePreview> {
+  return requestJson<TeachingProfilePreview>(getToken, `${RAG_API}/api/teaching-profiles/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ requirement }),
+  });
+}
+
+export async function listTeachingProfiles(
+  getToken: GetSessionToken,
+  courseId: string,
+): Promise<{ items: TeachingProfile[] }> {
+  return requestJson<{ items: TeachingProfile[] }>(
+    getToken,
+    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/teaching-profiles`,
+  );
+}
+
+export async function saveTeachingProfile(
+  getToken: GetSessionToken,
+  courseId: string,
+  profile: TeachingProfileInput,
+): Promise<TeachingProfile> {
+  return requestJson<TeachingProfile>(
+    getToken,
+    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/teaching-profiles`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(profile),
+    },
+  );
 }
 
 export async function streamQa(

@@ -19,6 +19,8 @@ export interface Course {
   description: string;
   courseType: "official" | "user";
   visibility: "private" | "public";
+  publicationStatus: "private" | "pending" | "published" | "rejected";
+  publishedAt: string | null;
   isOwner: boolean;
   canManage: boolean;
   createdAt: string;
@@ -65,6 +67,33 @@ export interface IngestionJob {
 export interface UploadAccepted {
   document: CourseDocument;
   job: IngestionJob;
+}
+
+export interface TeachingProfileInput {
+  language: LanguagePreference;
+  studentLevel: "beginner" | "intermediate" | "advanced";
+  learningGoal: string;
+  teachingStyles: Array<"intuition-first" | "step-by-step" | "socratic" | "analogy" | "worked-examples">;
+  answerDepth: "concise" | "balanced" | "detailed";
+  examplePreference: "minimal" | "when-helpful" | "worked";
+  exercisePolicy: "none" | "offer" | "always";
+  examOrientation: boolean;
+  citationPreference: "standard" | "detailed";
+  mathDetailLevel: "light" | "standard" | "full";
+  terminologyStyle: "plain" | "bilingual" | "formal";
+  customRequirements: string;
+}
+
+export interface TeachingProfilePreview extends TeachingProfileInput {
+  generatedPrompt: string;
+}
+
+export interface TeachingProfile extends TeachingProfilePreview {
+  id: string;
+  courseId: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Citation {

@@ -37,6 +37,8 @@ const course = {
   visibility: "public" as const,
   isOwner: false,
   canManage: false,
+  publicationStatus: "published" as const,
+  publishedAt: "2026-08-11T00:00:00Z",
   createdAt: "2026-08-11T00:00:00Z",
   updatedAt: "2026-08-11T00:00:00Z",
 };
@@ -49,6 +51,8 @@ const geCourse = {
   visibility: "public" as const,
   isOwner: false,
   canManage: false,
+  publicationStatus: "published" as const,
+  publishedAt: "2026-08-11T00:00:00Z",
   createdAt: "2026-08-11T00:00:00Z",
   updatedAt: "2026-08-11T00:00:00Z",
 };
