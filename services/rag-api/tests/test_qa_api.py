@@ -253,6 +253,31 @@ def test_chinese_question_receives_chinese_language_policy_without_changing_sse(
     assert next(data for name, data in events if name == "citation")["filename"] == "lighting.md"
 
 
+def test_conversation_language_preference_overrides_question_detection(tmp_path: Path) -> None:
+    provider = FakeAnswerProvider(["中文讲解。"])
+    with make_client(tmp_path, provider) as client:
+        client.headers["Authorization"] = "Bearer admin-token"
+        create_course_and_document(client)
+        created = client.post(
+            "/api/conversations",
+            json={"courseId": "cs3481", "preferredLanguage": "zh-CN"},
+            headers={"Authorization": "Bearer token-a"},
+        )
+        response = client.post(
+            "/api/qa/chat",
+            json={
+                "courseId": "cs3481",
+                "conversationId": created.json()["id"],
+                "question": "Please explain this concept step by step.",
+            },
+            headers={"Authorization": "Bearer token-a"},
+        )
+
+    assert response.status_code == 200
+    assert "中文" in provider.calls[0][2]
+    assert "natural English" not in provider.calls[0][2]
+
+
 def test_conversation_history_is_owner_scoped(tmp_path: Path) -> None:
     with make_client(tmp_path, FakeAnswerProvider()) as client:
         client.headers["Authorization"] = "Bearer admin-token"

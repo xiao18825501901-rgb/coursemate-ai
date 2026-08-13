@@ -1,6 +1,7 @@
 import json
 import logging
 from collections.abc import Iterator
+from typing import cast
 from uuid import uuid4
 
 from app.db import Database
@@ -9,7 +10,7 @@ from app.rag.answers import AnswerProvider
 from app.rag.prompt import build_context_with_hits, build_tutor_instructions
 from app.rag.retrieval import HybridRetriever
 from app.rag.types import SearchHit
-from app.tutor.language import detect_language, language_instruction
+from app.tutor.language import LanguagePreference, detect_language, language_instruction
 
 LOGGER = logging.getLogger(__name__)
 NO_SUPPORT_MESSAGE = (
@@ -229,7 +230,7 @@ class QaService:
         course_id: str,
         question: str,
         conversation_id: str | None,
-    ) -> str:
+    ) -> tuple[str, LanguagePreference]:
         if conversation_id is None:
             created = self.create_conversation(
                 owner_user_id=owner_user_id,
@@ -260,7 +261,13 @@ class QaService:
                     course_id,
                 ),
             )
-        return conversation_id
+            preference_row = connection.execute(
+                "SELECT preferred_language FROM conversations WHERE id = ?",
+                (conversation_id,),
+            ).fetchone()
+        assert preference_row is not None
+        preference = cast(LanguagePreference, str(preference_row["preferred_language"]))
+        return conversation_id, preference
 
     def _record_answer(
         self,
@@ -300,7 +307,7 @@ class QaService:
         conversation_id: str | None = None,
     ) -> Iterator[str]:
         request_id = f"qa_{uuid4().hex}"
-        conversation_id = self._record_question(
+        conversation_id, preferred_language = self._record_question(
             owner_user_id=owner_user_id,
             course_id=course_id,
             question=question,
@@ -337,7 +344,7 @@ class QaService:
         try:
             answer_parts: list[str] = []
             instructions = build_tutor_instructions(
-                language_instruction("auto", detect_language(question))
+                language_instruction(preferred_language, detect_language(question))
             )
             for delta in self.answer_provider.stream_answer(
                 question=question,
