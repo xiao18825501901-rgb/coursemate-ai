@@ -157,7 +157,14 @@ def main() -> int:
         )
         minimum_free_bytes = round(_positive_number("MIN_FREE_BYTES", 1_073_741_824))
     except ValueError as error:
-        print(json.dumps({"status": "failing", "checks": [asdict(Check("config", False, str(error)))]}))
+        print(
+            json.dumps(
+                {
+                    "status": "failing",
+                    "checks": [asdict(Check("config", False, str(error)))],
+                }
+            )
+        )
         return 2
 
     configured = {
@@ -183,7 +190,15 @@ def main() -> int:
         )
     )
     status = "ok" if all(check.ok for check in checks) else "failing"
-    print(json.dumps({"status": status, "checkedAt": datetime.now(UTC).isoformat(), "checks": [asdict(check) for check in checks]}))
+    print(
+        json.dumps(
+            {
+                "status": status,
+                "checkedAt": datetime.now(UTC).isoformat(),
+                "checks": [asdict(check) for check in checks],
+            }
+        )
+    )
     return 0 if status == "ok" else 2
 
 

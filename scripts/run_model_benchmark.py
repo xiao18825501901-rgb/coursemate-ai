@@ -23,13 +23,13 @@ ROOT = Path(__file__).resolve().parents[1]
 RAG_SERVICE = ROOT / "services" / "rag-api"
 sys.path.insert(0, str(RAG_SERVICE))
 
-from app.evaluation.agent_tool_benchmark import (
+from app.evaluation.agent_tool_benchmark import (  # noqa: E402
     AGENT_INSTRUCTIONS,
     MAX_AGENT_RESPONSE_ROUNDS,
     TASK_TOOLS,
     run_agent_tool_conversation,
 )
-from app.evaluation.model_benchmark import (
+from app.evaluation.model_benchmark import (  # noqa: E402
     BenchmarkCase,
     BenchmarkResult,
     calculate_cost_ceiling,
@@ -39,7 +39,7 @@ from app.evaluation.model_benchmark import (
     run_benchmark,
     summarize_results,
 )
-from app.evaluation.provider_safety import validate_provider_base_url
+from app.evaluation.provider_safety import validate_provider_base_url  # noqa: E402
 
 MAX_OUTPUT_TOKENS = 1_200
 PROTOCOL_OVERHEAD_TOKENS = 512

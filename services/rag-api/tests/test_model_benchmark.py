@@ -298,8 +298,12 @@ def test_agent_tool_conversation_replays_exact_call_ids_and_collects_usage() -> 
     assert sample.final_response_received is True
     assert sample.input_tokens == 55
     assert sample.output_tokens == 14
-    assert submitted_inputs[1][-1]["call_id"] == "search-call-1"
-    assert submitted_inputs[2][-1]["call_id"] == "complete-call-2"
+    search_output = submitted_inputs[1][-1]
+    complete_output = submitted_inputs[2][-1]
+    assert isinstance(search_output, dict)
+    assert isinstance(complete_output, dict)
+    assert search_output["call_id"] == "search-call-1"
+    assert complete_output["call_id"] == "complete-call-2"
 
 
 def test_stream_sampling_records_ttft_text_and_usage() -> None:

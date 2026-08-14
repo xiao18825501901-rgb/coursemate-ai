@@ -18,13 +18,13 @@ ROOT = Path(__file__).resolve().parents[1]
 RAG_SERVICE = ROOT / "services" / "rag-api"
 sys.path.insert(0, str(RAG_SERVICE))
 
-from app.evaluation.embedding_benchmark import (
+from app.evaluation.embedding_benchmark import (  # noqa: E402
     calculate_embedding_cost_ceiling,
     evaluate_embeddings,
     load_embedding_cases,
     load_official_corpus,
 )
-from app.evaluation.provider_safety import validate_provider_base_url
+from app.evaluation.provider_safety import validate_provider_base_url  # noqa: E402
 
 PROTOCOL_OVERHEAD_TOKENS = 8
 

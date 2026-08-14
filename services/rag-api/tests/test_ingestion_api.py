@@ -1,12 +1,17 @@
 from collections.abc import Iterator
 from pathlib import Path
+from typing import cast
 
 import pytest
-from fastapi import Request
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
+
+
+def _fastapi_app(client: TestClient) -> FastAPI:
+    return cast(FastAPI, client.app)
 
 
 class FakeEmbeddingProvider:
@@ -84,7 +89,7 @@ def test_health_and_course_pagination(client: TestClient) -> None:
 def test_health_returns_503_when_persistent_state_is_not_ready(
     client: TestClient,
 ) -> None:
-    with client.app.state.database.connect() as connection:
+    with _fastapi_app(client).state.database.connect() as connection:
         connection.execute("DELETE FROM schema_migrations WHERE version = 10")
 
     response = client.get("/health")
@@ -373,7 +378,7 @@ def test_owner_can_delete_document_but_other_user_cannot(client: TestClient) -> 
     assert client.get("/api/courses/document-course/documents").json()["total"] == 0
     assert not any(
         candidate.name.startswith(document_id)
-        for candidate in client.app.state.settings.upload_dir.rglob("*")
+        for candidate in _fastapi_app(client).state.settings.upload_dir.rglob("*")
     )
 
 
@@ -483,7 +488,7 @@ def test_user_upload_storage_path_is_namespaced_by_owner_course_and_document(
         files={"file": ("notes.md", b"# Safe path", "text/markdown")},
     )
     document_id = upload.json()["document"]["id"]
-    with client.app.state.database.connect() as connection:
+    with _fastapi_app(client).state.database.connect() as connection:
         stored = Path(
             connection.execute(
                 "SELECT stored_path FROM documents WHERE id = ?", (document_id,)

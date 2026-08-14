@@ -7,6 +7,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 REPOSITORY_ROOT = Path(__file__).parents[3]
 MONITOR_SCRIPT = REPOSITORY_ROOT / "ops" / "monitor_v2.py"
 
@@ -66,7 +68,7 @@ def test_backup_monitor_fails_closed_for_stale_or_incomplete_backup(tmp_path: Pa
 
 
 def test_backup_monitor_ignores_symlinked_completed_backup(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monitor = _monitor_module()
     now = datetime(2026, 8, 14, tzinfo=UTC)
@@ -107,7 +109,7 @@ def test_health_monitor_rejects_malformed_url_without_leaking_it() -> None:
 
 
 def test_backup_monitor_ignores_symlinked_required_artifact(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monitor = _monitor_module()
     now = datetime(2026, 8, 14, tzinfo=UTC)
@@ -127,7 +129,8 @@ def test_backup_monitor_ignores_symlinked_required_artifact(
 
 
 def test_main_fails_closed_when_monitoring_paths_and_urls_are_unconfigured(
-    monkeypatch, capsys
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     monitor = _monitor_module()
     for name in (

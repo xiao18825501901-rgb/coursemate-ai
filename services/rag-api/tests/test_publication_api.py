@@ -1,7 +1,9 @@
 from pathlib import Path
+from typing import cast
 
 from fastapi import Request
 from fastapi.testclient import TestClient
+from httpx import Response
 
 from app.config import Settings
 from app.main import create_app
@@ -44,8 +46,8 @@ def create_private_course(client: TestClient) -> None:
     assert response.status_code == 201
 
 
-def submit(client: TestClient) -> object:
-    return client.post(
+def submit(client: TestClient) -> Response:
+    response = client.post(
         "/api/courses/community-candidate/publication-requests",
         json={
             "shareMaterialsConsent": True,
@@ -54,6 +56,7 @@ def submit(client: TestClient) -> object:
         },
         headers={"Authorization": "Bearer owner"},
     )
+    return cast(Response, response)
 
 
 def test_publication_requires_both_explicit_consents(tmp_path: Path) -> None:
