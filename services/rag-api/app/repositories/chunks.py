@@ -1,10 +1,12 @@
 import json
 import re
 import sqlite3
+from dataclasses import replace
 
 from app.db import Database
 from app.rag.embeddings import cosine_similarity
 from app.rag.types import SearchHit
+from app.tutor.references import QueryReference
 
 ENGLISH_STOP_WORDS = frozenset(
     {
@@ -70,6 +72,8 @@ def _search_hit(row: sqlite3.Row, *, score: float, channel: str) -> SearchHit:
         section=row["section"],
         score=score,
         channels=(channel,),
+        metadata=json.loads(row["metadata_json"]),
+        parent_key=row["parent_key"],
     )
 
 
@@ -94,6 +98,8 @@ class ChunkRepository:
                     c.locator_type,
                     c.locator_value,
                     c.section,
+                    c.metadata_json,
+                    c.parent_key,
                     bm25(chunks_fts) AS rank
                 FROM chunks_fts
                 JOIN chunks AS c ON c.rowid = chunks_fts.rowid
@@ -110,6 +116,125 @@ class ChunkRepository:
             _search_hit(row, score=-float(row["rank"]), channel="keyword")
             for row in rows
         ]
+
+    def structured_search(
+        self,
+        course_id: str,
+        reference: QueryReference,
+        *,
+        limit: int,
+    ) -> list[SearchHit]:
+        """Resolve explicit document and structural locators inside one course."""
+
+        if limit <= 0 or not any(
+            (
+                reference.document,
+                reference.document_kind,
+                reference.document_number,
+                reference.question_number,
+                reference.question_part,
+                reference.page_number,
+                reference.slide_number,
+            )
+        ):
+            return []
+        conditions = ["c.course_id = ?"]
+        parameters: list[object] = [course_id]
+        if reference.document:
+            conditions.append("d.filename = ? COLLATE NOCASE")
+            parameters.append(reference.document)
+        if reference.document_kind and not reference.document:
+            conditions.append("json_extract(c.metadata_json, '$.document_kind') = ?")
+            parameters.append(reference.document_kind.value)
+        if reference.document_number and not reference.document:
+            conditions.append("json_extract(c.metadata_json, '$.document_number') = ?")
+            parameters.append(reference.document_number)
+        if reference.question_number:
+            conditions.append("json_extract(c.metadata_json, '$.question_number') = ?")
+            parameters.append(reference.question_number)
+        if reference.question_part:
+            conditions.append("json_extract(c.metadata_json, '$.question_part') = ?")
+            parameters.append(reference.question_part)
+        if reference.page_number is not None:
+            conditions.extend(("c.locator_type = 'page'", "c.locator_value = ?"))
+            parameters.append(str(reference.page_number))
+        if reference.slide_number is not None:
+            conditions.extend(("c.locator_type = 'slide'", "c.locator_value = ?"))
+            parameters.append(str(reference.slide_number))
+        parameters.append(limit)
+        where = " AND ".join(conditions)
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT
+                    c.id AS chunk_id,
+                    c.document_id,
+                    c.course_id,
+                    d.filename,
+                    c.content,
+                    c.locator_type,
+                    c.locator_value,
+                    c.section,
+                    c.metadata_json,
+                    c.parent_key
+                FROM chunks AS c
+                JOIN documents AS d ON d.id = c.document_id
+                WHERE {where}
+                ORDER BY
+                    CASE json_extract(c.metadata_json, '$.fragment_role')
+                        WHEN 'target' THEN 0 ELSE 1
+                    END,
+                    d.filename COLLATE NOCASE,
+                    c.ordinal,
+                    c.id
+                LIMIT ?
+                """,  # noqa: S608 -- fragments are fixed above; values stay parameterized.
+                parameters,
+            ).fetchall()
+        exact_hits = [
+            _search_hit(row, score=1.0, channel="locator")
+            for row in rows
+        ]
+        if not exact_hits or not reference.question_part or limit <= len(exact_hits):
+            return exact_hits
+        parent_keys = list(
+            dict.fromkeys(hit.parent_key for hit in exact_hits if hit.parent_key is not None)
+        )
+        if not parent_keys:
+            return exact_hits
+        placeholders = ", ".join("?" for _ in parent_keys)
+        remaining = limit - len(exact_hits)
+        excluded_ids = {hit.chunk_id for hit in exact_hits}
+        with self.database.connect() as connection:
+            parent_rows = connection.execute(
+                f"""
+                SELECT
+                    c.id AS chunk_id,
+                    c.document_id,
+                    c.course_id,
+                    d.filename,
+                    c.content,
+                    c.locator_type,
+                    c.locator_value,
+                    c.section,
+                    c.metadata_json,
+                    c.parent_key
+                FROM chunks AS c
+                JOIN documents AS d ON d.id = c.document_id
+                WHERE c.course_id = ? AND c.parent_key IN ({placeholders})
+                ORDER BY d.filename COLLATE NOCASE, c.ordinal, c.id
+                """,  # noqa: S608 -- placeholder count derives from matched parent rows.
+                [course_id, *parent_keys],
+            ).fetchall()
+        parent_hits = [
+            replace(
+                _search_hit(row, score=0.5, channel="parent_context"),
+                channels=("parent_context",),
+            )
+            for row in parent_rows
+            if row["chunk_id"] not in excluded_ids
+        ][:remaining]
+        return [*exact_hits, *parent_hits]
 
     def vector_search(
         self,
@@ -132,6 +257,8 @@ class ChunkRepository:
                     c.locator_type,
                     c.locator_value,
                     c.section,
+                    c.metadata_json,
+                    c.parent_key,
                     c.embedding
                 FROM chunks AS c
                 JOIN documents AS d ON d.id = c.document_id

@@ -1,0 +1,50 @@
+[
+  {
+    "id": "lighting-phong",
+    "courseId": "cs3481",
+    "query": "Which terms make up Phong lighting?",
+    "expectedChunkId": "chunk-cs-phong"
+  },
+  {
+    "id": "graphics-rasterization",
+    "courseId": "cs3481",
+    "query": "How are triangles converted into fragments?",
+    "expectedChunkId": "chunk-cs-raster"
+  },
+  {
+    "id": "data-dbscan",
+    "courseId": "cs3481",
+    "query": "What makes a point a DBSCAN core point?",
+    "expectedChunkId": "chunk-cs-dbscan"
+  },
+  {
+    "id": "clustering-complete-link",
+    "courseId": "cs3481",
+    "query": "Why does complete-link resist the chaining effect?",
+    "expectedChunkId": "chunk-cs-complete"
+  },
+  {
+    "id": "heritage-conservation",
+    "courseId": "ge2324",
+    "query": "What does heritage conservation protect?",
+    "expectedChunkId": "chunk-ge-heritage"
+  },
+  {
+    "id": "statistics-pearson",
+    "courseId": "ge2324",
+    "query": "What does Pearson correlation measure?",
+    "expectedChunkId": "chunk-ge-pearson"
+  },
+  {
+    "id": "statistics-spearman",
+    "courseId": "ge2324",
+    "query": "Which correlation uses ranks for monotonic association?",
+    "expectedChunkId": "chunk-ge-spearman"
+  },
+  {
+    "id": "statistics-kendall",
+    "courseId": "ge2324",
+    "query": "Which statistic compares concordant and discordant pairs?",
+    "expectedChunkId": "chunk-ge-kendall"
+  }
+]

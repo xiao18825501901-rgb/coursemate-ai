@@ -1,11 +1,27 @@
 import re
+from typing import TypeAlias
 
+from app.rag.structure import extract_structured_blocks
 from app.rag.types import SourceSection, TextChunk
+
+ChunkInput: TypeAlias = tuple[str, dict[str, str | int | None], str | None]
 
 
 def _normalize_paragraphs(text: str) -> list[str]:
     paragraphs = re.split(r"\n\s*\n+", text.strip())
     return [re.sub(r"\s+", " ", paragraph).strip() for paragraph in paragraphs if paragraph.strip()]
+
+
+def _part_fragment_roles(fragments: list[str], part: str | int | None) -> list[str]:
+    if part is None:
+        return ["target"] * len(fragments)
+    escaped = re.escape(str(part))
+    marker = re.compile(
+        rf"(?:[\(\uFF08]\s*{escaped}\s*[\)\uFF09]|\b{escaped}[.)])",
+        re.IGNORECASE,
+    )
+    roles = ["target" if marker.search(fragment) else "parent" for fragment in fragments]
+    return roles if "target" in roles else ["target"] * len(fragments)
 
 
 def _split_word_aware(text: str, limit: int) -> list[str]:
@@ -96,15 +112,37 @@ def chunk_sections(
         raise ValueError("overlap must be smaller than chunk_size")
 
     chunks: list[TextChunk] = []
+    previous_structured = None
     for source in sections:
-        for content in _chunk_section(source.text, chunk_size=chunk_size, overlap=overlap):
-            chunks.append(
-                TextChunk(
-                    ordinal=len(chunks),
-                    content=content,
-                    locator_type=source.locator_type,
-                    locator_value=source.locator_value,
-                    section=source.section,
+        structured = extract_structured_blocks(source, previous_structured)
+        if structured:
+            previous_structured = structured[-1]
+        contents: list[ChunkInput] = [
+            (unit.content, unit.metadata, unit.parent_key) for unit in structured
+        ] or [(source.text, source.metadata, source.parent_key)]
+        for text, metadata, parent_key in contents:
+            fragments = _chunk_section(text, chunk_size=chunk_size, overlap=overlap)
+            roles = _part_fragment_roles(fragments, metadata.get("question_part"))
+            for fragment_index, (content, role) in enumerate(
+                zip(fragments, roles, strict=True)
+            ):
+                fragment_metadata = metadata
+                if structured:
+                    fragment_metadata = {
+                        **metadata,
+                        "fragment_index": fragment_index,
+                        "fragment_count": len(fragments),
+                        "fragment_role": role,
+                    }
+                chunks.append(
+                    TextChunk(
+                        ordinal=len(chunks),
+                        content=content,
+                        locator_type=source.locator_type,
+                        locator_value=source.locator_value,
+                        section=source.section,
+                        metadata=fragment_metadata,
+                        parent_key=parent_key,
+                    )
                 )
-            )
     return chunks

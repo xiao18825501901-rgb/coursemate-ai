@@ -3,6 +3,7 @@ from dataclasses import replace
 from app.rag.embeddings import EmbeddingProvider
 from app.rag.types import SearchHit
 from app.repositories.chunks import ChunkRepository
+from app.tutor.references import QueryReference
 
 
 def reciprocal_rank_fusion(
@@ -72,3 +73,49 @@ class HybridRetriever:
             limit=candidate_limit,
         )
         return reciprocal_rank_fusion(keyword_hits, vector_hits, top_k=top_k)
+
+    def retrieve_structured(
+        self,
+        *,
+        course_id: str,
+        reference: QueryReference,
+        top_k: int,
+    ) -> list[SearchHit]:
+        return self.repository.structured_search(course_id, reference, limit=top_k)
+
+    def diagnose(
+        self,
+        *,
+        course_id: str,
+        query: str,
+        reference: QueryReference,
+        top_k: int,
+    ) -> dict[str, object]:
+        candidate_limit = max(top_k * 3, top_k)
+        structured = self.retrieve_structured(
+            course_id=course_id,
+            reference=reference,
+            top_k=top_k,
+        )
+        if structured:
+            return {
+                "strategy": "structured_locator",
+                "structured": structured,
+                "keyword": [],
+                "vector": [],
+                "selected": structured,
+            }
+        keyword = self.repository.keyword_search(course_id, query, limit=candidate_limit)
+        query_vector = self.embedding_provider.embed_texts([query])[0]
+        vector = self.repository.vector_search(
+            course_id,
+            query_vector,
+            limit=candidate_limit,
+        )
+        return {
+            "strategy": "hybrid",
+            "structured": [],
+            "keyword": keyword,
+            "vector": vector,
+            "selected": reciprocal_rank_fusion(keyword, vector, top_k=top_k),
+        }

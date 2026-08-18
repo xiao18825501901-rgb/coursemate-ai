@@ -1,7 +1,10 @@
 from dataclasses import dataclass
 from typing import Annotated, Protocol
 
-from clerk_backend_api import AuthenticateRequestOptions, authenticate_request
+from clerk_backend_api import (  # type: ignore[attr-defined]
+    AuthenticateRequestOptions,
+    authenticate_request,
+)
 from clerk_backend_api.security.types import AuthStatus
 from fastapi import Depends, Request
 

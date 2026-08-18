@@ -73,6 +73,17 @@ export class AgentDatabase {
     `);
   }
 
+  isReady(): boolean {
+    try {
+      const migration = this.connection
+        .prepare("SELECT 1 AS ready FROM schema_migrations WHERE version = 1")
+        .get() as { ready: number } | undefined;
+      return migration?.ready === 1;
+    } catch {
+      return false;
+    }
+  }
+
   close(): void {
     this.connection.close();
   }

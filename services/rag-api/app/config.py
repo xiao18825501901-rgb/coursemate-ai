@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     openai_base_url: str | None = None
     openai_chat_model: str = "gpt-5.6-luna"
     openai_embedding_model: str = "text-embedding-3-small"
+    rag_chat_api_key: SecretStr | None = None
+    rag_chat_base_url: str | None = None
+    rag_chat_model: str = ""
+    rag_embedding_api_key: SecretStr | None = None
+    rag_embedding_base_url: str | None = None
+    rag_embedding_model: str = ""
     rag_provider_mode: Literal["openai", "deterministic"] = "openai"
     web_origin: str = "http://localhost:5173"
     clerk_secret_key: SecretStr | None = None
@@ -40,12 +46,25 @@ class Settings(BaseSettings):
     chunk_overlap: int = Field(default=200, ge=0, le=4_000)
     top_k: int = Field(default=6, ge=1, le=30)
     max_upload_bytes: int = Field(default=20 * 1024 * 1024, ge=1_024, le=100 * 1024 * 1024)
+    user_course_max_courses: int = Field(default=10, ge=1, le=1_000)
+    user_course_max_files: int = Field(default=50, ge=1, le=10_000)
+    user_course_max_total_upload_bytes: int = Field(
+        default=500 * 1024 * 1024,
+        ge=1_024,
+        le=100 * 1024 * 1024 * 1024,
+    )
     max_context_chars: int = Field(default=18_000, ge=1_000, le=100_000)
 
     @model_validator(mode="after")
     def validate_chunk_window(self) -> "Settings":
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError("chunk_overlap must be smaller than chunk_size")
+        self.rag_chat_api_key = self.rag_chat_api_key or self.openai_api_key
+        self.rag_chat_base_url = self.rag_chat_base_url or self.openai_base_url
+        self.rag_chat_model = self.rag_chat_model or self.openai_chat_model
+        self.rag_embedding_api_key = self.rag_embedding_api_key or self.openai_api_key
+        self.rag_embedding_base_url = self.rag_embedding_base_url or self.openai_base_url
+        self.rag_embedding_model = self.rag_embedding_model or self.openai_embedding_model
         return self
 
     @property

@@ -1,6 +1,8 @@
 # CourseMate AI
 
-CourseMate AI is a multi-user learning application with Clerk authentication, a shared read-only course corpus, private cited conversations, and owner-isolated Todo tasks. Two independently verified backends connect the React interface into one evidence-to-action workflow.
+CourseMate AI V2 is a multi-course personalized teaching platform with Clerk authentication,
+durable cited tutor conversations, private user-created courses, moderated community publication
+and owner-isolated Todo tasks. Two independently verified backends connect evidence to action.
 
 ## What is ready
 
@@ -12,6 +14,9 @@ CourseMate AI is a multi-user learning application with Clerk authentication, a 
 - Responsive React pages for Home, QA, Study Plan, Documents, and About.
 - Deterministic offline providers for repeatable tests and OpenAI SDK Responses/Embeddings providers for production, including OpenAI-compatible endpoints.
 - Clerk verification in both backends, owner-scoped tasks/conversations, admin-only corpus mutation, and per-user AI limits.
+- Chinese/English tutor routing, history-aware follow-ups, exact assignment question location, progressive teaching and admin retrieval diagnostics.
+- Private-by-default course creation, secure upload/index/delete, versioned teaching profiles and a deterministic prompt builder.
+- Dual owner consent plus administrator approval for public community courses; approved content is mutation-locked until unpublish.
 
 ## Architecture at a glance
 
@@ -80,6 +85,10 @@ The end-to-end suite uses real Chrome, the full RAG database, deterministic mode
 
 ## Documentation
 
+- `docs/V2_ARCHITECTURE.md` through `docs/V2_PRODUCTION_DEPLOYMENT.md` cover V2 design, security, migration, verification and release operations.
+- `V2_HANDOFF_FOR_CHATGPT.md` explains the old behavior, root problem, new architecture/code and rationale for every V2 subsystem.
+- `docs/file-request-packs/README.md` maps 14 minimal future teaching and review packs.
+
 - docs/ARCHITECTURE.md — boundaries, runtime topology, trust model, and decisions.
 - docs/RAG_PIPELINE.md — ingestion, retrieval, prompt, citations, and acceptance questions.
 - docs/AGENT_PIPELINE.md — Responses tool loop and all five tools.
@@ -93,4 +102,9 @@ The end-to-end suite uses real Chrome, the full RAG database, deterministic mode
 
 ## Security and production note
 
-The repository contains local copies of private course materials under data/uploads. Do not publish them or the populated database without permission. The Render blueprint creates empty persistent disks; an allowlisted administrator must perform production ingestion. Clerk and model-provider secrets belong only in backend secret stores; the browser receives only the Clerk publishable key. Deployment still requires the owner to create accounts, approve paid storage, set secrets, seed authorized data, and run production smoke tests.
+The repository contains local copies of private course materials under data/uploads. Do not publish
+them or the populated database without permission. Clerk and model-provider secrets belong only in
+backend secret stores; the browser receives only the Clerk publishable key. The V2 source and local
+verification gates pass, but the paid model benchmark and `qqttai.com` production deployment/smoke
+test were not run. See `docs/V2_TEST_REPORT.md` for the exact acceptance matrix and
+`docs/V2_PRODUCTION_DEPLOYMENT.md` for the gated rollout/rollback procedure.

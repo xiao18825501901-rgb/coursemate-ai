@@ -17,7 +17,29 @@ export interface Course {
   id: string;
   name: string;
   description: string;
+  courseType: "official" | "user";
+  visibility: "private" | "public";
+  publicationStatus: "private" | "pending" | "published" | "rejected";
+  preferredLanguage: LanguagePreference;
+  documentCount?: number;
+  indexStatus?: "empty" | "indexing" | "indexed" | "failed";
+  publishedAt: string | null;
+  isOwner: boolean;
+  canManage: boolean;
   createdAt: string;
+  updatedAt: string;
+}
+
+export interface CourseCreateInput {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export interface CourseUpdateInput {
+  name?: string;
+  description?: string;
+  preferredLanguage?: LanguagePreference;
 }
 
 export type DocumentStatus = "pending" | "processing" | "ready" | "failed" | "unsupported";
@@ -29,11 +51,68 @@ export interface CourseDocument {
   mediaType: string;
   extension: string;
   sha256: string;
+  byteSize: number;
   status: DocumentStatus;
   chunkCount: number;
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface IngestionJob {
+  id: string;
+  documentId: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  processedChunks: number;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UploadAccepted {
+  document: CourseDocument;
+  job: IngestionJob;
+}
+
+export interface TeachingProfileInput {
+  language: LanguagePreference;
+  studentLevel: "beginner" | "intermediate" | "advanced";
+  learningGoal: string;
+  teachingStyles: Array<"intuition-first" | "step-by-step" | "socratic" | "analogy" | "worked-examples">;
+  answerDepth: "concise" | "balanced" | "detailed";
+  examplePreference: "minimal" | "when-helpful" | "worked";
+  exercisePolicy: "none" | "offer" | "always";
+  examOrientation: boolean;
+  citationPreference: "standard" | "detailed";
+  mathDetailLevel: "light" | "standard" | "full";
+  terminologyStyle: "plain" | "bilingual" | "formal";
+  customRequirements: string;
+}
+
+export interface TeachingProfilePreview extends TeachingProfileInput {
+  generatedPrompt: string;
+}
+
+export interface TeachingProfile extends TeachingProfilePreview {
+  id: string;
+  courseId: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublicationRequest {
+  id: string;
+  courseId: string;
+  courseName: string;
+  status: "pending" | "approved" | "rejected" | "withdrawn";
+  shareMaterialsConsent: boolean;
+  rightsConfirmation: boolean;
+  consentVersion: string;
+  consentedAt: string;
+  submittedAt: string;
+  reviewedAt: string | null;
+  reviewNote: string;
 }
 
 export interface Citation {
@@ -47,6 +126,51 @@ export interface Citation {
   section: string | null;
   excerpt: string;
   channels: string[];
+}
+
+export type LanguagePreference = "auto" | "zh-CN" | "en" | "bilingual";
+
+export interface ConversationSummary {
+  id: string;
+  courseId: string;
+  title: string;
+  preferredLanguage: LanguagePreference;
+  messageCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConversationMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  citations: Citation[];
+  metadata?: QaStreamMeta;
+  createdAt: string;
+}
+
+export interface ConversationDetail extends Omit<ConversationSummary, "messageCount"> {
+  messages: ConversationMessage[];
+}
+
+export type QueryIntent =
+  | "COURSE_GROUNDED"
+  | "COURSE_TUTORING"
+  | "GENERAL_CONVERSATION"
+  | "COURSE_META"
+  | "AMBIGUOUS";
+
+export type GroundingMode = "grounded" | "mixed" | "general" | "metadata";
+
+export interface QaStreamMeta {
+  requestId?: string;
+  conversationId?: string;
+  courseId?: string;
+  retrievedChunks?: number;
+  queryIntent?: QueryIntent;
+  groundingMode?: GroundingMode;
+  retrievalQueryRewritten?: boolean;
+  teachingApproach?: "formal" | "analogy" | "worked_example" | "socratic" | null;
 }
 
 export type TaskStatus = "todo" | "in_progress" | "completed";

@@ -1,6 +1,23 @@
 import type { GetSessionToken } from "../auth/AuthProvider";
 import { authenticatedFetch, requireOk, requestJson } from "./http";
-import type { Citation, Course, CourseDocument, Page } from "../types/api";
+import type {
+  Citation,
+  ConversationDetail,
+  ConversationSummary,
+  Course,
+  CourseCreateInput,
+  CourseDocument,
+  CourseUpdateInput,
+  IngestionJob,
+  LanguagePreference,
+  Page,
+  PublicationRequest,
+  QaStreamMeta,
+  TeachingProfile,
+  TeachingProfileInput,
+  TeachingProfilePreview,
+  UploadAccepted,
+} from "../types/api";
 
 
 const RAG_API = import.meta.env.VITE_RAG_API_URL ?? "http://localhost:8000";
@@ -43,7 +60,7 @@ export class SseDecoder {
 }
 
 export interface QaStreamCallbacks {
-  onMeta?: (data: Record<string, unknown>) => void;
+  onMeta?: (data: QaStreamMeta) => void;
   onDelta: (text: string) => void;
   onCitation: (citation: Citation) => void;
   onDone?: () => void;
@@ -51,6 +68,54 @@ export interface QaStreamCallbacks {
 
 export async function listCourses(getToken: GetSessionToken): Promise<Page<Course>> {
   return requestJson<Page<Course>>(getToken, `${RAG_API}/api/courses?page=1&pageSize=100`);
+}
+
+export async function getCourse(
+  getToken: GetSessionToken,
+  courseId: string,
+): Promise<Course> {
+  return requestJson<Course>(
+    getToken,
+    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}`,
+  );
+}
+
+export async function createCourse(
+  getToken: GetSessionToken,
+  input: CourseCreateInput,
+): Promise<Course> {
+  return requestJson<Course>(getToken, `${RAG_API}/api/courses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function updateCourse(
+  getToken: GetSessionToken,
+  courseId: string,
+  input: CourseUpdateInput,
+): Promise<Course> {
+  return requestJson<Course>(
+    getToken,
+    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export async function deleteCourse(
+  getToken: GetSessionToken,
+  courseId: string,
+): Promise<void> {
+  await requireOk(await authenticatedFetch(
+    getToken,
+    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}`,
+    { method: "DELETE" },
+  ));
 }
 
 export async function listDocuments(
@@ -63,18 +128,219 @@ export async function listDocuments(
   );
 }
 
+export async function listConversations(
+  getToken: GetSessionToken,
+  courseId: string,
+): Promise<Page<ConversationSummary>> {
+  return requestJson<Page<ConversationSummary>>(
+    getToken,
+    `${RAG_API}/api/conversations?courseId=${encodeURIComponent(courseId)}&page=1&pageSize=100`,
+  );
+}
+
+export async function createConversation(
+  getToken: GetSessionToken,
+  courseId: string,
+  preferredLanguage?: LanguagePreference,
+): Promise<ConversationSummary> {
+  return requestJson<ConversationSummary>(getToken, `${RAG_API}/api/conversations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ courseId, ...(preferredLanguage ? { preferredLanguage } : {}) }),
+  });
+}
+
+export async function getConversation(
+  getToken: GetSessionToken,
+  conversationId: string,
+): Promise<ConversationDetail> {
+  return requestJson<ConversationDetail>(
+    getToken,
+    `${RAG_API}/api/conversations/${encodeURIComponent(conversationId)}`,
+  );
+}
+
+export async function renameConversation(
+  getToken: GetSessionToken,
+  conversationId: string,
+  title: string,
+): Promise<ConversationSummary> {
+  return requestJson<ConversationSummary>(
+    getToken,
+    `${RAG_API}/api/conversations/${encodeURIComponent(conversationId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    },
+  );
+}
+
+export async function deleteConversation(
+  getToken: GetSessionToken,
+  conversationId: string,
+): Promise<void> {
+  await requireOk(
+    await authenticatedFetch(
+      getToken,
+      `${RAG_API}/api/conversations/${encodeURIComponent(conversationId)}`,
+      { method: "DELETE" },
+    ),
+  );
+}
+
 export async function uploadDocument(
   getToken: GetSessionToken,
   courseId: string,
   file: File,
-): Promise<void> {
+): Promise<UploadAccepted> {
   const body = new FormData();
   body.append("file", file);
-  await requireOk(
-    await authenticatedFetch(getToken, `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/documents`, {
+  return requestJson<UploadAccepted>(
+    getToken,
+    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/documents`,
+    { method: "POST", body },
+  );
+}
+
+export async function getIngestionJob(
+  getToken: GetSessionToken,
+  jobId: string,
+): Promise<IngestionJob> {
+  return requestJson<IngestionJob>(
+    getToken,
+    `${RAG_API}/api/ingestion-jobs/${encodeURIComponent(jobId)}`,
+  );
+}
+
+export async function deleteDocument(
+  getToken: GetSessionToken,
+  courseId: string,
+  documentId: string,
+): Promise<void> {
+  await requireOk(await authenticatedFetch(
+    getToken,
+    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/documents/${encodeURIComponent(documentId)}`,
+    { method: "DELETE" },
+  ));
+}
+
+export async function previewTeachingProfile(
+  getToken: GetSessionToken,
+  requirement: string,
+): Promise<TeachingProfilePreview> {
+  return requestJson<TeachingProfilePreview>(getToken, `${RAG_API}/api/teaching-profiles/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ requirement }),
+  });
+}
+
+export async function listTeachingProfiles(
+  getToken: GetSessionToken,
+  courseId: string,
+): Promise<{ items: TeachingProfile[] }> {
+  return requestJson<{ items: TeachingProfile[] }>(
+    getToken,
+    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/teaching-profiles`,
+  );
+}
+
+export async function saveTeachingProfile(
+  getToken: GetSessionToken,
+  courseId: string,
+  profile: TeachingProfileInput,
+): Promise<TeachingProfile> {
+  const writableProfile: TeachingProfileInput = {
+    language: profile.language,
+    studentLevel: profile.studentLevel,
+    learningGoal: profile.learningGoal,
+    teachingStyles: profile.teachingStyles,
+    answerDepth: profile.answerDepth,
+    examplePreference: profile.examplePreference,
+    exercisePolicy: profile.exercisePolicy,
+    examOrientation: profile.examOrientation,
+    citationPreference: profile.citationPreference,
+    mathDetailLevel: profile.mathDetailLevel,
+    terminologyStyle: profile.terminologyStyle,
+    customRequirements: profile.customRequirements,
+  };
+  return requestJson<TeachingProfile>(
+    getToken,
+    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/teaching-profiles`,
+    {
       method: "POST",
-      body,
-    }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(writableProfile),
+    },
+  );
+}
+
+export async function restoreTeachingProfile(
+  getToken: GetSessionToken,
+  courseId: string,
+  version: number,
+): Promise<TeachingProfile> {
+  return requestJson<TeachingProfile>(
+    getToken,
+    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/teaching-profiles/${version}/restore`,
+    { method: "POST" },
+  );
+}
+
+export async function submitPublicationRequest(
+  getToken: GetSessionToken,
+  courseId: string,
+): Promise<PublicationRequest> {
+  return requestJson<PublicationRequest>(
+    getToken,
+    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/publication-requests`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        shareMaterialsConsent: true,
+        rightsConfirmation: true,
+        consentVersion: "v1",
+      }),
+    },
+  );
+}
+
+export async function withdrawPublicationRequest(
+  getToken: GetSessionToken,
+  courseId: string,
+): Promise<void> {
+  await requireOk(await authenticatedFetch(
+    getToken,
+    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/publication-requests/current`,
+    { method: "DELETE" },
+  ));
+}
+
+export async function listPendingPublications(
+  getToken: GetSessionToken,
+): Promise<{ items: PublicationRequest[] }> {
+  return requestJson<{ items: PublicationRequest[] }>(
+    getToken,
+    `${RAG_API}/api/admin/publication-requests`,
+  );
+}
+
+export async function reviewPublication(
+  getToken: GetSessionToken,
+  requestId: string,
+  decision: "approve" | "reject",
+  reviewNote: string,
+): Promise<PublicationRequest> {
+  return requestJson<PublicationRequest>(
+    getToken,
+    `${RAG_API}/api/admin/publication-requests/${encodeURIComponent(requestId)}/review`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision, reviewNote }),
+    },
   );
 }
 
@@ -84,11 +350,16 @@ export async function streamQa(
   question: string,
   callbacks: QaStreamCallbacks,
   signal?: AbortSignal,
+  conversationId?: string,
 ): Promise<void> {
   const request: RequestInit = {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ courseId, question }),
+    body: JSON.stringify({
+      courseId,
+      question,
+      ...(conversationId === undefined ? {} : { conversationId }),
+    }),
   };
   if (signal !== undefined) request.signal = signal;
   const response = await requireOk(
@@ -100,7 +371,7 @@ export async function streamQa(
   const sseDecoder = new SseDecoder();
 
   const dispatch = (item: SseEvent): void => {
-    if (item.event === "meta") callbacks.onMeta?.(item.data);
+    if (item.event === "meta") callbacks.onMeta?.(item.data as QaStreamMeta);
     if (item.event === "delta" && typeof item.data.text === "string") {
       callbacks.onDelta(item.data.text);
     }

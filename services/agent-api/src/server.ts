@@ -50,9 +50,10 @@ const application = createApp({
   modelRateLimiter: new SqliteModelRateLimiter(database.connection, {
     limitPerMinute: config.agentChatRequestsPerMinute,
   }),
+  readinessCheck: () => database.isReady(),
 });
-const server = application.listen(config.port, () => {
-  console.log(`CourseMate Agent API listening on http://localhost:${config.port}`);
+const server = application.listen(config.port, config.host, () => {
+  console.log(`CourseMate Agent API listening on http://${config.host}:${config.port}`);
 });
 
 function shutdown(): void {

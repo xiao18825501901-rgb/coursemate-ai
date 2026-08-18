@@ -4,6 +4,9 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Layout } from "./components/Layout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AboutPage } from "./pages/AboutPage";
+import { AdminPublicationPage } from "./pages/AdminPublicationPage";
+import { CourseCenterPage } from "./pages/CourseCenterPage";
+import { CourseSettingsPage } from "./pages/CourseSettingsPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
 import { HomePage } from "./pages/HomePage";
 import { NotFoundPage } from "./pages/NotFoundPage";
@@ -20,6 +23,11 @@ export function AppRoutes() {
         <Route element={<ProtectedRoute />}>
           <Route element={<QaPage />} path="qa" />
           <Route element={<QaPage />} path="qa/:courseId" />
+          <Route element={<QaPage />} path="qa/:courseId/:conversationId" />
+          <Route element={<CourseCenterPage />} path="courses" />
+          <Route element={<CourseCenterPage createMode />} path="courses/new" />
+          <Route element={<CourseSettingsPage />} path="courses/:courseId/settings" />
+          <Route element={<AdminPublicationPage />} path="admin/publications" />
           <Route element={<TasksPage />} path="tasks" />
           <Route element={<DocumentsPage />} path="documents" />
         </Route>

@@ -4,11 +4,11 @@ from typing import Protocol
 
 from openai import OpenAI
 
-from app.rag.prompt import QA_INSTRUCTIONS
-
 
 class AnswerProvider(Protocol):
-    def stream_answer(self, *, question: str, context: str) -> Iterator[str]:
+    def stream_answer(
+        self, *, question: str, context: str, instructions: str
+    ) -> Iterator[str]:
         """Yield visible answer text deltas."""
 
 
@@ -32,10 +32,12 @@ class OpenAIAnswerProvider:
         self.model = model
         self.max_output_tokens = max_output_tokens
 
-    def stream_answer(self, *, question: str, context: str) -> Iterator[str]:
+    def stream_answer(
+        self, *, question: str, context: str, instructions: str
+    ) -> Iterator[str]:
         stream = self.client.responses.create(
             model=self.model,
-            instructions=QA_INSTRUCTIONS,
+            instructions=instructions,
             input=f"Question:\n{question}\n\n{context}",
             max_output_tokens=self.max_output_tokens,
             store=False,
@@ -49,14 +51,18 @@ class OpenAIAnswerProvider:
 
 
 class MissingAnswerProvider:
-    def stream_answer(self, *, question: str, context: str) -> Iterator[str]:
+    def stream_answer(
+        self, *, question: str, context: str, instructions: str
+    ) -> Iterator[str]:
         raise RuntimeError("OPENAI_API_KEY is required for grounded answers")
 
 
 class ExtractiveAnswerProvider:
     """Deterministic local answerer for demos when the OpenAI network is unavailable."""
 
-    def stream_answer(self, *, question: str, context: str) -> Iterator[str]:
+    def stream_answer(
+        self, *, question: str, context: str, instructions: str
+    ) -> Iterator[str]:
         question_tokens = {
             token
             for token in re.findall(r"\w+", question.casefold())

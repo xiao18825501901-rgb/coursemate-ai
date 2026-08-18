@@ -1,11 +1,28 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { CitationList } from "../components/CitationList";
+import { ConversationSidebar } from "../components/ConversationSidebar";
 import { useCourseMateAuth } from "../auth/AuthProvider";
 import { createTask } from "../services/agentApi";
-import { listCourses, listDocuments, streamQa } from "../services/ragApi";
-import type { Citation, Course, CourseDocument } from "../types/api";
+import {
+  createConversation,
+  deleteConversation,
+  getConversation,
+  listConversations,
+  listCourses,
+  listDocuments,
+  renameConversation,
+  streamQa,
+} from "../services/ragApi";
+import type {
+  Citation,
+  ConversationSummary,
+  Course,
+  CourseDocument,
+  GroundingMode,
+  QaStreamMeta,
+} from "../types/api";
 
 
 interface ChatMessage {
@@ -14,6 +31,7 @@ interface ChatMessage {
   text: string;
   question?: string;
   citations: Citation[];
+  metadata?: QaStreamMeta;
 }
 
 function messageId(): string {
@@ -24,16 +42,48 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "CourseMate could not complete the request.";
 }
 
+function previousUserQuestion(
+  messages: Array<{ role: "user" | "assistant"; content: string }>,
+  beforeIndex: number,
+): string | undefined {
+  for (let index = beforeIndex - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "user") return message.content;
+  }
+  return undefined;
+}
+
+const groundingLabels: Record<GroundingMode, { title: string; detail: string }> = {
+  grounded: {
+    title: "Course-material answer",
+    detail: "Claims are limited to retrieved course evidence; citations identify that evidence.",
+  },
+  mixed: {
+    title: "Course material + AI knowledge",
+    detail: "Citations support only the course-material portion, not supplementary AI knowledge.",
+  },
+  general: {
+    title: "General tutor conversation",
+    detail: "No course-material claim or citation is implied for this response.",
+  },
+  metadata: {
+    title: "Course information",
+    detail: "This response uses trusted course and document metadata, not retrieved excerpts.",
+  },
+};
+
 export function QaPage() {
   const { getToken } = useCourseMateAuth();
-  const { courseId: routeCourseId } = useParams();
+  const { courseId: routeCourseId, conversationId: routeConversationId } = useParams();
   const navigate = useNavigate();
   const [courses, setCourses] = useState<Course[]>([]);
   const [courseId, setCourseId] = useState(routeCourseId ?? "");
   const [documents, setDocuments] = useState<CourseDocument[]>([]);
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(true);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [planNotice, setPlanNotice] = useState("");
@@ -74,11 +124,58 @@ export function QaPage() {
       .catch((caught: unknown) => setError(errorMessage(caught)));
   }, [courseId, getToken]);
 
+  useEffect(() => {
+    let active = true;
+    if (!courseId) {
+      setConversations([]);
+      return;
+    }
+    setHistoryLoading(true);
+    void listConversations(getToken, courseId)
+      .then((page) => active && setConversations(page.items))
+      .catch((caught: unknown) => active && setError(errorMessage(caught)))
+      .finally(() => active && setHistoryLoading(false));
+    return () => {
+      active = false;
+    };
+  }, [courseId, getToken]);
+
+  useEffect(() => {
+    let active = true;
+    // Navigating to the server-assigned id during an active SSE stream must not
+    // replace the optimistic assistant message with a partial database snapshot.
+    if (streaming) return;
+    if (!routeConversationId) {
+      setMessages([]);
+      return;
+    }
+    void getConversation(getToken, routeConversationId)
+      .then((conversation) => {
+        if (!active) return;
+        setMessages(conversation.messages.map((message, index) => {
+          const question = message.role === "assistant"
+            ? previousUserQuestion(conversation.messages, index)
+            : undefined;
+          return {
+            id: message.id,
+            role: message.role,
+            text: message.content,
+            citations: message.citations,
+            ...(message.metadata === undefined ? {} : { metadata: message.metadata }),
+            ...(question === undefined ? {} : { question }),
+          };
+        }));
+      })
+      .catch((caught: unknown) => active && setError(errorMessage(caught)));
+    return () => {
+      active = false;
+    };
+  }, [getToken, routeConversationId, streaming]);
+
   const currentCourse = useMemo(
     () => courses.find((course) => course.id === courseId) ?? null,
     [courseId, courses],
   );
-
   async function ask(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const trimmed = question.trim();
@@ -112,14 +209,66 @@ export function QaPage() {
                   : item,
               ),
             ),
+          onMeta: (data) => {
+            setMessages((items) => items.map((item) => (
+              item.id === answerId ? { ...item, metadata: data } : item
+            )));
+            if (typeof data.conversationId !== "string" || routeConversationId) return;
+            navigate(`/qa/${courseId}/${data.conversationId}`, { replace: true });
+          },
+          onDone: () => {
+            void listConversations(getToken, courseId)
+              .then((page) => setConversations(page.items))
+              .catch(() => undefined);
+          },
         },
         controller.signal,
+        routeConversationId,
       );
     } catch (caught: unknown) {
       if (!controller.signal.aborted) setError(errorMessage(caught));
     } finally {
       setStreaming(false);
       abortRef.current = null;
+    }
+  }
+
+  async function startNewChat(): Promise<void> {
+    if (!courseId) return;
+    try {
+      setError(null);
+      const created = await createConversation(getToken, courseId);
+      setConversations((items) => [created, ...items]);
+      navigate(`/qa/${courseId}/${created.id}`);
+    } catch (caught: unknown) {
+      setError(errorMessage(caught));
+    }
+  }
+
+  async function renameHistory(conversation: ConversationSummary): Promise<void> {
+    const title = window.prompt("Rename conversation", conversation.title)?.trim();
+    if (!title || title === conversation.title) return;
+    try {
+      const updated = await renameConversation(getToken, conversation.id, title);
+      setConversations((items) => items.map((item) => (
+        item.id === updated.id ? updated : item
+      )));
+    } catch (caught: unknown) {
+      setError(errorMessage(caught));
+    }
+  }
+
+  async function deleteHistory(conversation: ConversationSummary): Promise<void> {
+    if (!window.confirm(`Delete “${conversation.title}” and all of its messages?`)) return;
+    try {
+      await deleteConversation(getToken, conversation.id);
+      setConversations((items) => items.filter((item) => item.id !== conversation.id));
+      if (routeConversationId === conversation.id) {
+        setMessages([]);
+        navigate(`/qa/${courseId}`, { replace: true });
+      }
+    } catch (caught: unknown) {
+      setError(errorMessage(caught));
     }
   }
 
@@ -154,7 +303,16 @@ export function QaPage() {
       </header>
       {error && <div className="alert alert-error" role="alert">{error}</div>}
       <p className="sr-only" aria-live="polite">{planNotice}</p>
-      <div className="qa-workspace">
+      <div className="qa-workspace qa-workspace-v2">
+        <ConversationSidebar
+          activeConversationId={routeConversationId}
+          conversations={conversations}
+          loading={historyLoading}
+          onCreate={() => void startNewChat()}
+          onDelete={(conversation) => void deleteHistory(conversation)}
+          onOpen={(conversation) => navigate(`/qa/${conversation.courseId}/${conversation.id}`)}
+          onRename={(conversation) => void renameHistory(conversation)}
+        />
         <aside className="course-panel" aria-label="Course documents">
           <label className="field-label" htmlFor="course-select">Course</label>
           <select
@@ -187,12 +345,18 @@ export function QaPage() {
               ))}
             </ul>
           )}
-          <p className="managed-corpus-note">Course sources are managed by CourseMate administrators.</p>
+          {currentCourse?.canManage ? (
+            <Link className="text-button" to={`/courses/${currentCourse.id}/settings`}>
+              Manage course and sources
+            </Link>
+          ) : (
+            <p className="managed-corpus-note">Official course sources are read-only.</p>
+          )}
         </aside>
 
         <section className="chat-panel" aria-labelledby="qa-chat-title">
           <div className="chat-panel-header">
-            <div><span className="online-indicator" />Grounded mode</div>
+            <div><span className="online-indicator" />AI tutor</div>
             <h2 id="qa-chat-title">Conversation</h2>
           </div>
           <div className="message-log" role="log" aria-live="polite" aria-relevant="additions text">
@@ -206,6 +370,15 @@ export function QaPage() {
               messages.map((message) => (
                 <article className={`message message-${message.role}`} key={message.id}>
                   <span className="message-role">{message.role === "user" ? "You" : "CourseMate"}</span>
+                  {message.role === "assistant" && message.metadata?.groundingMode && (
+                    <div
+                      className={`grounding-banner grounding-${message.metadata.groundingMode}`}
+                      role="status"
+                    >
+                      <strong>{groundingLabels[message.metadata.groundingMode].title}</strong>
+                      <span>{groundingLabels[message.metadata.groundingMode].detail}</span>
+                    </div>
+                  )}
                   <p>{message.text || (streaming ? "Reading your sources…" : "No answer returned.")}</p>
                   <CitationList citations={message.citations} />
                   {message.role === "assistant" && message.text && !streaming && (
