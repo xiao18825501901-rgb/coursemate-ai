@@ -2,6 +2,7 @@ import path from "node:path";
 
 export interface AgentConfig {
   databasePath: string;
+  host: string;
   port: number;
   webOrigin: string;
   openaiApiKey: string;
@@ -45,6 +46,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AgentC
   return {
     databasePath:
       configuredPath === ":memory:" ? configuredPath : path.resolve(process.cwd(), configuredPath),
+    host: environment.AGENT_HOST?.trim() || "127.0.0.1",
     port: boundedInteger(environment.AGENT_PORT ?? environment.PORT, 8001, 1, 65_535),
     webOrigin: environment.WEB_ORIGIN ?? "http://localhost:5173",
     openaiApiKey: environment.AGENT_MODEL_API_KEY ?? environment.OPENAI_API_KEY ?? "",
