@@ -1,25 +1,25 @@
 # CourseMate V3 — Test and Model Evaluation Report
 
-Last updated: 2026-09-12 after Stage 2 implementation and review.
+Last updated: 2026-09-12 after Stage 3 implementation and review.
 
 Branch: `feature/coursemate-v3-persistent-learning`
 
-Stage-switch base: `c6158cf34142c311e77a58aa49a3b0b7cbe7fbd8`; Stage 1 commits are `00961ef` through `e9ecd00`; Stage 2 code commits are `6eeff90`, `5a1f9d0`, `0be1a47`, `86032bb` and `5dba760`.
+Stage-switch base: `c6158cf34142c311e77a58aa49a3b0b7cbe7fbd8`; Stage 1 commits are `00961ef` through `e9ecd00`; Stage 2 code commits are `6eeff90`, `5a1f9d0`, `0be1a47`, `86032bb` and `5dba760`; Stage 3 code commits are `956d849`, `da1fa2a`, `e5d14d3`, `52514d1` and `2256cf0`.
 This report is cumulative and must be updated after every behavior change; old PASS does not cover later code.
 
 ## 1. Current evidence summary
 
 | Acceptance layer | Result | Meaning |
 |---|---|---|
-| Source implementation | PARTIAL | Stage 1 plus Stage 2 Registry/Spec/tree projections exist; Stages 3–8 are not complete |
-| Python automated tests | PASS for current Stage 2 code | 251 passed, 1 known dependency deprecation warning |
+| Source implementation | PARTIAL | Stages 1–3 source slices exist; Stages 4–8 are not complete |
+| Python automated tests | PASS for current Stage 3 code | 264 passed; 1 known dependency deprecation plus local pytest-cache ACL warning |
 | Web unit tests | PASS | 8 files / 33 tests passed |
 | Task Agent unit tests | PASS | 53 passed; V3 did not take over task tools |
-| Python lint/type | PASS | Ruff all checks; mypy strict app 53 files |
+| Python lint/type | PASS | Ruff all checks; mypy strict app 55 files |
 | TS typecheck/build | PASS | both workspaces typecheck; production bundles built locally |
 | V3 browser flow | LOCAL_FAKE_PROVIDER_VERIFIED | 1 Playwright flow passed with isolated synthetic DB/test identity/deterministic provider |
 | Real model | NOT VERIFIED | no paid call, account/region/endpoint unknown |
-| Real-data final migration/restore | PARTIAL | 011–014 passed on an isolated read-only-source copy; uploads/full restore/final Schema remain unverified |
+| Real-data final migration/restore | PARTIAL | 011–015 passed on an isolated read-only-source copy; uploads/full restore/final Schema remain unverified |
 | Production | NOT VERIFIED | no current release/auth/provider/Schema smoke evidence |
 
 ## 2. Cumulative local commands and actual results
@@ -205,14 +205,58 @@ The separate `work/v3-cs3481-subset-01/` run used two existing CS3481 document-v
 
 `SUPPLEMENTAL_ENGINEERING_DECISION`: migration 014 keeps the Registry, normalized current Spec projection and two tree graphs in one additive transaction boundary because none had been applied to the real or production database. The first UI plan editor intentionally creates a flat ordering of explicitly selected ATOMIC nodes; the API/Schema already support hierarchy, while richer drag/reparent editing remains later UI work.
 
-## 5. Test data and privacy
+## 5. Stage 3 Teaching plan, delivery and model-run evidence
+
+Stage 3 was driven by failing tests for the missing full-plan cache and safe failed-call evidence. A final browser failure also found that Plan metadata existed only in the immediate POST response; the failing backend regression reproduced its loss after a state reload, and the fix now stores the Plan version/unit/reuse metadata with the teaching unit.
+
+Current full-gate results after that fix:
+
+```text
+Python pytest: 264 passed, 2 warnings, 65.30s
+Ruff: All checks passed
+mypy: Success, 55 source files
+Web Vitest: 8 files / 33 tests passed
+Task Agent Vitest: 9 files / 53 tests passed
+TypeScript typecheck: Web PASS; Agent PASS
+Production build: Web 116 modules PASS; Agent tsc PASS
+Playwright V3 golden path: 1 passed, 16.6s; test body 8.1s
+```
+
+The two pytest warning categories were Starlette's `httpx` TestClient deprecation and inability to write the repository-local `.pytest_cache` on this host; neither changed test selection. Earlier Stage 3 focused runs used an ignored writable cache directory. No tests were skipped.
+
+The hermetic Playwright configuration now explicitly sets both backend `V3_ENABLED=true` and Web `VITE_V3_ENABLED=true`. Before that fix the first run rendered the V3-off 404 page; the next run exposed the missing persisted Plan metadata; only the third run passed. The final flow verifies private upload/preview, personal tree, full solution, Step question, Bridge context, Teaching delivery, `ciallo` display-only check prefix, `LEARNED`, exact return focus, reload/new-context recovery and 375px no-overflow. Desktop and mobile screenshots were visually inspected. Browser request failures and page console errors are asserted empty.
+
+Locally verified Teaching behavior:
+
+- migration 015 adds immutable preference and TeachingPlan versions, normalized Plan units/links, exact delivery evidence and safe model-call evidence;
+- v3.2 Planner produces a complete 1–12 unit path; each unit targets 1–3 items and includes 3–5 checks;
+- four majors × CASE_A/CASE_B select the intended strategy, while preferences/injected sources cannot remove REQUIRED scope or gain authority;
+- normal continuation uses one saved Plan and creates roles `planner, teacher, teacher`; explicit/preference/source/Spec/Bridge/runtime changes record a new version and invalidation reason;
+- a failed Executor leaves the valid Planner result available, records safe failure metadata, commits no teaching fact, and resumes without another Planner call;
+- incomplete, wrong-item, wrong-Plan-unit and forged delivery evidence is rejected by compiler/service/SQLite boundaries;
+- `LEARNED` derives from `VALIDATED` or explicitly migrated `LEGACY_PRESERVED` delivery rows for the pinned Spec, never from check answers or Assessment;
+- deterministic provider evidence identifies `FAKE_TEST_ONLY`, not `qwen3.8-max`; the endpoint region is only a configured label, not a verified runtime fact.
+
+Fresh isolated real-data-copy rehearsal `work/v3-migration-rehearsal-05/`:
+
+```text
+schema_versions=1..15
+old_rows_unchanged=true; integrity=ok; foreign_key_violations=0
+courses=5; documents=69; document_versions=69
+chunks=1937; unbound_chunks=0; invalid_source_owners=0
+CS3481 fixture: DRAFT, learner view NO_REVIEWED_TREE, model_calls=0
+```
+
+The source database was opened read-only and stayed at 1–10. The private evidence directory is ignored and is not a deployment artifact. This is not a full uploads/Task Agent restore drill.
+
+## 6. Test data and privacy
 
 - pytest uses `tmp_path` databases/uploads; V3 API fixtures set `v3_enabled=True` explicitly.
 - Playwright uses a new path under `work/` and fake content `2 + 3`; screenshots contain only synthetic values.
 - The local real RAG database was queried read-only for aggregate baseline facts and never passed to application initialization.
 - No private course body, user identity, key, prompt body or production response is included here.
 
-## 6. Model contract versus model quality
+## 7. Model contract versus model quality
 
 Current deterministic tests can prove:
 
@@ -233,24 +277,24 @@ They cannot prove:
 - production Clerk, Netlify, server/storage or multi-instance behavior;
 - actual token cost/latency/rate-limit behavior.
 
-## 7. Required future matrices
+## 8. Required future matrices
 
 | Stage | New evidence required before PASS |
 |---|---|
 | 1 | implemented preview/provenance slice is locally green; production storage, converter, full citation API and crash-safe deletion cleanup remain later gates |
 | 2 | locally verified; official author/review management remains Stage 6 and Assessment values remain Stage 5 |
-| 3 | four majors × CASE_A/B, plan cache/invalidation, REQUIRED preservation, injection/invalid output, complete coverage evidence |
+| 3 | locally verified; live provider quality/usage/cost remains Stage 7 and production remains Stage 8 |
 | 4 | text/image problem revisions, solution/step link, Bridge idempotency/revision/race, both directional pane flows, a11y/console/network |
 | 5 | five unequal/100, answer secrecy, assisted evidence, rubric arithmetic, unconfigured policy, weak points/replan triggers |
 | 6 | scoped review snapshot, consent/version substitution, withdraw/re-publish and generic Admin denial |
 | 7 | smallest approved live canaries with exact model/region/protocol/cost; four-major human rubric |
 | 8 | final full regression, final-Schema real-data copy + full restore, preview deploy and production smoke/rollback evidence |
 
-## 8. Open defects and non-PASS items
+## 9. Open defects and non-PASS items
 
 - Existing `package-lock` audit history reported one high and three moderate advisories; reachability/remediation is not yet resolved and cannot be hidden in launch PASS.
 - Current Playwright covers one owner and Problem→Teaching→return; two-user/Admin browser paths, Teaching→Problem reverse initiation and accessibility-tree evidence remain missing.
-- Existing model adapter has incomplete regional/protocol capability validation and may lose usage metadata when structured output is invalid.
+- Model adapter now retains safe metadata on structured-output failure, but actual qwen3.8-max account access, regional endpoint, protocol compatibility, provider usage fidelity and cost remain unverified.
 - Official tree author/review APIs are not implemented; Stage 2 publication behavior is exercised only through direct local fixtures and cannot be called production-ready.
 - Assessment, GradePolicy and publication snapshot tests are not yet implemented. The displayed Assessment axis is an explicit `NOT_ASSESSED` placeholder, not persistent Assessment evidence.
 

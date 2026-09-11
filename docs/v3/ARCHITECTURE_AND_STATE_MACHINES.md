@@ -1,6 +1,6 @@
 # CourseMate V3 — Architecture and State Machines
 
-Version: Stage 0 design baseline, 2026-09-12.
+Version: Stage 3 current/target baseline, 2026-09-12.
 This document distinguishes `CURRENT` source from `TARGET` architecture. Target objects are not claimed implemented until linked tests pass.
 
 ## 1. System ownership
@@ -78,9 +78,9 @@ MaterialEvidence, TeachingDeliveryEvidence and PerformanceEvidence are separate 
 | `learning_workspaces` (011) | owner×official-course state + private corpus | keep; add explicit lifecycle/revision fields only through later migration |
 | `knowledge_nodes` (012) | minimal private/canonical ID fields | extend through registry/evidence/aliases, not rewrite 012 |
 | `teaching_specs` (012) | JSON items + immutable update trigger | retain historical rows; add normalized item/version metadata if needed |
-| `learning_journeys`, `teaching_units`, `teaching_coverage` | minimal coverage state | harden evidence and state constraints; keep Q8 semantics |
+| `learning_journeys`, `teaching_units`, legacy `learning_coverage` | pinned Spec journey and saved unit state | migration 015 adds immutable Plan/Unit links and exact `teaching_delivery_evidence`; legacy rows remain visibly preserved |
 | `learning_problems/solutions/steps/bridges` | text problem and pinned step context | add immutable revision/source/image/knowledge-link/exposure fields |
-| `learning_operations/events/model_runs` | idempotent bounded generation and diagnostics | include path IDs, base revision, unknown outcome and invalid-output usage |
+| `learning_operations/events/model_runs` + `learning_model_run_evidence` | idempotent bounded generation and content-free call diagnostics | current path includes path IDs, base revision, safe invalid-output metadata and no hidden retry; daily aggregate caps remain target work |
 | Assessment/tree/publication snapshot tables | absent | add in numbered migrations after focused tests |
 
 ## 5. State machines

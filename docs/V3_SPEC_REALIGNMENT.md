@@ -35,7 +35,7 @@ Paid model calls used: none
 
 暂停时 32 个项目文件已按相对路径复制到被 Git 忽略的检查点，逐文件 SHA-256 与源文件一致。`ACTUAL_IMPLEMENTED_CHANGES_AUDIT.md` 和 `curl` 是 Owner 原有未跟踪文件，未修改、未暂存、未纳入检查点。没有 reset、clean、强制覆盖、推送或生产写入。
 
-切换时的 HEAD 只包含已提交的基线和 v3.1 模板/编译器。此后 Stage 1 和 Stage 2 已按显式文件边界提交；当前工作区仍须保护 Owner 的 `ACTUAL_IMPLEMENTED_CHANGES_AUDIT.md` 与 `curl`，每次提交不得使用 `git add .`。
+切换时的 HEAD 只包含已提交的基线和 v3.1 模板/编译器。此后 Stage 1、Stage 2 和 Stage 3 已按显式文件边界提交；当前工作区仍须保护 Owner 的 `ACTUAL_IMPLEMENTED_CHANGES_AUDIT.md` 与 `curl`，每次提交不得使用 `git add .`。
 
 ## 3. 事实分层
 
@@ -44,12 +44,12 @@ Paid model calls used: none
 - FastAPI/Python RAG API 是学习状态、课程资料和 V3 编排的拟定单一写入者。
 - React/TypeScript Web 仍保留 V2 页面，并有 feature-flagged V3 双 Pane 工作区。
 - Node Task Agent 保持任务工具职责，不写学习成绩或覆盖状态。
-- V3 011–014 迁移、冻结文档版本/派生物、workspace 文件隔离、Registry、ATOMIC/COMPOSITE、双树投影、版本化 Spec、v3.1 Planner/Executor 契约、Problem→Bridge→Teaching→Return 本地闭环已存在，但并未覆盖新版全部领域对象。
+- V3 011–015 迁移、冻结文档版本/派生物、workspace 文件隔离、Registry、ATOMIC/COMPOSITE、双树投影、版本化 Spec、v3.2 Planner/Compiler/Executor、计划缓存与交付证据，以及 Problem→Bridge→Teaching→Return 本地闭环已存在，但并未覆盖新版全部领域对象。
 - `V3_ENABLED` 和 `VITE_V3_ENABLED` 默认关闭；目标生成模型配置锁为 `qwen3.8-max`，Embedding 独立。
 
 ### 本地真实数据库
 
-只读核验 `data/rag.sqlite3`：迁移 1–10，`integrity_check=ok`；3 courses、67 documents、1,937 chunks、31 conversations、78 messages。没有把这些数量外推到生产。当前真实库没有执行 011–014。
+2026-09-12 最新隔离迁移脚本以 SQLite read-only URI 打开 `data/rag.sqlite3`：源库仍为迁移 1–10；5 courses、69 documents、1,937 chunks、31 conversations、78 messages。源库未由本任务初始化或迁移，这些数量也不外推到生产。此前冻结时的 3 courses/67 documents 是旧快照，已被本次更晚的只读证据取代。
 
 ### 历史部署报告
 
@@ -75,7 +75,7 @@ Paid model calls used: none
 | Canonical Node + Private Overlay / 双树 | Q7、§7 | 014、API 与 Web 已实现审核后官方视图和 owner×course 个性化版本；同名私人节点不合并 | KEEP + ADD | 引用同一 node/progress，不复制成绩；Stage 6 补管理审核 UI |
 | REQUIRED coverage 决定 LEARNED | Q8、§8 | 后端集合判定已有最小实现 | KEEP + HARDEN | 验证完整正文、Spec/Item/Step 版本与撤权 |
 | 动态 Teaching Unit 状态机 | Q9 | planner + unit 已有最小路径 | ADAPT | 补暂停/恢复、缓存、失败/预算状态 |
-| 四层教学规范 | Q10、§11–12 | v3.1 Planner/Common/四专业策略已进代码 | ADAPT | 新建兼容版本；补 Problem Solver、Grader、缓存键 |
+| 四层教学规范 | Q10、§11–12 | v3.2 Planner/Common/四专业策略、两 CASE、完整计划与缓存键已进代码；v3.1 保留 | KEEP + ADD | Teaching 本地合同已验证；Problem Solver 和 Grader 分属 Stage 4/5 |
 | 私人 workspace 与联合检索 | §5–6 | 011、workspaces.py、learning API | KEEP + HARDEN | A/B/Admin/匿名、metadata/HEAD/Range/chunk/citation 矩阵 |
 | 文档版本和派生预览 | §4–6 | 013 冻结版本/派生物/Chunk 绑定；安全文本、CSV、静态 Notebook、PDF、图片与 Office 诚实 fallback | KEEP + HARDEN | 本地 ACL/篡改测试通过；受控 Office converter、生产存储、清理重试仍待实现/核验 |
 | Problem 完整解答与步骤问题 | Q2、§9 | 最小文本题闭环已实现 | ADAPT | 模板版本化、题目/图片版本、答案 provenance、流式状态 |
@@ -93,16 +93,16 @@ Paid model calls used: none
 
 | 范围 | 状态 |
 |---|---|
-| 011–014 文件 | 已在 V3 feature branch 提交并视为迁移历史冻结；后续只用 015+ 前向修复 |
-| 临时/合成测试库 | 已执行过 011–014；只证明当前本地合同/fake-provider 流程 |
-| 隔离真实资料副本 | `work/v3-migration-rehearsal-04/` 执行到 14；旧表摘要不变、integrity ok、FK 0、67/67 文档版本、1,937 chunks 全部绑定 |
+| 011–015 文件 | 已在 V3 feature branch 提交并视为迁移历史冻结；后续只用 016+ 前向修复 |
+| 临时/合成测试库 | 已执行过 011–015；只证明当前本地合同/fake-provider 流程 |
+| 隔离真实资料副本 | `work/v3-migration-rehearsal-05/` 执行到 15；旧表摘要不变、integrity ok、FK 0、69/69 文档版本、1,937 chunks 全部绑定 |
 | CS3481 最小子集副本 | `work/v3-cs3481-subset-01/`：3 个 DRAFT 候选节点、2 条层级边、1 条 prerequisite、2 条真实版本证据；学习者不可见、0 模型调用 |
 | 本地真实库 | 仍为 1–10；未执行 V3 |
 | 生产 | UNKNOWN |
 
-审计发现并修复了一个安全边界：此前 `Database.initialize()` 无条件执行 011/012。现在只有 `Settings.v3_enabled=True` 才执行 V3 迁移，V2 readiness 要求 1–10，V3 readiness 要求 1–14；V2 课程/发布查询也不会在 flag 关闭时引用 V3 表。Stage 2 进一步在服务与 SQLite 双层约束树 source，并让损坏的历史树读取失败关闭。当前全量证据为 Python 251 passed、Web 33 passed、Task Agent 53 passed、Ruff/mypy/typecheck/build 通过，以及隔离合成数据库 Playwright 1 passed。
+审计发现并修复了一个安全边界：此前 `Database.initialize()` 无条件执行 011/012。现在只有 `Settings.v3_enabled=True` 才执行 V3 迁移，V2 readiness 要求 1–10，V3 readiness 要求 1–15；V2 课程/发布查询也不会在 flag 关闭时引用 V3 表。Stage 2 在服务与 SQLite 双层约束树 source，并让损坏的历史树读取失败关闭；Stage 3 将计划、计划单元、交付证据和模型调用元数据加入显式版本链。当前全量证据为 Python 264 passed、Web 33 passed、Task Agent 53 passed、Ruff/mypy/typecheck/build 通过，以及隔离合成数据库 Playwright 1 passed。
 
-011–014 不再通过改编号或删除来掩盖曾在合成/副本数据库执行的事实。后续结构使用 015+ 前向迁移，并在新的隔离副本演练。
+011–015 不再通过改编号或删除来掩盖曾在合成/副本数据库执行的事实。后续结构使用 016+ 前向迁移，并在新的隔离副本演练。
 
 ## 6. 新验收层级
 
@@ -166,3 +166,32 @@ Production database migration: UNKNOWN / NOT EXECUTED BY THIS TASK
 - 树读取对跨课程/跨 owner 或历史损坏 source 失败关闭，返回不含节点细节的 `TREE_SOURCE_UNAVAILABLE`。
 
 已完成的 Stage 2 不等于 V3 完成。Stage 3 从版本化 Teaching Plan 缓存、四专业 × CASE_A/B 运行时合同和更强 TeachingDeliveryEvidence 开始；官方发布管理仍属 Stage 6，Assessment/GradePolicy 属 Stage 5。
+
+## 10. Stage 3 完成检查点
+
+```text
+Source implementation: IMPLEMENTED for Stage 3 Teaching scope
+Local contract tests: VERIFIED
+Local fake-provider/browser flow: VERIFIED
+Live qwen3.8-max: NOT VERIFIED
+Production: NOT VERIFIED
+Local real database migration: NOT EXECUTED
+Production database migration: UNKNOWN / NOT EXECUTED BY THIS TASK
+```
+
+阶段提交：`956d849`（015 Schema）、`da1fa2a`（v3.2 计划运行时）、`e5d14d3`（计划持久化边界抽取）、`52514d1`（刷新后 Plan 元数据持久化）、`2256cf0`（Web 计划/理解检查与 hermetic E2E）。
+
+Stage 3 已落实：
+
+- v3.1 保留不改，运行时切换到版本化 `prompts/v3.2/`；四专业与 CASE_A/CASE_B 均由编译器合同测试覆盖。
+- Planner 一次产生完整的 1–12 个教学单元；每单元只覆盖 1–3 个 Teaching Items 并带 3–5 个理解检查。普通继续复用有效计划，只有显式 replan 或受控的 Spec、偏好、证据、Bridge、模板/模型/课程策略变化才失效。
+- Planner 选择的证据集合是 Executor 的唯一材料上下文；偏好与资料中的 prompt injection 始终作为不可信数据，不能删除 REQUIRED、扩大权限或发布内容。
+- `TeachingDeliveryEvidence` 精确绑定 PlanVersion、PlanUnit、TeachingUnit、TeachingItem 与持久化 Section hash；`LEARNED` 只从固定 Spec 的全部 REQUIRED 有效交付集合推导。旧 coverage 仅标 `LEGACY_PRESERVED`，不冒充 v3.2 验证。
+- 每次模型尝试只保存安全运行元数据。结构化输出失败仍保留 model/provider/protocol/region label、输入 hash、时间/延迟、token（若返回）、状态和错误类别，不保存 prompt/response body，也不自动付费重试或 fallback。
+- CS3481 的 `ciallo` 仅来自版本化 display policy，用作理解题展示前缀；不参与机器评分，也不宣称课程官方策略。
+
+`SUPPLEMENTAL_ENGINEERING_DECISION`：计划最多 12 个单元、每单元 1–3 个 items、每单元 3–5 个理解检查；模型地域字段仅记录配置标签而非推断真实部署；失败 Executor 保留已成功的 Planner 版本供明确恢复；普通继续不产生第二次 Planner 调用。这些是工程补漏，不冒充 Q1–Q10 的逐条用户确认。
+
+Stage 3 本地证据：Python 264 passed；Web 33 passed；Task Agent 53 passed；Ruff、mypy（55 source files）、TypeScript、生产构建通过；Playwright 黄金闭环 1 passed，并目检桌面和 375px 截图。`work/v3-migration-rehearsal-05/` 从最新真实库只读备份副本升级到 1–15，旧表指纹不变、integrity ok、FK 0、69/69 document versions、1,937 chunks 全绑定；CS3481 DRAFT 子集仍对学习者不可见且 0 模型调用。
+
+Stage 3 不包含 Problem 图片/版本化解法、正式 Assessment、官方审核发布、真实 qwen 调用或生产部署；这些仍按 Stage 4–8 执行。

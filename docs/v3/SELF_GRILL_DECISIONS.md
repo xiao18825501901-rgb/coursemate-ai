@@ -9,7 +9,7 @@ Q1–Q10 are `LOCKED_REQUIREMENT`. Every new implementation choice below is expl
 
 - **问题 / 来源或缺口:** V3 UI/API was feature-gated, but `Database.initialize()` applied 011/012 unconditionally.
 - **反例:** Starting an otherwise V2 release against the real migration-10 database silently adds V3 tables.
-- **采用方案 / 取舍:** Store `v3_enabled` in `Database`; V2 requires migrations 1–10 and never queries V3 tables; V3 applies/requires the current V3 migration set (1–13 after Stage 1). This couples migration activation to the release flag, so production migration remains an explicit rollout event.
+- **采用方案 / 取舍:** Store `v3_enabled` in `Database`; V2 requires migrations 1–10 and never queries V3 tables; V3 applies/requires the current V3 migration set (1–15 after Stage 3). This couples migration activation to the release flag, so production migration remains an explicit rollout event.
 - **不可违反的规则:** Disabled V3 cannot mutate or depend on V3 Schema.
 - **验收测试:** `test_v3_migrations_require_explicit_feature_enablement`, `test_feature_defaults_off`, readiness tests, full V2 regression.
 - **剩余不确定性:** Production migration state is unknown and needs preflight.
@@ -129,10 +129,10 @@ Q1–Q10 are `LOCKED_REQUIREMENT`. Every new implementation choice below is expl
 
 - **问题 / 来源或缺口:** Planning on every teaching turn doubles cost and creates style drift.
 - **反例:** A normal “can you clarify?” call regenerates the course plan and silently changes REQUIRED order.
-- **采用方案 / 取舍:** Cache key includes owner/workspace/course, Spec version, preference version, model/template version and authorized source-version set. Regenerate only at first use, explicit replan, material preference change, Spec/source policy change.
+- **采用方案 / 取舍:** Migration 015 and `learning/plans.py` persist a full Plan keyed by owner/workspace/course/node, Spec version+hash, preference version+hash, model/protocol, template/Schema, course-policy version, ordered source-version IDs and optional Bridge revision. Regenerate only at first use, explicit replan, material preference change, Spec/source/Bridge/runtime policy change; every reuse revalidates IDs and remaining REQUIRED scope.
 - **不可违反的规则:** Cache is owner-scoped; revoked source invalidates future context; REQUIRED cannot be deleted by adaptation.
 - **验收测试:** hit/miss/invalidations, cross-user cache poisoning and preference-only OPTIONAL reordering.
-- **剩余不确定性:** Exact “material preference change” fields will be documented with API Schema.
+- **剩余不确定性:** Live provider cache/cost behavior and future preference-field taxonomy require production evidence; current string preference changes are hash-addressed.
 - **分类:** `SUPPLEMENTAL_ENGINEERING_DECISION`.
 
 ## SG-14 — GradePolicy incompleteness is a visible state

@@ -1,15 +1,15 @@
 # CourseMate V3 — Prompt Templates and Contracts
 
-Version: Stage 0 inventory, 2026-09-12.
-This is an executable-asset ledger, not a promise that future prompt work is complete.
+Version: Stage 3 executable contract, 2026-09-12.
+This is an executable-asset ledger. It does not claim live-model quality or completion of the future Problem/Assessment templates.
 
 ## 1. Current executable assets
 
-`services/rag-api/app/learning/compiler.py` pins `TEMPLATE_VERSION = "v3.1"` and loads only version-controlled files from `app/learning/prompts/v3.1/`:
+`services/rag-api/app/learning/compiler.py` pins `TEMPLATE_VERSION = "v3.2"` and loads only version-controlled files from `app/learning/prompts/v3.2/`. The prior v3.1 files remain immutable for historical interpretation:
 
 | Asset | Runtime role | Current status |
 |---|---|---|
-| `planner.md` | next bounded Teaching Unit plan, CASE_A/CASE_B | called by `LearningOrchestrator.generate_unit` |
+| `planner.md` | complete bounded Teaching Plan, CASE_A/CASE_B | called only when no valid cached plan exists |
 | `common.md` | stable Teaching Executor rules | compiled into system instructions |
 | `cases.md` | two input scenarios and precedence | compiled into system instructions |
 | `CS.md` | Computer Science strategy | compiled by major |
@@ -17,7 +17,7 @@ This is an executable-asset ledger, not a promise that future prompt work is com
 | `MATERIALS.md` | Materials Science strategy | compiled by major |
 | `ENERGY.md` | Energy strategy | compiled by major |
 
-The files are real code assets and have compiler/unit tests. The new Master Prompt additionally requires a versioned Problem Solver and Assessment Grader, richer plan caching and updated normative seed coverage; those are `PLANNED`, not silently attributed to v3.1.
+The files are real code assets and have compiler/runtime tests. v3.2 implements the Master seed for both scenarios, all four major strategies, complete-plan scheduling and 3–5 comprehension checks per unit. The versioned Problem Solver and Assessment Grader remain `PLANNED` for Stages 4 and 5; they are not silently attributed to v3.2.
 
 ## 2. Trust and instruction precedence
 
@@ -60,7 +60,7 @@ model/template/output budget
 
 CASE_A means the learner specifies what to learn but not how; use course defaults and stored preferences without inventing preferences. CASE_B means how is explicitly known; adapt sequence/examples/pace while retaining all REQUIRED scope.
 
-Planner output is strict `TeachingPlan`: case, node/spec, at most three target items, unit goal/sequence/adaptation, valid evidence IDs, optional exact bridge, exercise blueprint, remaining scope, uncertainties and stop condition. `extra=forbid`, bounded strings/lists and server ID-set validation apply.
+Planner output is strict `TeachingPlan`: case, node/spec, one to twelve ordered units, each targeting one to three items with goal/sequence/adaptation, 3–5 comprehension checks, valid evidence IDs, optional exact bridge, remaining scope, uncertainties and stop condition. Every uncovered REQUIRED item must be scheduled exactly once. `extra=forbid`, bounded strings/lists and server ID-set validation apply.
 
 ### Stage B — Compiler + Teaching Executor
 
@@ -70,7 +70,7 @@ Executor output contains bounded saved sections, terms, examples/formulas, valid
 
 ## 4. Versioned target assets
 
-`SUPPLEMENTAL_ENGINEERING_DECISION`: preserve v3.1 immutably and introduce the next compatible set as a new directory/version after failing tests are written. Do not edit a template version already referenced by saved plans/model runs.
+`SUPPLEMENTAL_ENGINEERING_DECISION`: v3.1 is preserved immutably and the compatible Stage 3 contract is a new v3.2 directory/version introduced after failing tests. Do not edit a template version already referenced by saved plans/model runs.
 
 | Target asset | Required core behavior |
 |---|---|
@@ -85,9 +85,9 @@ Executor output contains bounded saved sections, terms, examples/formulas, valid
 
 The CS3481 Word file informs bilingual explanation, knowledge map, code/data connection, process chains, exam phrasing and 3–5 comprehension checks. It is not a four-major syllabus, not proof of course facts, and its final “start teaching” text is never loaded as platform instruction.
 
-## 5. Planned strict Schemas
+## 5. Strict Schemas and later additions
 
-Existing `NodeDraft`, `TeachingItem`, `TeachingPlan`, `TeachingUnitOutput` and `ProblemSolutionOutput` remain the starting contracts. Target additions include:
+`TeachingPlanUnit`, full-path `TeachingPlan`, `CheckQuestion` and `TeachingUnitOutput` are active v3.2 contracts. Target additions for later stages include:
 
 ```text
 ProblemSolutionOutputV2
@@ -118,13 +118,13 @@ owner_user_id + workspace_id + course_id + node_id
 + ordered authorized source_version_ids + bridge revision when present
 ```
 
-The cache record stores input hash, output Schema version, creation/invalidated reason and provider usage. It is private to the owner. Revoked evidence invalidates future context. A cached plan is still revalidated against current allowed IDs before use.
+The cache record stores input hash, output Schema version, creation/invalidated reason and provider usage. It is private to the owner. Revoked evidence invalidates future context. A cached plan is revalidated against current allowed IDs, remaining REQUIRED scope and pinned context before every use. The persisted cache identity also includes Spec hash, preference hash, course policy version, protocol, and Bridge context revision; explicit `replan=true` records an `EXPLICIT_REPLAN` invalidation.
 
 ## 7. Model-run evidence
 
 For each call store only safe operational metadata: operation ID, role (Planner/Executor/Problem/Grader/Router), model ID, provider/protocol/region label, template+Schema version, input hash, start/end/latency, token/usage values if returned, status and bounded error class. Do not log prompt/response bodies, private excerpts, API keys or identity tokens.
 
-Current gap: invalid structured output can raise before the orchestrator receives usage metadata. This must be fixed and tested before live canary.
+Structured-output failure now raises a typed `ProviderCallFailure` carrying safe metadata, and the orchestrator records the failed attempt without a learning fact. A completed HTTP response with invalid output is `FAILED`; a transport outcome whose provider acceptance is unknown remains `UNKNOWN`. There is no automatic retry or provider fallback. Live endpoint, usage fidelity and cost remain unverified.
 
 ## 8. Acceptance matrix
 
@@ -142,4 +142,4 @@ Current gap: invalid structured output can raise before the orchestrator receive
 | pre-submit Assessment response | no answer/rubric/grader prompt in client payload |
 | Grader arithmetic mismatch | backend recomputes/rejects; model cannot publish grade |
 
-Current conclusion: v3.1 is `SOURCE_IMPLEMENTED` and locally contract-tested in the Python suite. The new target template version, Problem Solver, Grader and live quality are `NOT_VERIFIED` until their own stages.
+Current conclusion: Teaching v3.2 is `SOURCE_IMPLEMENTED` and `LOCAL_CONTRACT_VERIFIED`; its deterministic Problem→Teaching browser path is `LOCAL_FAKE_PROVIDER_VERIFIED`. Tests cover four majors × two cases, REQUIRED preservation, injection handling, malformed output evidence, exact delivery bindings, cache reuse/invalidation and failed-Executor resume. Problem Solver v2, Grader and all live quality remain `NOT_VERIFIED` until their own stages.
