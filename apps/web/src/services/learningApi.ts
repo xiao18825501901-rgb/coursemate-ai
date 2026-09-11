@@ -1,5 +1,5 @@
 import type { GetSessionToken } from "../auth/AuthProvider";
-import type { LearningState } from "../types/learning";
+import type { KnowledgeSnapshot, LearningState } from "../types/learning";
 import { requestJson } from "./http";
 
 export const learningBase = `${import.meta.env.VITE_RAG_API_URL ?? "http://localhost:8000"}/api/learning`;
@@ -11,6 +11,9 @@ export function joinLearning(getToken: GetSessionToken, courseId: string) {
 }
 export function getLearningState(getToken: GetSessionToken, workspace: string) {
   return requestJson<LearningState>(getToken, `${learningBase}/workspaces/${workspace}/state`);
+}
+export function getKnowledgeState(getToken: GetSessionToken, workspace: string) {
+  return requestJson<KnowledgeSnapshot>(getToken, `${learningBase}/workspaces/${workspace}/knowledge`);
 }
 export function learningAction<T>(getToken: GetSessionToken, workspace: string, path: string, payload: unknown, method = "POST") {
   return requestJson<T>(getToken, `${learningBase}/workspaces/${workspace}/${path}`, {
