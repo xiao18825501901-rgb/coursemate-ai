@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useCourseMateAuth } from "../auth/AuthProvider";
 import { createCourse, listCourses } from "../services/ragApi";
 import type { Course } from "../types/api";
+import { v3Enabled } from "../services/learningApi";
 
 const indexLabels = { empty: "Empty", indexing: "Indexing", indexed: "Indexed", failed: "Failed" };
 
@@ -83,6 +84,7 @@ export function CourseCenterPage({ createMode = false }: { createMode?: boolean 
     {items.length === 0 ? <div className="empty-panel">{empty}</div> : <div className="course-card-grid">{items.map((course) => <article className="course-card" key={course.id}>
       <div className="course-card-topline"><span className="course-pill">{course.id}</span><span className={`visibility-badge visibility-${course.visibility}`}>{course.visibility === "private" ? "Private by default" : course.courseType === "official" ? "Official" : "Community"}</span></div>
       <h3>{course.name}</h3><p>{course.description || "No description yet."}</p>
+      {v3Enabled && <Link className="button button-primary" to={`/learn/${course.id}`}>加入我的学习 · V3</Link>}
       <small>{course.documentCount ?? 0} files · {indexLabels[course.indexStatus ?? "empty"]} · Updated {new Date(course.updatedAt).toLocaleDateString()}</small>
       <div className="course-card-actions"><Link className="button button-primary" to={`/qa/${course.id}`}>Open tutor</Link>{course.canManage && <Link aria-label={`Manage ${course.name}`} className="button button-secondary" to={`/courses/${course.id}/settings`}>Settings</Link>}</div>
     </article>)}</div>}

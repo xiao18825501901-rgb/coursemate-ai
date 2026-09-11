@@ -12,6 +12,8 @@ import { HomePage } from "./pages/HomePage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { QaPage } from "./pages/QaPage";
 import { TasksPage } from "./pages/TasksPage";
+import { LearningPage } from "./pages/LearningPage";
+import { v3Enabled } from "./services/learningApi";
 
 
 export function AppRoutes() {
@@ -21,6 +23,7 @@ export function AppRoutes() {
         <Route element={<HomePage />} index />
         <Route element={<AboutPage />} path="about" />
         <Route element={<ProtectedRoute />}>
+          {v3Enabled && <Route element={<LearningPage />} path="learn/:courseId" />}
           <Route element={<QaPage />} path="qa" />
           <Route element={<QaPage />} path="qa/:courseId" />
           <Route element={<QaPage />} path="qa/:courseId/:conversationId" />
