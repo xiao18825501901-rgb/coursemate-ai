@@ -2,7 +2,7 @@ from dataclasses import replace
 
 from app.rag.embeddings import EmbeddingProvider
 from app.rag.types import SearchHit
-from app.repositories.chunks import ChunkRepository
+from app.repositories.chunks import ChunkRepository, RetrievalAccess
 from app.tutor.references import QueryReference
 
 
@@ -56,7 +56,14 @@ class HybridRetriever:
         self.repository = repository
         self.embedding_provider = embedding_provider
 
-    def retrieve(self, *, course_id: str, query: str, top_k: int) -> list[SearchHit]:
+    def retrieve(
+        self,
+        *,
+        course_id: str,
+        query: str,
+        top_k: int,
+        access: RetrievalAccess | None = None,
+    ) -> list[SearchHit]:
         cleaned_query = query.strip()
         if not cleaned_query or top_k <= 0:
             return []
@@ -65,12 +72,14 @@ class HybridRetriever:
             course_id,
             cleaned_query,
             limit=candidate_limit,
+            access=access,
         )
         query_vector = self.embedding_provider.embed_texts([cleaned_query])[0]
         vector_hits = self.repository.vector_search(
             course_id,
             query_vector,
             limit=candidate_limit,
+            access=access,
         )
         return reciprocal_rank_fusion(keyword_hits, vector_hits, top_k=top_k)
 
@@ -80,8 +89,11 @@ class HybridRetriever:
         course_id: str,
         reference: QueryReference,
         top_k: int,
+        access: RetrievalAccess | None = None,
     ) -> list[SearchHit]:
-        return self.repository.structured_search(course_id, reference, limit=top_k)
+        return self.repository.structured_search(
+            course_id, reference, limit=top_k, access=access
+        )
 
     def diagnose(
         self,

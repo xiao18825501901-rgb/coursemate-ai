@@ -5,6 +5,14 @@ from pathlib import Path
 
 from app.config import Settings
 
+V3_MIGRATIONS = (
+    "011_learning_workspaces.sql",
+    "012_learning_journeys.sql",
+    "013_document_versions_and_artifacts.sql",
+)
+LATEST_V2_SCHEMA_VERSION = 10
+LATEST_V3_SCHEMA_VERSION = 13
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (
     id TEXT PRIMARY KEY,
@@ -227,6 +235,7 @@ class Database:
     def __init__(self, settings: Settings) -> None:
         self.path = settings.database_path
         self.upload_dir = settings.upload_dir
+        self.v3_enabled = settings.v3_enabled
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -437,6 +446,15 @@ class Database:
                 """
             )
 
+        if self.v3_enabled:
+            with self.connect() as connection:
+                for name in V3_MIGRATIONS:
+                    connection.executescript(
+                        (Path(__file__).parent.parent / "migrations" / name).read_text(
+                            encoding="utf-8"
+                        )
+                    )
+
     def is_ready(self) -> bool:
         if not self.upload_dir.is_dir():
             return False
@@ -445,9 +463,19 @@ class Database:
             database_uri = f"{self.path.resolve().as_uri()}?mode=ro"
             connection = sqlite3.connect(database_uri, uri=True, timeout=10)
             connection.execute("PRAGMA busy_timeout = 10000")
-            return connection.execute(
-                "SELECT 1 FROM schema_migrations WHERE version = 10"
-            ).fetchone() is not None
+            required_version = (
+                LATEST_V3_SCHEMA_VERSION
+                if self.v3_enabled
+                else LATEST_V2_SCHEMA_VERSION
+            )
+            applied_versions = {
+                int(row[0])
+                for row in connection.execute(
+                    "SELECT version FROM schema_migrations WHERE version <= ?",
+                    (required_version,),
+                )
+            }
+            return applied_versions == set(range(1, required_version + 1))
         except sqlite3.Error:
             return False
         finally:

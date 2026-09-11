@@ -43,6 +43,10 @@ class PublicationService:
             )
         request_id = f"publication_{uuid4().hex}"
         with self.database.connect() as connection:
+            if self.database.v3_enabled and connection.execute(
+                "SELECT 1 FROM learning_workspaces WHERE private_course_id=?", (course_id,)
+            ).fetchone():
+                raise ApiError(409, "WORKSPACE_PRIVATE", "Workspace files cannot be published.")
             active = connection.execute(
                 "SELECT 1 FROM course_publication_requests "
                 "WHERE course_id = ? AND status = 'pending'",
@@ -178,8 +182,15 @@ class PublicationService:
 
     def unpublish(self, course_id: str) -> None:
         with self.database.connect() as connection:
+            workspace_filter = (
+                " AND NOT EXISTS (SELECT 1 FROM learning_workspaces "
+                "WHERE private_course_id=courses.id)"
+                if self.database.v3_enabled
+                else ""
+            )
             row = connection.execute(
-                "SELECT course_type, publication_status FROM courses WHERE id = ?",
+                "SELECT course_type, publication_status FROM courses WHERE id = ?"
+                + workspace_filter,
                 (course_id,),
             ).fetchone()
             if row is None or row["course_type"] != "user":

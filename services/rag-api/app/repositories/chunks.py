@@ -1,7 +1,8 @@
 import json
 import re
 import sqlite3
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from typing import Literal
 
 from app.db import Database
 from app.rag.embeddings import cosine_similarity
@@ -51,6 +52,42 @@ ENGLISH_STOP_WORDS = frozenset(
 )
 
 
+@dataclass(frozen=True)
+class RetrievalAccess:
+    owner_user_id: str
+    scope: Literal["official", "mine"]
+
+
+def _source_access(
+    course_id: str,
+    access: RetrievalAccess | None,
+    *,
+    fts: bool = False,
+) -> tuple[str, str, list[object], str]:
+    if access is None:
+        prefix = "chunks_fts.course_id = ? AND " if fts else ""
+        parameters: list[object] = [course_id, course_id] if fts else [course_id]
+        return "", prefix + "c.course_id = ?", parameters, "d.filename"
+    joins = (
+        "JOIN chunk_source_versions AS csv ON csv.chunk_id=c.id "
+        "JOIN document_versions AS dv ON dv.id=csv.document_version_id "
+    )
+    if access.scope == "official":
+        condition = (
+            "dv.course_id=? AND (dv.source_scope='OFFICIAL' OR "
+            "(dv.source_scope='OWNER_COURSE' AND (dv.owner_user_id=? OR EXISTS("
+            "SELECT 1 FROM courses AS source_course WHERE source_course.id=dv.course_id "
+            "AND source_course.visibility='public' "
+            "AND source_course.publication_status='published'))))"
+        )
+    else:
+        condition = (
+            "dv.course_id=? AND dv.source_scope='WORKSPACE_PRIVATE' "
+            "AND dv.owner_user_id=?"
+        )
+    return joins, condition, [course_id, access.owner_user_id], "dv.filename"
+
+
 def _query_tokens(query: str) -> list[str]:
     tokens = [token.casefold() for token in re.findall(r"\w+", query, flags=re.UNICODE)]
     meaningful = [
@@ -81,19 +118,29 @@ class ChunkRepository:
     def __init__(self, database: Database) -> None:
         self.database = database
 
-    def keyword_search(self, course_id: str, query: str, *, limit: int) -> list[SearchHit]:
+    def keyword_search(
+        self,
+        course_id: str,
+        query: str,
+        *,
+        limit: int,
+        access: RetrievalAccess | None = None,
+    ) -> list[SearchHit]:
         tokens = _query_tokens(query)
         if not tokens or limit <= 0:
             return []
         fts_query = " OR ".join(f'"{token}"' for token in tokens)
+        source_joins, source_condition, source_parameters, filename = _source_access(
+            course_id, access, fts=True
+        )
         with self.database.connect() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT
                     c.id AS chunk_id,
                     c.document_id,
                     c.course_id,
-                    d.filename,
+                    {filename} AS filename,
                     c.content,
                     c.locator_type,
                     c.locator_value,
@@ -104,13 +151,13 @@ class ChunkRepository:
                 FROM chunks_fts
                 JOIN chunks AS c ON c.rowid = chunks_fts.rowid
                 JOIN documents AS d ON d.id = c.document_id
+                {source_joins}
                 WHERE chunks_fts MATCH ?
-                    AND chunks_fts.course_id = ?
-                    AND c.course_id = ?
+                    AND {source_condition}
                 ORDER BY rank ASC, c.id ASC
                 LIMIT ?
-                """,
-                (fts_query, course_id, course_id, limit),
+                """,  # noqa: S608 -- SQL fragments are fixed by RetrievalAccess.
+                (fts_query, *source_parameters, limit),
             ).fetchall()
         return [
             _search_hit(row, score=-float(row["rank"]), channel="keyword")
@@ -123,6 +170,7 @@ class ChunkRepository:
         reference: QueryReference,
         *,
         limit: int,
+        access: RetrievalAccess | None = None,
     ) -> list[SearchHit]:
         """Resolve explicit document and structural locators inside one course."""
 
@@ -138,10 +186,13 @@ class ChunkRepository:
             )
         ):
             return []
-        conditions = ["c.course_id = ?"]
-        parameters: list[object] = [course_id]
+        source_joins, source_condition, source_parameters, filename = _source_access(
+            course_id, access
+        )
+        conditions = [source_condition]
+        parameters: list[object] = list(source_parameters)
         if reference.document:
-            conditions.append("d.filename = ? COLLATE NOCASE")
+            conditions.append(f"{filename} = ? COLLATE NOCASE")
             parameters.append(reference.document)
         if reference.document_kind and not reference.document:
             conditions.append("json_extract(c.metadata_json, '$.document_kind') = ?")
@@ -170,7 +221,7 @@ class ChunkRepository:
                     c.id AS chunk_id,
                     c.document_id,
                     c.course_id,
-                    d.filename,
+                    {filename} AS filename,
                     c.content,
                     c.locator_type,
                     c.locator_value,
@@ -179,12 +230,13 @@ class ChunkRepository:
                     c.parent_key
                 FROM chunks AS c
                 JOIN documents AS d ON d.id = c.document_id
+                {source_joins}
                 WHERE {where}
                 ORDER BY
                     CASE json_extract(c.metadata_json, '$.fragment_role')
                         WHEN 'target' THEN 0 ELSE 1
                     END,
-                    d.filename COLLATE NOCASE,
+                    {filename} COLLATE NOCASE,
                     c.ordinal,
                     c.id
                 LIMIT ?
@@ -205,6 +257,9 @@ class ChunkRepository:
         placeholders = ", ".join("?" for _ in parent_keys)
         remaining = limit - len(exact_hits)
         excluded_ids = {hit.chunk_id for hit in exact_hits}
+        parent_joins, parent_condition, parent_parameters, parent_filename = _source_access(
+            course_id, access
+        )
         with self.database.connect() as connection:
             parent_rows = connection.execute(
                 f"""
@@ -212,7 +267,7 @@ class ChunkRepository:
                     c.id AS chunk_id,
                     c.document_id,
                     c.course_id,
-                    d.filename,
+                    {parent_filename} AS filename,
                     c.content,
                     c.locator_type,
                     c.locator_value,
@@ -221,10 +276,11 @@ class ChunkRepository:
                     c.parent_key
                 FROM chunks AS c
                 JOIN documents AS d ON d.id = c.document_id
-                WHERE c.course_id = ? AND c.parent_key IN ({placeholders})
-                ORDER BY d.filename COLLATE NOCASE, c.ordinal, c.id
+                {parent_joins}
+                WHERE {parent_condition} AND c.parent_key IN ({placeholders})
+                ORDER BY {parent_filename} COLLATE NOCASE, c.ordinal, c.id
                 """,  # noqa: S608 -- placeholder count derives from matched parent rows.
-                [course_id, *parent_keys],
+                [*parent_parameters, *parent_keys],
             ).fetchall()
         parent_hits = [
             replace(
@@ -242,17 +298,21 @@ class ChunkRepository:
         query_vector: list[float],
         *,
         limit: int,
+        access: RetrievalAccess | None = None,
     ) -> list[SearchHit]:
         if not query_vector or limit <= 0:
             return []
+        source_joins, source_condition, source_parameters, filename = _source_access(
+            course_id, access
+        )
         with self.database.connect() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT
                     c.id AS chunk_id,
                     c.document_id,
                     c.course_id,
-                    d.filename,
+                    {filename} AS filename,
                     c.content,
                     c.locator_type,
                     c.locator_value,
@@ -262,9 +322,10 @@ class ChunkRepository:
                     c.embedding
                 FROM chunks AS c
                 JOIN documents AS d ON d.id = c.document_id
-                WHERE c.course_id = ?
-                """,
-                (course_id,),
+                {source_joins}
+                WHERE {source_condition}
+                """,  # noqa: S608 -- SQL fragments are fixed by RetrievalAccess.
+                source_parameters,
             ).fetchall()
 
         scored: list[SearchHit] = []

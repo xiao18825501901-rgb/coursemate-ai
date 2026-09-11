@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.ingestion import router as ingestion_router
+from app.api.learning import router as learning_router
 from app.api.publication import router as publication_router
 from app.api.qa import router as qa_router
 from app.api.teaching_profiles import router as teaching_profiles_router
@@ -14,6 +15,7 @@ from app.auth import AuthVerifier, ClerkAuthVerifier, TestAuthVerifier
 from app.config import Settings
 from app.db import Database
 from app.errors import ApiError
+from app.learning.orchestrator import LearningOrchestrator
 from app.rag.answers import (
     AnswerProvider,
     ExtractiveAnswerProvider,
@@ -94,6 +96,11 @@ def create_app(
         embedding_provider,
     )
     application.state.database = database
+    if resolved_settings.v3_enabled:
+        application.state.learning = LearningOrchestrator(
+            database, resolved_settings,
+            HybridRetriever(ChunkRepository(database), embedding_provider)
+        )
     teaching_profile_service = TeachingProfileService(database)
     application.state.teaching_profile_service = teaching_profile_service
     application.state.publication_service = PublicationService(database)
@@ -137,6 +144,9 @@ def create_app(
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
+        if request.url.path.startswith("/api/learning"):
+            response.headers["Cache-Control"] = "private, no-store"
+            response.headers["Vary"] = "Authorization"
         return response
 
     @application.exception_handler(ApiError)
@@ -186,4 +196,6 @@ def create_app(
     application.include_router(qa_router)
     application.include_router(teaching_profiles_router)
     application.include_router(publication_router)
+    if resolved_settings.v3_enabled:
+        application.include_router(learning_router)
     return application

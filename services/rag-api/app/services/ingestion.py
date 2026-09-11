@@ -10,6 +10,7 @@ from app.config import Settings
 from app.course_access import require_course_access
 from app.db import Database
 from app.errors import ApiError
+from app.learning.uploads import MEDIA_TYPES, validate_file_content
 from app.models import (
     Course,
     CourseCreate,
@@ -33,21 +34,6 @@ def _storage_owner_segment(owner_user_id: str) -> str:
     """Create a stable opaque path segment without exposing the identity provider subject."""
 
     return hashlib.sha256(owner_user_id.encode("utf-8")).hexdigest()[:32]
-
-MEDIA_TYPES: dict[str, set[str]] = {
-    ".md": {"text/markdown", "text/plain", "application/octet-stream"},
-    ".markdown": {"text/markdown", "text/plain", "application/octet-stream"},
-    ".txt": {"text/plain", "application/octet-stream"},
-    ".pdf": {"application/pdf", "application/octet-stream"},
-    ".docx": {
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/octet-stream",
-    },
-    ".pptx": {
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "application/octet-stream",
-    },
-}
 
 
 class MissingEmbeddingProvider:
@@ -111,6 +97,8 @@ class IngestionService:
         is_admin: bool = True,
     ) -> Course:
         course_type = "official" if is_admin else "user"
+        if self.settings.v3_enabled and payload.id.startswith("ws-"):
+            raise ApiError(422, "RESERVED_COURSE_ID", "This course ID namespace is reserved.")
         visibility = "public" if is_admin else "private"
         publication_status = "published" if is_admin else "private"
         owner = None if is_admin else owner_user_id
@@ -118,9 +106,16 @@ class IngestionService:
             with self.database.connect() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 if not is_admin:
+                    workspace_filter = (
+                        " AND NOT EXISTS (SELECT 1 FROM learning_workspaces "
+                        "WHERE private_course_id=courses.id)"
+                        if self.settings.v3_enabled
+                        else ""
+                    )
                     owned_courses = connection.execute(
                         "SELECT COUNT(*) FROM courses "
-                        "WHERE owner_user_id = ? AND course_type = 'user'",
+                        "WHERE owner_user_id = ? AND course_type = 'user'"
+                        + workspace_filter,
                         (owner_user_id,),
                     ).fetchone()[0]
                     if owned_courses >= self.settings.user_course_max_courses:
@@ -172,6 +167,11 @@ class IngestionService:
     ) -> CoursePage:
         offset = (page - 1) * page_size
         where = "1 = 1" if is_admin else "(visibility = 'public' OR owner_user_id = ?)"
+        if self.settings.v3_enabled:
+            where += (
+                " AND NOT EXISTS (SELECT 1 FROM learning_workspaces "
+                "WHERE private_course_id=courses.id)"
+            )
         parameters: tuple[object, ...] = () if is_admin else (owner_user_id,)
         with self.database.connect() as connection:
             total = connection.execute(
@@ -275,9 +275,12 @@ class IngestionService:
             ).fetchone()
         if row is None:
             raise ApiError(404, "JOB_NOT_FOUND", "The ingestion job was not found.")
-        self._require_course(
-            row["course_id"], owner_user_id=owner_user_id, is_admin=is_admin
-        )
+        try:
+            self._require_course(
+                row["course_id"], owner_user_id=owner_user_id, is_admin=is_admin
+            )
+        except ApiError as error:
+            raise ApiError(404, "JOB_NOT_FOUND", "The ingestion job was not found.") from error
         return IngestionJob.model_validate(
             {key: row[key] for key in IngestionJob.model_fields}
         )
@@ -323,12 +326,30 @@ class IngestionService:
             course_id, owner_user_id=owner_user_id, is_admin=is_admin, write=True
         )
         with self.database.connect() as connection:
-            paths = [
-                Path(row["stored_path"])
-                for row in connection.execute(
+            if self.settings.v3_enabled and connection.execute(
+                "SELECT 1 FROM learning_workspaces WHERE course_id=? OR private_course_id=?",
+                (course_id, course_id),
+            ).fetchone():
+                raise ApiError(
+                    409, "ACTIVE_WORKSPACE",
+                    "Archive learning workspaces before deleting this course."
+                )
+            if self.settings.v3_enabled:
+                stored_rows = connection.execute(
+                    "SELECT document_versions.stored_path FROM document_versions "
+                    "WHERE document_versions.course_id=? "
+                    "UNION SELECT derived_artifacts.stored_path FROM derived_artifacts "
+                    "JOIN document_versions ON document_versions.id="
+                    "derived_artifacts.document_version_id "
+                    "WHERE document_versions.course_id=? "
+                    "AND derived_artifacts.stored_path IS NOT NULL",
+                    (course_id, course_id),
+                ).fetchall()
+            else:
+                stored_rows = connection.execute(
                     "SELECT stored_path FROM documents WHERE course_id = ?", (course_id,)
                 ).fetchall()
-            ]
+            paths = [Path(row["stored_path"]) for row in stored_rows]
             connection.execute("DELETE FROM courses WHERE id = ?", (course_id,))
         for path in paths:
             self._delete_stored_file(path)
@@ -352,9 +373,23 @@ class IngestionService:
             ).fetchone()
             if row is None:
                 raise ApiError(404, "DOCUMENT_NOT_FOUND", "The document was not found.")
+            if self.settings.v3_enabled:
+                stored_rows = connection.execute(
+                    "SELECT stored_path FROM document_versions WHERE document_id=? "
+                    "UNION SELECT derived_artifacts.stored_path FROM derived_artifacts "
+                    "JOIN document_versions ON document_versions.id="
+                    "derived_artifacts.document_version_id "
+                    "WHERE document_versions.document_id=? "
+                    "AND derived_artifacts.stored_path IS NOT NULL",
+                    (document_id, document_id),
+                ).fetchall()
+                paths = [Path(item["stored_path"]) for item in stored_rows]
+            else:
+                paths = [Path(row["stored_path"])]
             connection.execute("DELETE FROM documents WHERE id = ?", (document_id,))
-        self._delete_stored_file(Path(row["stored_path"]))
-        self._remove_empty_upload_parents([Path(row["stored_path"])])
+        for path in paths:
+            self._delete_stored_file(path)
+        self._remove_empty_upload_parents(paths)
 
     def _delete_stored_file(self, path: Path) -> None:
         upload_root = self.settings.upload_dir.resolve()
@@ -494,34 +529,42 @@ class IngestionService:
                     "This course already contains a document with the same content.",
                     details={"documentId": duplicate["id"]},
                 )
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(content)
-            connection.execute(
-                """
-                INSERT INTO documents (
-                    id, course_id, filename, stored_path, media_type, extension, sha256,
-                    byte_size, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
-                """,
-                (
-                    document_id,
-                    course_id,
-                    filename,
-                    str(destination),
-                    media_type,
-                    extension,
-                    digest,
-                    len(content),
-                ),
-            )
-            connection.execute(
-                "INSERT INTO ingestion_jobs (id, document_id, status) VALUES (?, ?, 'queued')",
-                (job_id, document_id),
-            )
+            try:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(content)
+                connection.execute(
+                    """
+                    INSERT INTO documents (
+                        id, course_id, filename, stored_path, media_type, extension, sha256,
+                        byte_size, status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                    """,
+                    (
+                        document_id,
+                        course_id,
+                        filename,
+                        str(destination),
+                        media_type,
+                        extension,
+                        digest,
+                        len(content),
+                    ),
+                )
+                connection.execute(
+                    "INSERT INTO ingestion_jobs (id, document_id, status) "
+                    "VALUES (?, ?, 'queued')",
+                    (job_id, document_id),
+                )
+                # Make commit failures part of the same compensating boundary as inserts.
+                connection.commit()
+            except Exception:
+                self._delete_stored_file(destination)
+                self._remove_empty_upload_parents([destination])
+                raise
 
         return UploadAccepted(
             document=self._get_document(document_id),
-            job=self.get_job(job_id),
+            job=self.get_job(job_id, owner_user_id=owner_user_id, is_admin=is_admin),
         )
 
     def process_document(self, document_id: str, job_id: str) -> None:
@@ -544,10 +587,26 @@ class IngestionService:
                     (job_id,),
                 )
                 row = connection.execute(
-                    "SELECT course_id, stored_path FROM documents WHERE id = ?", (document_id,)
+                    "SELECT course_id, stored_path, extension FROM documents WHERE id = ?",
+                    (document_id,),
                 ).fetchone()
             if row is None:
                 raise RuntimeError("Document disappeared before ingestion")
+
+            if row["extension"] not in LOADERS:
+                with self.database.connect() as connection:
+                    connection.execute(
+                        "UPDATE documents SET status='ready',chunk_count=0,error_message=NULL,"
+                        "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
+                        (document_id,),
+                    )
+                    connection.execute(
+                        "UPDATE ingestion_jobs SET status='completed',processed_chunks=0,"
+                        "error_message=NULL,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                        "WHERE id=?",
+                        (job_id,),
+                    )
+                return
 
             sections = load_document(Path(row["stored_path"]))
             chunks = chunk_sections(
@@ -640,7 +699,8 @@ class IngestionService:
         ):
             raise ApiError(400, "INVALID_FILENAME", "The upload filename is not safe.")
         extension = Path(filename).suffix.lower()
-        if extension not in LOADERS:
+        allowed_extensions = MEDIA_TYPES if self.settings.v3_enabled else LOADERS
+        if extension not in allowed_extensions:
             raise ApiError(400, "UNSUPPORTED_EXTENSION", "This file extension is not supported.")
         if media_type not in MEDIA_TYPES[extension]:
             raise ApiError(
@@ -652,10 +712,7 @@ class IngestionService:
             raise ApiError(400, "FILE_TOO_LARGE", "The uploaded file exceeds the size limit.")
         if not content:
             raise ApiError(400, "EMPTY_FILE", "The uploaded file is empty.")
-        if extension == ".pdf" and not content.startswith(b"%PDF"):
-            raise ApiError(400, "INVALID_FILE_CONTENT", "The file does not contain a PDF header.")
-        if extension in {".docx", ".pptx"} and not content.startswith(b"PK"):
-            raise ApiError(400, "INVALID_FILE_CONTENT", "The file is not an Office ZIP document.")
+        validate_file_content(extension, content, self.settings)
         return extension
 
     def _require_course(

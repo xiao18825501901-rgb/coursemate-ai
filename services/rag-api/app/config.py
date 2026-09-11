@@ -33,6 +33,25 @@ class Settings(BaseSettings):
     rag_qa_requests_per_minute: int = Field(default=10, ge=1, le=1_000)
     app_env: Literal["development", "test", "production"] = "production"
     auth_test_user_id: str | None = None
+    v3_enabled: bool = False
+    v3_model: Literal["qwen3.8-max"] = "qwen3.8-max"
+    v3_model_api_key: SecretStr | None = None
+    v3_model_base_url: str | None = None
+    v3_max_output_tokens: int = Field(default=4000, ge=500, le=8000)
+    v3_daily_operations: int = Field(default=30, ge=1, le=500)
+    v3_preview_max_bytes: int = Field(default=2 * 1024 * 1024, ge=1_024, le=20 * 1024 * 1024)
+    v3_preview_max_text_chars: int = Field(default=100_000, ge=1_000, le=1_000_000)
+    v3_preview_max_csv_rows: int = Field(default=200, ge=1, le=5_000)
+    v3_preview_max_csv_columns: int = Field(default=50, ge=1, le=500)
+    v3_preview_max_cell_chars: int = Field(default=2_000, ge=10, le=20_000)
+    v3_preview_max_notebook_cells: int = Field(default=100, ge=1, le=1_000)
+    v3_preview_max_image_pixels: int = Field(default=40_000_000, ge=1, le=100_000_000)
+    v3_preview_max_image_dimension: int = Field(default=16_384, ge=1, le=100_000)
+    v3_office_max_archive_entries: int = Field(default=2_000, ge=1, le=20_000)
+    v3_office_max_uncompressed_bytes: int = Field(
+        default=50 * 1024 * 1024, ge=1_024, le=500 * 1024 * 1024
+    )
+    v3_office_max_compression_ratio: int = Field(default=100, ge=1, le=1_000)
 
     database_path: Path = Field(
         default=Path("../../data/rag.sqlite3"),

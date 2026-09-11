@@ -17,6 +17,16 @@ def require_course_access(
 
     with database.connect() as connection:
         row = connection.execute("SELECT * FROM courses WHERE id = ?", (course_id,)).fetchone()
+        workspace = (
+            connection.execute(
+                "SELECT owner_user_id FROM learning_workspaces WHERE private_course_id=?",
+                (course_id,),
+            ).fetchone()
+            if database.v3_enabled
+            else None
+        )
+    if workspace is not None and workspace["owner_user_id"] != owner_user_id:
+        raise ApiError(404, "COURSE_NOT_FOUND", "The course was not found.")
     allowed = row is not None and (
         is_admin
         or row["owner_user_id"] == owner_user_id
