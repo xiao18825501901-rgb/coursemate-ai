@@ -35,7 +35,7 @@ Paid model calls used: none
 
 暂停时 32 个项目文件已按相对路径复制到被 Git 忽略的检查点，逐文件 SHA-256 与源文件一致。`ACTUAL_IMPLEMENTED_CHANGES_AUDIT.md` 和 `curl` 是 Owner 原有未跟踪文件，未修改、未暂存、未纳入检查点。没有 reset、clean、强制覆盖、推送或生产写入。
 
-当前 HEAD 只包含已提交的基线和 v3.1 模板/编译器；大量 V3 闭环代码仍在工作区，不能用 HEAD 单独代表当前实现。每次提交必须显式选择项目文件，不得 `git add .`。
+切换时的 HEAD 只包含已提交的基线和 v3.1 模板/编译器。此后 Stage 1 和 Stage 2 已按显式文件边界提交；当前工作区仍须保护 Owner 的 `ACTUAL_IMPLEMENTED_CHANGES_AUDIT.md` 与 `curl`，每次提交不得使用 `git add .`。
 
 ## 3. 事实分层
 
@@ -44,12 +44,12 @@ Paid model calls used: none
 - FastAPI/Python RAG API 是学习状态、课程资料和 V3 编排的拟定单一写入者。
 - React/TypeScript Web 仍保留 V2 页面，并有 feature-flagged V3 双 Pane 工作区。
 - Node Task Agent 保持任务工具职责，不写学习成绩或覆盖状态。
-- V3 011–013 迁移、冻结文档版本/派生物、workspace 文件隔离、ATOMIC 节点、v3.1 Planner/Executor 契约、Problem→Bridge→Teaching→Return 本地闭环已存在，但并未覆盖新版全部领域对象。
+- V3 011–014 迁移、冻结文档版本/派生物、workspace 文件隔离、Registry、ATOMIC/COMPOSITE、双树投影、版本化 Spec、v3.1 Planner/Executor 契约、Problem→Bridge→Teaching→Return 本地闭环已存在，但并未覆盖新版全部领域对象。
 - `V3_ENABLED` 和 `VITE_V3_ENABLED` 默认关闭；目标生成模型配置锁为 `qwen3.8-max`，Embedding 独立。
 
 ### 本地真实数据库
 
-只读核验 `data/rag.sqlite3`：迁移 1–10，`integrity_check=ok`；3 courses、67 documents、1,937 chunks、31 conversations、78 messages。没有把这些数量外推到生产。当前真实库没有执行 011–013。
+只读核验 `data/rag.sqlite3`：迁移 1–10，`integrity_check=ok`；3 courses、67 documents、1,937 chunks、31 conversations、78 messages。没有把这些数量外推到生产。当前真实库没有执行 011–014。
 
 ### 历史部署报告
 
@@ -68,11 +68,11 @@ Paid model calls used: none
 | V2 QA、Clerk、引用、流式输出、Task Agent | §0、§19 | 既有 API/Web/Agent | KEEP | 全量 V2 回归；不得以 V3 重写替代 |
 | qwen3.8-max 主智能模型；Embedding 独立 | Q1、§3 | V3 adapter + locked setting；V2/部署模板仍有旧角色配置 | ADAPT | 增加协议/地域/能力合同；账户与 live 为 BLOCKED |
 | Shared Orchestrator + Teaching/Problem/AUTO | Q2 | Orchestrator 有 Teaching/Problem；AUTO 未实现 | ADAPT + ADD | 保留共享 workspace；补可解释路由与测试 |
-| 双轴学习状态 | Q3、Q8 | coverage 推导 Learning Progress；Assessment 缺失 | ADAPT + ADD | 不从旧聊天推导 LEARNED；测评独立迁移 |
+| 双轴学习状态 | Q3、Q8 | 014/`knowledge.py` 已分别投影 Learning 与 Assessment；Assessment 当前只明确返回 `NOT_ASSESSED` | KEEP + ADD | 不从旧聊天推导 LEARNED；Stage 5 新增独立测评事实 |
 | 五题不等权、总分 100 | Q4、§13 | 无 Assessment Schema/API/UI | ADD | 新增版本化 Blueprint/Attempt/Evidence；不写旧成绩 |
 | Hybrid Assessment Pool | Q5 | 无正式题池 | ADD | source/scope/version/泄题边界必测 |
-| COMPOSITE / ATOMIC | Q6 | 模型允许两类，当前只创建私人 ATOMIC | ADAPT | 新增 registry、关系、聚合；禁止矛盾父状态 |
-| Canonical Node + Private Overlay / 双树 | Q7、§7 | 私人节点 + workspace；没有稳定发布树版本 | ADAPT + ADD | 引用同一 node/progress，不复制成绩 |
+| COMPOSITE / ATOMIC | Q6 | 014 与 API 支持两类；COMPOSITE 无 Spec/Journey，按唯一 ATOMIC 后代聚合 | KEEP + HARDEN | Stage 2 本地合同已验证；Stage 5 接入真实 Assessment 聚合 |
+| Canonical Node + Private Overlay / 双树 | Q7、§7 | 014、API 与 Web 已实现审核后官方视图和 owner×course 个性化版本；同名私人节点不合并 | KEEP + ADD | 引用同一 node/progress，不复制成绩；Stage 6 补管理审核 UI |
 | REQUIRED coverage 决定 LEARNED | Q8、§8 | 后端集合判定已有最小实现 | KEEP + HARDEN | 验证完整正文、Spec/Item/Step 版本与撤权 |
 | 动态 Teaching Unit 状态机 | Q9 | planner + unit 已有最小路径 | ADAPT | 补暂停/恢复、缓存、失败/预算状态 |
 | 四层教学规范 | Q10、§11–12 | v3.1 Planner/Common/四专业策略已进代码 | ADAPT | 新建兼容版本；补 Problem Solver、Grader、缓存键 |
@@ -80,7 +80,7 @@ Paid model calls used: none
 | 文档版本和派生预览 | §4–6 | 013 冻结版本/派生物/Chunk 绑定；安全文本、CSV、静态 Notebook、PDF、图片与 Office 诚实 fallback | KEEP + HARDEN | 本地 ACL/篡改测试通过；受控 Office converter、生产存储、清理重试仍待实现/核验 |
 | Problem 完整解答与步骤问题 | Q2、§9 | 最小文本题闭环已实现 | ADAPT | 模板版本化、题目/图片版本、答案 provenance、流式状态 |
 | LearningBridge 精确返回 | §10 | 012 + API/UI 有 step/node/context/anchor | KEEP + HARDEN | 修复路径 ID 幂等摘要、并发 revision；重启/重新登录复验 |
-| 两 Pane UI | §14 | 当前横向/纵向布局和状态恢复 | ADAPT | 补树、Assessment、AUTO、拖拽/窄屏 tab、a11y |
+| 两 Pane UI | §14 | 横向/纵向布局、双树与双轴、个人计划和状态恢复已进入 Web | ADAPT | 补 Assessment 入口、AUTO、拖拽/窄屏 tab、完整 a11y |
 | 公开版本审核/撤回 | §15 | V2 course publication；无树/Spec/派生物版本绑定 | ADD | 私人内容不进入普通 Admin 视图；发布只绑定冻结版本 |
 | GradePolicy 缺项 | §13 | 无 V3 policy | ADD | 原始已知值留存；A- 与 thresholds 为 UNCONFIGURED |
 | 旧计划“先黄金闭环、后文件/树” | 新 §18 | 已按旧顺序做了最小闭环 | RETIRE as ordering | 不删除成果；改按 Stage 1→8 重验与扩展 |
@@ -93,15 +93,16 @@ Paid model calls used: none
 
 | 范围 | 状态 |
 |---|---|
-| 011/012/013 文件 | 工作区已编写，尚未提交；013 已视为迁移历史冻结 |
-| 临时/合成测试库 | 已执行过 011–013；只证明当前本地契约 |
-| 隔离真实资料副本 | `work/v3-migration-rehearsal-03/` 执行到 13；旧表摘要不变、integrity ok、FK 0、67/67 文档版本、1,937 chunks 全部绑定 |
+| 011–014 文件 | 已在 V3 feature branch 提交并视为迁移历史冻结；后续只用 015+ 前向修复 |
+| 临时/合成测试库 | 已执行过 011–014；只证明当前本地合同/fake-provider 流程 |
+| 隔离真实资料副本 | `work/v3-migration-rehearsal-04/` 执行到 14；旧表摘要不变、integrity ok、FK 0、67/67 文档版本、1,937 chunks 全部绑定 |
+| CS3481 最小子集副本 | `work/v3-cs3481-subset-01/`：3 个 DRAFT 候选节点、2 条层级边、1 条 prerequisite、2 条真实版本证据；学习者不可见、0 模型调用 |
 | 本地真实库 | 仍为 1–10；未执行 V3 |
 | 生产 | UNKNOWN |
 
-审计发现并修复了一个安全边界：此前 `Database.initialize()` 无条件执行 011/012。现在只有 `Settings.v3_enabled=True` 才执行 V3 迁移，V2 readiness 要求 1–10，V3 readiness 要求 1–13；V2 课程/发布查询也不会在 flag 关闭时引用 V3 表。失败测试先复现，当前全量证据为 Python 241 passed、Web 30 passed、Task Agent 53 passed、Ruff/mypy/typecheck/build 通过，以及隔离合成数据库 Playwright 1 passed。
+审计发现并修复了一个安全边界：此前 `Database.initialize()` 无条件执行 011/012。现在只有 `Settings.v3_enabled=True` 才执行 V3 迁移，V2 readiness 要求 1–10，V3 readiness 要求 1–14；V2 课程/发布查询也不会在 flag 关闭时引用 V3 表。Stage 2 进一步在服务与 SQLite 双层约束树 source，并让损坏的历史树读取失败关闭。当前全量证据为 Python 251 passed、Web 33 passed、Task Agent 53 passed、Ruff/mypy/typecheck/build 通过，以及隔离合成数据库 Playwright 1 passed。
 
-011–013 不再通过改编号或删除来掩盖曾在合成/副本数据库执行的事实。后续结构使用 014+ 前向迁移，并在新的隔离副本演练。
+011–014 不再通过改编号或删除来掩盖曾在合成/副本数据库执行的事实。后续结构使用 015+ 前向迁移，并在新的隔离副本演练。
 
 ## 6. 新验收层级
 
@@ -141,3 +142,27 @@ NOT_VERIFIED
 - 官方知识树和 Teaching Spec 内容发布：需要 Owner/授权审核者批准具体版本，不阻塞编辑、预览和审核流程实现。
 
 除此之外的本地源码、测试、合成数据、迁移副本与文档工作继续自动执行。
+
+## 9. Stage 2 完成检查点
+
+```text
+Source implementation: IMPLEMENTED for Stage 2 scope
+Local contract tests: VERIFIED
+Local fake-provider/browser flow: VERIFIED
+Live qwen3.8-max: NOT VERIFIED
+Production: NOT VERIFIED
+Local real database migration: NOT EXECUTED
+Production database migration: UNKNOWN / NOT EXECUTED BY THIS TASK
+```
+
+阶段提交：`6eeff90`（014 Schema）、`5a1f9d0`（Registry/树/Spec API）、`0be1a47`（Web 双树）、`86032bb`（浏览器闭环）、`5dba760`（CS3481 未审核子集验证）。
+
+本阶段新增而非 Q1–Q10 的决策均标为 `SUPPLEMENTAL_ENGINEERING_DECISION`：
+
+- 014 在同一个加法迁移中建立 Registry、规范化 Spec 投影和双图结构，因为这些对象尚未进入本地真实库或生产，且需要同一事务约束；后续不得改写 014。
+- 官方 DRAFT/CANDIDATE 对普通学习者完全隐藏；没有已审核版本时返回 `NO_REVIEWED_TREE`，不降级冒充官方树。
+- 第一版个人计划 UI 只提供用户明确选择的 ATOMIC 平铺顺序；API/Schema 已支持父子层级与 prerequisite，完整可视化编辑留在后续 UI 增量。
+- Assessment 尚未落库时显式返回 `NOT_ASSESSED` 和 null 分数/等级，绝不由 Learning Progress 推断成绩。
+- 树读取对跨课程/跨 owner 或历史损坏 source 失败关闭，返回不含节点细节的 `TREE_SOURCE_UNAVAILABLE`。
+
+已完成的 Stage 2 不等于 V3 完成。Stage 3 从版本化 Teaching Plan 缓存、四专业 × CASE_A/B 运行时合同和更强 TeachingDeliveryEvidence 开始；官方发布管理仍属 Stage 6，Assessment/GradePolicy 属 Stage 5。

@@ -1,25 +1,25 @@
 # CourseMate V3 — Test and Model Evaluation Report
 
-Last updated: 2026-09-12 after Stage 1 implementation and review.
+Last updated: 2026-09-12 after Stage 2 implementation and review.
 
 Branch: `feature/coursemate-v3-persistent-learning`
 
-Stage-switch base: `c6158cf34142c311e77a58aa49a3b0b7cbe7fbd8`; current verified code commits: `00961ef`, `fb38efd`, `e9ecd00` plus this evidence update.
+Stage-switch base: `c6158cf34142c311e77a58aa49a3b0b7cbe7fbd8`; Stage 1 commits are `00961ef` through `e9ecd00`; Stage 2 code commits are `6eeff90`, `5a1f9d0`, `0be1a47`, `86032bb` and `5dba760`.
 This report is cumulative and must be updated after every behavior change; old PASS does not cover later code.
 
 ## 1. Current evidence summary
 
 | Acceptance layer | Result | Meaning |
 |---|---|---|
-| Source implementation | PARTIAL | Stage 1 file/provenance/private-overlay slice and minimal learning loop exist; full Master spec does not |
-| Python automated tests | PASS for current Stage 1 code | 241 passed, 1 known dependency deprecation warning |
-| Web unit tests | PASS | 30 passed |
+| Source implementation | PARTIAL | Stage 1 plus Stage 2 Registry/Spec/tree projections exist; Stages 3–8 are not complete |
+| Python automated tests | PASS for current Stage 2 code | 251 passed, 1 known dependency deprecation warning |
+| Web unit tests | PASS | 8 files / 33 tests passed |
 | Task Agent unit tests | PASS | 53 passed; V3 did not take over task tools |
-| Python lint/type | PASS | Ruff all checks; mypy strict app 52 files |
+| Python lint/type | PASS | Ruff all checks; mypy strict app 53 files |
 | TS typecheck/build | PASS | both workspaces typecheck; production bundles built locally |
 | V3 browser flow | LOCAL_FAKE_PROVIDER_VERIFIED | 1 Playwright flow passed with isolated synthetic DB/test identity/deterministic provider |
 | Real model | NOT VERIFIED | no paid call, account/region/endpoint unknown |
-| Real-data final migration/restore | PARTIAL | 011–013 passed on an isolated read-only-source copy; uploads/full restore/final Schema remain unverified |
+| Real-data final migration/restore | PARTIAL | 011–014 passed on an isolated read-only-source copy; uploads/full restore/final Schema remain unverified |
 | Production | NOT VERIFIED | no current release/auth/provider/Schema smoke evidence |
 
 ## 2. Cumulative local commands and actual results
@@ -147,14 +147,72 @@ old_rows_unchanged=true; integrity=ok; foreign_key_violations=0
 invalid_source_owners=0; v3_invariants_ok=true
 ```
 
-## 4. Test data and privacy
+## 4. Stage 2 Registry, tree and two-axis evidence
+
+The failing-first suite added ten focused checks for migration backfill/repeatability, `ATOMIC`/`COMPOSITE` rules, hierarchy and prerequisite cycles, same-name user isolation, reviewed official visibility, immutable published membership/review metadata, independent state axes, pinned Spec journeys and fail-closed corrupted-tree reads. Before the final hardening changes, five checks failed for the expected missing constraints/read projection; no failing assertion was removed.
+
+Focused and full results on the Stage 2 code state:
+
+```text
+pytest learning/workspace/database/document/knowledge focus
+49 passed, 1 warning, 16.94s
+
+pytest full Python suite
+251 passed, 1 warning, 57.51s
+
+ruff app + affected tests/scripts
+All checks passed
+
+mypy app
+Success: no issues found in 53 source files
+
+Web Vitest
+8 files / 33 tests passed
+
+Web typecheck + production build
+PASS; 116 Vite modules
+
+Playwright V3 isolated synthetic flow
+1 passed, 18.6s; test body 9.8s
+```
+
+Locally verified behavior:
+
+- migration 014 keeps existing node/Spec IDs and adds aliases, lineage, material evidence, normalized immutable Teaching Items, Spec metadata, tree versions, memberships and a separate prerequisite graph;
+- personalized tree inserts are workspace/course/owner bound in both service logic and SQLite triggers; private nodes belonging to another user are rejected;
+- official DRAFT members remain invisible until node, Spec and tree review state is explicit; published membership and review identity are immutable;
+- a deliberately corrupted disposable database fails closed with `TREE_SOURCE_UNAVAILABLE` and returns neither the foreign private node ID nor title;
+- `COMPOSITE` owns no Teaching Spec or direct Learning Journey; its Learning Progress is derived from unique ATOMIC descendants;
+- a new private Spec version creates a separate pinned Journey, starts at `NOT_STARTED`, and retains the older completed journey as history;
+- Learning Progress and Assessment are returned as separate objects; Stage 2 Assessment is explicitly `NOT_ASSESSED`, never numeric zero;
+- the Web renders official and personalized views, their review/version status and both axes, and creates an explicit ordered private plan without a publication action;
+- changing workspaces hides the old registry synchronously before the next fetch, preventing a prior private node from remaining on screen;
+- the browser flow creates a personal tree, teaches one REQUIRED item, returns to the exact Problem step, and restores tree/progress after reload and a new browser context at desktop and 375px widths.
+
+Fresh isolated real-data-copy rehearsal `work/v3-migration-rehearsal-04/`:
+
+```text
+source SHA-256 before == after
+old_rows_unchanged=true
+integrity=ok; foreign_key_violations=0
+schema_versions=1..14
+documents=67; document_versions=67
+chunks=1937; unbound_chunks=0
+invalid_source_owners=0; v3_invariants_ok=true
+```
+
+The separate `work/v3-cs3481-subset-01/` run used two existing CS3481 document-version/Chunk references without copying their content into evidence output. It created an explicitly unreviewed local fixture with 3 candidate nodes, 2 hierarchy edges, 1 prerequisite edge and 2 material-evidence rows. The tree remained `DRAFT`, reviewer fields remained null, learner output remained `NO_REVIEWED_TREE`, candidate nodes were invisible, model calls were 0, integrity was `ok`, and foreign-key violations were 0. This proves local structure/provenance mechanics only; it is not an official content-quality review.
+
+`SUPPLEMENTAL_ENGINEERING_DECISION`: migration 014 keeps the Registry, normalized current Spec projection and two tree graphs in one additive transaction boundary because none had been applied to the real or production database. The first UI plan editor intentionally creates a flat ordering of explicitly selected ATOMIC nodes; the API/Schema already support hierarchy, while richer drag/reparent editing remains later UI work.
+
+## 5. Test data and privacy
 
 - pytest uses `tmp_path` databases/uploads; V3 API fixtures set `v3_enabled=True` explicitly.
 - Playwright uses a new path under `work/` and fake content `2 + 3`; screenshots contain only synthetic values.
 - The local real RAG database was queried read-only for aggregate baseline facts and never passed to application initialization.
 - No private course body, user identity, key, prompt body or production response is included here.
 
-## 5. Model contract versus model quality
+## 6. Model contract versus model quality
 
 Current deterministic tests can prove:
 
@@ -175,12 +233,12 @@ They cannot prove:
 - production Clerk, Netlify, server/storage or multi-instance behavior;
 - actual token cost/latency/rate-limit behavior.
 
-## 6. Required future matrices
+## 7. Required future matrices
 
 | Stage | New evidence required before PASS |
 |---|---|
 | 1 | implemented preview/provenance slice is locally green; production storage, converter, full citation API and crash-safe deletion cleanup remain later gates |
-| 2 | registry/homonym/de-dup, hierarchy vs prerequisite DAG, tree publish versions, double-axis projections |
+| 2 | locally verified; official author/review management remains Stage 6 and Assessment values remain Stage 5 |
 | 3 | four majors × CASE_A/B, plan cache/invalidation, REQUIRED preservation, injection/invalid output, complete coverage evidence |
 | 4 | text/image problem revisions, solution/step link, Bridge idempotency/revision/race, both directional pane flows, a11y/console/network |
 | 5 | five unequal/100, answer secrecy, assisted evidence, rubric arithmetic, unconfigured policy, weak points/replan triggers |
@@ -188,12 +246,12 @@ They cannot prove:
 | 7 | smallest approved live canaries with exact model/region/protocol/cost; four-major human rubric |
 | 8 | final full regression, final-Schema real-data copy + full restore, preview deploy and production smoke/rollback evidence |
 
-## 7. Open defects and non-PASS items
+## 8. Open defects and non-PASS items
 
 - Existing `package-lock` audit history reported one high and three moderate advisories; reachability/remediation is not yet resolved and cannot be hidden in launch PASS.
 - Current Playwright covers one owner and Problem→Teaching→return; two-user/Admin browser paths, Teaching→Problem reverse initiation and accessibility-tree evidence remain missing.
 - Existing model adapter has incomplete regional/protocol capability validation and may lose usage metadata when structured output is invalid.
-- Bridge path ID is not yet proven part of canonical idempotency hash; stale model-finalization compare-and-set needs a focused race test.
-- Tree, Assessment, GradePolicy and publication snapshot tests are not yet implemented. DocumentVersion/DerivedArtifact tests exist only at local-contract level.
+- Official tree author/review APIs are not implemented; Stage 2 publication behavior is exercised only through direct local fixtures and cannot be called production-ready.
+- Assessment, GradePolicy and publication snapshot tests are not yet implemented. The displayed Assessment axis is an explicit `NOT_ASSESSED` placeholder, not persistent Assessment evidence.
 
 No live or production claim should be inferred from the local green checks.
