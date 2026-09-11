@@ -1090,6 +1090,9 @@ class LearningOrchestrator:
             saved_unit = {
                 **unit.model_dump(),
                 "display": {"question_prefix": policy.question_prefix},
+                "plan_version": plan_row["version"],
+                "plan_unit_key": unit_plan.unit_key,
+                "plan_reused": plan_reused,
             }
             db.execute(
                 "INSERT INTO "

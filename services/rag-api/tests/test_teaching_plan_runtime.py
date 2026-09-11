@@ -72,11 +72,23 @@ def test_full_plan_is_versioned_and_reused_without_second_planner_charge(
         assert first.json()["plan_reused"] is False
         assert first.json()["display"]["question_prefix"] == "ciallo"
         assert len(first.json()["comprehension_checks"]) == 3
+        first_state_unit = client.get(
+            f"/api/learning/workspaces/{workspace['id']}/state"
+        ).json()["units"][0]
+        assert first_state_unit["plan_version"] == 1
+        assert first_state_unit["plan_unit_key"] == first.json()["plan_unit_key"]
+        assert first_state_unit["plan_reused"] is False
         second = teach(client, workspace["id"], "teach-plan-2", node_id=node["id"])
         assert second.status_code == 200, second.text
         assert second.json()["progress"] == "LEARNED"
         assert second.json()["plan_reused"] is True
         assert roles == ["planner", "teacher", "teacher"]
+        second_state_unit = client.get(
+            f"/api/learning/workspaces/{workspace['id']}/state"
+        ).json()["units"][0]
+        assert second_state_unit["plan_version"] == 1
+        assert second_state_unit["plan_unit_key"] == second.json()["plan_unit_key"]
+        assert second_state_unit["plan_reused"] is True
 
         with client.app.state.database.connect() as connection:
             plans = connection.execute(
