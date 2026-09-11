@@ -1,9 +1,10 @@
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useCourseMateAuth } from "../auth/AuthProvider";
+import { KnowledgeTrees } from "../components/KnowledgeTrees";
 import { LearningFiles } from "../components/LearningFiles";
 import { getLearningState, joinLearning, learningAction } from "../services/learningApi";
-import type { LearningState, LayoutPreference, Major, Mode } from "../types/learning";
+import type { LearningState, LayoutPreference, Major, Mode, PersonalPlanDraft } from "../types/learning";
 import "./learning.css";
 
 export function LearningPage() {
@@ -69,7 +70,7 @@ export function LearningPage() {
     {!state ? <p aria-busy={!error}>{error ? "请检查登录和 V3 后端开关。" : "正在恢复课程学习状态…"}</p> : <>
       <div className="learning-toolbar">
         <label>当前知识节点 <select value={nodeId} onChange={e => setNodeId(e.target.value)}><option value="">选择知识节点</option>{state.nodes.map(n => <option key={n.id} value={n.id}>{n.title} {n.status === "PRIVATE" ? "[My Files / 私人]" : ""}</option>)}</select></label>
-        <span>Learning Progress：<strong>{node?.progress ?? "NOT_STARTED"}</strong></span><span>Assessment Grade：NOT_ASSESSED</span>
+        <span>Learning Progress：<strong>{node?.progress ?? "NOT_STARTED"}</strong></span><span>Assessment Grade：{node?.assessment?.grade_label ?? node?.assessment?.status ?? "NOT_ASSESSED"}</span>
         <label>模式偏好 <select value={mode} onChange={e => setMode(e.target.value as Mode)}><option>AUTO</option><option>TEACHING</option><option>PROBLEM</option></select></label>
         <label>窗格布局 <select value={layout.orientation} onChange={e => setLayout({ ...layout, orientation: e.target.value as "columns" | "rows" })}><option value="columns">左右</option><option value="rows">上下</option></select></label>
         <label>教学窗格比例 <input type="range" min={30} max={70} value={layout.ratio} onChange={e => setLayout({ ...layout, ratio: Number(e.target.value) })} /></label>
@@ -77,6 +78,13 @@ export function LearningPage() {
         <button onClick={() => setLayout({ orientation: "columns", swapped: false, ratio: 50 })}>恢复默认布局</button>
         <button disabled={busy} onClick={() => void action("preferences", { mode, layout }, "PATCH")}>保存布局和偏好</button>
       </div>
+      <KnowledgeTrees
+        busy={busy}
+        onCreatePlan={(draft: PersonalPlanDraft) => action("plans", draft)}
+        onSelectNode={setNodeId}
+        revision={state.revision}
+        workspace={state.id}
+      />
       <details><summary>建立私人知识教学范围（不发布官方树）</summary>
         <p>当前内测支持手动建立一个原子教学范围；这不是已审核的官方 Teaching Spec。</p>
         <label>新私人知识节点 <input value={title} onChange={e => setTitle(e.target.value)} maxLength={150} /></label>
