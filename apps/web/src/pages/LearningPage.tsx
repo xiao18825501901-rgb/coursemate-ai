@@ -97,8 +97,19 @@ export function LearningPage() {
         <section className="teaching-pane learning-pane" aria-label="知识教学"><h2>知识教学</h2>
           {bridge?.problem_snapshot && <aside><h3>原题条件</h3><p>{bridge.problem_snapshot.question}</p><p>{bridge.problem_snapshot.conditions.join("；")}</p><p>Step {bridge.problem_snapshot.step.ordinal}：{bridge.problem_snapshot.step.operation}</p></aside>}
           <label>本单元学习方式（可选） <textarea value={preference} onChange={e => setPreference(e.target.value)} maxLength={2000} placeholder="例如：先直觉，后公式，用中文逐步讲解" /></label>
-          <button disabled={busy || !nodeId} onClick={() => void action("units", { node_id: nodeId, bridge_id: bridge?.node_id === nodeId ? bridge.id : null, preference })}>继续一个教学单元</button>
+          <div className="teaching-actions">
+            <button disabled={busy || !nodeId} onClick={() => void action("units", { node_id: nodeId, bridge_id: bridge?.node_id === nodeId ? bridge.id : null, preference })}>继续一个教学单元</button>
+            <button disabled={busy || !nodeId} onClick={() => void action("units", { node_id: nodeId, bridge_id: bridge?.node_id === nodeId ? bridge.id : null, preference, replan: true })}>按当前偏好重新规划</button>
+          </div>
+          <small>普通继续会复用有效计划；明确重新规划会新增一次 Planner 模型调用。</small>
+          {unit?.plan_version && <p className="plan-status">Teaching Plan v{unit.plan_version} · {unit.plan_reused ? "已复用" : "本次新建"} · {unit.plan_unit_key}</p>}
           {unit?.sections?.map(s => <article key={s.section_id}><h3>{s.title}</h3><p className="learning-prose">{s.content}</p></article>)}
+          {!!unit?.comprehension_checks?.length && <section className="comprehension-checks" aria-label="理解检查">
+            <h3>理解检查（不影响 LEARNED）</h3>
+            <ol>{unit.comprehension_checks.map(check => <li key={check.check_id}>
+              {unit.display?.question_prefix && <span className="question-prefix">{unit.display.question_prefix} </span>}{check.prompt}
+            </li>)}</ol>
+          </section>}
           {unit?.status === "SOURCE_UNAVAILABLE" && <p>原教学来源已不可用。</p>}
           {!unit && <p>选择知识节点开始，或点击题目 Step 下的知识问题。</p>}
           {bridge?.return_anchor && <button disabled={busy} onClick={() => void action(`bridges/${bridge.id}/return`)}>返回原题原 Step</button>}

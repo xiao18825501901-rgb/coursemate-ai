@@ -42,6 +42,9 @@ test("V3 problem step teaches and returns across browser contexts", async ({ pag
   await expect(page.getByText("原题条件", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "继续一个教学单元" }).click();
   await expect(page.locator(".learning-toolbar").getByText("LEARNED", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "理解检查" })).toBeVisible();
+  await expect(page.getByText(/ciallo State the idea in your own words/)).toBeVisible();
+  await expect(page.getByText(/Teaching Plan v1 · 本次新建/)).toBeVisible();
   await page.getByRole("button", { name: "返回原题原 Step" }).click();
   await expect(page.locator("article.solution-step:focus")).toBeVisible();
   await page.reload();

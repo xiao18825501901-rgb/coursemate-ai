@@ -13,6 +13,12 @@
 .learning-pane h2 { margin-top: 0; }
 .learning-pane aside { border-left: .25rem solid var(--accent); background: var(--accent-soft); padding: .75rem; }
 .learning-prose, .learning-files pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.teaching-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; }
+.plan-status { color: var(--ink-soft); font-size: .875rem; overflow-wrap: anywhere; }
+.comprehension-checks { margin-top: 1rem; padding: .85rem; border: 1px solid var(--line); background: var(--surface-soft); }
+.comprehension-checks h3 { margin-top: 0; }
+.comprehension-checks li { margin-block: .5rem; }
+.question-prefix { color: var(--accent-dark); font-weight: 700; }
 .solution-step { border-top: 1px solid var(--line); margin-top: 1rem; padding: .75rem 0; scroll-margin-top: 2rem; }
 .solution-step:focus { outline: 3px solid var(--focus); outline-offset: .25rem; }
 .learning-files { margin: 1rem 0; padding: .75rem; border: 1px solid var(--line); }
