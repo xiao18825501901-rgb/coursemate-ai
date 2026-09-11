@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/rag-api"))
 from app.config import Settings  # noqa: E402
-from app.db import Database  # noqa: E402
+from app.db import LATEST_V3_SCHEMA_VERSION, Database  # noqa: E402
 
 TABLES = (
     "courses",
@@ -83,7 +83,7 @@ def rehearse(source: Path, target: Path) -> dict[str, object]:
         v3_invariants["document_versions"] == v3_invariants["documents"]
         and v3_invariants["unbound_chunks"] == 0
         and v3_invariants["invalid_source_owners"] == 0
-        and versions == list(range(1, 14))
+        and versions == list(range(1, LATEST_V3_SCHEMA_VERSION + 1))
     )
     result = {
         "old_rows_unchanged": before == after,

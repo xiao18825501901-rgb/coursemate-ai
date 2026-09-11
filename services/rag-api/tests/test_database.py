@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.config import Settings
-from app.db import Database
+from app.db import LATEST_V3_SCHEMA_VERSION, Database
 from app.main import create_app
 
 
@@ -324,7 +324,7 @@ def test_v3_migrations_require_explicit_feature_enablement(tmp_path: Path) -> No
             "WHERE type = 'table' AND name = 'learning_workspaces'"
         ).fetchone()
 
-    assert v3_versions == list(range(1, 14))
+    assert v3_versions == list(range(1, LATEST_V3_SCHEMA_VERSION + 1))
     assert v3_workspace_table is not None
 
 
@@ -338,7 +338,10 @@ def test_v3_readiness_requires_latest_v3_migration(tmp_path: Path) -> None:
     database.initialize()
 
     with database.connect() as connection:
-        connection.execute("DELETE FROM schema_migrations WHERE version = 13")
+        connection.execute(
+            "DELETE FROM schema_migrations WHERE version = ?",
+            (LATEST_V3_SCHEMA_VERSION,),
+        )
 
     assert database.is_ready() is False
 

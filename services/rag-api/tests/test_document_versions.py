@@ -6,7 +6,7 @@ from test_learning_journey import setup_workspace
 from test_learning_workspace import client_at
 
 from app.config import Settings
-from app.db import Database
+from app.db import LATEST_V3_SCHEMA_VERSION, Database
 
 
 def test_v3_migration_backfills_immutable_document_and_chunk_versions(
@@ -76,7 +76,7 @@ def test_v3_migration_backfills_immutable_document_and_chunk_versions(
         assert version["sha256"] == "a" * 64
         assert version["stored_path"] == str(source)
         assert chunk_version["document_version_id"] == version["id"]
-        assert versions == list(range(1, 14))
+        assert versions == list(range(1, LATEST_V3_SCHEMA_VERSION + 1))
 
         with pytest.raises(sqlite3.IntegrityError, match="immutable"):
             connection.execute(
