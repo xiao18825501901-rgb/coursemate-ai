@@ -157,7 +157,7 @@ def test_legacy_conversations_are_quarantined_and_migration_is_repeatable(
         ]
 
     assert {"metadata_json", "parent_key"}.issubset(chunk_columns)
-    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    assert versions == list(range(1, 11))
 
 
 def test_database_repairs_empty_course_timestamp_after_migration(tmp_path: Path) -> None:
@@ -279,7 +279,68 @@ def test_v2_conversation_migration_preserves_messages_and_derives_title(
     assert conversation["title"].startswith("DBSCAN 中 core point")
     assert conversation["preferred_language"] == "auto"
     assert message["metadata_json"] == "{}"
-    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    assert versions == list(range(1, 11))
+
+
+def test_v3_migrations_require_explicit_feature_enablement(tmp_path: Path) -> None:
+    v2_settings = make_settings(tmp_path)
+    v2_database = Database(v2_settings)
+
+    v2_database.initialize()
+
+    with v2_database.connect() as connection:
+        v2_versions = [
+            row[0]
+            for row in connection.execute(
+                "SELECT version FROM schema_migrations ORDER BY version"
+            )
+        ]
+        v2_workspace_table = connection.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'learning_workspaces'"
+        ).fetchone()
+
+    assert v2_versions == list(range(1, 11))
+    assert v2_workspace_table is None
+
+    v3_database = Database(
+        Settings(
+            database_path=v2_settings.database_path,
+            upload_dir=v2_settings.upload_dir,
+            v3_enabled=True,
+        )
+    )
+    v3_database.initialize()
+
+    with v3_database.connect() as connection:
+        v3_versions = [
+            row[0]
+            for row in connection.execute(
+                "SELECT version FROM schema_migrations ORDER BY version"
+            )
+        ]
+        v3_workspace_table = connection.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'learning_workspaces'"
+        ).fetchone()
+
+    assert v3_versions == list(range(1, 14))
+    assert v3_workspace_table is not None
+
+
+def test_v3_readiness_requires_latest_v3_migration(tmp_path: Path) -> None:
+    settings = Settings(
+        database_path=tmp_path / "rag.sqlite3",
+        upload_dir=tmp_path / "uploads",
+        v3_enabled=True,
+    )
+    database = Database(settings)
+    database.initialize()
+
+    with database.connect() as connection:
+        connection.execute("DELETE FROM schema_migrations WHERE version = 13")
+
+    assert database.is_ready() is False
 
 
 def test_deployment_path_environment_aliases_are_honored(
