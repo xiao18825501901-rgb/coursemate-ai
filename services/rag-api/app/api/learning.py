@@ -12,9 +12,11 @@ from app.errors import ApiError
 from app.learning.models import (
     BridgeInput,
     NodeDraft,
+    PersonalPlanInput,
     PreferenceInput,
     ReturnInput,
     SolveInput,
+    TeachingSpecDraft,
     TeachInput,
 )
 from app.learning.orchestrator import LearningOrchestrator
@@ -466,12 +468,44 @@ def learning_state(workspace_id: str, request: Request, user: User) -> dict[str,
     return cast(LearningOrchestrator, request.app.state.learning).state(workspace_id, user.user_id)
 
 
+@router.get("/workspaces/{workspace_id}/knowledge")
+def knowledge_state(workspace_id: str, request: Request, user: User) -> dict[str, Any]:
+    return cast(LearningOrchestrator, request.app.state.learning).knowledge_state(
+        workspace_id, user.user_id
+    )
+
+
 @router.post("/workspaces/{workspace_id}/nodes")
 def create_node(
     workspace_id: str, payload: NodeDraft, request: Request, user: User
 ) -> dict[str, Any]:
     return cast(LearningOrchestrator, request.app.state.learning).create_node(
         workspace_id, user.user_id, payload
+    )
+
+
+@router.post("/workspaces/{workspace_id}/plans")
+def personal_plan(
+    workspace_id: str,
+    payload: PersonalPlanInput,
+    request: Request,
+    user: User,
+) -> dict[str, Any]:
+    return cast(LearningOrchestrator, request.app.state.learning).personal_plan(
+        workspace_id, user.user_id, payload
+    )
+
+
+@router.post("/workspaces/{workspace_id}/nodes/{node_id}/specs")
+def create_spec(
+    workspace_id: str,
+    node_id: str,
+    payload: TeachingSpecDraft,
+    request: Request,
+    user: User,
+) -> dict[str, Any]:
+    return cast(LearningOrchestrator, request.app.state.learning).create_spec(
+        workspace_id, user.user_id, node_id, payload
     )
 
 

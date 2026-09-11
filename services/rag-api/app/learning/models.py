@@ -24,13 +24,21 @@ class NodeDraft(Contract):
     description: Text
     major: Major
     kind: Literal["ATOMIC", "COMPOSITE"] = "ATOMIC"
-    items: list[TeachingItem] = Field(min_length=1, max_length=30)
+    items: list[TeachingItem] = Field(max_length=30)
 
     @model_validator(mode="after")
     def unique_scope(self) -> "NodeDraft":
         ids = [i.item_id for i in self.items]
-        if len(ids) != len(set(ids)) or not any(i.requirement == "REQUIRED" for i in self.items):
-            raise ValueError("Unique item IDs and at least one REQUIRED item are necessary")
+        if len(ids) != len(set(ids)):
+            raise ValueError("Teaching item IDs must be unique")
+        if self.kind == "ATOMIC" and (
+            not self.items or not any(i.requirement == "REQUIRED" for i in self.items)
+        ):
+            raise ValueError("An ATOMIC node requires at least one REQUIRED teaching item")
+        if self.kind == "COMPOSITE" and self.items:
+            raise ValueError(
+                "A COMPOSITE node aggregates descendants and cannot own teaching items"
+            )
         return self
 
 
@@ -139,3 +147,50 @@ class PreferenceInput(OperationInput):
 
 class ReturnInput(OperationInput):
     status: Literal["COMPLETED", "CANCELLED"] = "COMPLETED"
+
+
+class TreeMembershipInput(Contract):
+    node_id: Identifier
+    parent_node_id: Identifier | None = None
+    ordinal: int = Field(ge=0, le=10_000)
+    spec_version: int | None = Field(default=None, ge=1)
+
+
+class PrerequisiteInput(Contract):
+    node_id: Identifier
+    prerequisite_node_id: Identifier
+
+
+class PersonalPlanInput(OperationInput):
+    title: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
+    ]
+    change_reason: Text
+    memberships: list[TreeMembershipInput] = Field(min_length=1, max_length=500)
+    prerequisites: list[PrerequisiteInput] = Field(default_factory=list, max_length=1_000)
+
+    @model_validator(mode="after")
+    def unique_graph_entries(self) -> "PersonalPlanInput":
+        nodes = [member.node_id for member in self.memberships]
+        edges = [
+            (edge.node_id, edge.prerequisite_node_id) for edge in self.prerequisites
+        ]
+        if len(nodes) != len(set(nodes)):
+            raise ValueError("Each knowledge node may appear only once in a tree version")
+        if len(edges) != len(set(edges)):
+            raise ValueError("Prerequisite edges must be unique")
+        return self
+
+
+class TeachingSpecDraft(OperationInput):
+    change_reason: Text
+    items: list[TeachingItem] = Field(min_length=1, max_length=30)
+
+    @model_validator(mode="after")
+    def valid_items(self) -> "TeachingSpecDraft":
+        ids = [item.item_id for item in self.items]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Teaching item IDs must be unique")
+        if not any(item.requirement == "REQUIRED" for item in self.items):
+            raise ValueError("A specification requires at least one REQUIRED item")
+        return self

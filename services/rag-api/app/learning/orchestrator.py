@@ -15,16 +15,19 @@ from app.learning.compiler import (
     validate_plan,
     validate_unit,
 )
+from app.learning.knowledge import KnowledgeService
 from app.learning.models import (
     BridgeInput,
     NodeDraft,
     OperationInput,
+    PersonalPlanInput,
     PreferenceInput,
     ProblemSolutionOutput,
     ReturnInput,
     SolveInput,
     TeachingItem,
     TeachingPlan,
+    TeachingSpecDraft,
     TeachingUnitOutput,
     TeachInput,
 )
@@ -48,6 +51,7 @@ class LearningOrchestrator:
         self.settings = settings
         self.retriever = retriever
         self.provider = LearningProvider(settings)
+        self.knowledge = KnowledgeService(database)
 
     def node(self, workspace: sqlite3.Row, node_id: str) -> dict[str, Any]:
         with self.db.connect() as db:
@@ -56,25 +60,44 @@ class LearningOrchestrator:
                 "AND ((owner_user_id=? AND status='PRIVATE') OR status='PUBLISHED')",
                 (node_id, workspace["course_id"], workspace["owner_user_id"]),
             ).fetchone()
-            spec = db.execute(
-                "SELECT * FROM teaching_specs WHERE node_id=? ORDER BY version DESC LIMIT 1",
-                (node_id,),
-            ).fetchone()
-        if row is None or spec is None:
+            spec = (
+                db.execute(
+                    "SELECT teaching_specs.* FROM teaching_specs "
+                    "JOIN teaching_spec_metadata AS metadata "
+                    "ON metadata.node_id=teaching_specs.node_id "
+                    "AND metadata.version=teaching_specs.version "
+                    "WHERE teaching_specs.node_id=? "
+                    "AND metadata.status IN ('PRIVATE_ACTIVE','PUBLISHED') "
+                    "ORDER BY teaching_specs.version DESC LIMIT 1",
+                    (node_id,),
+                ).fetchone()
+                if row is not None and row["kind"] == "ATOMIC"
+                else None
+            )
+        if row is None:
             raise ApiError(404, "NODE_NOT_FOUND", "The knowledge node was not found.")
+        if row["kind"] == "ATOMIC" and spec is None:
+            raise ApiError(
+                409,
+                "SPEC_NOT_AVAILABLE",
+                "The atomic knowledge node has no active Teaching Spec.",
+            )
         return {
-            **dict(row),
-            "spec_version": spec["version"],
-            "spec_hash": spec["content_hash"],
-            "items": json.loads(spec["content_json"]),
+            "id": row["id"],
+            "course_id": row["course_id"],
+            "title": row["title"],
+            "description": row["description"],
+            "major": row["major"],
+            "kind": row["kind"],
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "spec_version": spec["version"] if spec is not None else None,
+            "spec_hash": spec["content_hash"] if spec is not None else None,
+            "items": json.loads(spec["content_json"]) if spec is not None else [],
         }
 
     def create_node(self, workspace_id: str, owner: str, draft: NodeDraft) -> dict[str, Any]:
         workspace = workspace_for(self.db, workspace_id, owner)
-        if draft.kind != "ATOMIC":
-            raise ApiError(
-                422, "ATOMIC_SCOPE_REQUIRED", "Composite nodes require a reviewed tree definition."
-            )
         evidence_ids = {e for item in draft.items for e in item.evidence_ids}
         self.check_evidence(workspace, evidence_ids)
         node_id = identifier()
@@ -103,14 +126,127 @@ class LearningOrchestrator:
                     draft.kind,
                 ),
             )
-            db.execute(
-                "INSERT INTO teaching_specs VALUES(?,1,?,?)",
-                (node_id, content, hashlib.sha256(content.encode()).hexdigest()),
-            )
+            if draft.kind == "ATOMIC":
+                db.execute(
+                    "INSERT INTO teaching_specs VALUES(?,1,?,?)",
+                    (node_id, content, hashlib.sha256(content.encode()).hexdigest()),
+                )
             db.execute(
                 "UPDATE learning_workspaces SET revision=revision+1 WHERE id=?", (workspace_id,)
             )
         return self.node(workspace, node_id)
+
+    def knowledge_state(self, workspace_id: str, owner: str) -> dict[str, Any]:
+        return self.knowledge.snapshot(workspace_id, owner)
+
+    def personal_plan(
+        self, workspace_id: str, owner: str, request: PersonalPlanInput
+    ) -> dict[str, Any]:
+        def save(
+            db: sqlite3.Connection, workspace: sqlite3.Row, _: Any
+        ) -> dict[str, Any]:
+            return self.knowledge.create_personal_plan(db, workspace, request)
+
+        return self.operate(
+            workspace_id,
+            owner,
+            request,
+            "personal.plan",
+            lambda workspace: None,
+            save,
+        )
+
+    def create_spec(
+        self,
+        workspace_id: str,
+        owner: str,
+        node_id: str,
+        request: TeachingSpecDraft,
+    ) -> dict[str, Any]:
+        content = encode([item.model_dump() for item in request.items])
+        content_hash = hashlib.sha256(content.encode()).hexdigest()
+
+        def prepare(workspace: sqlite3.Row) -> None:
+            with self.db.connect() as db:
+                node = db.execute(
+                    "SELECT kind FROM knowledge_nodes WHERE id=? AND course_id=? "
+                    "AND owner_user_id=? AND status='PRIVATE'",
+                    (node_id, workspace["course_id"], owner),
+                ).fetchone()
+            if node is None:
+                raise ApiError(404, "NODE_NOT_FOUND", "The knowledge node was not found.")
+            if node["kind"] != "ATOMIC":
+                raise ApiError(
+                    422,
+                    "ATOMIC_REQUIRED",
+                    "Only atomic knowledge nodes have a Teaching Spec.",
+                )
+            self.check_evidence(
+                workspace,
+                {evidence_id for item in request.items for evidence_id in item.evidence_ids},
+            )
+
+        def save(
+            db: sqlite3.Connection, workspace: sqlite3.Row, _: Any
+        ) -> dict[str, Any]:
+            node = db.execute(
+                "SELECT kind FROM knowledge_nodes WHERE id=? AND course_id=? "
+                "AND owner_user_id=? AND status='PRIVATE'",
+                (node_id, workspace["course_id"], owner),
+            ).fetchone()
+            if node is None:
+                raise ApiError(404, "NODE_NOT_FOUND", "The knowledge node was not found.")
+            self.check_evidence(
+                workspace,
+                {evidence_id for item in request.items for evidence_id in item.evidence_ids},
+            )
+            latest = db.execute(
+                "SELECT version,content_hash FROM teaching_specs WHERE node_id=? "
+                "ORDER BY version DESC LIMIT 1",
+                (node_id,),
+            ).fetchone()
+            if latest is not None and latest["content_hash"] == content_hash:
+                raise ApiError(
+                    409,
+                    "SPEC_UNCHANGED",
+                    "Create a new Teaching Spec only when its scope changes.",
+                )
+            version = int(latest["version"] if latest is not None else 0) + 1
+            db.execute(
+                "INSERT INTO teaching_specs(node_id,version,content_json,content_hash) "
+                "VALUES(?,?,?,?)",
+                (node_id, version, content, content_hash),
+            )
+            db.execute(
+                "UPDATE teaching_spec_metadata SET change_reason=? "
+                "WHERE node_id=? AND version=?",
+                (request.change_reason, node_id, version),
+            )
+            return {
+                "node_id": node_id,
+                "version": version,
+                "content_hash": content_hash,
+                "items": [item.model_dump() for item in request.items],
+                "learning_progress": "NOT_STARTED",
+                "assessment_status": "NOT_ASSESSED",
+                "evidence_ids": sorted(
+                    {
+                        evidence_id
+                        for item in request.items
+                        for evidence_id in item.evidence_ids
+                    }
+                ),
+            }
+
+        return self.operate(
+            workspace_id,
+            owner,
+            request,
+            "teaching.spec",
+            prepare,
+            save,
+            resource_identity={"node_id": node_id},
+        )
 
     def evidence_version(self, workspace: sqlite3.Row, evidence_id: str) -> sqlite3.Row:
         with self.db.connect() as db:
@@ -445,10 +581,16 @@ class LearningOrchestrator:
 
     @staticmethod
     def journey(db: sqlite3.Connection, workspace_id: str, node: dict[str, Any]) -> sqlite3.Row:
+        if node["kind"] != "ATOMIC" or node["spec_version"] is None:
+            raise ApiError(
+                422,
+                "ATOMIC_REQUIRED",
+                "A learning journey requires an atomic node with an active Teaching Spec.",
+            )
         row = db.execute(
-            "SELECT * FROM learning_journeys WHERE workspace_id=? AND node_id=? ORDER BY "
-            "spec_version DESC LIMIT 1",
-            (workspace_id, node["id"]),
+            "SELECT * FROM learning_journeys WHERE workspace_id=? AND node_id=? "
+            "AND spec_version=?",
+            (workspace_id, node["id"], node["spec_version"]),
         ).fetchone()
         if row is None:
             journey_id = identifier()
@@ -538,6 +680,12 @@ class LearningOrchestrator:
     def teach(self, workspace_id: str, owner: str, request: TeachInput) -> dict[str, Any]:
         def prepare(workspace: sqlite3.Row) -> Any:
             node = self.node(workspace, request.node_id)
+            if node["kind"] != "ATOMIC":
+                raise ApiError(
+                    422,
+                    "ATOMIC_REQUIRED",
+                    "Teach atomic descendants instead of a composite node.",
+                )
             with self.db.connect() as db:
                 journey = self.journey(db, workspace_id, node)
                 spec = db.execute(
@@ -757,18 +905,23 @@ class LearningOrchestrator:
 
     def state(self, workspace_id: str, owner: str) -> dict[str, Any]:
         workspace = workspace_for(self.db, workspace_id, owner)
+        knowledge = self.knowledge.snapshot(workspace_id, owner)
+        nodes = [
+            {
+                "id": node["id"],
+                "title": node["title"],
+                "description": node["description"],
+                "major": node["major"],
+                "kind": node["kind"],
+                "status": node["status"],
+                "source": node["source"],
+                "progress": node["state"]["learning"]["status"],
+                "learning": node["state"]["learning"],
+                "assessment": node["state"]["assessment"],
+            }
+            for node in knowledge["registry"]
+        ]
         with self.db.connect() as db:
-            nodes = [
-                dict(r)
-                for r in db.execute(
-                    "SELECT n.*,COALESCE(j.status,'NOT_STARTED') AS progress "
-                    "FROM knowledge_nodes n LEFT JOIN learning_journeys j ON j.node_id=n.id "
-                    "AND j.workspace_id=? "
-                    "WHERE n.course_id=? AND (n.owner_user_id=? OR n.status='PUBLISHED') ORDER "
-                    "BY n.created_at,n.id LIMIT 200",
-                    (workspace_id, workspace["course_id"], owner),
-                )
-            ]
             solutions = [
                 json.loads(r[0])
                 for r in db.execute(
