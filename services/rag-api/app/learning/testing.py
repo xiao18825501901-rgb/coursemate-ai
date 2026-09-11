@@ -33,23 +33,61 @@ def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
             ],
         }
     if schema == "TeachingPlan":
+        eligible = context["eligible"]
+        group_size = max(1, (len(eligible) + 11) // 12)
+        units: list[dict[str, Any]] = []
+        for index in range(0, len(eligible), group_size):
+            target_ids = [item["item_id"] for item in eligible[index : index + group_size]]
+            ordinal = len(units) + 1
+            units.append(
+                {
+                    "unit_key": f"unit_{ordinal}",
+                    "target_item_ids": target_ids,
+                    "unit_goal": "Explain the current bounded Teaching Items",
+                    "teaching_sequence": [
+                        "Why this matters",
+                        "Intuition and formal concept",
+                        "Checkable application",
+                    ],
+                    "adaptation": context["preference"],
+                    "selected_evidence_ids": [],
+                    "suggested_exercise_blueprint": "Use a small checkable example",
+                    "check_questions": [
+                        {
+                            "check_id": f"u{ordinal}_definition",
+                            "kind": "DEFINITION",
+                            "prompt": "State the idea in your own words.",
+                        },
+                        {
+                            "check_id": f"u{ordinal}_distinction",
+                            "kind": "DISTINCTION",
+                            "prompt": "Contrast it with a nearby idea.",
+                        },
+                        {
+                            "check_id": f"u{ordinal}_application",
+                            "kind": "APPLICATION",
+                            "prompt": "Apply it to the bounded example.",
+                        },
+                    ],
+                    "instruction_draft": "Teach intuition, definition, example and application.",
+                    "stop_condition": "UNIT_COMPLETE",
+                }
+            )
         return {
-            "case": "CASE_B" if context["preference"] else "CASE_A",
+            "schema_version": "v3.2",
+            "case_type": "CASE_B" if context["preference"] else "CASE_A",
             "node_id": context["node_id"],
             "spec_version": context["spec_version"],
-            "target_item_ids": [context["eligible"][0]["item_id"]],
-            "unit_goal": "Explain the current bounded item",
-            "teaching_sequence": ["Principle then example"],
-            "adaptation": context["preference"],
-            "selected_evidence_ids": [],
+            "preference_interpretation": context["preference"],
+            "units": units,
             "problem_bridge_id": context["bridge_id"],
-            "suggested_exercise_blueprint": "Combine counts",
-            "remaining_scope_plan": [],
             "uncertainties": ["Synthetic fixture, not live quality proof"],
-            "stop_condition": "UNIT_COMPLETE",
         }
     if schema == "TeachingUnitOutput":
+        unit_plan = context["plan_unit"]
         return {
+            "plan_unit_key": unit_plan["unit_key"],
+            "completion_status": "COMPLETED",
             "sections": [
                 {
                     "section_id": "explanation",
@@ -65,8 +103,10 @@ def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
             "formulas_examples": ["2 + 3 = 5"],
             "source_refs": [],
             "coverage_proposals": [
-                {"item_id": context["plan"]["target_item_ids"][0], "section_ids": ["explanation"]}
+                {"item_id": item_id, "section_ids": ["explanation"]}
+                for item_id in unit_plan["target_item_ids"]
             ],
+            "comprehension_checks": unit_plan["check_questions"],
             "knowledge_questions": [],
             "return_anchor": context["return_anchor"],
             "next_actions": ["RETURN", "CONTINUE", "PAUSE"],

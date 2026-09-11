@@ -1,0 +1,5 @@
+{
+  "version": "default-course-policy-v1",
+  "question_prefix": null,
+  "applies_to": "comprehension_check_display"
+}

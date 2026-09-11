@@ -42,20 +42,53 @@ class NodeDraft(Contract):
         return self
 
 
-class TeachingPlan(Contract):
-    case: Literal["CASE_A", "CASE_B"]
-    node_id: Identifier
-    spec_version: int = Field(ge=1)
+class CheckQuestion(Contract):
+    check_id: Identifier
+    kind: Literal["DEFINITION", "DISTINCTION", "ENGLISH", "APPLICATION", "SYNTHESIS"]
+    prompt: Text
+
+
+class TeachingPlanUnit(Contract):
+    unit_key: Identifier
     target_item_ids: list[Identifier] = Field(min_length=1, max_length=3)
     unit_goal: Text
     teaching_sequence: list[Text] = Field(min_length=1, max_length=8)
     adaptation: str = Field(max_length=2000)
     selected_evidence_ids: list[Identifier] = Field(max_length=20)
-    problem_bridge_id: Identifier | None
     suggested_exercise_blueprint: str = Field(max_length=2000)
-    remaining_scope_plan: list[Text] = Field(max_length=30)
-    uncertainties: list[Text] = Field(max_length=10)
+    check_questions: list[CheckQuestion] = Field(min_length=3, max_length=5)
+    instruction_draft: str = Field(max_length=3000)
     stop_condition: Literal["UNIT_COMPLETE", "MISSING_EVIDENCE"]
+
+    @model_validator(mode="after")
+    def unique_unit_scope(self) -> "TeachingPlanUnit":
+        if len(self.target_item_ids) != len(set(self.target_item_ids)):
+            raise ValueError("Teaching plan unit item IDs must be unique")
+        check_ids = [question.check_id for question in self.check_questions]
+        if len(check_ids) != len(set(check_ids)):
+            raise ValueError("Teaching plan check IDs must be unique within a unit")
+        return self
+
+
+class TeachingPlan(Contract):
+    schema_version: Literal["v3.2"]
+    case_type: Literal["CASE_A", "CASE_B"]
+    node_id: Identifier
+    spec_version: int = Field(ge=1)
+    preference_interpretation: str = Field(max_length=2000)
+    units: list[TeachingPlanUnit] = Field(min_length=1, max_length=12)
+    problem_bridge_id: Identifier | None
+    uncertainties: list[Text] = Field(max_length=10)
+
+    @model_validator(mode="after")
+    def unique_plan_scope(self) -> "TeachingPlan":
+        unit_keys = [unit.unit_key for unit in self.units]
+        item_ids = [item_id for unit in self.units for item_id in unit.target_item_ids]
+        if len(unit_keys) != len(set(unit_keys)):
+            raise ValueError("Teaching plan unit keys must be unique")
+        if len(item_ids) != len(set(item_ids)):
+            raise ValueError("A Teaching Item may be scheduled only once per plan")
+        return self
 
 
 class Section(Contract):
@@ -78,11 +111,14 @@ class KnowledgeLink(Contract):
 
 
 class TeachingUnitOutput(Contract):
+    plan_unit_key: Identifier
+    completion_status: Literal["COMPLETED", "INCOMPLETE"]
     sections: list[Section] = Field(min_length=1, max_length=8)
     terms: list[Text] = Field(max_length=20)
     formulas_examples: list[Text] = Field(max_length=10)
     source_refs: list[Identifier] = Field(max_length=20)
     coverage_proposals: list[CoverageProposal] = Field(max_length=3)
+    comprehension_checks: list[CheckQuestion] = Field(min_length=3, max_length=5)
     knowledge_questions: list[KnowledgeLink] = Field(max_length=10)
     return_anchor: str | None = Field(max_length=200)
     next_actions: list[Literal["CONTINUE", "EXAMPLE", "RETURN", "ASSESS", "PAUSE"]] = Field(
@@ -132,6 +168,7 @@ class TeachInput(OperationInput):
     bridge_id: Identifier | None = None
     preference: str = Field(default="", max_length=2000)
     language: Literal["zh-CN", "en", "bilingual"] = "zh-CN"
+    replan: bool = False
 
 
 class Layout(Contract):

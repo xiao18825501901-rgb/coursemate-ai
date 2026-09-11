@@ -92,7 +92,7 @@ def test_migration_014_backfills_normalized_specs_and_is_repeatable(tmp_path: Pa
                 (workspace["id"],),
             ).fetchone()[0]
 
-        assert versions == list(range(1, 15))
+        assert versions == list(range(1, 16))
         assert tuple(item) == (
             "REQUIRED",
             "Explain addition",

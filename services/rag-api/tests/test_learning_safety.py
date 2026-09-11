@@ -147,7 +147,11 @@ def test_coverage_rejects_invalid_completed_content(mutation: str) -> None:
     )
     data = fixture_output(
         "TeachingUnitOutput",
-        {"plan": plan.model_dump(), "return_anchor": None},
+        {
+            "plan": plan.model_dump(),
+            "plan_unit": plan.units[0].model_dump(),
+            "return_anchor": None,
+        },
     )
     if mutation == "unknown_item":
         data["coverage_proposals"][0]["item_id"] = "forged"
@@ -161,6 +165,45 @@ def test_coverage_rejects_invalid_completed_content(mutation: str) -> None:
         validate_unit(
             TeachingUnitOutput.model_validate(data),
             plan=plan,
+            unit_plan=plan.units[0],
+            node_ids={"n"},
+            return_anchor=None,
+        )
+
+
+@pytest.mark.parametrize("mutation", ["missing_target", "incomplete_unit", "wrong_plan_unit"])
+def test_coverage_requires_the_completed_persistable_plan_unit(mutation: str) -> None:
+    plan = TeachingPlan.model_validate(
+        fixture_output(
+            "TeachingPlan",
+            {
+                "preference": "",
+                "node_id": "n",
+                "spec_version": 1,
+                "eligible": [{"item_id": "r"}],
+                "bridge_id": None,
+            },
+        )
+    )
+    data = fixture_output(
+        "TeachingUnitOutput",
+        {
+            "plan": plan.model_dump(),
+            "plan_unit": plan.units[0].model_dump(),
+            "return_anchor": None,
+        },
+    )
+    if mutation == "missing_target":
+        data["coverage_proposals"] = []
+    elif mutation == "incomplete_unit":
+        data["completion_status"] = "INCOMPLETE"
+    else:
+        data["plan_unit_key"] = "forged_unit"
+    with pytest.raises(ValueError):
+        validate_unit(
+            TeachingUnitOutput.model_validate(data),
+            plan=plan,
+            unit_plan=plan.units[0],
             node_ids={"n"},
             return_anchor=None,
         )

@@ -354,10 +354,11 @@ class KnowledgeService:
                 "SELECT COUNT(DISTINCT items.item_id) FROM teaching_items AS items "
                 "JOIN learning_journeys AS journey ON journey.node_id=items.node_id "
                 "AND journey.spec_version=items.spec_version AND journey.workspace_id=? "
-                "JOIN learning_coverage AS coverage ON coverage.journey_id=journey.id "
+                "JOIN teaching_delivery_evidence AS coverage ON coverage.journey_id=journey.id "
                 "AND coverage.item_id=items.item_id "
                 "WHERE items.node_id=? AND items.spec_version=? "
-                "AND items.requirement='REQUIRED'",
+                "AND items.requirement='REQUIRED' AND coverage.validation_status IN "
+                "('VALIDATED','LEGACY_PRESERVED')",
                 (workspace_id, node_id, spec_version),
             ).fetchone()[0]
         )

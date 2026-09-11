@@ -2,8 +2,10 @@ import hashlib
 import json
 import sqlite3
 from collections.abc import Callable
-from typing import Any, Literal, cast
+from typing import Any, Literal, TypeVar, cast
 from uuid import uuid4
+
+from pydantic import BaseModel
 
 from app.config import Settings
 from app.db import Database
@@ -15,6 +17,7 @@ from app.learning.compiler import (
     validate_plan,
     validate_unit,
 )
+from app.learning.course_policy import course_policy
 from app.learning.knowledge import KnowledgeService
 from app.learning.models import (
     BridgeInput,
@@ -31,7 +34,7 @@ from app.learning.models import (
     TeachingUnitOutput,
     TeachInput,
 )
-from app.learning.provider import LearningProvider
+from app.learning.provider import LearningProvider, ProviderCallFailure
 from app.learning.workspaces import document_version_for, workspace_for
 from app.rag.retrieval import HybridRetriever
 from app.repositories.chunks import RetrievalAccess
@@ -43,6 +46,9 @@ def encode(value: Any) -> str:
 
 def identifier() -> str:
     return uuid4().hex
+
+
+Output = TypeVar("Output", bound=BaseModel)
 
 
 class LearningOrchestrator:
@@ -475,21 +481,375 @@ class LearningOrchestrator:
     def record_run(self, workspace_id: str, operation: str, run: dict[str, Any]) -> None:
         with self.db.connect() as db:
             db.execute(
-                "INSERT INTO learning_model_runs "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                "INSERT INTO learning_model_run_evidence("
+                "id,workspace_id,operation_id,role,model_id,provider_label,protocol,"
+                "region_label,template_version,schema_version,input_hash,started_at,"
+                "finished_at,latency_ms,input_tokens,output_tokens,status,error_class,"
+                "provider_response_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     identifier(),
                     workspace_id,
                     operation,
                     run["role"],
                     run["model"],
+                    run.get("provider", "UNRECORDED"),
                     run["protocol"],
-                    TEMPLATE_VERSION,
-                    run["input_tokens"],
-                    run["output_tokens"],
-                    run["provider_response_id"],
+                    run.get("region", "UNKNOWN"),
+                    run.get("template_version", TEMPLATE_VERSION),
+                    run.get("schema_version", "UNRECORDED"),
+                    run.get("input_hash"),
+                    run.get("started_at", "1970-01-01T00:00:00Z"),
+                    run.get("finished_at", "1970-01-01T00:00:00Z"),
+                    run.get("latency_ms", 0),
+                    run.get("input_tokens", 0),
+                    run.get("output_tokens", 0),
+                    run.get("status", "UNKNOWN"),
+                    run.get("error_class"),
+                    run.get("provider_response_id"),
                 ),
             )
+
+    def generate(
+        self,
+        workspace_id: str,
+        operation: str,
+        schema: type[Output],
+        *,
+        instructions: str,
+        context: dict[str, Any],
+        role: str,
+        template_version: str,
+        schema_version: str,
+    ) -> tuple[Output, dict[str, Any]]:
+        try:
+            output, run = self.provider.generate(
+                schema,
+                instructions=instructions,
+                context=context,
+                role=role,
+                template_version=template_version,
+                schema_version=schema_version,
+            )
+        except ProviderCallFailure as error:
+            self.record_run(workspace_id, operation, error.run)
+            raise error.cause from error
+        self.record_run(workspace_id, operation, run)
+        return output, run
+
+    @staticmethod
+    def _hash(value: Any) -> str:
+        return hashlib.sha256(encode(value).encode()).hexdigest()
+
+    def preference_version(
+        self, workspace_id: str, preference: str, language: str
+    ) -> dict[str, Any]:
+        payload = {"preference": preference.strip(), "language": language}
+        preference_hash = self._hash(payload)
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT * FROM learning_preference_versions "
+                "WHERE workspace_id=? AND preference_hash=?",
+                (workspace_id, preference_hash),
+            ).fetchone()
+            if row is None:
+                version = int(
+                    db.execute(
+                        "SELECT COALESCE(MAX(version),0)+1 FROM learning_preference_versions "
+                        "WHERE workspace_id=?",
+                        (workspace_id,),
+                    ).fetchone()[0]
+                )
+                db.execute(
+                    "INSERT INTO learning_preference_versions("
+                    "workspace_id,version,preference_hash,preference_json) VALUES(?,?,?,?)",
+                    (workspace_id, version, preference_hash, encode(payload)),
+                )
+                row = db.execute(
+                    "SELECT * FROM learning_preference_versions "
+                    "WHERE workspace_id=? AND version=?",
+                    (workspace_id, version),
+                ).fetchone()
+        return dict(cast(sqlite3.Row, row))
+
+    @staticmethod
+    def _plan_invalidation_reason(row: sqlite3.Row, identity: dict[str, Any]) -> str:
+        if row["preference_hash"] != identity["preference_hash"]:
+            return "PREFERENCE_CHANGED"
+        if json.loads(row["source_version_ids_json"]) != identity["source_version_ids"]:
+            return "SOURCE_SET_CHANGED"
+        if row["bridge_id"] != identity["bridge_id"] or row["bridge_revision"] != identity[
+            "bridge_revision"
+        ]:
+            return "BRIDGE_CHANGED"
+        if (
+            row["template_version"] != identity["template_version"]
+            or row["schema_version"] != identity["schema_version"]
+            or row["model_id"] != identity["model_id"]
+            or row["protocol"] != identity["protocol"]
+        ):
+            return "RUNTIME_CHANGED"
+        return "PLAN_INPUT_CHANGED"
+
+    def cached_plan(
+        self,
+        *,
+        workspace_id: str,
+        node_id: str,
+        journey_id: str,
+        identity: dict[str, Any],
+        cache_key: str,
+        explicit_replan: bool,
+    ) -> sqlite3.Row | None:
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute(
+                "UPDATE teaching_plan_versions SET status='INVALIDATED',"
+                "invalidated_reason='SPEC_UPDATED',"
+                "invalidated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                "WHERE workspace_id=? AND node_id=? AND journey_id!=? AND status='ACTIVE'",
+                (workspace_id, node_id, journey_id),
+            )
+            rows = db.execute(
+                "SELECT * FROM teaching_plan_versions WHERE workspace_id=? AND node_id=? "
+                "AND journey_id=? AND status='ACTIVE' ORDER BY version DESC",
+                (workspace_id, node_id, journey_id),
+            ).fetchall()
+            for row in rows:
+                if explicit_replan or row["cache_key"] != cache_key:
+                    reason = (
+                        "EXPLICIT_REPLAN"
+                        if explicit_replan
+                        else self._plan_invalidation_reason(row, identity)
+                    )
+                    db.execute(
+                        "UPDATE teaching_plan_versions SET status='INVALIDATED',"
+                        "invalidated_reason=?,"
+                        "invalidated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
+                        (reason, row["id"]),
+                    )
+                else:
+                    return cast(sqlite3.Row, row)
+        return None
+
+    def invalidate_plan(self, plan_id: str, reason: str) -> None:
+        with self.db.connect() as db:
+            db.execute(
+                "UPDATE teaching_plan_versions SET status='INVALIDATED',"
+                "invalidated_reason=?,"
+                "invalidated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                "WHERE id=? AND status='ACTIVE'",
+                (reason, plan_id),
+            )
+
+    def save_plan(
+        self,
+        *,
+        workspace: sqlite3.Row,
+        journey: sqlite3.Row,
+        request: TeachInput,
+        plan: TeachingPlan,
+        run: dict[str, Any],
+        preference: dict[str, Any],
+        identity: dict[str, Any],
+        cache_key: str,
+        input_hash: str,
+    ) -> sqlite3.Row:
+        plan_id = identifier()
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            current_revision = db.execute(
+                "SELECT revision FROM learning_workspaces WHERE id=?", (workspace["id"],)
+            ).fetchone()
+            if current_revision is None or current_revision["revision"] != request.revision + 1:
+                raise ApiError(
+                    409,
+                    "REVISION_CONFLICT",
+                    "The workspace changed before the teaching plan could be saved.",
+                )
+            version = int(
+                db.execute(
+                    "SELECT COALESCE(MAX(version),0)+1 FROM teaching_plan_versions "
+                    "WHERE journey_id=?",
+                    (journey["id"],),
+                ).fetchone()[0]
+            )
+            db.execute(
+                "INSERT INTO teaching_plan_versions("
+                "id,workspace_id,owner_user_id,course_id,journey_id,node_id,spec_version,"
+                "version,case_type,preference_version,preference_hash,template_version,"
+                "schema_version,model_id,protocol,source_version_ids_json,bridge_id,"
+                "bridge_revision,cache_key,input_hash,plan_json,planner_operation_id,"
+                "provider_usage_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    plan_id,
+                    workspace["id"],
+                    workspace["owner_user_id"],
+                    workspace["course_id"],
+                    journey["id"],
+                    journey["node_id"],
+                    journey["spec_version"],
+                    version,
+                    plan.case_type,
+                    preference["version"],
+                    preference["preference_hash"],
+                    TEMPLATE_VERSION,
+                    plan.schema_version,
+                    self.provider.cache_model,
+                    self.provider.cache_protocol,
+                    encode(identity["source_version_ids"]),
+                    identity["bridge_id"],
+                    identity["bridge_revision"],
+                    cache_key,
+                    input_hash,
+                    encode(plan.model_dump()),
+                    request.operation_id,
+                    encode(run),
+                ),
+            )
+            for ordinal, unit in enumerate(plan.units):
+                db.execute(
+                    "INSERT INTO teaching_plan_units("
+                    "plan_version_id,unit_key,ordinal,target_item_ids_json,content_json) "
+                    "VALUES(?,?,?,?,?)",
+                    (
+                        plan_id,
+                        unit.unit_key,
+                        ordinal,
+                        encode(unit.target_item_ids),
+                        encode(unit.model_dump()),
+                    ),
+                )
+            row = db.execute(
+                "SELECT * FROM teaching_plan_versions WHERE id=?", (plan_id,)
+            ).fetchone()
+        return cast(sqlite3.Row, row)
+
+    def resolve_plan(
+        self,
+        *,
+        workspace: sqlite3.Row,
+        journey: sqlite3.Row,
+        node: dict[str, Any],
+        request: TeachInput,
+        items: list[TeachingItem],
+        eligible: list[TeachingItem],
+        evidence: list[dict[str, Any]],
+        bridge: sqlite3.Row | None,
+        planner_context: dict[str, Any],
+    ) -> tuple[sqlite3.Row, TeachingPlan, bool]:
+        preference = self.preference_version(
+            workspace["id"], request.preference, request.language
+        )
+        source_version_ids = sorted(
+            {
+                f"{item['document_version_id']}:{item['document_version']}"
+                for item in evidence
+            }
+        )
+        identity = {
+            "owner_user_id": workspace["owner_user_id"],
+            "workspace_id": workspace["id"],
+            "course_id": workspace["course_id"],
+            "node_id": node["id"],
+            "spec_version": journey["spec_version"],
+            "spec_hash": node["spec_hash"],
+            "preference_version": preference["version"],
+            "preference_hash": preference["preference_hash"],
+            "template_version": TEMPLATE_VERSION,
+            "schema_version": "v3.2",
+            "model_id": self.provider.cache_model,
+            "protocol": self.provider.cache_protocol,
+            "course_policy_version": planner_context["course_policy"]["version"],
+            "source_version_ids": source_version_ids,
+            "bridge_id": bridge["id"] if bridge is not None else None,
+            "bridge_revision": bridge["revision"] if bridge is not None else None,
+        }
+        cache_key = self._hash(identity)
+        input_hash = self._hash(
+            {
+                "identity": identity,
+                "eligible": [item.model_dump() for item in eligible],
+            }
+        )
+        expected_case = "CASE_B" if request.preference.strip() else "CASE_A"
+        cached = self.cached_plan(
+            workspace_id=workspace["id"],
+            node_id=node["id"],
+            journey_id=journey["id"],
+            identity=identity,
+            cache_key=cache_key,
+            explicit_replan=request.replan,
+        )
+        if cached is not None:
+            try:
+                plan = TeachingPlan.model_validate_json(cached["plan_json"])
+                item_by_id = {item.item_id: item for item in items}
+                planned_item_ids = {
+                    item_id for unit in plan.units for item_id in unit.target_item_ids
+                }
+                if not planned_item_ids <= item_by_id.keys():
+                    raise ValueError("Cached plan references a retired Teaching Item")
+                validate_plan(
+                    plan,
+                    node_id=node["id"],
+                    spec_version=journey["spec_version"],
+                    eligible=[item_by_id[item_id] for item_id in planned_item_ids],
+                    evidence_ids=[item["id"] for item in evidence],
+                    bridge_id=request.bridge_id,
+                    expected_case=expected_case,
+                )
+                with self.db.connect() as db:
+                    delivered = {
+                        row[0]
+                        for row in db.execute(
+                            "SELECT plan_unit_key FROM teaching_unit_plan_links "
+                            "WHERE plan_version_id=?",
+                            (cached["id"],),
+                        )
+                    }
+                pending_items = {
+                    item_id
+                    for unit in plan.units
+                    if unit.unit_key not in delivered
+                    for item_id in unit.target_item_ids
+                }
+                if pending_items != {item.item_id for item in eligible}:
+                    raise ValueError("Cached plan does not match remaining REQUIRED scope")
+                return cached, plan, True
+            except ValueError:
+                self.invalidate_plan(cached["id"], "CACHE_REVALIDATION_FAILED")
+        plan, run = self.generate(
+            workspace["id"],
+            request.operation_id,
+            TeachingPlan,
+            instructions=template("planner"),
+            context=planner_context,
+            role="planner",
+            template_version=TEMPLATE_VERSION,
+            schema_version="v3.2",
+        )
+        validate_plan(
+            plan,
+            node_id=node["id"],
+            spec_version=journey["spec_version"],
+            eligible=eligible,
+            evidence_ids=[item["id"] for item in evidence],
+            bridge_id=request.bridge_id,
+            expected_case=expected_case,
+        )
+        stored = self.save_plan(
+            workspace=workspace,
+            journey=journey,
+            request=request,
+            plan=plan,
+            run=run,
+            preference=preference,
+            identity=identity,
+            cache_key=cache_key,
+            input_hash=input_hash,
+        )
+        return stored, plan, False
 
     def solve(self, workspace_id: str, owner: str, request: SolveInput) -> dict[str, Any]:
         def prepare(workspace: sqlite3.Row) -> Any:
@@ -499,7 +859,9 @@ class LearningOrchestrator:
                     422, "ATOMIC_REQUIRED", "Solution steps must reference atomic knowledge."
                 )
             evidence = self.evidence(workspace, request.question, request.scope)
-            output, run = self.provider.generate(
+            output, _run = self.generate(
+                workspace_id,
+                request.operation_id,
                 ProblemSolutionOutput,
                 instructions=(
                     "Give the full solution immediately, exam answer and all steps. Each step "
@@ -511,8 +873,9 @@ class LearningOrchestrator:
                 ),
                 context={"question": request.question, "nodes": nodes, "evidence": evidence},
                 role="problem",
+                template_version="problem-inline-v1",
+                schema_version="ProblemSolutionOutput:v1",
             )
-            self.record_run(workspace_id, request.operation_id, run)
             allowed = {e["id"] for e in evidence}
             if any(
                 k.node_id not in request.node_ids for s in output.steps for k in s.knowledge_links
@@ -695,7 +1058,10 @@ class LearningOrchestrator:
                 covered = {
                     r[0]
                     for r in db.execute(
-                        "SELECT item_id FROM learning_coverage WHERE journey_id=?", (journey["id"],)
+                        "SELECT DISTINCT item_id FROM teaching_delivery_evidence "
+                        "WHERE journey_id=? AND validation_status IN "
+                        "('VALIDATED','LEGACY_PRESERVED')",
+                        (journey["id"],),
                     )
                 }
                 bridge = (
@@ -726,61 +1092,147 @@ class LearningOrchestrator:
             context = {
                 "node_id": node["id"],
                 "knowledge_node": node,
+                "teaching_spec_version": journey["spec_version"],
                 "spec_version": journey["spec_version"],
+                "required_items": [
+                    item.model_dump() for item in items if item.requirement == "REQUIRED"
+                ],
+                "recommended_items": [
+                    item.model_dump() for item in items if item.requirement == "RECOMMENDED"
+                ],
+                "optional_items": [
+                    item.model_dump() for item in items if item.requirement == "OPTIONAL"
+                ],
                 "eligible": [i.model_dump() for i in eligible],
                 "covered_item_ids": sorted(covered),
                 "preference": request.preference,
                 "language": request.language,
+                "major_policy": node["major"],
+                "course_policy": course_policy(workspace["course_id"]).model_dump(),
+                "learning_cursor": json.loads(workspace["cursor_json"]),
                 "evidence": evidence,
                 "bridge_id": request.bridge_id,
                 "bridge": bridge_data,
                 "output_budget": self.settings.v3_max_output_tokens,
             }
-            plan, run = self.provider.generate(
-                TeachingPlan, instructions=template("planner"), context=context, role="planner"
-            )
-            self.record_run(workspace_id, request.operation_id, run)
-            validate_plan(
-                plan,
-                node_id=node["id"],
-                spec_version=journey["spec_version"],
+            plan_row, plan, plan_reused = self.resolve_plan(
+                workspace=workspace,
+                journey=journey,
+                node=node,
+                request=request,
+                items=items,
                 eligible=eligible,
-                evidence_ids=[e["id"] for e in evidence],
-                bridge_id=request.bridge_id,
+                evidence=evidence,
+                bridge=bridge,
+                planner_context=context,
             )
-            if (
-                plan.case != ("CASE_B" if request.preference else "CASE_A")
-                or plan.stop_condition != "UNIT_COMPLETE"
-            ):
-                raise ValueError(
-                    "Planner cannot change input case or continue despite missing evidence"
+            with self.db.connect() as db:
+                delivered = {
+                    row[0]
+                    for row in db.execute(
+                        "SELECT plan_unit_key FROM teaching_unit_plan_links "
+                        "WHERE plan_version_id=?",
+                        (plan_row["id"],),
+                    )
+                }
+            unit_plan = next(
+                (unit for unit in plan.units if unit.unit_key not in delivered), None
+            )
+            if unit_plan is None:
+                raise ApiError(409, "SCOPE_COMPLETE", "The saved teaching plan is complete.")
+            if unit_plan.stop_condition == "MISSING_EVIDENCE":
+                raise ApiError(
+                    409,
+                    "MISSING_EVIDENCE",
+                    "The saved plan identifies missing evidence; no teaching completion "
+                    "was generated.",
                 )
+            selected_evidence_ids = set(unit_plan.selected_evidence_ids)
+            selected_evidence = [
+                item for item in evidence if item["id"] in selected_evidence_ids
+            ]
+            unit_context = {**context, "evidence": selected_evidence}
             instructions, compiled = compile_unit(
                 major=node["major"],
                 plan=plan,
-                items=[i for i in items if i.item_id in plan.target_item_ids],
-                context=context,
+                unit_plan=unit_plan,
+                items=[i for i in items if i.item_id in unit_plan.target_item_ids],
+                context=unit_context,
             )
             anchor = bridge_data["return_anchor"] if bridge_data else None
-            unit, run = self.provider.generate(
+            unit, _run = self.generate(
+                workspace_id,
+                request.operation_id,
                 TeachingUnitOutput,
                 instructions=instructions,
                 context={
                     "compiled": json.loads(compiled),
                     "plan": plan.model_dump(),
+                    "plan_unit": unit_plan.model_dump(),
                     "return_anchor": anchor,
                 },
                 role="teacher",
+                template_version=TEMPLATE_VERSION,
+                schema_version="v3.2",
             )
-            self.record_run(workspace_id, request.operation_id, run)
-            validate_unit(unit, plan=plan, node_ids={node["id"]}, return_anchor=anchor)
-            return journey["id"], node, items, plan, unit, evidence, context
+            validate_unit(
+                unit,
+                plan=plan,
+                unit_plan=unit_plan,
+                node_ids={node["id"]},
+                return_anchor=anchor,
+            )
+            return (
+                journey["id"],
+                node,
+                items,
+                plan_row,
+                plan,
+                unit_plan,
+                unit,
+                selected_evidence,
+                plan_reused,
+            )
 
         def save(db: sqlite3.Connection, workspace: sqlite3.Row, data: Any) -> dict[str, Any]:
-            journey_id, node, items, plan, unit, evidence, context = data
+            (
+                journey_id,
+                node,
+                items,
+                plan_row,
+                plan,
+                unit_plan,
+                unit,
+                evidence,
+                plan_reused,
+            ) = data
             self.node(workspace, node["id"])
             self.check_evidence(workspace, {e["id"] for e in evidence})
+            current_plan = db.execute(
+                "SELECT status,journey_id FROM teaching_plan_versions WHERE id=?",
+                (plan_row["id"],),
+            ).fetchone()
+            if (
+                current_plan is None
+                or current_plan["status"] != "ACTIVE"
+                or current_plan["journey_id"] != journey_id
+                or db.execute(
+                    "SELECT 1 FROM teaching_unit_plan_links WHERE plan_version_id=? "
+                    "AND plan_unit_key=?",
+                    (plan_row["id"], unit_plan.unit_key),
+                ).fetchone()
+            ):
+                raise ApiError(
+                    409,
+                    "PLAN_CONFLICT",
+                    "The teaching plan changed before this unit could be saved.",
+                )
             unit_id = identifier()
+            policy = course_policy(workspace["course_id"])
+            saved_unit = {
+                **unit.model_dump(),
+                "display": {"question_prefix": policy.question_prefix},
+            }
             db.execute(
                 "INSERT INTO "
                 "teaching_units(id,journey_id,operation_id,workflow,content_json,"
@@ -789,23 +1241,56 @@ class LearningOrchestrator:
                     unit_id,
                     journey_id,
                     request.operation_id,
-                    encode(unit.model_dump()),
+                    encode(saved_unit),
                     encode(plan.model_dump()),
                     encode(
                         {
                             "prompt_version": TEMPLATE_VERSION,
+                            "schema_version": plan.schema_version,
                             "spec_hash": node["spec_hash"],
-                            "model": self.provider.model,
+                            "model": self.provider.cache_model,
                             "evidence_ids": [e["id"] for e in evidence],
-                            "preference": request.preference,
+                            "preference_version": plan_row["preference_version"],
+                            "preference_hash": plan_row["preference_hash"],
                             "language": request.language,
+                            "plan_version_id": plan_row["id"],
+                            "plan_unit_key": unit_plan.unit_key,
+                            "course_policy_version": policy.version,
                         }
                     ),
                 ),
             )
+            db.execute(
+                "INSERT INTO teaching_unit_plan_links("
+                "teaching_unit_id,plan_version_id,plan_unit_key) VALUES(?,?,?)",
+                (unit_id, plan_row["id"], unit_plan.unit_key),
+            )
+            sections = {section.section_id: section for section in unit.sections}
             for proposal in unit.coverage_proposals:
+                for section_id in proposal.section_ids:
+                    section_hash = self._hash(sections[section_id].model_dump())
+                    db.execute(
+                        "INSERT INTO teaching_delivery_evidence("
+                        "id,journey_id,node_id,spec_version,item_id,teaching_unit_id,"
+                        "section_id,plan_version_id,plan_unit_key,content_hash,"
+                        "validation_status,validation_reason) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,'VALIDATED',"
+                        "'SERVER_SCHEMA_SCOPE_AND_PERSISTENCE_V1')",
+                        (
+                            identifier(),
+                            journey_id,
+                            node["id"],
+                            plan.spec_version,
+                            proposal.item_id,
+                            unit_id,
+                            section_id,
+                            plan_row["id"],
+                            unit_plan.unit_key,
+                            section_hash,
+                        ),
+                    )
                 db.execute(
-                    "INSERT INTO "
+                    "INSERT OR IGNORE INTO "
                     "learning_coverage(journey_id,item_id,unit_id,section_ids_json) "
                     "VALUES(?,?,?,?)",
                     (journey_id, proposal.item_id, unit_id, encode(proposal.section_ids)),
@@ -813,15 +1298,31 @@ class LearningOrchestrator:
             covered = {
                 r[0]
                 for r in db.execute(
-                    "SELECT item_id FROM learning_coverage WHERE journey_id=?", (journey_id,)
+                    "SELECT DISTINCT item_id FROM teaching_delivery_evidence "
+                    "WHERE journey_id=? AND validation_status IN "
+                    "('VALIDATED','LEGACY_PRESERVED')",
+                    (journey_id,),
                 )
             }
             required = {i.item_id for i in items if i.requirement == "REQUIRED"}
             progress = "LEARNED" if required <= covered else "LEARNING"
             db.execute("UPDATE learning_journeys SET status=? WHERE id=?", (progress, journey_id))
+            pending_plan_units = db.execute(
+                "SELECT COUNT(*) FROM teaching_plan_units AS plan_unit "
+                "WHERE plan_unit.plan_version_id=? AND NOT EXISTS("
+                "SELECT 1 FROM teaching_unit_plan_links AS link "
+                "WHERE link.plan_version_id=plan_unit.plan_version_id "
+                "AND link.plan_unit_key=plan_unit.unit_key)",
+                (plan_row["id"],),
+            ).fetchone()[0]
+            if pending_plan_units == 0:
+                db.execute(
+                    "UPDATE teaching_plan_versions SET status='COMPLETED' WHERE id=?",
+                    (plan_row["id"],),
+                )
             if request.bridge_id:
                 db.execute(
-                    "UPDATE learning_bridges SET status=?,revision=revision+1 WHERE id=? AND "
+                    "UPDATE learning_bridges SET status=? WHERE id=? AND "
                     "workspace_id=?",
                     (
                         "READY_TO_RETURN" if progress == "LEARNED" else "LEARNING",
@@ -845,12 +1346,16 @@ class LearningOrchestrator:
                 {"node_id": node["id"], "progress": progress},
             )
             return {
-                **unit.model_dump(),
+                **saved_unit,
                 "id": unit_id,
                 "journey_id": journey_id,
                 "progress": progress,
                 "grade": "NOT_ASSESSED",
                 "evidence_ids": [e["id"] for e in evidence],
+                "plan_version_id": plan_row["id"],
+                "plan_version": plan_row["version"],
+                "plan_unit_key": unit_plan.unit_key,
+                "plan_reused": plan_reused,
             }
 
         return self.operate(workspace_id, owner, request, "unit", prepare, save)
