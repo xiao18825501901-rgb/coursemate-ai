@@ -34,6 +34,7 @@ from app.learning.models import (
     TeachingUnitOutput,
     TeachInput,
 )
+from app.learning.plans import TeachingPlanRepository
 from app.learning.provider import LearningProvider, ProviderCallFailure
 from app.learning.workspaces import document_version_for, workspace_for
 from app.rag.retrieval import HybridRetriever
@@ -58,6 +59,7 @@ class LearningOrchestrator:
         self.retriever = retriever
         self.provider = LearningProvider(settings)
         self.knowledge = KnowledgeService(database)
+        self.plans = TeachingPlanRepository(database)
 
     def node(self, workspace: sqlite3.Row, node_id: str) -> dict[str, Any]:
         with self.db.connect() as db:
@@ -544,52 +546,7 @@ class LearningOrchestrator:
         self, workspace_id: str, preference: str, language: str
     ) -> dict[str, Any]:
         payload = {"preference": preference.strip(), "language": language}
-        preference_hash = self._hash(payload)
-        with self.db.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            row = db.execute(
-                "SELECT * FROM learning_preference_versions "
-                "WHERE workspace_id=? AND preference_hash=?",
-                (workspace_id, preference_hash),
-            ).fetchone()
-            if row is None:
-                version = int(
-                    db.execute(
-                        "SELECT COALESCE(MAX(version),0)+1 FROM learning_preference_versions "
-                        "WHERE workspace_id=?",
-                        (workspace_id,),
-                    ).fetchone()[0]
-                )
-                db.execute(
-                    "INSERT INTO learning_preference_versions("
-                    "workspace_id,version,preference_hash,preference_json) VALUES(?,?,?,?)",
-                    (workspace_id, version, preference_hash, encode(payload)),
-                )
-                row = db.execute(
-                    "SELECT * FROM learning_preference_versions "
-                    "WHERE workspace_id=? AND version=?",
-                    (workspace_id, version),
-                ).fetchone()
-        return dict(cast(sqlite3.Row, row))
-
-    @staticmethod
-    def _plan_invalidation_reason(row: sqlite3.Row, identity: dict[str, Any]) -> str:
-        if row["preference_hash"] != identity["preference_hash"]:
-            return "PREFERENCE_CHANGED"
-        if json.loads(row["source_version_ids_json"]) != identity["source_version_ids"]:
-            return "SOURCE_SET_CHANGED"
-        if row["bridge_id"] != identity["bridge_id"] or row["bridge_revision"] != identity[
-            "bridge_revision"
-        ]:
-            return "BRIDGE_CHANGED"
-        if (
-            row["template_version"] != identity["template_version"]
-            or row["schema_version"] != identity["schema_version"]
-            or row["model_id"] != identity["model_id"]
-            or row["protocol"] != identity["protocol"]
-        ):
-            return "RUNTIME_CHANGED"
-        return "PLAN_INPUT_CHANGED"
+        return self.plans.preference_version(workspace_id, self._hash(payload), payload)
 
     def cached_plan(
         self,
@@ -601,46 +558,17 @@ class LearningOrchestrator:
         cache_key: str,
         explicit_replan: bool,
     ) -> sqlite3.Row | None:
-        with self.db.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            db.execute(
-                "UPDATE teaching_plan_versions SET status='INVALIDATED',"
-                "invalidated_reason='SPEC_UPDATED',"
-                "invalidated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
-                "WHERE workspace_id=? AND node_id=? AND journey_id!=? AND status='ACTIVE'",
-                (workspace_id, node_id, journey_id),
-            )
-            rows = db.execute(
-                "SELECT * FROM teaching_plan_versions WHERE workspace_id=? AND node_id=? "
-                "AND journey_id=? AND status='ACTIVE' ORDER BY version DESC",
-                (workspace_id, node_id, journey_id),
-            ).fetchall()
-            for row in rows:
-                if explicit_replan or row["cache_key"] != cache_key:
-                    reason = (
-                        "EXPLICIT_REPLAN"
-                        if explicit_replan
-                        else self._plan_invalidation_reason(row, identity)
-                    )
-                    db.execute(
-                        "UPDATE teaching_plan_versions SET status='INVALIDATED',"
-                        "invalidated_reason=?,"
-                        "invalidated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
-                        (reason, row["id"]),
-                    )
-                else:
-                    return cast(sqlite3.Row, row)
-        return None
+        return self.plans.cached_plan(
+            workspace_id=workspace_id,
+            node_id=node_id,
+            journey_id=journey_id,
+            identity=identity,
+            cache_key=cache_key,
+            explicit_replan=explicit_replan,
+        )
 
     def invalidate_plan(self, plan_id: str, reason: str) -> None:
-        with self.db.connect() as db:
-            db.execute(
-                "UPDATE teaching_plan_versions SET status='INVALIDATED',"
-                "invalidated_reason=?,"
-                "invalidated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
-                "WHERE id=? AND status='ACTIVE'",
-                (reason, plan_id),
-            )
+        self.plans.invalidate(plan_id, reason)
 
     def save_plan(
         self,
@@ -655,75 +583,21 @@ class LearningOrchestrator:
         cache_key: str,
         input_hash: str,
     ) -> sqlite3.Row:
-        plan_id = identifier()
-        with self.db.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            current_revision = db.execute(
-                "SELECT revision FROM learning_workspaces WHERE id=?", (workspace["id"],)
-            ).fetchone()
-            if current_revision is None or current_revision["revision"] != request.revision + 1:
-                raise ApiError(
-                    409,
-                    "REVISION_CONFLICT",
-                    "The workspace changed before the teaching plan could be saved.",
-                )
-            version = int(
-                db.execute(
-                    "SELECT COALESCE(MAX(version),0)+1 FROM teaching_plan_versions "
-                    "WHERE journey_id=?",
-                    (journey["id"],),
-                ).fetchone()[0]
-            )
-            db.execute(
-                "INSERT INTO teaching_plan_versions("
-                "id,workspace_id,owner_user_id,course_id,journey_id,node_id,spec_version,"
-                "version,case_type,preference_version,preference_hash,template_version,"
-                "schema_version,model_id,protocol,source_version_ids_json,bridge_id,"
-                "bridge_revision,cache_key,input_hash,plan_json,planner_operation_id,"
-                "provider_usage_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (
-                    plan_id,
-                    workspace["id"],
-                    workspace["owner_user_id"],
-                    workspace["course_id"],
-                    journey["id"],
-                    journey["node_id"],
-                    journey["spec_version"],
-                    version,
-                    plan.case_type,
-                    preference["version"],
-                    preference["preference_hash"],
-                    TEMPLATE_VERSION,
-                    plan.schema_version,
-                    self.provider.cache_model,
-                    self.provider.cache_protocol,
-                    encode(identity["source_version_ids"]),
-                    identity["bridge_id"],
-                    identity["bridge_revision"],
-                    cache_key,
-                    input_hash,
-                    encode(plan.model_dump()),
-                    request.operation_id,
-                    encode(run),
-                ),
-            )
-            for ordinal, unit in enumerate(plan.units):
-                db.execute(
-                    "INSERT INTO teaching_plan_units("
-                    "plan_version_id,unit_key,ordinal,target_item_ids_json,content_json) "
-                    "VALUES(?,?,?,?,?)",
-                    (
-                        plan_id,
-                        unit.unit_key,
-                        ordinal,
-                        encode(unit.target_item_ids),
-                        encode(unit.model_dump()),
-                    ),
-                )
-            row = db.execute(
-                "SELECT * FROM teaching_plan_versions WHERE id=?", (plan_id,)
-            ).fetchone()
-        return cast(sqlite3.Row, row)
+        return self.plans.save(
+            workspace=workspace,
+            journey=journey,
+            request_revision=request.revision,
+            operation_id=request.operation_id,
+            plan=plan,
+            run=run,
+            preference=preference,
+            identity=identity,
+            cache_key=cache_key,
+            input_hash=input_hash,
+            template_version=TEMPLATE_VERSION,
+            model_id=self.provider.cache_model,
+            protocol=self.provider.cache_protocol,
+        )
 
     def resolve_plan(
         self,
@@ -799,15 +673,7 @@ class LearningOrchestrator:
                     bridge_id=request.bridge_id,
                     expected_case=expected_case,
                 )
-                with self.db.connect() as db:
-                    delivered = {
-                        row[0]
-                        for row in db.execute(
-                            "SELECT plan_unit_key FROM teaching_unit_plan_links "
-                            "WHERE plan_version_id=?",
-                            (cached["id"],),
-                        )
-                    }
+                delivered = self.plans.delivered_unit_keys(cached["id"])
                 pending_items = {
                     item_id
                     for unit in plan.units
@@ -1126,15 +992,7 @@ class LearningOrchestrator:
                 bridge=bridge,
                 planner_context=context,
             )
-            with self.db.connect() as db:
-                delivered = {
-                    row[0]
-                    for row in db.execute(
-                        "SELECT plan_unit_key FROM teaching_unit_plan_links "
-                        "WHERE plan_version_id=?",
-                        (plan_row["id"],),
-                    )
-                }
+            delivered = self.plans.delivered_unit_keys(plan_row["id"])
             unit_plan = next(
                 (unit for unit in plan.units if unit.unit_key not in delivered), None
             )
@@ -1307,19 +1165,7 @@ class LearningOrchestrator:
             required = {i.item_id for i in items if i.requirement == "REQUIRED"}
             progress = "LEARNED" if required <= covered else "LEARNING"
             db.execute("UPDATE learning_journeys SET status=? WHERE id=?", (progress, journey_id))
-            pending_plan_units = db.execute(
-                "SELECT COUNT(*) FROM teaching_plan_units AS plan_unit "
-                "WHERE plan_unit.plan_version_id=? AND NOT EXISTS("
-                "SELECT 1 FROM teaching_unit_plan_links AS link "
-                "WHERE link.plan_version_id=plan_unit.plan_version_id "
-                "AND link.plan_unit_key=plan_unit.unit_key)",
-                (plan_row["id"],),
-            ).fetchone()[0]
-            if pending_plan_units == 0:
-                db.execute(
-                    "UPDATE teaching_plan_versions SET status='COMPLETED' WHERE id=?",
-                    (plan_row["id"],),
-                )
+            self.plans.complete_if_delivered(db, plan_row["id"])
             if request.bridge_id:
                 db.execute(
                     "UPDATE learning_bridges SET status=? WHERE id=? AND "
