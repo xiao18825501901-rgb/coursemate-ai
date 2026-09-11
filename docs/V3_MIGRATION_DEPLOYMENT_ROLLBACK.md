@@ -1,5 +1,7 @@
 # V3 Migration / Rollback boundaries
 
+> 历史说明（2026-09-12）：新版主规格现已收到。本文件保留旧规格下的早期迁移边界；当前迁移与恢复契约见 [v3/MIGRATION_AND_ROLLBACK.md](v3/MIGRATION_AND_ROLLBACK.md)。本文件不再单独授权实施。
+
 本轮只迁移隔离测试库/副本，不迁移当前真实资料库，不执行生产写入。V3 仅新增表，旧课程、文档、chunks、向量、会话与 Task DB 不重建、不重嵌入。
 
 迁移门禁：SQLite online backup → 新隔离目录 → 使用新代码初始化两次 → 核对旧行/内容摘要、integrity/FKs、版本与新增约束 → 跑 A/B/Admin 隔离与闭环 → 保留可回滚快照。不得对未知服务器 git pull 当部署。

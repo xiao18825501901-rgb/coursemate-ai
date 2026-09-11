@@ -1,5 +1,7 @@
 # V3 基线与需求追踪（持续更新，不是完成声明）
 
+> 历史说明（2026-09-12）：本文件记录上一版规格下的基线和目标映射。新版主规格现已收到并成为当前依据；当前状态与规范矩阵见 [v3/REQUIREMENTS_AND_TRACEABILITY.md](v3/REQUIREMENTS_AND_TRACEABILITY.md)，切换差异见 [V3_SPEC_REALIGNMENT.md](V3_SPEC_REALIGNMENT.md)。本文件不再单独授权实施。
+
 ## Stage 0 / 2026-09-12
 
 - 输入：完整读取 Owner 的 `COURSEMATE_V3_CODEX_IMPLEMENTATION_PROMPT.md`，621 行；该规格与本次消息共同为实施契约。Q1–Q10 不重议，SG 为工程默认而非逐项用户确认。

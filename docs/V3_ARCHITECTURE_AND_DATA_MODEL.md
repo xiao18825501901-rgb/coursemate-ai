@@ -1,5 +1,7 @@
 # V3 Architecture / 增量决定
 
+> 历史说明（2026-09-12）：新版主规格现已收到。本文件保留旧规格下的早期架构决定；当前架构、状态机与数据责任见 [v3/ARCHITECTURE_AND_STATE_MACHINES.md](v3/ARCHITECTURE_AND_STATE_MACHINES.md)。本文件不再单独授权实施。
+
 ## 决定与边界
 
 保留 FastAPI 单一学习状态所有者；Node Task Agent 不存成绩，不改其任务工具。HTTP 身份来自现有 Clerk verifier；模型只是提案。新增 `app/learning` 模块，不新建服务。

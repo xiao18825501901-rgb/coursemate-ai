@@ -1,5 +1,7 @@
 # V3 Self-Grill 决策记录
 
+> 历史说明（2026-09-12）：新版主规格现已收到。本文件保留旧规格下的早期决策记录；当前分类、反例、规则与验收见 [v3/SELF_GRILL_DECISIONS.md](v3/SELF_GRILL_DECISIONS.md)。本文件不再单独授权实施。
+
 不是逐条用户确认，不是无漏洞认证。采用规格 SG01–24；Q1–10 保持不变。
 
 2026-09-12：本地未发现 grill-me/grilling；读取固定 commit `3cca18b368ae95cdbdebbff572ccafa662551015` 的 [grilling 入口](https://github.com/mattpocock/skills/blob/3cca18b368ae95cdbdebbff572ccafa662551015/skills/productivity/grilling/SKILL.md)。按用户要求用自审/反例测试替代重新访谈，不安装脚本。
