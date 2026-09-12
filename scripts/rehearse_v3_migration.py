@@ -142,6 +142,110 @@ def rehearse(source: Path, target: Path) -> dict[str, object]:
                 "WHERE NOT EXISTS(SELECT 1 FROM learning_bridge_contexts AS context "
                 "WHERE context.bridge_id=bridge.id)"
             ).fetchone()[0],
+            "assessment_question_revisions": copied.execute(
+                "SELECT COUNT(*) FROM assessment_question_revisions"
+            ).fetchone()[0],
+            "assessment_rubric_criteria": copied.execute(
+                "SELECT COUNT(*) FROM assessment_rubric_criteria"
+            ).fetchone()[0],
+            "assessment_blueprint_versions": copied.execute(
+                "SELECT COUNT(*) FROM assessment_blueprint_versions"
+            ).fetchone()[0],
+            "assessment_blueprint_items": copied.execute(
+                "SELECT COUNT(*) FROM assessment_blueprint_items"
+            ).fetchone()[0],
+            "assessment_sessions": copied.execute(
+                "SELECT COUNT(*) FROM assessment_sessions"
+            ).fetchone()[0],
+            "assessment_question_attempts": copied.execute(
+                "SELECT COUNT(*) FROM assessment_question_attempts"
+            ).fetchone()[0],
+            "assessment_exposure_events": copied.execute(
+                "SELECT COUNT(*) FROM assessment_exposure_events"
+            ).fetchone()[0],
+            "performance_evidence": copied.execute(
+                "SELECT COUNT(*) FROM performance_evidence"
+            ).fetchone()[0],
+            "learning_replan_triggers": copied.execute(
+                "SELECT COUNT(*) FROM learning_replan_triggers"
+            ).fetchone()[0],
+            "teaching_unit_remediations": copied.execute(
+                "SELECT COUNT(*) FROM teaching_unit_remediations"
+            ).fetchone()[0],
+            "teaching_plan_performance_triggers": copied.execute(
+                "SELECT COUNT(*) FROM teaching_plan_performance_triggers"
+            ).fetchone()[0],
+            "grade_policy_versions": copied.execute(
+                "SELECT COUNT(*) FROM grade_policy_versions"
+            ).fetchone()[0],
+            "assessment_blueprint_grade_policies": copied.execute(
+                "SELECT COUNT(*) FROM assessment_blueprint_grade_policies"
+            ).fetchone()[0],
+            "grade_snapshots": copied.execute(
+                "SELECT COUNT(*) FROM grade_snapshots"
+            ).fetchone()[0],
+            "requirements_grade_policy_seed": copied.execute(
+                "SELECT COUNT(*) FROM grade_policy_versions "
+                "WHERE id='gp_requirements_draft_v1' "
+                "AND status='DRAFT_UNCONFIGURED' "
+                "AND provenance_label='Requirements draft; not an institutional policy' "
+                "AND json_array_length(raw_score_bands_json)=0 "
+                "AND json_extract(numeric_scale_json,'$[2].letter')='A-' "
+                "AND json_type(numeric_scale_json,'$[2].numeric_value')='null'"
+            ).fetchone()[0],
+            "invalid_frozen_assessment_blueprints": copied.execute(
+                "SELECT COUNT(*) FROM assessment_blueprint_versions AS blueprint "
+                "WHERE blueprint.status IN ('FROZEN','RETIRED') AND ("
+                "(SELECT COUNT(*) FROM assessment_blueprint_items AS item "
+                " WHERE item.blueprint_id=blueprint.id)!=5 OR "
+                "(SELECT COALESCE(SUM(item.marks),0) "
+                " FROM assessment_blueprint_items AS item "
+                " WHERE item.blueprint_id=blueprint.id)!=100 OR "
+                "(SELECT MIN(item.marks) FROM assessment_blueprint_items AS item "
+                " WHERE item.blueprint_id=blueprint.id)="
+                "(SELECT MAX(item.marks) FROM assessment_blueprint_items AS item "
+                " WHERE item.blueprint_id=blueprint.id))"
+            ).fetchone()[0],
+            "assessment_sessions_without_five_attempts": copied.execute(
+                "SELECT COUNT(*) FROM assessment_sessions AS session "
+                "WHERE (SELECT COUNT(*) FROM assessment_question_attempts AS attempt "
+                "WHERE attempt.session_id=session.id)!=5"
+            ).fetchone()[0],
+            "frozen_blueprints_without_grade_policy": copied.execute(
+                "SELECT COUNT(*) FROM assessment_blueprint_versions AS blueprint "
+                "WHERE blueprint.status IN ('FROZEN','RETIRED') "
+                "AND NOT EXISTS(SELECT 1 FROM assessment_blueprint_grade_policies AS policy "
+                "WHERE policy.blueprint_id=blueprint.id)"
+            ).fetchone()[0],
+            "invalid_assessment_policy_bindings": copied.execute(
+                "SELECT COUNT(*) FROM assessment_blueprint_grade_policies AS binding "
+                "JOIN grade_policy_versions AS policy "
+                "ON policy.id=binding.grade_policy_version_id WHERE "
+                "(binding.mapping_status='CONFIGURED' "
+                " AND policy.status NOT IN ('PUBLISHED','RETIRED')) OR "
+                "(binding.mapping_status='UNCONFIGURED' "
+                " AND policy.status!='DRAFT_UNCONFIGURED')"
+            ).fetchone()[0],
+            "invalid_independent_performance_evidence": copied.execute(
+                "SELECT COUNT(*) FROM performance_evidence AS evidence "
+                "JOIN assessment_sessions AS session "
+                "ON session.id=evidence.assessment_session_id "
+                "JOIN assessment_question_attempts AS attempt "
+                "ON attempt.id=evidence.question_attempt_id "
+                "WHERE evidence.independent_eligible=1 AND ("
+                "session.mode!='INDEPENDENT' OR session.assistance_status!='UNASSISTED' "
+                "OR attempt.assistance!='NONE')"
+            ).fetchone()[0],
+            "invalid_grade_snapshot_bindings": copied.execute(
+                "SELECT COUNT(*) FROM grade_snapshots AS snapshot "
+                "JOIN assessment_sessions AS session "
+                "ON session.id=snapshot.assessment_session_id "
+                "LEFT JOIN assessment_blueprint_grade_policies AS binding "
+                "ON binding.blueprint_id=session.blueprint_id "
+                "WHERE binding.blueprint_id IS NULL "
+                "OR binding.grade_policy_version_id!=snapshot.grade_policy_version_id "
+                "OR binding.mapping_status!=snapshot.mapping_status"
+            ).fetchone()[0],
         }
     invariants_ok = (
         v3_invariants["document_versions"] == v3_invariants["documents"]
@@ -152,6 +256,13 @@ def rehearse(source: Path, target: Path) -> dict[str, object]:
         and v3_invariants["solutions_without_revisions"] == 0
         and v3_invariants["legacy_step_links_without_normalized_rows"] == 0
         and v3_invariants["bridges_without_contexts"] == 0
+        and v3_invariants["requirements_grade_policy_seed"] == 1
+        and v3_invariants["invalid_frozen_assessment_blueprints"] == 0
+        and v3_invariants["assessment_sessions_without_five_attempts"] == 0
+        and v3_invariants["frozen_blueprints_without_grade_policy"] == 0
+        and v3_invariants["invalid_assessment_policy_bindings"] == 0
+        and v3_invariants["invalid_independent_performance_evidence"] == 0
+        and v3_invariants["invalid_grade_snapshot_bindings"] == 0
         and versions == list(range(1, LATEST_V3_SCHEMA_VERSION + 1))
     )
     result = {
