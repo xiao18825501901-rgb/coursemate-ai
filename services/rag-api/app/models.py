@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -324,10 +325,35 @@ class PublicationRequest(ApiModel):
     reviewed_at: datetime | None
     reviewed_by_user_id: str | None = Field(exclude=True)
     review_note: str
+    snapshot_id: str | None = None
+    snapshot_hash: str | None = None
+    resource_count: int = 0
 
 
 class PublicationRequestPage(ApiModel):
     items: list[PublicationRequest]
+
+
+class PublicationSnapshotResource(ApiModel):
+    kind: str
+    id: str
+    version: str
+    display_name: str
+    source_scope: str
+    content_hash: str
+    metadata: dict[str, Any]
+
+
+class PublicationSnapshot(ApiModel):
+    id: str
+    subject_kind: str
+    request_id: str
+    course_id: str
+    workspace_id: str | None
+    content_hash: str
+    created_at: datetime
+    summary: dict[str, Any]
+    resources: list[PublicationSnapshotResource]
 
 
 class ConversationMessage(ApiModel):

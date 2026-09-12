@@ -28,13 +28,19 @@ def require_course_access(
     if workspace is not None and workspace["owner_user_id"] != owner_user_id:
         raise ApiError(404, "COURSE_NOT_FOUND", "The course was not found.")
     allowed = row is not None and (
-        is_admin
-        or row["owner_user_id"] == owner_user_id
+        row["owner_user_id"] == owner_user_id
+        or (is_admin and row["course_type"] == "official")
         or (not write and row["visibility"] == "public")
     )
     if not allowed:
         raise ApiError(404, "COURSE_NOT_FOUND", "The course was not found.")
-    if write and not is_admin and row["publication_status"] == "published":
+    if write and row["course_type"] == "user" and row["publication_status"] == "pending":
+        raise ApiError(
+            409,
+            "PUBLICATION_REVIEW_LOCKED",
+            "Withdraw the pending review before changing its version-bound content.",
+        )
+    if write and row["course_type"] == "user" and row["publication_status"] == "published":
         raise ApiError(
             409,
             "PUBLISHED_COURSE_LOCKED",

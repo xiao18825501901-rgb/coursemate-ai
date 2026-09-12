@@ -133,8 +133,7 @@ def test_course_detail_obeys_private_visibility_policy(client: TestClient) -> No
     assert owner.status_code == 200
     assert owner.json()["isOwner"] is True
     assert other.status_code == 404
-    assert admin.status_code == 200
-    assert admin.json()["canManage"] is True
+    assert admin.status_code == 404
 
 
 def test_course_name_cannot_be_blank(client: TestClient) -> None:
@@ -291,7 +290,7 @@ def test_authentication_admin_boundary_and_shared_read_access(client: TestClient
     assert invalid.status_code == 401
 
 
-def test_private_course_is_visible_and_mutable_only_by_owner_or_admin(
+def test_private_course_is_visible_and_mutable_only_by_owner(
     client: TestClient,
 ) -> None:
     client.headers["Authorization"] = "Bearer user-token"
@@ -325,7 +324,7 @@ def test_private_course_is_visible_and_mutable_only_by_owner_or_admin(
     assert other_job.status_code == 404
 
     client.headers["Authorization"] = "Bearer admin-token"
-    assert client.get("/api/courses/private-course/documents").status_code == 200
+    assert client.get("/api/courses/private-course/documents").status_code == 404
 
 
 def test_owner_can_update_and_delete_private_course(client: TestClient) -> None:
