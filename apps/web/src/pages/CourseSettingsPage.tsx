@@ -194,8 +194,11 @@ export function CourseSettingsPage() {
       <section className="settings-panel danger-zone">
         <h2>Delete course</h2>
         <p>This removes conversations, documents, chunks, and stored uploads for this course.</p>
+        {(course?.publicationStatus === "pending" || course?.publicationStatus === "published") && (
+          <p className="privacy-notice">Withdraw the version-bound publication before deleting this course.</p>
+        )}
         <label><span className="field-label">Type {courseId} to confirm</span><input onChange={(event) => setConfirmId(event.target.value)} value={confirmId} /></label>
-        <button className="button danger-button" disabled={confirmId !== courseId} onClick={() => void deleteCourse(getToken, courseId).then(() => navigate("/courses")).catch((caught: unknown) => setError(message(caught)))} type="button">Delete course permanently</button>
+        <button className="button danger-button" disabled={confirmId !== courseId || course?.publicationStatus === "pending" || course?.publicationStatus === "published"} onClick={() => void deleteCourse(getToken, courseId).then(() => navigate("/courses")).catch((caught: unknown) => setError(message(caught)))} type="button">Delete course permanently</button>
       </section>
     </div>
     <div className="form-actions"><Link className="button button-secondary" to="/courses">Back to courses</Link><Link className="button button-primary" to={`/qa/${courseId}`}>Open tutor</Link></div>

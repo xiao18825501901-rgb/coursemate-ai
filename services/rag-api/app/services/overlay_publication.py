@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from app.db import Database
 from app.errors import ApiError
+from app.learning.workspaces import workspace_for
 from app.models import (
     OverlayPublicationCandidates,
     OverlayPublicationRequest,
@@ -221,8 +222,11 @@ class OverlayPublicationService:
             }
         )
 
-    def current(self, workspace_id: str, *, owner_user_id: str) -> OverlayPublicationRequest:
+    def current(
+        self, workspace_id: str, *, owner_user_id: str
+    ) -> OverlayPublicationRequest | None:
         self._require_v3()
+        workspace_for(self.database, workspace_id, owner_user_id)
         with self.database.connect() as connection:
             row = connection.execute(
                 "SELECT id FROM overlay_publication_requests "
@@ -231,9 +235,7 @@ class OverlayPublicationService:
                 (workspace_id, owner_user_id),
             ).fetchone()
             request = self._select_request(connection, row["id"]) if row is not None else None
-        if request is None:
-            raise ApiError(404, "OVERLAY_PUBLICATION_NOT_FOUND", "No Overlay request was found.")
-        return self._request(request)
+        return self._request(request) if request is not None else None
 
     def owner_snapshot(
         self,

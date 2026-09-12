@@ -65,6 +65,37 @@ def create_private_course_with_document(client: TestClient) -> tuple[str, str]:
     return uploaded.json()["document"]["id"], version_id
 
 
+def test_empty_current_overlay_is_a_successful_nullable_lookup(tmp_path: Path) -> None:
+    with v3_client(tmp_path) as client:
+        with client.app.state.database.connect() as connection:
+            connection.execute(
+                "INSERT INTO courses(id,name,publication_status) "
+                "VALUES('cs3481','CS3481','published')"
+            )
+        workspace = client.post(
+            "/api/learning/workspaces",
+            json={"course_id": "cs3481"},
+            headers={"Authorization": "Bearer owner"},
+        )
+        assert workspace.status_code == 200, workspace.text
+
+        current = client.get(
+            f"/api/learning/workspaces/{workspace.json()['id']}"
+            "/overlay-publication-requests/current",
+            headers={"Authorization": "Bearer owner"},
+        )
+        foreign = client.get(
+            f"/api/learning/workspaces/{workspace.json()['id']}"
+            "/overlay-publication-requests/current",
+            headers={"Authorization": "Bearer other"},
+        )
+
+    assert current.status_code == 200
+    assert current.json() is None
+    assert foreign.status_code == 404
+    assert foreign.json()["error"]["code"] == "WORKSPACE_NOT_FOUND"
+
+
 def seed_official_tree(client: TestClient) -> None:
     created = client.post(
         "/api/courses",

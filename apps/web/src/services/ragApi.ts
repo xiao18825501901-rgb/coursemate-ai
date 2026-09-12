@@ -454,13 +454,10 @@ export async function getCurrentOverlayPublication(
   getToken: GetSessionToken,
   workspaceId: string,
 ): Promise<OverlayPublicationRequest | null> {
-  const response = await authenticatedFetch(
+  return requestJson<OverlayPublicationRequest | null>(
     getToken,
     `${RAG_API}/api/learning/workspaces/${encodeURIComponent(workspaceId)}/overlay-publication-requests/current`,
   );
-  if (response.status === 404) return null;
-  await requireOk(response);
-  return (await response.json()) as OverlayPublicationRequest;
 }
 
 export async function getCurrentOverlayPublicationSnapshot(

@@ -2,11 +2,13 @@
 import argparse
 import hashlib
 import json
+import re
 import sqlite3
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+WORK_ROOT = ROOT / "work"
 sys.path.insert(0, str(ROOT / "services/rag-api"))
 from app.config import Settings  # noqa: E402 - repository-local service bootstrap
 from app.db import LATEST_V3_SCHEMA_VERSION, Database  # noqa: E402
@@ -23,6 +25,26 @@ TABLES = (
     "rate_limit_windows",
 )
 
+GOVERNANCE_MIGRATIONS = (
+    "019_scoped_publication_reviews.sql",
+    "020_official_publication_resource_locks.sql",
+    "021_model_call_budget_reservations.sql",
+)
+SCHEMA_OBJECT = re.compile(
+    r"CREATE\s+(?:UNIQUE\s+)?(TABLE|TRIGGER|INDEX)\s+IF\s+NOT\s+EXISTS\s+"
+    r"([A-Za-z_][A-Za-z0-9_]*)",
+    re.IGNORECASE,
+)
+
+
+def expected_governance_schema_objects() -> set[tuple[str, str]]:
+    migration_root = ROOT / "services/rag-api/migrations"
+    objects: set[tuple[str, str]] = set()
+    for filename in GOVERNANCE_MIGRATIONS:
+        sql = migration_root.joinpath(filename).read_text(encoding="utf-8")
+        objects.update((kind.casefold(), name) for kind, name in SCHEMA_OBJECT.findall(sql))
+    return objects
+
 
 def fingerprints(connection: sqlite3.Connection) -> dict[str, dict[str, object]]:
     result = {}
@@ -37,7 +59,7 @@ def fingerprints(connection: sqlite3.Connection) -> dict[str, dict[str, object]]
 
 def rehearse(source: Path, target: Path) -> dict[str, object]:
     source, target = source.resolve(), target.resolve()
-    if not source.is_file() or target.exists() or not target.is_relative_to(ROOT / "work"):
+    if not source.is_file() or target.exists() or not target.is_relative_to(WORK_ROOT):
         raise ValueError("Use an existing source and a fresh isolated target directory under work")
     target.mkdir(parents=True)
     with sqlite3.connect(source.as_uri() + "?mode=ro", uri=True) as original:
@@ -57,6 +79,16 @@ def rehearse(source: Path, target: Path) -> dict[str, object]:
         after = fingerprints(copied)
         integrity = copied.execute("PRAGMA integrity_check").fetchone()[0]
         foreign_keys = copied.execute("PRAGMA foreign_key_check").fetchall()
+        actual_schema_objects = {
+            (row[0], row[1])
+            for row in copied.execute(
+                "SELECT type,name FROM sqlite_master WHERE type IN ('table','trigger','index')"
+            )
+        }
+        missing_governance_schema_objects = sorted(
+            f"{kind}:{name}"
+            for kind, name in expected_governance_schema_objects() - actual_schema_objects
+        )
         versions = [
             row[0]
             for row in copied.execute(
@@ -246,6 +278,93 @@ def rehearse(source: Path, target: Path) -> dict[str, object]:
                 "OR binding.grade_policy_version_id!=snapshot.grade_policy_version_id "
                 "OR binding.mapping_status!=snapshot.mapping_status"
             ).fetchone()[0],
+            "publication_review_snapshots": copied.execute(
+                "SELECT COUNT(*) FROM publication_review_snapshots"
+            ).fetchone()[0],
+            "publication_snapshot_resources": copied.execute(
+                "SELECT COUNT(*) FROM publication_snapshot_resources"
+            ).fetchone()[0],
+            "publication_releases": copied.execute(
+                "SELECT COUNT(*) FROM publication_releases"
+            ).fetchone()[0],
+            "official_knowledge_publication_requests": copied.execute(
+                "SELECT COUNT(*) FROM official_knowledge_publication_requests"
+            ).fetchone()[0],
+            "overlay_publication_requests": copied.execute(
+                "SELECT COUNT(*) FROM overlay_publication_requests"
+            ).fetchone()[0],
+            "publication_requests_without_snapshots": copied.execute(
+                "SELECT COUNT(*) FROM ("
+                "SELECT request.id FROM official_knowledge_publication_requests AS request "
+                "LEFT JOIN publication_review_snapshots AS snapshot "
+                "ON snapshot.id=request.snapshot_id WHERE snapshot.id IS NULL "
+                "UNION ALL "
+                "SELECT request.id FROM overlay_publication_requests AS request "
+                "LEFT JOIN publication_review_snapshots AS snapshot "
+                "ON snapshot.id=request.snapshot_id WHERE snapshot.id IS NULL)"
+            ).fetchone()[0],
+            "publication_releases_without_snapshots": copied.execute(
+                "SELECT COUNT(*) FROM publication_releases AS release "
+                "LEFT JOIN publication_review_snapshots AS snapshot "
+                "ON snapshot.id=release.snapshot_id WHERE snapshot.id IS NULL"
+            ).fetchone()[0],
+            "publication_resources_without_snapshots": copied.execute(
+                "SELECT COUNT(*) FROM publication_snapshot_resources AS resource "
+                "LEFT JOIN publication_review_snapshots AS snapshot "
+                "ON snapshot.id=resource.snapshot_id WHERE snapshot.id IS NULL"
+            ).fetchone()[0],
+            "learning_model_run_evidence": copied.execute(
+                "SELECT COUNT(*) FROM learning_model_run_evidence"
+            ).fetchone()[0],
+            "learning_model_call_reservations": copied.execute(
+                "SELECT COUNT(*) FROM learning_model_call_reservations"
+            ).fetchone()[0],
+            "duplicate_model_run_roles": copied.execute(
+                "SELECT COUNT(*) FROM (SELECT workspace_id,operation_id,role "
+                "FROM learning_model_run_evidence GROUP BY workspace_id,operation_id,role "
+                "HAVING COUNT(*)>1)"
+            ).fetchone()[0],
+            "model_runs_without_budget_reservations": copied.execute(
+                "SELECT COUNT(*) FROM learning_model_run_evidence AS evidence "
+                "LEFT JOIN learning_model_call_reservations AS reservation "
+                "ON reservation.workspace_id=evidence.workspace_id "
+                "AND reservation.operation_id=evidence.operation_id "
+                "AND reservation.role=evidence.role WHERE reservation.id IS NULL"
+            ).fetchone()[0],
+            "model_reservations_without_evidence": copied.execute(
+                "SELECT COUNT(*) FROM learning_model_call_reservations AS reservation "
+                "LEFT JOIN learning_model_run_evidence AS evidence "
+                "ON evidence.workspace_id=reservation.workspace_id "
+                "AND evidence.operation_id=reservation.operation_id "
+                "AND evidence.role=reservation.role WHERE evidence.id IS NULL"
+            ).fetchone()[0],
+            "finalized_model_reservations_without_evidence": copied.execute(
+                "SELECT COUNT(*) FROM learning_model_call_reservations AS reservation "
+                "LEFT JOIN learning_model_run_evidence AS evidence "
+                "ON evidence.workspace_id=reservation.workspace_id "
+                "AND evidence.operation_id=reservation.operation_id "
+                "AND evidence.role=reservation.role "
+                "WHERE evidence.id IS NULL AND reservation.status!='RESERVED'"
+            ).fetchone()[0],
+            "model_reservation_scope_mismatches": copied.execute(
+                "SELECT COUNT(*) FROM learning_model_call_reservations AS reservation "
+                "LEFT JOIN learning_workspaces AS workspace "
+                "ON workspace.id=reservation.workspace_id WHERE workspace.id IS NULL "
+                "OR reservation.owner_user_id!=workspace.owner_user_id "
+                "OR reservation.course_id!=workspace.course_id"
+            ).fetchone()[0],
+            "model_reservation_evidence_mismatches": copied.execute(
+                "SELECT COUNT(*) FROM learning_model_run_evidence AS evidence "
+                "JOIN learning_model_call_reservations AS reservation "
+                "ON reservation.workspace_id=evidence.workspace_id "
+                "AND reservation.operation_id=evidence.operation_id "
+                "AND reservation.role=evidence.role WHERE "
+                "reservation.status!=(CASE evidence.status "
+                "WHEN 'LEGACY_COMPLETED' THEN 'COMPLETED' ELSE evidence.status END) "
+                "OR reservation.input_tokens!=evidence.input_tokens "
+                "OR reservation.output_tokens!=evidence.output_tokens"
+            ).fetchone()[0],
+            "missing_governance_schema_objects": missing_governance_schema_objects,
         }
     invariants_ok = (
         v3_invariants["document_versions"] == v3_invariants["documents"]
@@ -263,6 +382,15 @@ def rehearse(source: Path, target: Path) -> dict[str, object]:
         and v3_invariants["invalid_assessment_policy_bindings"] == 0
         and v3_invariants["invalid_independent_performance_evidence"] == 0
         and v3_invariants["invalid_grade_snapshot_bindings"] == 0
+        and v3_invariants["publication_requests_without_snapshots"] == 0
+        and v3_invariants["publication_releases_without_snapshots"] == 0
+        and v3_invariants["publication_resources_without_snapshots"] == 0
+        and v3_invariants["duplicate_model_run_roles"] == 0
+        and v3_invariants["model_runs_without_budget_reservations"] == 0
+        and v3_invariants["finalized_model_reservations_without_evidence"] == 0
+        and v3_invariants["model_reservation_scope_mismatches"] == 0
+        and v3_invariants["model_reservation_evidence_mismatches"] == 0
+        and not v3_invariants["missing_governance_schema_objects"]
         and versions == list(range(1, LATEST_V3_SCHEMA_VERSION + 1))
     )
     result = {

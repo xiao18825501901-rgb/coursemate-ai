@@ -221,12 +221,9 @@ describe("version-bound publication API", () => {
   });
 
   it("submits only explicitly selected Overlay resources and treats no request as empty state", async () => {
-    const notFound = {
-      error: { code: "OVERLAY_PUBLICATION_NOT_FOUND", message: "No request", details: {} },
-    };
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ nodes: [], documents: [], artifacts: [], evidence: [] })))
-      .mockResolvedValueOnce(new Response(JSON.stringify(notFound), { status: 404 }))
+      .mockResolvedValueOnce(new Response("null", { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: "overlay-1" }), { status: 201 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -261,6 +258,20 @@ describe("version-bound publication API", () => {
       rightsConfirmation: true,
       consentVersion: "v1",
     });
+  });
+
+  it("does not hide a foreign workspace response as an empty Overlay state", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: { code: "WORKSPACE_NOT_FOUND", message: "Workspace not found", details: {} },
+    }), { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getCurrentOverlayPublication(async () => "owner-token", "foreign-workspace"),
+    ).rejects.toEqual(expect.objectContaining({
+      status: 404,
+      code: "WORKSPACE_NOT_FOUND",
+    }));
   });
 
   it("loads the owner's exact current Overlay snapshot through the workspace scope", async () => {

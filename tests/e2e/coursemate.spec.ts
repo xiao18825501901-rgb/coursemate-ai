@@ -157,7 +157,12 @@ test("creates, indexes, teaches from, and deletes a private course", async ({ pa
 
   await page.goto(`/courses/${courseId}/settings`);
   await page.getByLabel(`Type ${courseId} to confirm`).fill(courseId);
-  await page.getByRole("button", { name: "Delete course permanently" }).click();
+  const deleteButton = page.getByRole("button", { name: "Delete course permanently" });
+  await expect(deleteButton).toBeDisabled();
+  await page.getByRole("button", { name: "Withdraw publication request" }).click();
+  await expect(page.getByRole("button", { name: "Submit for admin review" })).toBeVisible();
+  await expect(deleteButton).toBeEnabled();
+  await deleteButton.click();
   await expect(page).toHaveURL(/\/courses$/);
   await expect(page.getByText(courseName, { exact: true })).not.toBeVisible();
   expect(consoleErrors).toEqual([]);

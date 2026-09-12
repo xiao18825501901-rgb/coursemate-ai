@@ -284,13 +284,13 @@ def overlay_publication_candidates(
 
 @router.get(
     "/api/learning/workspaces/{workspace_id}/overlay-publication-requests/current",
-    response_model=OverlayPublicationRequest,
+    response_model=OverlayPublicationRequest | None,
 )
 def current_overlay_publication(
     workspace_id: str,
     request: Request,
     user: Annotated[AuthenticatedUser, Depends(require_user)],
-) -> OverlayPublicationRequest:
+) -> OverlayPublicationRequest | None:
     return _overlay_service(request).current(workspace_id, owner_user_id=user.user_id)
 
 
