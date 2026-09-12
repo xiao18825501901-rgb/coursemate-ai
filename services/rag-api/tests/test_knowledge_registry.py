@@ -7,6 +7,8 @@ import pytest
 from test_learning_journey import setup_workspace
 from test_learning_workspace import client_at, join
 
+from app.db import LATEST_V3_SCHEMA_VERSION
+
 
 def private_node(
     client,
@@ -92,7 +94,7 @@ def test_migration_014_backfills_normalized_specs_and_is_repeatable(tmp_path: Pa
                 (workspace["id"],),
             ).fetchone()[0]
 
-        assert versions == list(range(1, 16))
+        assert versions == list(range(1, LATEST_V3_SCHEMA_VERSION + 1))
         assert tuple(item) == (
             "REQUIRED",
             "Explain addition",

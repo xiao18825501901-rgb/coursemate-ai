@@ -8,6 +8,7 @@ from test_learning_journey import setup_workspace
 from test_learning_workspace import client_at
 
 from app.config import Settings
+from app.db import LATEST_V3_SCHEMA_VERSION
 from app.learning.models import TeachingPlan
 from app.learning.provider import LearningProvider, ProviderCallFailure
 
@@ -299,7 +300,7 @@ def test_migration_015_backfills_legacy_coverage_without_claiming_new_validation
                 "FROM teaching_delivery_evidence WHERE teaching_unit_id=?",
                 (unit_id,),
             ).fetchall()
-        assert versions == list(range(1, 16))
+        assert versions == list(range(1, LATEST_V3_SCHEMA_VERSION + 1))
         assert [tuple(row) for row in delivery] == [("LEGACY_PRESERVED", None, None)]
 
 

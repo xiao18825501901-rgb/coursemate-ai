@@ -11,9 +11,10 @@ V3_MIGRATIONS = (
     "013_document_versions_and_artifacts.sql",
     "014_knowledge_registry_and_trees.sql",
     "015_teaching_plans_and_delivery_evidence.sql",
+    "016_problem_runtime_and_bridges.sql",
 )
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 15
+LATEST_V3_SCHEMA_VERSION = 16
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (

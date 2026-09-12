@@ -475,6 +475,36 @@ def knowledge_state(workspace_id: str, request: Request, user: User) -> dict[str
     )
 
 
+@router.get("/workspaces/{workspace_id}/problem-index")
+def problem_index(
+    workspace_id: str,
+    request: Request,
+    user: User,
+    scope: Literal["official", "mine", "union"] = "union",
+    query: str | None = Query(default=None, max_length=500),
+    document_version_id: str | None = Query(default=None, max_length=100),
+    filename: str | None = Query(default=None, max_length=500),
+    question_number: str | None = Query(default=None, max_length=40),
+    question_part: str | None = Query(default=None, max_length=40),
+    locator_type: str | None = Query(default=None, max_length=40),
+    locator_value: str | None = Query(default=None, max_length=100),
+    limit: int = Query(default=25, ge=1, le=100),
+) -> dict[str, Any]:
+    return cast(LearningOrchestrator, request.app.state.learning).problem_index(
+        workspace_id,
+        user.user_id,
+        scope=scope,
+        query=query,
+        document_version_id=document_version_id,
+        filename=filename,
+        question_number=question_number,
+        question_part=question_part,
+        locator_type=locator_type,
+        locator_value=locator_value,
+        limit=limit,
+    )
+
+
 @router.post("/workspaces/{workspace_id}/nodes")
 def create_node(
     workspace_id: str, payload: NodeDraft, request: Request, user: User

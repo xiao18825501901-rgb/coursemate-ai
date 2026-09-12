@@ -35,6 +35,7 @@ from app.learning.models import (
     TeachInput,
 )
 from app.learning.plans import TeachingPlanRepository
+from app.learning.problems import ProblemIndexScope, ProblemRepository
 from app.learning.provider import LearningProvider, ProviderCallFailure
 from app.learning.workspaces import document_version_for, workspace_for
 from app.rag.retrieval import HybridRetriever
@@ -60,6 +61,36 @@ class LearningOrchestrator:
         self.provider = LearningProvider(settings)
         self.knowledge = KnowledgeService(database)
         self.plans = TeachingPlanRepository(database)
+        self.problems = ProblemRepository(database)
+
+    def problem_index(
+        self,
+        workspace_id: str,
+        owner: str,
+        *,
+        scope: ProblemIndexScope,
+        query: str | None,
+        document_version_id: str | None,
+        filename: str | None,
+        question_number: str | None,
+        question_part: str | None,
+        locator_type: str | None,
+        locator_value: str | None,
+        limit: int,
+    ) -> dict[str, Any]:
+        return self.problems.list_index(
+            workspace_id,
+            owner,
+            scope=scope,
+            query=query,
+            document_version_id=document_version_id,
+            filename=filename,
+            question_number=question_number,
+            question_part=question_part,
+            locator_type=locator_type,
+            locator_value=locator_value,
+            limit=limit,
+        )
 
     def node(self, workspace: sqlite3.Row, node_id: str) -> dict[str, Any]:
         with self.db.connect() as db:
