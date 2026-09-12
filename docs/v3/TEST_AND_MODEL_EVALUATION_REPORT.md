@@ -1,25 +1,25 @@
 # CourseMate V3 — Test and Model Evaluation Report
 
-Last updated: 2026-09-12 after Stage 4 implementation and review.
+Last updated: 2026-09-12 after Stage 5 implementation, migration rehearsal and browser isolation recovery.
 
 Branch: `feature/coursemate-v3-persistent-learning`
 
-Stage-switch base: `c6158cf34142c311e77a58aa49a3b0b7cbe7fbd8`; Stage 1 commits are `00961ef` through `e9ecd00`; Stage 2 code commits are `6eeff90`, `5a1f9d0`, `0be1a47`, `86032bb` and `5dba760`; Stage 3 code commits are `956d849`, `da1fa2a`, `e5d14d3`, `52514d1` and `2256cf0`; Stage 4 code/evidence commits are `5b88c3e`, `ebe2ffa`, `1eb94ed` and `cf8466b`.
+Stage-switch base: `c6158cf34142c311e77a58aa49a3b0b7cbe7fbd8`; Stage 1 commits are `00961ef` through `e9ecd00`; Stage 2 code commits are `6eeff90`, `5a1f9d0`, `0be1a47`, `86032bb` and `5dba760`; Stage 3 code commits are `956d849`, `da1fa2a`, `e5d14d3`, `52514d1` and `2256cf0`; Stage 4 code/evidence commits are `5b88c3e`, `ebe2ffa`, `1eb94ed` and `cf8466b`; Stage 5 implementation and hardening commits run from `141057a` through `a882d36`.
 This report is cumulative and must be updated after every behavior change; old PASS does not cover later code.
 
 ## 1. Current evidence summary
 
 | Acceptance layer | Result | Meaning |
 |---|---|---|
-| Source implementation | PARTIAL | Stages 1–4 source slices exist; Stages 5–8 are not complete |
-| Python automated tests | PASS for current Stage 4 code | 270 passed; 1 known dependency deprecation plus local pytest-cache ACL warning |
-| Web unit tests | PASS | 9 files / 35 tests passed |
+| Source implementation | PARTIAL | Stages 1–5 source slices exist; Stages 6–8 are not complete |
+| Python automated tests | PASS for current Stage 5 code | 284 passed; 1 known dependency deprecation plus local pytest-cache ACL warning |
+| Web unit tests | PASS | 10 files / 39 tests passed |
 | Task Agent unit tests | PASS | 53 passed; V3 did not take over task tools |
-| Python lint/type | PASS | Ruff all checks; mypy strict app 56 files |
+| Python lint/type | PASS | Ruff app/tests/scripts; mypy strict app 57 files |
 | TS typecheck/build | PASS | both workspaces typecheck; production bundles built locally |
-| V3 browser flow | LOCAL_FAKE_PROVIDER_VERIFIED | 1 Playwright flow passed with isolated synthetic DB/test identity/deterministic provider |
+| Browser regression | LOCAL_FAKE_PROVIDER_VERIFIED | 5 Playwright tests passed against an isolated DB copy; source DB/uploads before/after summaries matched |
 | Real model | NOT VERIFIED | no paid call, account/region/endpoint unknown |
-| Real-data final migration/restore | PARTIAL | current local 1–15 source copied read-only and upgraded through 016; uploads/full restore/final Schema remain unverified |
+| Real-data migration/recovery | PARTIAL | pre-test 1–15 snapshot copied and upgraded through 018; local E2E incident recovery verified; full two-DB/uploads restore remains unverified |
 | Production | NOT VERIFIED | no current release/auth/provider/Schema smoke evidence |
 
 ## 2. Cumulative local commands and actual results
@@ -298,14 +298,79 @@ The zero index is expected and important: legacy chunks contain no structural `q
 
 Official current Model Studio documentation was checked for the local adapter decision: `qwen3.8-max` is listed for Responses and multimodal image input; Responses image content accepts a complete Base64 data URI. This verifies only the documented contract. The actual account, region, endpoint, model entitlement, response quality, usage and price were not called or verified.
 
-## 7. Test data and privacy
+## 7. Stage 5 Assessment, GradePolicy and replan evidence
+
+Focused Assessment contracts:
+
+```text
+python -m pytest tests/test_assessment_runtime.py -q
+13 passed, 2 warnings
+
+python -m pytest tests/test_assessment_runtime.py tests/test_teaching_plan_runtime.py \
+  tests/test_learning_journey.py tests/test_learning_safety.py -q
+35 passed
+```
+
+The tests verify frozen five-question blueprints with unequal `10/15/20/25/30` marks totaling 100, exact question/rubric/policy versions, official/current-owner pool scope, exclusion of `MODEL_ONLY`, Problem-answer-exposed sibling revisions and Assessment-assisted families, and no answer/rubric fields in the pre-submit projection. A SQLite authorizer additionally proves the in-progress projection succeeds while reads of the server `answer_json` column are denied. Deterministic item marks are recomputed by the backend; open answers use strict `AssessmentGradeProposal`. `NEEDS_REVIEW` remains submitted without a raw score or GradeSnapshot.
+
+Answer reveal or teaching help permanently changes the whole session to `PRACTICE` and every generated PerformanceEvidence row to non-independent. Abandoned/unsubmitted sessions emit neither zero nor F and do not unlock hidden answers. Weak rubric evidence creates a pending trigger without a provider call; a later explicit Teaching action passes only bounded evidence summaries to Planner, persists trigger→Plan→Unit remediation links, and marks the trigger applied only after the planned delivery completes. A low Assessment result never removes `LEARNED`.
+
+GradePolicy tests preserve the supplied A+/A/... values but keep A- numeric value null and raw-score bands empty in `gp_requirements_draft_v1`. Raw score and rubric evidence remain available while letter/numeric mapping says `UNCONFIGURED`; publish rejects incomplete or falsely “CityU official” provenance. A published new policy is immutable and newly frozen blueprints pin it without rewriting older blueprints.
+
+Stage 5 full validation:
+
+```text
+Python: 284 passed, 2 warnings
+Web: 10 files / 39 tests passed
+Task Agent: 9 files / 53 tests passed
+Ruff: all checks passed for app, tests and scripts
+mypy: 57 source files, no issues
+TypeScript: Web and Agent passed
+Production build: Web 117 modules; Agent tsc passed
+Playwright: 5 passed, 40.3s; final loaded-host rerun 5 passed, 2.6m
+```
+
+The two Python warnings are the known Starlette/httpx deprecation and a Windows pytest cache ACL warning. They are not skipped failures. A 5-second Vitest default produced reproducible infrastructure timeouts on five 5.1–5.9-second Windows/JSDOM cold-start tests; an explicit 15-second budget was then committed and all 39 unchanged assertions passed. The final Playwright run covers the existing V2 QA/task/mobile/private-course flows plus V3 private image Problem→Bridge→Teaching→exact return, new browser context, Assessment submit/raw score and reload at 375px. The later 2.6-minute run was on a loaded host; it passed the same five scenarios without relaxing Playwright assertions.
+
+Migration rehearsal `work/v3-migration-rehearsal-08/` used SQLite read-only online backup while the local source was 1–15, initialized the copy twice to 1–18, and reported:
+
+```text
+old_rows_unchanged=true; integrity=ok; foreign_key_violations=0
+schema_versions=1..18; v3_invariants_ok=true
+documents/document_versions=69/69; unbound_chunks=0
+legacy problem/revision/solution/bridge context=2/2/2/2
+assessment questions/blueprints/sessions/evidence/snapshots=0/0/0/0/0
+grade_policy_versions=1; requirements_grade_policy_seed=1
+invalid frozen blueprints/policy bindings/independent evidence/snapshots=0/0/0/0
+```
+
+Zero Assessment rows are the correct legacy fact; the migration did not invent grades. The one policy is explicitly `DRAFT_UNCONFIGURED` and “not an institutional policy.”
+
+### Default Playwright isolation incident and recovery
+
+The first combined five-test invocation exposed that the legacy default `playwright.config.ts` did not set `RAG_DATABASE_PATH`. It migrated the local real DB from 1–15 to 1–18 and added deterministic test rows/files before the V3 test timed out on its missing seeded Assessment node. This is a failed safety gate, not a PASS, and is retained in the report.
+
+All writers were stopped. Before replacement, the contaminated DB was captured by SQLite online backup. The recovery candidate came from the online snapshot taken immediately before the faulty invocation; migrations 16–18 were retained because applied history must not be rewritten, while every protected V2 row fingerprint and all pre-test V3 table counts were restored. The result passed integrity/FK checks, and exactly two hash-matched synthetic uploads were moved from the active upload root to ignored quarantine rather than deleted. Two contaminated database copies remain under `work/v3-e2e-incident-recovery-20260912/`; that private directory must not be committed or shared.
+
+The permanent fix adds `prepare_full_e2e.py`, points both RAG DB and uploads at a unique `work/e2e-rag-*` target, and has a config regression assertion. The corrected five-test run preserved these before/after values exactly:
+
+```text
+database sha256=48852F977EBF37B1A9B77DF1A03E5D3549BEBC71EC77401673BA60F5BD6D906B
+database bytes=5,828,608
+upload files=70; upload bytes=124,209,888
+upload manifest sha256=FB1DBBCEE7E46969C2F361BB8BA09534C13BE8C101AD8694A1A8E35D91E83E03
+```
+
+This proves recovery and isolation for the current local run only. It is not production evidence.
+
+## 8. Test data and privacy
 
 - pytest uses `tmp_path` databases/uploads; V3 API fixtures set `v3_enabled=True` explicitly.
-- Playwright uses a new path under `work/` and fake content `2 + 3`; screenshots contain only synthetic values.
-- The local real RAG database was queried read-only for aggregate baseline facts and never passed to application initialization.
+- Playwright now uses a read-only online copy under `work/`, a separate upload root and fake content `2 + 3`; screenshots contain only synthetic values.
+- The local real RAG database was accidentally initialized once by the disclosed pre-fix default config, then recovered as documented above. The corrected run left DB and upload summaries unchanged.
 - No private course body, user identity, key, prompt body or production response is included here.
 
-## 8. Model contract versus model quality
+## 9. Model contract versus model quality
 
 Current deterministic tests can prove:
 
@@ -326,25 +391,25 @@ They cannot prove:
 - production Clerk, Netlify, server/storage or multi-instance behavior;
 - actual token cost/latency/rate-limit behavior.
 
-## 9. Required future matrices
+## 10. Required future matrices
 
 | Stage | New evidence required before PASS |
 |---|---|
 | 1 | implemented preview/provenance slice is locally green; production storage, converter, full citation API and crash-safe deletion cleanup remain later gates |
-| 2 | locally verified; official author/review management remains Stage 6 and Assessment values remain Stage 5 |
+| 2 | locally verified; official author/review management remains Stage 6 |
 | 3 | locally verified; live provider quality/usage/cost remains Stage 7 and production remains Stage 8 |
 | 4 | locally verified for text/index/image revisions, solution/step link, private image, Problem→Teaching→return and persistence; reverse Teaching→Problem, two-user/Admin browser and full a11y remain overall gates |
-| 5 | five unequal/100, answer secrecy, assisted evidence, rubric arithmetic, unconfigured policy, weak points/replan triggers |
+| 5 | locally verified for five unequal/100, answer secrecy, assisted evidence, rubric arithmetic, unconfigured policy and explicit weak-point replan; live grading quality remains Stage 7 |
 | 6 | scoped review snapshot, consent/version substitution, withdraw/re-publish and generic Admin denial |
 | 7 | smallest approved live canaries with exact model/region/protocol/cost; four-major human rubric |
 | 8 | final full regression, final-Schema real-data copy + full restore, preview deploy and production smoke/rollback evidence |
 
-## 10. Open defects and non-PASS items
+## 11. Open defects and non-PASS items
 
 - Existing `package-lock` audit history reported one high and three moderate advisories; reachability/remediation is not yet resolved and cannot be hidden in launch PASS.
-- Current Playwright covers one owner and private-image Problem→Teaching→return; two-user/Admin browser paths, Teaching→Problem reverse initiation and accessibility-tree evidence remain missing.
+- Current Playwright covers one synthetic owner plus existing V2 flows; two-user/Admin browser paths, Teaching→Problem reverse initiation and accessibility-tree evidence remain missing.
 - Model adapter now retains safe metadata on structured-output failure, but actual qwen3.8-max account access, regional endpoint, protocol compatibility, provider usage fidelity and cost remain unverified.
 - Official tree author/review APIs are not implemented; Stage 2 publication behavior is exercised only through direct local fixtures and cannot be called production-ready.
-- Assessment, GradePolicy and publication snapshot tests are not yet implemented. The displayed Assessment axis is an explicit `NOT_ASSESSED` placeholder, not persistent Assessment evidence.
+- Assessment and GradePolicy are persistent and locally verified; question author/review UI, integrated COMPOSITE exams, human finalization of `NEEDS_REVIEW` and publication snapshots remain unimplemented.
 
 No live or production claim should be inferred from the local green checks.

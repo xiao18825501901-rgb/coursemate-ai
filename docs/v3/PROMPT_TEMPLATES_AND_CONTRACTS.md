@@ -1,7 +1,7 @@
 # CourseMate V3 — Prompt Templates and Contracts
 
-Version: Stage 4 executable contract, 2026-09-12.
-This is an executable-asset ledger. It does not claim live-model quality or completion of the future Assessment template.
+Version: Stage 5 executable contract, 2026-09-12.
+This is an executable-asset ledger. It does not claim live-model grading/teaching quality.
 
 ## 1. Current executable assets
 
@@ -17,8 +17,9 @@ This is an executable-asset ledger. It does not claim live-model quality or comp
 | `MATERIALS.md` | Materials Science strategy | compiled by major |
 | `ENERGY.md` | Energy strategy | compiled by major |
 | `problem.md` | complete answer, multimodal transcription/uncertainty and exact Step knowledge links | compiled for text/indexed/image Problem calls |
+| `assessment.md` | submitted open answer + frozen rubric criterion grading only | compiled after submission; never receives policy authority |
 
-The files are real code assets and have compiler/runtime tests. v3.2 implements the Master seed for both Teaching scenarios, all four major strategies, complete-plan scheduling, 3–5 comprehension checks per unit and the Stage 4 Problem Solver contract. The Assessment Grader remains `PLANNED` for Stage 5; it is not silently attributed to v3.2.
+The files are real code assets and have compiler/runtime tests. v3.2 implements the Master seed for both Teaching scenarios, all four major strategies, complete-plan scheduling, 3–5 comprehension checks per unit, the Problem Solver contract and the Stage 5 Assessment Grader contract. Deterministic question types bypass the model and are graded by backend rules.
 
 ## 2. Trust and instruction precedence
 
@@ -56,6 +57,7 @@ valid covered and eligible item IDs
 authorized MaterialEvidence IDs and versions
 saved preference version and learning cursor
 optional pinned LearningBridge
+optional pending PerformanceEvidence trigger IDs and bounded criterion/item summaries
 model/template/output budget
 ```
 
@@ -88,14 +90,9 @@ The CS3481 Word file informs bilingual explanation, knowledge map, code/data con
 
 ## 5. Strict Schemas and later additions
 
-`TeachingPlanUnit`, full-path `TeachingPlan`, `CheckQuestion`, `TeachingUnitOutput`, `ProblemSolutionOutput` and `StepKnowledgeLink` are active v3.2 contracts. Target additions for later stages include:
+`TeachingPlanUnit`, full-path `TeachingPlan`, `CheckQuestion`, `TeachingUnitOutput`, `ProblemSolutionOutput`, `StepKnowledgeLink` and `AssessmentGradeProposal` are active v3.2 contracts. The remaining planned model contract is:
 
 ```text
-AssessmentGradeProposal
-  assessment_session_id, question_attempt_id, rubric_version_id,
-  criteria[{criterion_id, awarded, evidence, uncertainty}],
-  total_proposed, feedback, assistance_flags
-
 AutoRouteDecision
   requested_mode, selected_mode, reason_code, confidence,
   ambiguity_question?, source_version_ids
@@ -138,4 +135,4 @@ Structured-output failure now raises a typed `ProviderCallFailure` carrying safe
 | pre-submit Assessment response | no answer/rubric/grader prompt in client payload |
 | Grader arithmetic mismatch | backend recomputes/rejects; model cannot publish grade |
 
-Current conclusion: Teaching and Problem v3.2 are `SOURCE_IMPLEMENTED` and `LOCAL_CONTRACT_VERIFIED`; their deterministic private-image Problem→Teaching→exact-return browser path is `LOCAL_FAKE_PROVIDER_VERIFIED`. Tests cover four majors × two cases, REQUIRED preservation, injection handling, malformed output evidence, exact delivery bindings, cache reuse/invalidation, failed-Executor resume, text/index/image source identity, visual uncertainty, validated/unresolved links and Bridge persistence. The fake 1×1 PNG does not establish visual accuracy. Assessment Grader, AUTO router and all live-model quality remain `NOT_VERIFIED` until their own stages.
+Current conclusion: Teaching, Problem and Assessment Grader v3.2 are `SOURCE_IMPLEMENTED` and `LOCAL_CONTRACT_VERIFIED`; the deterministic private-image Problem→Teaching→exact-return→Assessment browser path is `LOCAL_FAKE_PROVIDER_VERIFIED`. Tests cover four majors × two cases, REQUIRED preservation, injection handling, malformed output evidence, exact delivery bindings, cache reuse/invalidation, failed-Executor resume, text/index/image source identity, visual uncertainty, validated/unresolved links, Bridge persistence, post-submit-only grading, criterion arithmetic and safe weakness-triggered replanning. The fake 1×1 PNG does not establish visual accuracy, and the fake grader does not establish semantic fairness. AUTO router and all live-model quality remain `NOT_VERIFIED`.

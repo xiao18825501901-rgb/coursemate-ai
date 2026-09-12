@@ -1,6 +1,6 @@
 # CourseMate V3 — Permissions and Data Provenance
 
-Version: Stage 1 implemented security contract, 2026-09-12.
+Version: Stage 5 implemented security contract, 2026-09-12.
 Authentication is necessary but never sufficient: every API, file read, retrieval query, model context, cache and derivative must authorize the specific resource.
 
 ## 1. Principals and scopes
@@ -118,9 +118,10 @@ Original bytes are immutable. Conversion does not replace `stored_path`; it crea
 
 - Formal session creation selects and freezes question revisions server-side.
 - Correct answers, rubrics, grading prompts and hidden scoring metadata are not embedded in the Web bundle or pre-submit JSON.
-- `Problem Mode` exposure, hints, solution reveal, tool use or manual assistance marks the relevant attempt/family `ASSISTED`/`EXPOSED`.
+- A family exposed by `Problem Mode` is excluded when a formal Blueprint is selected. Help or answer reveal inside an active Assessment irreversibly changes the whole session to `PRACTICE` and all resulting evidence to non-independent.
 - Only qualifying submitted independent attempts contribute to GradeSnapshot/readiness; assisted practice may still generate clearly labeled learning feedback.
 - Generated or external-inspired questions store source class, author/model/template version, validation status and visibility. Private source material cannot be published by transformation alone.
+- Before submit, the client projection contains question prompts/options/marks but no answer, rubric criterion or grader prompt. Open-response grading receives only the submitted answer and exact frozen criterion; GradePolicy choice and final arithmetic remain server-side.
 
 ## 10. Lifecycle and revocation
 
@@ -139,4 +140,4 @@ Deletion is not implemented through `git clean`, database rebuild or broad recur
 
 Stage acceptance requires tests with two ordinary users, one admin, anonymous, and where applicable a scoped reviewer. At minimum test guessed IDs, list/count leakage, `HEAD`/`Range`, stale signed/derived URL, cross-user cache, missing file, symlink, unsafe media, revoked source during an open Bridge, provider error/log redaction and hidden assessment answer inspection.
 
-Current local evidence covers owner vs second user/Admin/anonymous for private metadata, stable source versions, preview, original and derived content including `GET`, `HEAD` and byte `Range`; reviewed owner-course sharing is revoked when publication is withdrawn. Retrieval SQL filters frozen source versions before candidate generation and evidence is authorized again before prompt assembly. Malformed/oversized Office, image, CSV/notebook preview and source/artifact integrity cases are covered. Dedicated public chunk/citation endpoints, scoped reviewer grants, production object storage and crash-safe cleanup retry remain unimplemented or unverified, so this document is not a production security acceptance.
+Current local evidence covers owner vs second user/Admin/anonymous for private metadata, stable source versions, preview, original and derived content including `GET`, `HEAD` and byte `Range`; reviewed owner-course sharing is revoked when publication is withdrawn. Retrieval SQL filters frozen source versions before candidate generation and evidence is authorized again before prompt assembly. Assessment tests exclude another owner’s private questions, `MODEL_ONLY` candidates and answer-exposed Problem families; pre-submit DTO tests find no hidden answer/rubric. Malformed/oversized Office, image, CSV/notebook preview and source/artifact integrity cases are covered. Dedicated public chunk/citation endpoints, scoped reviewer grants, production object storage and crash-safe cleanup retry remain unimplemented or unverified, so this document is not a production security acceptance.

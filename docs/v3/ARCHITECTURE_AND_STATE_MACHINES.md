@@ -1,6 +1,6 @@
 # CourseMate V3 — Architecture and State Machines
 
-Version: Stage 4 current/target baseline, 2026-09-12.
+Version: Stage 5 current/target baseline, 2026-09-12.
 This document distinguishes `CURRENT` source from `TARGET` architecture. Target objects are not claimed implemented until linked tests pass.
 
 ## 1. System ownership
@@ -81,7 +81,8 @@ MaterialEvidence, TeachingDeliveryEvidence and PerformanceEvidence are separate 
 | `learning_journeys`, `teaching_units`, legacy `learning_coverage` | pinned Spec journey and saved unit state | migration 015 adds immutable Plan/Unit links and exact `teaching_delivery_evidence`; legacy rows remain visibly preserved |
 | `learning_problems/solutions/steps/bridges` | retained stable IDs and JSON projections | migration 016 adds immutable ProblemRevision/Attempt/SolutionRevision, StepKnowledgeLink and LearningBridgeContext; legacy rows are explicitly preserved, while new rows require exact versions and owner/workspace validation |
 | `learning_operations/events/model_runs` + `learning_model_run_evidence` | idempotent bounded generation and content-free call diagnostics | current path includes path IDs, base revision, safe invalid-output metadata and no hidden retry; daily aggregate caps remain target work |
-| Assessment/tree/publication snapshot tables | absent | add in numbered migrations after focused tests |
+| Assessment questions/rubrics/blueprints/sessions/evidence and GradePolicy/Snapshot | migrations 017/018 + `learning/assessments.py` | implemented for atomic-node formal Assessment; author/review UI and integrated COMPOSITE exams remain target work |
+| Publication review snapshot/grant tables | absent | add in 019+ after focused authorization/version-substitution tests |
 
 ## 5. State machines
 
@@ -154,18 +155,33 @@ OPEN -> LEARNING -> READY_TO_RETURN -> COMPLETED
 
 The normalized bridge context pins problem revision, attempt, solution revision, step, validated knowledge link, node/Spec/item, journey, original conditions, selected question/reason and return anchor. Legacy contexts retain explicit `LEGACY_PRESERVED` status. Return is allowed to historical UI context when safe, but revoked source content is not rehydrated into new model context.
 
-### Assessment session
+### Assessment blueprint and session
 
 ```text
-CREATED -> IN_PROGRESS -> SUBMITTED -> GRADED
-                   \-> ABANDONED
-                   \-> INVALIDATED
+Blueprint: BUILDING -> FROZEN -> RETIRED
+
+Session: IN_PROGRESS -> SUBMITTED -> GRADED
+              |              `-> remains SUBMITTED / NEEDS_REVIEW
+              +-> ABANDONED
+              `-> INVALIDATED
 ```
 
-- Blueprint, five question revisions, unequal weights totaling 100, rubrics, sources and GradePolicy are frozen at `CREATED`.
+- Blueprint, five question revisions, unequal weights totaling 100, rubrics, sources and GradePolicy binding are frozen before the session starts.
 - `ABANDONED` or unsubmitted never becomes zero/F.
-- Help/reveal switches the affected attempt to assisted/practice; it cannot be converted back to independent evidence.
+- Help/reveal switches the entire session to assisted/practice and every resulting evidence row to non-independent; it cannot be converted back.
 - Raw score and rubric evidence may reach `GRADED` while letter/GPA remains `UNCONFIGURED`.
+- A strict model grader may propose criterion marks for open responses, but backend validation/arithmetic owns marks and snapshots. `NEEDS_REVIEW` emits no invented score.
+
+### Performance-triggered replan
+
+```text
+PENDING -- explicit user Teaching action --> linked PlanVersion
+   |                                      -> remediation TeachingUnit
+   |                                      -> APPLIED after completed delivery
+   `--------------------------------------> DISMISSED (future explicit policy)
+```
+
+Creating weak PerformanceEvidence does not call a model. Planner receives only authorized criterion/item summaries after the user explicitly continues Teaching; it does not receive hidden answers or full student responses. Remediation links do not mutate the Q8 coverage formula, so `LEARNED` remains a delivery-completion fact.
 
 ### Publication
 

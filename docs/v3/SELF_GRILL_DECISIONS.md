@@ -9,7 +9,7 @@ Q1–Q10 are `LOCKED_REQUIREMENT`. Every new implementation choice below is expl
 
 - **问题 / 来源或缺口:** V3 UI/API was feature-gated, but `Database.initialize()` applied 011/012 unconditionally.
 - **反例:** Starting an otherwise V2 release against the real migration-10 database silently adds V3 tables.
-- **采用方案 / 取舍:** Store `v3_enabled` in `Database`; V2 requires migrations 1–10 and never queries V3 tables; V3 applies/requires the current V3 migration set (1–16 after Stage 4). This couples migration activation to the release flag, so production migration remains an explicit rollout event.
+- **采用方案 / 取舍:** Store `v3_enabled` in `Database`; V2 requires migrations 1–10 and never queries V3 tables; V3 applies/requires the current V3 migration set (1–18 after Stage 5). This couples migration activation to the release flag, so production migration remains an explicit rollout event.
 - **不可违反的规则:** Disabled V3 cannot mutate or depend on V3 Schema.
 - **验收测试:** `test_v3_migrations_require_explicit_feature_enablement`, `test_feature_defaults_off`, readiness tests, full V2 regression.
 - **剩余不确定性:** Production migration state is unknown and needs preflight.
@@ -79,7 +79,7 @@ Q1–Q10 are `LOCKED_REQUIREMENT`. Every new implementation choice below is expl
 
 - **问题 / 来源或缺口:** Problem Mode intentionally reveals answers while Assessment must measure separately.
 - **反例:** The same exposed question is submitted as “unassisted” and raises grade/readiness.
-- **采用方案 / 取舍:** Track immutable question family/version and exposure; formal sessions freeze a blueprint server-side. Any help/reveal marks an attempt assisted/practice and excludes it from independent grade evidence.
+- **采用方案 / 取舍:** Track immutable question family/version and exposure; formal sessions freeze a blueprint server-side. Any help/reveal irreversibly marks the whole session practice and excludes all of its evidence from independent grade projection. Problem-exposed families are excluded before freeze.
 - **不可违反的规则:** Answers/rubrics are not sent before submission; unsubmitted is not F; `NOT_ASSESSED` is not zero.
 - **验收测试:** Network/bundle leak check, exposed-family exclusion, reveal-after-start, abandoned session and assisted attempt.
 - **剩余不确定性:** Question-family similarity detection needs conservative evaluation.
@@ -129,7 +129,7 @@ Q1–Q10 are `LOCKED_REQUIREMENT`. Every new implementation choice below is expl
 
 - **问题 / 来源或缺口:** Planning on every teaching turn doubles cost and creates style drift.
 - **反例:** A normal “can you clarify?” call regenerates the course plan and silently changes REQUIRED order.
-- **采用方案 / 取舍:** Migration 015 and `learning/plans.py` persist a full Plan keyed by owner/workspace/course/node, Spec version+hash, preference version+hash, model/protocol, template/Schema, course-policy version, ordered source-version IDs and optional Bridge revision. Regenerate only at first use, explicit replan, material preference change, Spec/source/Bridge/runtime policy change; every reuse revalidates IDs and remaining REQUIRED scope.
+- **采用方案 / 取舍:** Migration 015 and `learning/plans.py` persist a full Plan keyed by owner/workspace/course/node, Spec version+hash, preference version+hash, model/protocol, template/Schema, course-policy version, ordered source-version IDs, optional Bridge revision and normalized pending performance trigger IDs. Regenerate only at first use, explicit replan, material preference change, Spec/source/Bridge/runtime policy change or explicit teaching after new PerformanceEvidence; every reuse revalidates IDs and remaining REQUIRED scope.
 - **不可违反的规则:** Cache is owner-scoped; revoked source invalidates future context; REQUIRED cannot be deleted by adaptation.
 - **验收测试:** hit/miss/invalidations, cross-user cache poisoning and preference-only OPTIONAL reordering.
 - **剩余不确定性:** Live provider cache/cost behavior and future preference-field taxonomy require production evidence; current string preference changes are hash-addressed.
@@ -139,7 +139,7 @@ Q1–Q10 are `LOCKED_REQUIREMENT`. Every new implementation choice below is expl
 
 - **问题 / 来源或缺口:** Raw source lacks A- numeric value and percentage boundaries.
 - **反例:** Code invents 3.7 or labels thresholds “CityU official,” then publishes grades.
-- **采用方案 / 取舍:** Versioned policy can be `DRAFT_UNCONFIGURED`; preserve supplied values and null missing fields. Raw score/rubric/evidence work; grade snapshot says mapping pending. Publication requires completeness validation.
+- **采用方案 / 取舍:** Migration 018 stores a versioned `DRAFT_UNCONFIGURED`; supplied values are preserved while missing fields stay null/empty. Raw score/rubric/evidence work; the frozen GradeSnapshot says mapping pending. Admin preview is allowed, while publication requires complete non-overlapping bands, rounding and verified provenance.
 - **不可违反的规则:** No inferred A-/threshold and no institution claim without an authoritative source supplied/approved by Owner.
 - **验收测试:** round-trip nulls, preview, publish rejection, immutable later policy snapshot.
 - **剩余不确定性:** Owner must supply/approve business values.
@@ -159,7 +159,7 @@ Q1–Q10 are `LOCKED_REQUIREMENT`. Every new implementation choice below is expl
 
 - **问题 / 来源或缺口:** A model-generated question can be ambiguous or unsolvable.
 - **反例:** Grader uses the same incorrect hidden assumption as generator and awards false confidence.
-- **采用方案 / 取舍:** Generated revision is a candidate with provenance, solution/rubric validation status and model/template versions. It cannot enter formal pool until deterministic checks and configured review/second-pass validation succeed.
+- **采用方案 / 取舍:** Generated revision is a candidate with provenance, solution/rubric validation status and model/template versions. The Stage 5 selector admits only revisions explicitly promoted to `VALIDATED` with a non-`MODEL_ONLY` verification method; deterministic or human/second-pass validation must happen before that promotion.
 - **不可违反的规则:** Generation is not proof of solvability or fairness; source-inspired text must be original and private rights boundaries respected.
 - **验收测试:** no-solution, multiple-answer, inconsistent rubric, copied private content and validation-failure exclusion.
 - **剩余不确定性:** Human-review threshold for official pools requires product policy.
@@ -184,6 +184,8 @@ Q1–Q10 are `LOCKED_REQUIREMENT`. Every new implementation choice below is expl
 - **验收测试:** two-run migration, old-row hashes/counts, integrity/FK, missing/tampered file manifest and isolated restore smoke.
 - **剩余不确定性:** Current production paths/topology/release are unknown.
 - **分类:** `SUPPLEMENTAL_ENGINEERING_DECISION`.
+
+Stage 5 incident evidence reinforced this boundary: a default browser config that omitted explicit DB/upload targets was treated as a failed gate. The contaminated state was preserved, pre-test rows were recovered from an online snapshot, applied additive Schema history was retained, and the default config now creates a writable isolated copy from a read-only source connection. This is an implementation correction, not a new user-confirmed product requirement.
 
 ## SG-19 — Collection capability checks are not byte-integrity claims
 

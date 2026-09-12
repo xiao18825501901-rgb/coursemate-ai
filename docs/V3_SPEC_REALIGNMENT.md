@@ -44,12 +44,14 @@ Paid model calls used: none
 - FastAPI/Python RAG API 是学习状态、课程资料和 V3 编排的拟定单一写入者。
 - React/TypeScript Web 仍保留 V2 页面，并有 feature-flagged V3 双 Pane 工作区。
 - Node Task Agent 保持任务工具职责，不写学习成绩或覆盖状态。
-- V3 011–016 迁移、冻结文档版本/派生物、workspace 文件隔离、Registry、ATOMIC/COMPOSITE、双树投影、版本化 Spec、v3.2 Planner/Compiler/Executor、计划缓存与交付证据，以及版本化 Problem→Bridge→Teaching→Return 本地闭环已存在，但并未覆盖新版全部领域对象。
+- V3 011–018 迁移、冻结文档版本/派生物、workspace 文件隔离、Registry、ATOMIC/COMPOSITE、双树投影、版本化 Spec、v3.2 Planner/Compiler/Executor/Problem/Assessment Grader、计划缓存与交付证据、正式 Assessment/GradePolicy，以及版本化 Problem→Bridge→Teaching→Assessment 本地闭环已存在，但并未覆盖新版全部领域对象。
 - `V3_ENABLED` 和 `VITE_V3_ENABLED` 默认关闭；目标生成模型配置锁为 `qwen3.8-max`，Embedding 独立。
 
 ### 本地真实数据库
 
-2026-09-12 17:25 的最新只读复核显示 `data/rag.sqlite3` 当前为迁移 1–15，而不是本文此前写下的 1–10；5 courses、69 documents、1,937 chunks、31 conversations、78 messages。迁移 016 演练前后源文件 SHA-256 均为 `BCB04E8814D5FF0E4301845C541DBAABF9EF6CE65F6F18853E501B3205AE93ED`，文件最后写入时间早于本次演练，因此本次脚本没有改源库。谁在何时应用 11–15 **UNKNOWN**，不得从 Git 或测试结果反推。此前 1–10 与 3 courses/67 documents 均为已被当前证据取代的旧快照；这些本地数量也不外推到生产。
+2026-09-12 17:25 的 Stage 4 只读复核曾确认 `data/rag.sqlite3` 为迁移 1–15：5 courses、69 documents、1,937 chunks、31 conversations、78 messages；当时 016 演练没有改源库，谁应用 11–15 仍为 **UNKNOWN**。
+
+Stage 5 全量浏览器回归首次把旧默认 `playwright.config.ts` 与 V3 用例一起运行时，发现该配置没有显式覆盖 `RAG_DATABASE_PATH`，因而错误地对本地真实库执行了 016–018 并写入合成测试状态。任务立即停止写入，并用错误发生前由 `v3-migration-rehearsal-08` 的 SQLite online backup 捕获、再加性迁移到 18 的快照恢复全部测试前数据；没有倒改已执行迁移历史。恢复后为 1–18、5 courses、69 documents、1,937 chunks、31 conversations、78 messages，integrity `ok`、外键违规 0，受保护旧表逐行指纹与测试前一致。两份精确匹配 E2E fixture 的新上传被移入忽略目录的隔离区，污染态数据库保留两份可恢复副本。当前主文件 SHA-256 为 `48852F977EBF37B1A9B77DF1A03E5D3549BEBC71EC77401673BA60F5BD6D906B`；70 个活动 uploads、124,209,888 bytes，完整清单摘要为 `FB1DBBCEE7E46969C2F361BB8BA09534C13BE8C101AD8694A1A8E35D91E83E03`。这些都是本地事实，不外推到生产。
 
 ### 历史部署报告
 
@@ -68,10 +70,10 @@ Paid model calls used: none
 | V2 QA、Clerk、引用、流式输出、Task Agent | §0、§19 | 既有 API/Web/Agent | KEEP | 全量 V2 回归；不得以 V3 重写替代 |
 | qwen3.8-max 主智能模型；Embedding 独立 | Q1、§3 | V3 adapter + locked setting；V2/部署模板仍有旧角色配置 | ADAPT | 增加协议/地域/能力合同；账户与 live 为 BLOCKED |
 | Shared Orchestrator + Teaching/Problem/AUTO | Q2 | Orchestrator 有 Teaching/Problem；AUTO 未实现 | ADAPT + ADD | 保留共享 workspace；补可解释路由与测试 |
-| 双轴学习状态 | Q3、Q8 | 014/`knowledge.py` 已分别投影 Learning 与 Assessment；Assessment 当前只明确返回 `NOT_ASSESSED` | KEEP + ADD | 不从旧聊天推导 LEARNED；Stage 5 新增独立测评事实 |
-| 五题不等权、总分 100 | Q4、§13 | 无 Assessment Schema/API/UI | ADD | 新增版本化 Blueprint/Attempt/Evidence；不写旧成绩 |
-| Hybrid Assessment Pool | Q5 | 无正式题池 | ADD | source/scope/version/泄题边界必测 |
-| COMPOSITE / ATOMIC | Q6 | 014 与 API 支持两类；COMPOSITE 无 Spec/Journey，按唯一 ATOMIC 后代聚合 | KEEP + HARDEN | Stage 2 本地合同已验证；Stage 5 接入真实 Assessment 聚合 |
+| 双轴学习状态 | Q3、Q8 | `knowledge.py` 分别投影 coverage 与 Assessment；017/018 保存独立证据 | KEEP | LEARNED 不读取分数；NOT_ASSESSED 不等于 0；本地合同已验证 |
+| 五题不等权、总分 100 | Q4、§13 | 冻结 Blueprint、Attempt、Evidence、API 与 Web 已实现 | KEEP + HARDEN | 服务端固定 5 题、10/15/20/25/30、总分 100；Stage 6 补作者/审核界面 |
+| Hybrid Assessment Pool | Q5 | 017 + `assessments.py` 支持 official/本人私人/已验证生成/外部启发原创 | KEEP + HARDEN | owner ACL、MODEL_ONLY/已泄题 family 排除和 source diversity 已测 |
+| COMPOSITE / ATOMIC | Q6 | COMPOSITE 无独立成绩写入，聚合唯一、独立、已测 ATOMIC 后代 | KEEP + HARDEN | 未测后代不按 0；完整/部分覆盖显式；综合父节点考试仍是后续能力 |
 | Canonical Node + Private Overlay / 双树 | Q7、§7 | 014、API 与 Web 已实现审核后官方视图和 owner×course 个性化版本；同名私人节点不合并 | KEEP + ADD | 引用同一 node/progress，不复制成绩；Stage 6 补管理审核 UI |
 | REQUIRED coverage 决定 LEARNED | Q8、§8 | 后端集合判定已有最小实现 | KEEP + HARDEN | 验证完整正文、Spec/Item/Step 版本与撤权 |
 | 动态 Teaching Unit 状态机 | Q9 | planner + unit 已有最小路径 | ADAPT | 补暂停/恢复、缓存、失败/预算状态 |
@@ -80,9 +82,9 @@ Paid model calls used: none
 | 文档版本和派生预览 | §4–6 | 013 冻结版本/派生物/Chunk 绑定；安全文本、CSV、静态 Notebook、PDF、图片与 Office 诚实 fallback | KEEP + HARDEN | 本地 ACL/篡改测试通过；受控 Office converter、生产存储、清理重试仍待实现/核验 |
 | Problem 完整解答与步骤问题 | Q2、§9 | 最小文本题闭环已实现 | ADAPT | 模板版本化、题目/图片版本、答案 provenance、流式状态 |
 | LearningBridge 精确返回 | §10 | 012 + API/UI 有 step/node/context/anchor | KEEP + HARDEN | 修复路径 ID 幂等摘要、并发 revision；重启/重新登录复验 |
-| 两 Pane UI | §14 | 横向/纵向布局、双树与双轴、个人计划和状态恢复已进入 Web | ADAPT | 补 Assessment 入口、AUTO、拖拽/窄屏 tab、完整 a11y |
+| 两 Pane UI | §14 | 横向/纵向布局、双树与双轴、个人计划、Assessment 与状态恢复已进入 Web | ADAPT | AUTO、拖拽/窄屏 tab 和完整 a11y 仍待补齐 |
 | 公开版本审核/撤回 | §15 | V2 course publication；无树/Spec/派生物版本绑定 | ADD | 私人内容不进入普通 Admin 视图；发布只绑定冻结版本 |
-| GradePolicy 缺项 | §13 | 无 V3 policy | ADD | 原始已知值留存；A- 与 thresholds 为 UNCONFIGURED |
+| GradePolicy 缺项 | §13 | 018 + Admin create/preview/publish 与冻结 Blueprint 绑定 | KEEP + CONFIGURE | 原始已知值留存；A- 与 thresholds 仍为 UNCONFIGURED，不能发布/冒充官方 |
 | 旧计划“先黄金闭环、后文件/树” | 新 §18 | 已按旧顺序做了最小闭环 | RETIRE as ordering | 不删除成果；改按 Stage 1→8 重验与扩展 |
 | SG01–SG24 作为“用户逐项确认” | 本次要求 | 旧文档曾用 SG 编号 | REPLACE classification | 只把 Q1–Q10 标 LOCKED；新增规则统一标 SUPPLEMENTAL |
 | 真实模型/生产 PASS | §3、§20 | 无当前凭证或付费证据 | BLOCKED | 本地继续；账户/预算/生产由 Owner 受控执行 |
@@ -93,16 +95,17 @@ Paid model calls used: none
 
 | 范围 | 状态 |
 |---|---|
-| 011–016 文件 | 已在 V3 feature branch 提交并视为迁移历史冻结；后续只用 017+ 前向修复 |
-| 临时/合成测试库 | 已执行过 011–016；只证明当前本地合同/fake-provider 流程 |
+| 011–018 文件 | 已在 V3 feature branch 提交；已执行的本地迁移历史不重编号、不删除，后续只用 019+ 前向修复 |
+| 临时/合成测试库 | 已执行过 011–018；只证明当前本地合同/fake-provider 流程 |
 | 隔离真实资料副本 | `work/v3-migration-rehearsal-07/` 从当前 1–15 源库副本执行到 16；旧表指纹不变、integrity ok、FK 0、69/69 文档版本、1,937 chunks 全部绑定；2 组 legacy problem/solution/step/bridge 全部正规化且缺失数为 0 |
+| Stage 5 隔离副本 | `work/v3-migration-rehearsal-08/` 在默认 E2E 事故前从 1–15 源库 online backup，并两次初始化至 18；旧表指纹不变、integrity ok、FK 0，Assessment 表为空且只新增 1 条明确非院校官方的 `DRAFT_UNCONFIGURED` policy |
 | CS3481 最小子集副本 | `work/v3-cs3481-subset-01/`：3 个 DRAFT 候选节点、2 条层级边、1 条 prerequisite、2 条真实版本证据；学习者不可见、0 模型调用 |
-| 本地真实库 | 当前只读证据为 1–15；本任务未对它应用 016，11–15 的执行来源 UNKNOWN |
+| 本地真实库 | 当前为 1–18；016–018 因已披露的默认 E2E 配置事故被执行，随后保留 Schema 并恢复测试前数据；11–15 的执行来源仍 UNKNOWN |
 | 生产 | UNKNOWN |
 
-审计发现并修复了一个安全边界：此前 `Database.initialize()` 无条件执行 011/012。现在只有 `Settings.v3_enabled=True` 才执行 V3 迁移，V2 readiness 要求 1–10，当前 V3 readiness 要求 1–16；V2 课程/发布查询也不会在 flag 关闭时引用 V3 表。Stage 2 在服务与 SQLite 双层约束树 source，并让损坏的历史树读取失败关闭；Stage 3 将计划、计划单元、交付证据和模型调用元数据加入显式版本链；Stage 4 将 Problem、Attempt、Solution、StepKnowledgeLink 与 LearningBridge Context 正规化。当前全量证据为 Python 270 passed、Web 35 passed、Task Agent 53 passed、Ruff/mypy（56 source files）/typecheck/build 通过，以及隔离合成数据库 Playwright 1 passed。
+审计发现并修复了两个安全边界：`Database.initialize()` 只在 `Settings.v3_enabled=True` 时执行 V3 迁移；默认 Playwright 也必须先把 RAG 库只读 online backup 到唯一 `work/e2e-rag-*` 并把新 uploads 指向该目录。V2 readiness 仍要求 1–10，当前 V3 readiness 要求 1–18。Stage 2–4 的树、教学和 Problem/Bridge 链保持不变；Stage 5 新增冻结 Assessment、PerformanceEvidence、GradePolicy 和显式触发式重规划。当前全量证据为 Python 284 passed、Web 39 passed、Task Agent 53 passed、Ruff/mypy（57 source files）/typecheck/build 通过，以及隔离数据库 Playwright 5 passed。
 
-011–016 不再通过改编号或删除来掩盖曾在本地/合成/副本数据库执行的事实。后续结构使用 017+ 前向迁移，并在新的隔离副本演练。
+011–018 不通过改编号或删除来掩盖已执行事实。后续结构使用 019+ 前向迁移，并在新的隔离副本演练。
 
 ## 6. 新验收层级
 
@@ -224,3 +227,33 @@ Stage 4 已落实：
 Stage 4 全量证据：Python 270 passed；Web 35 passed；Task Agent 53 passed；Ruff、mypy（56 source files）、两 workspace TypeScript、生产构建通过；Playwright 1 passed。`work/v3-migration-rehearsal-07/` 从当前本地 1–15 源库只读备份副本升级到 1–16，两次初始化后旧表指纹不变、integrity ok、FK 0；现有 2 组 legacy problem/solution/step/bridge 均有一一对应正规化行，缺失计数全为 0。当前源库本身为 1–15 且本次未迁移 016。
 
 Stage 4 不包含正式 Assessment、GradePolicy、完整 AUTO 语义路由、官方审核发布、真实 qwen 视觉/教学质量验证或生产部署；这些继续按 Stage 5–8 执行。
+
+## 12. Stage 5 完成检查点
+
+```text
+Source implementation: IMPLEMENTED for Stage 5 Assessment/GradePolicy/replan scope
+Local contract tests: VERIFIED
+Local fake-provider/browser flow: VERIFIED
+Live qwen3.8-max grader/teaching quality: NOT VERIFIED
+Production: NOT VERIFIED
+Local real database Schema: 1–18 after disclosed E2E isolation incident and verified data recovery
+Production database migration: UNKNOWN / NOT EXECUTED BY THIS TASK
+```
+
+阶段提交：`141057a`（017/018 Assessment 与 GradePolicy Schema）、`bbeb3d8`（冻结五题测评运行时）、`11443bc`（PerformanceEvidence 与显式重规划）、`063f728`（持久化 Web Assessment）、`c325346`（1–18 迁移不变量）、`9d5ed79`（默认 Playwright 数据隔离）、`8342f4b`（答案读取与曝光题族自审修复）、`a882d36`（Windows/JSDOM 测试预算）。
+
+Stage 5 已落实：
+
+- Formal Assessment 冻结 5 个不同 family 的精确 QuestionRevision、Rubric、source/verification、10/15/20/25/30 分值和 GradePolicy 绑定；进行中投影不读取 answer/rubric，只有已提交/已评分或该题明确 reveal 后才逐题读取。
+- Hybrid pool 严格限定 official 与当前 owner 私人题，排除 `MODEL_ONLY`、未验证候选，以及已在 Problem Mode 看过答案或在 Assessment 中使用过辅助的整个 family。Problem 答案暴露不会升级为独立测评证据。
+- 确定性题由后端按冻结答案与 rubric 计算；开放题只接受严格 `AssessmentGradeProposal`，模型不能决定总分、letter 或 GPA。`NEEDS_REVIEW` 不产生伪分数。
+- 查看答案或请求教学会把整个 session 永久降级为 `PRACTICE`/non-independent；放弃或未提交不会写 0/F，也不会解锁其余答案。
+- 每个 criterion 形成细粒度 `PerformanceEvidence`；弱项只创建 `PENDING` replan trigger，不自动调用付费模型。只有用户明确继续教学时，Planner 才接收无答案正文的安全证据摘要，并把 trigger→Plan→Unit→remediation 串联；`LEARNED` 不因低分回退。
+- GradePolicy 支持 Admin 创建、预览、完整性验证和发布，Blueprint 固定旧 policy。需求材料中的 A- 数值与 raw-score 分界仍保留为 null/空；默认 seed 明确写为非院校官方，raw score 可用但 letter/numeric grade 为 `UNCONFIGURED`。
+- COMPOSITE Assessment 只聚合唯一、独立、已评分的 ATOMIC 后代；未测节点不算 0，并区分 partial/fully assessed。
+
+Stage 5 证据：新增 Assessment 专项 13 passed，Teaching/Problem/Safety 组合回归 35 passed；全量 Python 284 passed、Web 39 passed、Task Agent 53 passed；Ruff、mypy（57 source files）、两个 TypeScript workspace 和生产构建通过。默认隔离配置下 Playwright 先有 5 passed（40.3s），合并前受载主机再次完整复验为 5 passed（2.6m）；两次都证明真实本地 DB 与 uploads 前后摘要完全一致。合并前安全自审又用 SQLite authorizer、同 family 兄弟题与 abandon 反例锁定答案最小读取和曝光题族隔离；修复后的全量 Python 回归仍为 284 passed。Web 的 5 秒默认单测时限在当前 Windows/JSDOM 冷启动下稳定产生 5.1–5.9 秒的假失败，定点诊断后把显式时限设为 15 秒；全量 39 条行为断言随后通过，未跳过或删除测试。
+
+迁移副本 `work/v3-migration-rehearsal-08/` 从事故前 1–15 源状态两次初始化至 18：旧表指纹不变、integrity ok、FK 0、版本连续 1–18；Assessment/GradeSnapshot 历史均为 0，不推断旧成绩；唯一 GradePolicy 是明确未配置的需求草案。该目录及 `work/v3-e2e-incident-recovery-20260912/` 含私人数据库证据，只能本机保留，不提交、不分享。
+
+Stage 5 不包含正式题库作者/审核 UI、完整官方树发布、综合 COMPOSITE 考试、人工复核终审、AUTO 语义路由、真实 qwen 评分质量或生产部署；这些继续按 Stage 6–8 执行。

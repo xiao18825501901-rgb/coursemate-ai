@@ -1,7 +1,7 @@
 # CourseMate V3 — Grade Policy Gaps and Configuration
 
-Version: Stage 0 policy contract, 2026-09-12.
-Current implementation status: `PLANNED`; no V3 GradePolicy tables or production policy are claimed.
+Version: Stage 5 implemented policy contract, 2026-09-12.
+Current implementation status: `SOURCE_IMPLEMENTED / LOCAL_CONTRACT_VERIFIED`; no production policy is configured or claimed.
 
 ## 1. What the source actually supplies
 
@@ -36,7 +36,7 @@ Grade             = raw score + rubric evidence + optional configured letter/GPA
 
 `LEARNED` is derived only from REQUIRED Teaching coverage. A legal record may be `LEARNED + C-`, `NOT_STARTED + high prior diagnostic`, or `LEARNED + NOT_ASSESSED`. Neither axis overwrites the other.
 
-## 3. GradePolicyVersion target contract
+## 3. GradePolicyVersion implemented contract
 
 ```text
 id
@@ -46,8 +46,8 @@ version
 status: DRAFT_UNCONFIGURED | DRAFT_VALID | PUBLISHED | RETIRED
 display_name
 provenance_label
-numeric_scale[]: {letter, numeric_value|null, supplied_by, note}
-raw_score_bands[]: {letter, lower|null, upper|null, lower_inclusive, upper_inclusive}
+numeric_scale[]: {letter, numeric_value|null}
+raw_score_bands[]: {letter, minimum, maximum}
 rounding_rule|null
 pass_rule|null
 retake_rule|null
@@ -85,7 +85,7 @@ Unsubmitted/interrupted sessions are not zero or F. `NOT_ASSESSED` is a state, n
 
 ## 5. Default assessment blueprint policy
 
-Each ATOMIC node assessment freezes exactly five questions. Marks must be positive integers, not all equal, and total exactly 100. The common 10/15/20/25/30 example is illustrative only; a deterministic validator enforces shape while the node/major-specific blueprint determines question types and marks.
+Each ATOMIC node assessment freezes exactly five questions. Marks must be positive integers, not all equal, and total exactly 100. The current default selector assigns `10/15/20/25/30`; SQLite independently rejects any frozen Blueprint that is not exactly five, totals other than 100 or has all-equal marks. Future node-specific weighting requires a new versioned selection policy, not mutation of a frozen Blueprint.
 
 Frozen Blueprint contains:
 
@@ -99,7 +99,7 @@ Frozen Blueprint contains:
 
 Answers and Rubrics remain server-side before submission.
 
-## 6. GradeSnapshot target behavior
+## 6. GradeSnapshot implemented behavior
 
 The backend computes awarded marks from validated criterion proposals and clamps/rejects impossible totals. The model may explain semantic evidence but cannot perform the authoritative sum or select a GradePolicy.
 
@@ -130,6 +130,8 @@ Fine-grained PerformanceEvidence records concept, terminology, method/reasoning,
 9. Learning Progress remains unchanged for every grade outcome;
 10. parent COMPOSITE aggregation documents missing/uncertain children and never writes contradictory mastery.
 
+All ten contract families have local deterministic coverage in `test_assessment_runtime.py`; the current focused file reports 13 passing tests, including server-answer-column denial, abandoned-answer secrecy and exposed-family retest guards. This is not evidence of live semantic grading quality or production configuration. Human finalization of `NEEDS_REVIEW`, author/reviewer UI and integrated COMPOSITE exams remain future work.
+
 ## 8. Minimal Owner action, deferred
 
 Before Letter/GPA production activation, the Owner must provide or approve:
@@ -140,3 +142,5 @@ Before Letter/GPA production activation, the Owner must provide or approve:
 - the precise non-misleading policy display name and provenance.
 
 This missing policy does not block raw score, Rubric, performance evidence, `NOT_ASSESSED`, test workflows or local implementation.
+
+The repository seed `gp_requirements_draft_v1` is therefore intentionally `DRAFT_UNCONFIGURED`, has no raw-score bands, keeps A- numeric value null and says “Requirements draft; not an institutional policy.” Admin endpoints can create and preview a later version, but publish rejects incomplete mappings and unverified institutional claims. Frozen Blueprints retain their exact old policy binding.
