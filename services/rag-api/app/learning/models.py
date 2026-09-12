@@ -110,6 +110,26 @@ class KnowledgeLink(Contract):
     reason: Text
 
 
+class StepKnowledgeLink(Contract):
+    resolution_status: Literal["VALIDATED", "UNRESOLVED"]
+    node_id: Identifier | None = None
+    spec_version: int | None = Field(default=None, ge=1)
+    item_id: Identifier | None = None
+    question_text: Text
+    reason: Text
+    unresolved_reason: Text | None = None
+
+    @model_validator(mode="after")
+    def complete_or_explicitly_unresolved(self) -> "StepKnowledgeLink":
+        identity = (self.node_id, self.spec_version, self.item_id)
+        if self.resolution_status == "VALIDATED":
+            if any(value is None for value in identity) or self.unresolved_reason is not None:
+                raise ValueError("A validated StepKnowledgeLink needs an exact Spec item")
+        elif any(value is not None for value in identity) or self.unresolved_reason is None:
+            raise ValueError("An unresolved StepKnowledgeLink cannot invent a node binding")
+        return self
+
+
 class TeachingUnitOutput(Contract):
     plan_unit_key: Identifier
     completion_status: Literal["COMPLETED", "INCOMPLETE"]
@@ -133,8 +153,22 @@ class SolutionStep(Contract):
     explanation: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=20, max_length=6000)
     ]
-    knowledge_links: list[KnowledgeLink] = Field(min_length=1, max_length=5)
+    formulae: list[Text] = Field(default_factory=list, max_length=10)
+    units: list[Text] = Field(default_factory=list, max_length=10)
+    check: Text | None = None
+    knowledge_links: list[StepKnowledgeLink] = Field(min_length=1, max_length=5)
     source_refs: list[Identifier] = Field(max_length=10)
+
+    @model_validator(mode="after")
+    def unique_validated_nodes(self) -> "SolutionStep":
+        node_ids = [
+            link.node_id
+            for link in self.knowledge_links
+            if link.resolution_status == "VALIDATED"
+        ]
+        if len(node_ids) != len(set(node_ids)):
+            raise ValueError("A solution step may ask only one question per bound node")
+        return self
 
 
 class ProblemSolutionOutput(Contract):
@@ -144,6 +178,9 @@ class ProblemSolutionOutput(Contract):
     conditions: list[Text] = Field(max_length=20)
     steps: list[SolutionStep] = Field(min_length=1, max_length=12)
     assumptions: list[Text] = Field(max_length=10)
+    common_mistakes: list[Text] = Field(default_factory=list, max_length=10)
+    question_transcription: Text | None = None
+    visual_uncertainties: list[Text] = Field(default_factory=list, max_length=20)
     verification: Literal["NOT_INDEPENDENTLY_VERIFIED"]
 
 
@@ -153,14 +190,36 @@ class OperationInput(Contract):
 
 
 class SolveInput(OperationInput):
-    question: Text
+    question: Text | None = None
     node_ids: list[Identifier] = Field(min_length=1, max_length=10)
     scope: Literal["official", "mine", "union"] = "union"
+    problem_index_entry_id: Identifier | None = None
+    image_document_version_id: Identifier | None = None
+    transcription_hint: Text | None = None
+
+    @model_validator(mode="after")
+    def one_problem_source(self) -> "SolveInput":
+        if self.problem_index_entry_id and self.image_document_version_id:
+            raise ValueError("Choose either an indexed question or one image")
+        if self.problem_index_entry_id and self.question is not None:
+            raise ValueError("An indexed question must use its saved version text")
+        if not (self.question or self.problem_index_entry_id or self.image_document_version_id):
+            raise ValueError("Provide question text, an indexed question, or an image")
+        if self.transcription_hint is not None and self.image_document_version_id is None:
+            raise ValueError("A transcription hint belongs to an image question")
+        return self
 
 
 class BridgeInput(OperationInput):
     step_id: Identifier
-    node_id: Identifier
+    knowledge_link_id: Identifier | None = None
+    node_id: Identifier | None = None
+
+    @model_validator(mode="after")
+    def link_or_legacy_node(self) -> "BridgeInput":
+        if self.knowledge_link_id is None and self.node_id is None:
+            raise ValueError("Select a saved StepKnowledgeLink")
+        return self
 
 
 class TeachInput(OperationInput):

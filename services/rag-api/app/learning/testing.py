@@ -6,13 +6,28 @@ from typing import Any
 def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
     if schema == "ProblemSolutionOutput":
         # Not an answerer: only a labelled, fixed synthetic integration-test question is supported.
-        if context["question"].replace(" ", "").lower() not in ("whatis2+3?", "2+3"):
+        candidate = context.get("transcription_hint") or context["question"]
+        if "2+3" not in candidate.replace(" ", "").lower():
             raise ValueError("Fake provider supports only the synthetic 2+3 fixture")
+        is_image = context.get("input_kind") == "IMAGE"
+        node = context["nodes"][0]
+        item = next(
+            item for item in node["items"] if item["requirement"] == "REQUIRED"
+        )
         return {
             "answer_origin": "MODEL_PROPOSED",
             "exam_answer": "[FAKE TEST FIXTURE] 2 + 3 = 5.",
             "conditions": ["Two objects and three objects"],
             "assumptions": ["Synthetic test fixture"],
+            "common_mistakes": ["[FAKE TEST FIXTURE] Counting either group twice."],
+            "question_transcription": (
+                "[FAKE TEST FIXTURE] What is 2 + 3?" if is_image else None
+            ),
+            "visual_uncertainties": (
+                ["[FAKE TEST FIXTURE] Visual correctness was not evaluated."]
+                if is_image
+                else []
+            ),
             "verification": "NOT_INDEPENDENTLY_VERIFIED",
             "steps": [
                 {
@@ -21,11 +36,18 @@ def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
                     "explanation": (
                         "Count two objects then three more: one, two, three, four, five."
                     ),
+                    "formulae": ["2 + 3 = 5"],
+                    "units": ["objects"],
+                    "check": "Recount the combined set to obtain five objects.",
                     "knowledge_links": [
                         {
-                            "node_id": context["nodes"][0]["id"],
+                            "resolution_status": "VALIDATED",
+                            "node_id": node["id"],
+                            "spec_version": node["spec_version"],
+                            "item_id": item["item_id"],
                             "question_text": "Why do we add these counts?",
                             "reason": "This step combines quantities.",
+                            "unresolved_reason": None,
                         }
                     ],
                     "source_refs": [],

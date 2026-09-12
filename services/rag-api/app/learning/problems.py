@@ -3,7 +3,9 @@ from typing import Any, Literal, cast
 
 from app.db import Database
 from app.errors import ApiError
-from app.learning.workspaces import document_version_for, workspace_for
+from app.learning.previews import IMAGE_MEDIA_TYPES
+from app.learning.provider import ProviderImage
+from app.learning.workspaces import document_version_for, original_path, workspace_for
 
 ProblemIndexScope = Literal["official", "mine", "union"]
 
@@ -41,6 +43,8 @@ class ProblemRepository:
     def _payload(row: sqlite3.Row) -> dict[str, Any]:
         return {
             "id": row["id"],
+            "chunk_id": row["chunk_id"],
+            "document_id": row["document_id"],
             "document_version_id": row["document_version_id"],
             "document_sha256": row["document_sha256"],
             "filename": row["filename"],
@@ -102,7 +106,8 @@ class ProblemRepository:
                 ).fetchone()[0]
             )
             rows = connection.execute(
-                "SELECT entry.*,version.filename,version.sha256 AS document_sha256,"
+                "SELECT entry.*,version.document_id,version.filename,"
+                "version.sha256 AS document_sha256,"
                 "version.source_scope FROM problem_index_entries AS entry "
                 "JOIN document_versions AS version "
                 "ON version.id = entry.document_version_id "
@@ -126,7 +131,8 @@ class ProblemRepository:
         workspace = workspace_for(self.database, workspace_id, owner)
         with self.database.connect() as connection:
             row = connection.execute(
-                "SELECT entry.*,version.filename,version.sha256 AS document_sha256,"
+                "SELECT entry.*,version.document_id,version.filename,"
+                "version.sha256 AS document_sha256,"
                 "version.source_scope,version.owner_user_id,course.visibility,"
                 "course.publication_status FROM problem_index_entries AS entry "
                 "JOIN document_versions AS version "
@@ -159,4 +165,55 @@ class ProblemRepository:
             raise ApiError(
                 404, "PROBLEM_INDEX_NOT_FOUND", "The indexed question was not found."
             ) from error
-        return cast(dict[str, Any], self._payload(row))
+        return self._payload(row)
+
+    def image_input(
+        self,
+        workspace_id: str,
+        owner: str,
+        version_id: str,
+        *,
+        max_bytes: int,
+    ) -> tuple[ProviderImage, dict[str, Any]]:
+        workspace = workspace_for(self.database, workspace_id, owner)
+        try:
+            version = document_version_for(self.database, version_id, owner)
+        except ApiError as error:
+            raise ApiError(404, "PROBLEM_IMAGE_NOT_FOUND", "The image was not found.") from error
+        is_private = (
+            version["course_id"] == workspace["private_course_id"]
+            and version["source_scope"] == "WORKSPACE_PRIVATE"
+            and version["owner_user_id"] == owner
+        )
+        is_course = version["course_id"] == workspace["course_id"] and (
+            version["source_scope"] == "OFFICIAL" or version["owner_user_id"] == owner
+        )
+        media_type = IMAGE_MEDIA_TYPES.get(version["extension"])
+        if (
+            not (is_private or is_course)
+            or media_type not in {"image/png", "image/jpeg"}
+        ):
+            raise ApiError(404, "PROBLEM_IMAGE_NOT_FOUND", "The image was not found.")
+        if version["byte_size"] > max_bytes:
+            raise ApiError(
+                413,
+                "IMAGE_MODEL_LIMIT",
+                "The image exceeds the bounded model-input size.",
+                details={"limitBytes": max_bytes},
+            )
+        path = original_path(self.database, version)
+        if path is None:
+            raise ApiError(410, "SOURCE_UNAVAILABLE", "The image source is unavailable.")
+        image = ProviderImage(
+            media_type=cast(Literal["image/png", "image/jpeg"], media_type),
+            content=path.read_bytes(),
+            sha256=version["sha256"],
+            source_version_id=version["id"],
+        )
+        return image, {
+            "document_version_id": version["id"],
+            "document_sha256": version["sha256"],
+            "filename": version["filename"],
+            "media_type": media_type,
+            "byte_size": version["byte_size"],
+        }

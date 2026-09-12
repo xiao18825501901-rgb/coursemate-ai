@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     v3_model_base_url: str | None = None
     v3_max_output_tokens: int = Field(default=4000, ge=500, le=8000)
     v3_daily_operations: int = Field(default=30, ge=1, le=500)
+    v3_problem_image_max_bytes: int = Field(
+        default=10 * 1024 * 1024, ge=1_024, le=20 * 1024 * 1024
+    )
     v3_preview_max_bytes: int = Field(default=2 * 1024 * 1024, ge=1_024, le=20 * 1024 * 1024)
     v3_preview_max_text_chars: int = Field(default=100_000, ge=1_000, le=1_000_000)
     v3_preview_max_csv_rows: int = Field(default=200, ge=1, le=5_000)

@@ -1,8 +1,10 @@
+import base64
 import json
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from hashlib import sha256
 from time import perf_counter
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 from urllib.parse import urlsplit
 
 from openai import OpenAI
@@ -12,6 +14,18 @@ from app.config import Settings
 from app.errors import ApiError
 
 Output = TypeVar("Output", bound=BaseModel)
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderImage:
+    media_type: Literal["image/png", "image/jpeg"]
+    content: bytes = field(repr=False)
+    sha256: str
+    source_version_id: str
+
+    def __post_init__(self) -> None:
+        if not self.content or sha256(self.content).hexdigest() != self.sha256:
+            raise ValueError("Provider image bytes do not match their immutable source version")
 
 
 class ProviderCallFailure(Exception):
@@ -63,10 +77,24 @@ class LearningProvider:
         role: str,
         template_version: str = "UNVERSIONED",
         schema_version: str | None = None,
+        images: list[ProviderImage] | None = None,
     ) -> tuple[Output, dict[str, Any]]:
         settings = self.settings
+        safe_images = images or []
         serialized = json.dumps(
-            {"authorized_context": context, "required_output_schema": schema.model_json_schema()},
+            {
+                "authorized_context": context,
+                "authorized_images": [
+                    {
+                        "source_version_id": item.source_version_id,
+                        "media_type": item.media_type,
+                        "sha256": item.sha256,
+                        "byte_size": len(item.content),
+                    }
+                    for item in safe_images
+                ],
+                "required_output_schema": schema.model_json_schema(),
+            },
             ensure_ascii=False,
         )
         started_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
@@ -91,6 +119,13 @@ class LearningProvider:
         }
         response_received = False
         try:
+            if any(
+                len(item.content) > settings.v3_problem_image_max_bytes
+                for item in safe_images
+            ):
+                raise ApiError(
+                    413, "IMAGE_MODEL_LIMIT", "The image exceeds the model input limit."
+                )
             if settings.app_env == "test" and settings.rag_provider_mode == "deterministic":
                 from app.learning.testing import fixture_output
 
@@ -131,11 +166,27 @@ class LearningProvider:
                         max_retries=0,
                         timeout=90,
                     )
+                provider_input: Any = serialized
+                if safe_images:
+                    content: list[dict[str, str]] = [
+                        {"type": "input_text", "text": serialized}
+                    ]
+                    content.extend(
+                        {
+                            "type": "input_image",
+                            "image_url": "data:"
+                            + item.media_type
+                            + ";base64,"
+                            + base64.b64encode(item.content).decode("ascii"),
+                        }
+                        for item in safe_images
+                    )
+                    provider_input = [{"role": "user", "content": content}]
                 response = self.client.responses.create(
                     model=self.model,
                     instructions=instructions
                     + "\nReturn only one valid JSON object matching the supplied schema.",
-                    input=serialized,
+                    input=provider_input,
                     max_output_tokens=settings.v3_max_output_tokens,
                     store=False,
                     tools=[],
