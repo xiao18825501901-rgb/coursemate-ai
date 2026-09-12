@@ -10,7 +10,13 @@ from app.auth import AuthenticatedUser, require_user
 from app.db import Database
 from app.errors import ApiError
 from app.learning.models import (
+    AssessmentAbandonInput,
+    AssessmentAssistInput,
+    AssessmentStartInput,
+    AssessmentSubmitInput,
     BridgeInput,
+    GradePolicyDraftInput,
+    GradePolicyPreviewInput,
     NodeDraft,
     PersonalPlanInput,
     PreferenceInput,
@@ -472,6 +478,131 @@ def learning_state(workspace_id: str, request: Request, user: User) -> dict[str,
 def knowledge_state(workspace_id: str, request: Request, user: User) -> dict[str, Any]:
     return cast(LearningOrchestrator, request.app.state.learning).knowledge_state(
         workspace_id, user.user_id
+    )
+
+
+@router.post("/workspaces/{workspace_id}/assessments")
+def start_assessment(
+    workspace_id: str,
+    payload: AssessmentStartInput,
+    request: Request,
+    user: User,
+) -> dict[str, Any]:
+    return cast(LearningOrchestrator, request.app.state.learning).start_assessment(
+        workspace_id,
+        user.user_id,
+        payload,
+    )
+
+
+@router.get("/workspaces/{workspace_id}/assessments/{session_id}")
+def assessment(
+    workspace_id: str,
+    session_id: str,
+    request: Request,
+    user: User,
+) -> dict[str, Any]:
+    return cast(LearningOrchestrator, request.app.state.learning).assessment(
+        workspace_id,
+        user.user_id,
+        session_id,
+    )
+
+
+@router.post("/workspaces/{workspace_id}/assessments/{session_id}/submit")
+def submit_assessment(
+    workspace_id: str,
+    session_id: str,
+    payload: AssessmentSubmitInput,
+    request: Request,
+    user: User,
+) -> dict[str, Any]:
+    return cast(LearningOrchestrator, request.app.state.learning).submit_assessment(
+        workspace_id,
+        user.user_id,
+        session_id,
+        payload,
+    )
+
+
+@router.post("/workspaces/{workspace_id}/assessments/{session_id}/assist")
+def assist_assessment(
+    workspace_id: str,
+    session_id: str,
+    payload: AssessmentAssistInput,
+    request: Request,
+    user: User,
+) -> dict[str, Any]:
+    return cast(LearningOrchestrator, request.app.state.learning).assist_assessment(
+        workspace_id,
+        user.user_id,
+        session_id,
+        payload,
+    )
+
+
+@router.post("/workspaces/{workspace_id}/assessments/{session_id}/abandon")
+def abandon_assessment(
+    workspace_id: str,
+    session_id: str,
+    payload: AssessmentAbandonInput,
+    request: Request,
+    user: User,
+) -> dict[str, Any]:
+    return cast(LearningOrchestrator, request.app.state.learning).abandon_assessment(
+        workspace_id,
+        user.user_id,
+        session_id,
+        payload,
+    )
+
+
+@router.get("/grade-policies")
+def grade_policies(request: Request, user: User) -> dict[str, Any]:
+    if not user.is_admin:
+        raise ApiError(403, "ADMIN_REQUIRED", "Administrator access is required.")
+    service = cast(LearningOrchestrator, request.app.state.learning).assessments
+    return {"items": service.grade_policies()}
+
+
+@router.post("/grade-policies")
+def create_grade_policy(
+    payload: GradePolicyDraftInput,
+    request: Request,
+    user: User,
+) -> dict[str, Any]:
+    if not user.is_admin:
+        raise ApiError(403, "ADMIN_REQUIRED", "Administrator access is required.")
+    return cast(LearningOrchestrator, request.app.state.learning).create_grade_policy(
+        user.user_id,
+        payload,
+    )
+
+
+@router.post("/grade-policies/{policy_id}/preview")
+def preview_grade_policy(
+    policy_id: str,
+    payload: GradePolicyPreviewInput,
+    request: Request,
+    user: User,
+) -> dict[str, Any]:
+    if not user.is_admin:
+        raise ApiError(403, "ADMIN_REQUIRED", "Administrator access is required.")
+    service = cast(LearningOrchestrator, request.app.state.learning).assessments
+    return service.preview_grade_policy(policy_id, payload.raw_score)
+
+
+@router.post("/grade-policies/{policy_id}/publish")
+def publish_grade_policy(
+    policy_id: str,
+    request: Request,
+    user: User,
+) -> dict[str, Any]:
+    if not user.is_admin:
+        raise ApiError(403, "ADMIN_REQUIRED", "Administrator access is required.")
+    return cast(LearningOrchestrator, request.app.state.learning).publish_grade_policy(
+        user.user_id,
+        policy_id,
     )
 
 

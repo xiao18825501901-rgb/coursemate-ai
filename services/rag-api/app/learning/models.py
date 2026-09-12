@@ -290,3 +290,114 @@ class TeachingSpecDraft(OperationInput):
         if not any(item.requirement == "REQUIRED" for item in self.items):
             raise ValueError("A specification requires at least one REQUIRED item")
         return self
+
+
+class AssessmentStartInput(OperationInput):
+    node_id: Identifier
+
+
+class AssessmentAnswer(Contract):
+    blueprint_item_id: Identifier
+    answer: str = Field(max_length=12_000)
+
+
+class AssessmentSubmitInput(OperationInput):
+    answers: list[AssessmentAnswer] = Field(min_length=5, max_length=5)
+
+    @model_validator(mode="after")
+    def exactly_one_answer_per_item(self) -> "AssessmentSubmitInput":
+        item_ids = [answer.blueprint_item_id for answer in self.answers]
+        if len(item_ids) != len(set(item_ids)):
+            raise ValueError("Each frozen Assessment item needs exactly one answer")
+        return self
+
+
+class AssessmentAssistInput(OperationInput):
+    blueprint_item_id: Identifier
+    action: Literal["HINT", "TEACHING", "ANSWER_REVEALED"]
+
+
+class AssessmentAbandonInput(OperationInput):
+    pass
+
+
+class AssessmentCriterionGrade(Contract):
+    criterion_id: Identifier
+    score_fraction: float = Field(ge=0, le=1)
+    answer_evidence: str = Field(max_length=2_000)
+    feedback: Text
+    confidence: float = Field(ge=0, le=1)
+    needs_review: bool = False
+
+
+class AssessmentQuestionGrade(Contract):
+    blueprint_item_id: Identifier
+    criteria: list[AssessmentCriterionGrade] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def unique_criteria(self) -> "AssessmentQuestionGrade":
+        criterion_ids = [criterion.criterion_id for criterion in self.criteria]
+        if len(criterion_ids) != len(set(criterion_ids)):
+            raise ValueError("Assessment criterion proposals must be unique")
+        return self
+
+
+class AssessmentGradeProposal(Contract):
+    schema_version: Literal["v3.2"]
+    questions: list[AssessmentQuestionGrade] = Field(min_length=1, max_length=5)
+    uncertainties: list[Text] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def unique_questions(self) -> "AssessmentGradeProposal":
+        item_ids = [question.blueprint_item_id for question in self.questions]
+        if len(item_ids) != len(set(item_ids)):
+            raise ValueError("Assessment grading proposals must be unique per question")
+        return self
+
+
+class NumericGradeValue(Contract):
+    letter: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20)
+    ]
+    numeric_value: float | None = None
+
+
+class RawScoreBand(Contract):
+    minimum: int = Field(ge=0, le=100)
+    maximum: int = Field(ge=0, le=100)
+    letter: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20)
+    ]
+
+    @model_validator(mode="after")
+    def ordered_band(self) -> "RawScoreBand":
+        if self.minimum > self.maximum:
+            raise ValueError("A raw score band minimum cannot exceed its maximum")
+        return self
+
+
+class GradePolicyDraftInput(Contract):
+    scope_type: Literal["PLATFORM", "COURSE", "NODE"]
+    scope_id: Identifier
+    display_name: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
+    ]
+    provenance_label: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)
+    ]
+    numeric_scale: list[NumericGradeValue] = Field(max_length=30)
+    raw_score_bands: list[RawScoreBand] = Field(max_length=101)
+    rounding_rule: Literal["NEAREST_INTEGER", "FLOOR", "CEILING"] | None = None
+    pass_rule: str | None = Field(default=None, max_length=1_000)
+    retake_rule: str | None = Field(default=None, max_length=1_000)
+
+    @model_validator(mode="after")
+    def unique_letters(self) -> "GradePolicyDraftInput":
+        letters = [item.letter for item in self.numeric_scale]
+        if len(letters) != len(set(letters)):
+            raise ValueError("GradePolicy letter values must be unique")
+        return self
+
+
+class GradePolicyPreviewInput(Contract):
+    raw_score: float = Field(ge=0, le=100)

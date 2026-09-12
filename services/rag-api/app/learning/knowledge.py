@@ -15,8 +15,7 @@ def _encode(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def _assessment_state() -> dict[str, object]:
-    # Formal assessment arrives in Stage 5. Absence is explicit, never score zero.
+def _not_assessed() -> dict[str, object]:
     return {"status": "NOT_ASSESSED", "raw_score": None, "grade_label": None}
 
 
@@ -378,6 +377,97 @@ class KnowledgeService:
             "historical_learned_spec_versions": historical,
         }
 
+    @staticmethod
+    def _atomic_assessment(
+        connection: sqlite3.Connection,
+        workspace_id: str,
+        node_id: str,
+    ) -> dict[str, Any]:
+        active = connection.execute(
+            "SELECT id,mode,assistance_status,started_at FROM assessment_sessions "
+            "WHERE workspace_id=? AND node_id=? AND status='IN_PROGRESS' "
+            "ORDER BY started_at DESC,id DESC LIMIT 1",
+            (workspace_id, node_id),
+        ).fetchone()
+        if active is not None:
+            return {
+                "status": "IN_PROGRESS",
+                "raw_score": None,
+                "grade_label": None,
+                "session_id": active["id"],
+                "mode": active["mode"],
+                "assistance_status": active["assistance_status"],
+            }
+        graded = connection.execute(
+            "SELECT session.id,session.mode,session.assistance_status,session.graded_at,"
+            "snapshot.raw_score,snapshot.grade_label,snapshot.numeric_value,"
+            "snapshot.mapping_status,snapshot.independent_eligible "
+            "FROM assessment_sessions AS session "
+            "JOIN grade_snapshots AS snapshot ON snapshot.assessment_session_id=session.id "
+            "WHERE session.workspace_id=? AND session.node_id=? AND session.status='GRADED' "
+            "ORDER BY snapshot.independent_eligible DESC,session.graded_at DESC,"
+            "snapshot.revision DESC LIMIT 1",
+            (workspace_id, node_id),
+        ).fetchone()
+        if graded is not None:
+            return {
+                "status": "GRADED",
+                "raw_score": graded["raw_score"],
+                "grade_label": graded["grade_label"],
+                "numeric_value": graded["numeric_value"],
+                "mapping_status": graded["mapping_status"],
+                "independent_eligible": bool(graded["independent_eligible"]),
+                "session_id": graded["id"],
+                "mode": graded["mode"],
+                "assistance_status": graded["assistance_status"],
+            }
+        pending_review = connection.execute(
+            "SELECT id,mode,assistance_status FROM assessment_sessions "
+            "WHERE workspace_id=? AND node_id=? AND status='SUBMITTED' "
+            "ORDER BY submitted_at DESC,id DESC LIMIT 1",
+            (workspace_id, node_id),
+        ).fetchone()
+        if pending_review is not None:
+            return {
+                "status": "NEEDS_REVIEW",
+                "raw_score": None,
+                "grade_label": None,
+                "session_id": pending_review["id"],
+                "mode": pending_review["mode"],
+                "assistance_status": pending_review["assistance_status"],
+            }
+        return _not_assessed()
+
+    @staticmethod
+    def _composite_assessment(
+        atomic_states: list[dict[str, Any]],
+        descendant_count: int,
+    ) -> dict[str, Any]:
+        assessed = [
+            state
+            for state in atomic_states
+            if state["status"] == "GRADED"
+            and state.get("independent_eligible") is True
+            and state.get("raw_score") is not None
+        ]
+        if not assessed:
+            return _not_assessed()
+        score = round(
+            sum(float(state["raw_score"]) for state in assessed) / len(assessed),
+            4,
+        )
+        return {
+            "status": (
+                "GRADED" if len(assessed) == descendant_count else "PARTIALLY_ASSESSED"
+            ),
+            "raw_score": score,
+            "grade_label": None,
+            "mapping_status": "COMPOSITE_RAW_ONLY",
+            "assessed_atomic_count": len(assessed),
+            "atomic_descendant_count": descendant_count,
+            "aggregation": "UNIQUE_INDEPENDENT_ATOMIC_MEAN_V1",
+        }
+
     def _tree_payload(
         self,
         connection: sqlite3.Connection,
@@ -427,6 +517,15 @@ class KnowledgeService:
             for member in memberships
             if member["kind"] == "ATOMIC"
         }
+        atomic_assessments = {
+            member["node_id"]: self._atomic_assessment(
+                connection,
+                workspace["id"],
+                member["node_id"],
+            )
+            for member in memberships
+            if member["kind"] == "ATOMIC"
+        }
         children: dict[str, set[str]] = defaultdict(set)
         for member in memberships:
             if member["parent_node_id"] is not None:
@@ -446,6 +545,7 @@ class KnowledgeService:
             return result
 
         states: dict[str, dict[str, Any]] = dict(atomic_states)
+        assessment_states: dict[str, dict[str, Any]] = dict(atomic_assessments)
         for member in memberships:
             if member["kind"] != "COMPOSITE":
                 continue
@@ -472,6 +572,10 @@ class KnowledgeService:
                 "atomic_descendant_count": len(descendants),
                 "historical_learned_spec_versions": [],
             }
+            assessment_states[member["node_id"]] = self._composite_assessment(
+                [atomic_assessments[node_id] for node_id in descendants],
+                len(descendants),
+            )
         members = [
             {
                 "node_id": member["node_id"],
@@ -485,7 +589,7 @@ class KnowledgeService:
                 "source": "PRIVATE" if member["owner_user_id"] else "CANONICAL",
                 "state": {
                     "learning": states[member["node_id"]],
-                    "assessment": _assessment_state(),
+                    "assessment": assessment_states[member["node_id"]],
                 },
             }
             for member in memberships
@@ -562,7 +666,12 @@ class KnowledgeService:
                             "atomic_descendant_count": 0,
                             "historical_learned_spec_versions": [],
                         }
-                    state = {"learning": learning, "assessment": _assessment_state()}
+                    assessment = (
+                        self._atomic_assessment(connection, workspace_id, node["id"])
+                        if node["kind"] == "ATOMIC"
+                        else _not_assessed()
+                    )
+                    state = {"learning": learning, "assessment": assessment}
                 aliases = [
                     alias[0]
                     for alias in connection.execute(

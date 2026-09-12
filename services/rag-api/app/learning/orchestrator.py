@@ -10,8 +10,10 @@ from pydantic import BaseModel
 from app.config import Settings
 from app.db import Database
 from app.errors import ApiError
+from app.learning.assessments import AssessmentService
 from app.learning.compiler import (
     TEMPLATE_VERSION,
+    assessment_template,
     compile_unit,
     problem_template,
     template,
@@ -21,7 +23,13 @@ from app.learning.compiler import (
 from app.learning.course_policy import course_policy
 from app.learning.knowledge import KnowledgeService
 from app.learning.models import (
+    AssessmentAbandonInput,
+    AssessmentAssistInput,
+    AssessmentGradeProposal,
+    AssessmentStartInput,
+    AssessmentSubmitInput,
     BridgeInput,
+    GradePolicyDraftInput,
     NodeDraft,
     OperationInput,
     PersonalPlanInput,
@@ -63,6 +71,7 @@ class LearningOrchestrator:
         self.knowledge = KnowledgeService(database)
         self.plans = TeachingPlanRepository(database)
         self.problems = ProblemRepository(database)
+        self.assessments = AssessmentService(database)
 
     def problem_index(
         self,
@@ -178,6 +187,169 @@ class LearningOrchestrator:
 
     def knowledge_state(self, workspace_id: str, owner: str) -> dict[str, Any]:
         return self.knowledge.snapshot(workspace_id, owner)
+
+    def start_assessment(
+        self,
+        workspace_id: str,
+        owner: str,
+        request: AssessmentStartInput,
+    ) -> dict[str, Any]:
+        def save(
+            db: sqlite3.Connection,
+            workspace: sqlite3.Row,
+            _: Any,
+        ) -> dict[str, Any]:
+            result = self.assessments.start(db, workspace, request.node_id)
+            self.cursor(
+                db,
+                workspace_id,
+                node_id=request.node_id,
+                assessment_session_id=result["id"],
+                pane="ASSESSMENT",
+            )
+            return result
+
+        return self.operate(
+            workspace_id,
+            owner,
+            request,
+            "assessment.start",
+            lambda workspace: None,
+            save,
+            resource_identity={"node_id": request.node_id},
+        )
+
+    def assessment(
+        self,
+        workspace_id: str,
+        owner: str,
+        session_id: str,
+    ) -> dict[str, Any]:
+        return self.assessments.view(workspace_id, owner, session_id)
+
+    def submit_assessment(
+        self,
+        workspace_id: str,
+        owner: str,
+        session_id: str,
+        request: AssessmentSubmitInput,
+    ) -> dict[str, Any]:
+        def prepare(workspace: sqlite3.Row) -> AssessmentGradeProposal | None:
+            prepared = self.assessments.prepare_submission(
+                workspace,
+                session_id,
+                request.answers,
+            )
+            grader_context = self.assessments.grader_context(prepared)
+            if grader_context is None:
+                return None
+            instructions, template_version = assessment_template()
+            proposal, _run = self.generate(
+                workspace_id,
+                request.operation_id,
+                AssessmentGradeProposal,
+                instructions=instructions,
+                context=grader_context,
+                role="grader",
+                template_version=template_version,
+                schema_version="v3.2",
+            )
+            return proposal
+
+        def save(
+            db: sqlite3.Connection,
+            workspace: sqlite3.Row,
+            proposal: AssessmentGradeProposal | None,
+        ) -> dict[str, Any]:
+            result = self.assessments.save_submission(
+                db,
+                workspace,
+                session_id,
+                request.answers,
+                proposal,
+            )
+            self.cursor(
+                db,
+                workspace_id,
+                node_id=result["node_id"],
+                assessment_session_id=session_id,
+                pane="ASSESSMENT",
+            )
+            return result
+
+        return self.operate(
+            workspace_id,
+            owner,
+            request,
+            "assessment.submit",
+            prepare,
+            save,
+            resource_identity={"assessment_session_id": session_id},
+        )
+
+    def assist_assessment(
+        self,
+        workspace_id: str,
+        owner: str,
+        session_id: str,
+        request: AssessmentAssistInput,
+    ) -> dict[str, Any]:
+        def save(
+            db: sqlite3.Connection,
+            workspace: sqlite3.Row,
+            _: Any,
+        ) -> dict[str, Any]:
+            return self.assessments.assist(
+                db,
+                workspace,
+                session_id,
+                request.blueprint_item_id,
+                request.action,
+            )
+
+        return self.operate(
+            workspace_id,
+            owner,
+            request,
+            "assessment.assist",
+            lambda workspace: None,
+            save,
+            resource_identity={"assessment_session_id": session_id},
+        )
+
+    def abandon_assessment(
+        self,
+        workspace_id: str,
+        owner: str,
+        session_id: str,
+        request: AssessmentAbandonInput,
+    ) -> dict[str, Any]:
+        def save(
+            db: sqlite3.Connection,
+            workspace: sqlite3.Row,
+            _: Any,
+        ) -> dict[str, Any]:
+            return self.assessments.abandon(db, workspace, session_id)
+
+        return self.operate(
+            workspace_id,
+            owner,
+            request,
+            "assessment.abandon",
+            lambda workspace: None,
+            save,
+            resource_identity={"assessment_session_id": session_id},
+        )
+
+    def create_grade_policy(
+        self,
+        owner: str,
+        request: GradePolicyDraftInput,
+    ) -> dict[str, Any]:
+        return self.assessments.create_grade_policy(owner, request)
+
+    def publish_grade_policy(self, owner: str, policy_id: str) -> dict[str, Any]:
+        return self.assessments.publish_grade_policy(owner, policy_id)
 
     def personal_plan(
         self, workspace_id: str, owner: str, request: PersonalPlanInput
