@@ -1,5 +1,6 @@
 import hashlib
 import json
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -308,6 +309,52 @@ def test_assessment_freezes_five_unequal_questions_without_leaking_answers(
         assert restored.json()["questions"] == assessment["questions"]
 
 
+def test_in_progress_projection_does_not_read_the_server_answer_column(
+    tmp_path: Path,
+) -> None:
+    with client_at(tmp_path) as client:
+        workspace, node = setup_workspace(client)
+        seed_assessment_pool(client, node)
+        assessment = start_assessment(
+            client,
+            workspace["id"],
+            node["id"],
+            "assessment-start-answer-column-guard",
+        )
+        with client.app.state.database.connect() as connection:
+            workspace_row = connection.execute(
+                "SELECT * FROM learning_workspaces WHERE id=?",
+                (workspace["id"],),
+            ).fetchone()
+            assert workspace_row is not None
+
+            def deny_answer_column(
+                action: int,
+                table: str | None,
+                column: str | None,
+                _database: str | None,
+                _trigger: str | None,
+            ) -> int:
+                if (
+                    action == sqlite3.SQLITE_READ
+                    and table == "assessment_question_revisions"
+                    and column == "answer_json"
+                ):
+                    return sqlite3.SQLITE_DENY
+                return sqlite3.SQLITE_OK
+
+            connection.set_authorizer(deny_answer_column)
+            projected = client.app.state.learning.assessments._session_view(
+                connection,
+                workspace_row,
+                assessment["id"],
+            )
+            connection.set_authorizer(None)
+
+        assert projected["status"] == "IN_PROGRESS"
+        assert all("review" not in question for question in projected["questions"])
+
+
 def test_deterministic_submission_records_raw_score_without_inventing_grade(
     tmp_path: Path,
 ) -> None:
@@ -419,6 +466,39 @@ def test_revealing_one_answer_turns_the_whole_session_into_practice(
             for evidence in result["performance_evidence"]
         )
 
+        with client.app.state.database.connect() as connection:
+            answer = {"value": 11, "tolerance": 0}
+            connection.execute(
+                "INSERT INTO assessment_question_revisions("
+                "id,course_id,owner_user_id,family_id,revision,source_kind,"
+                "question_type,difficulty,prompt_text,options_json,answer_json,"
+                "validation_status,verification_method,content_hash,created_by_user_id) "
+                "VALUES('aq_retest_replacement','cs3481','a','family_retest_replacement',"
+                "1,'MODEL_GENERATED','NUMERIC',1,'Calculate 6 + 5.','[]',?,"
+                "'VALIDATED','DETERMINISTIC',?,'a')",
+                (
+                    json.dumps(answer),
+                    hashlib.sha256(b"assessment-retest-replacement").hexdigest(),
+                ),
+            )
+            connection.execute(
+                "INSERT INTO assessment_rubric_criteria("
+                "question_revision_id,criterion_id,node_id,spec_version,item_id,"
+                "dimension,max_fraction,description,deterministic_rule_json) "
+                "VALUES('aq_retest_replacement','correctness',?,1,'principle',"
+                "'CALCULATION',100,'Produces the correct result.','{}')",
+                (node["id"],),
+            )
+        retest = start_assessment(
+            client,
+            workspace["id"],
+            node["id"],
+            "assessment-start-after-answer-reveal",
+        )
+        assert selected["family_id"] not in {
+            question["family_id"] for question in retest["questions"]
+        }
+
 
 def test_abandoned_or_unsubmitted_assessment_is_not_zero_or_failure(
     tmp_path: Path,
@@ -452,6 +532,9 @@ def test_abandoned_or_unsubmitted_assessment_is_not_zero_or_failure(
         assert response.status_code == 200, response.text
         assert response.json()["status"] == "ABANDONED"
         assert response.json()["raw_score"] is None
+        assert all(
+            "review" not in question for question in response.json()["questions"]
+        )
         projected = next(
             item
             for item in client.get(
@@ -630,9 +713,22 @@ def test_pool_excludes_foreign_private_questions_and_problem_answers_already_see
                 "SELECT id FROM problem_revisions WHERE workspace_id=?",
                 (workspace["id"],),
             ).fetchone()[0]
-            for question_id, owner, source_problem_revision_id in (
-                ("aq_answer_exposed", "a", problem_revision_id),
-                ("aq_foreign_private", "b", None),
+            for question_id, owner, source_problem_revision_id, family_id, revision in (
+                (
+                    "aq_answer_exposed",
+                    "a",
+                    problem_revision_id,
+                    "family_problem_answer_exposed",
+                    1,
+                ),
+                (
+                    "aq_answer_exposed_sibling",
+                    "a",
+                    None,
+                    "family_problem_answer_exposed",
+                    2,
+                ),
+                ("aq_foreign_private", "b", None, "family_foreign_private", 1),
             ):
                 answer = {"value": 5, "tolerance": 0}
                 connection.execute(
@@ -641,13 +737,14 @@ def test_pool_excludes_foreign_private_questions_and_problem_answers_already_see
                     "source_problem_revision_id,question_type,difficulty,prompt_text,"
                     "options_json,answer_json,validation_status,verification_method,"
                     "content_hash,created_by_user_id) "
-                    "VALUES(?,?,?,?,1,'MODEL_GENERATED',?,'NUMERIC',1,?, '[]',?,"
+                    "VALUES(?,?,?,?,?,'MODEL_GENERATED',?,'NUMERIC',1,?, '[]',?,"
                     "'VALIDATED','DETERMINISTIC',?,?)",
                     (
                         question_id,
                         "cs3481",
                         owner,
-                        "aaa_" + question_id,
+                        family_id,
+                        revision,
                         source_problem_revision_id,
                         "Calculate the already exposed result.",
                         json.dumps(answer),
@@ -672,6 +769,7 @@ def test_pool_excludes_foreign_private_questions_and_problem_answers_already_see
             question["question_revision_id"] for question in assessment["questions"]
         }
         assert "aq_answer_exposed" not in selected
+        assert "aq_answer_exposed_sibling" not in selected
         assert "aq_foreign_private" not in selected
 
 

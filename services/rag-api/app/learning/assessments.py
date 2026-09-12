@@ -111,11 +111,21 @@ class AssessmentService:
             "AND question.validation_status='VALIDATED' "
             "AND question.verification_method!='MODEL_ONLY' "
             "AND NOT EXISTS("
-            " SELECT 1 FROM problem_attempts AS problem_attempt "
+            " SELECT 1 FROM assessment_exposure_events AS exposure "
+            " WHERE exposure.workspace_id=? "
+            " AND exposure.family_id=question.family_id"
+            ") "
+            "AND NOT EXISTS("
+            " SELECT 1 FROM assessment_question_revisions AS exposed_question "
+            " JOIN problem_attempts AS problem_attempt "
+            " ON problem_attempt.problem_revision_id="
+            "exposed_question.source_problem_revision_id "
             " WHERE problem_attempt.workspace_id=? "
             " AND problem_attempt.assistance='ANSWER_EXPOSED' "
-            " AND problem_attempt.problem_revision_id="
-            "question.source_problem_revision_id"
+            " AND exposed_question.course_id=question.course_id "
+            " AND exposed_question.family_id=question.family_id "
+            " AND (exposed_question.owner_user_id IS NULL "
+            " OR exposed_question.owner_user_id=?)"
             ") "
             "ORDER BY prior_exposures,question.difficulty,question.family_id,question.id",
             (
@@ -123,6 +133,8 @@ class AssessmentService:
                 workspace["course_id"],
                 workspace["owner_user_id"],
                 workspace["id"],
+                workspace["id"],
+                workspace["owner_user_id"],
             ),
         ).fetchall()
         return [
@@ -236,6 +248,8 @@ class AssessmentService:
             "marks": list(MARK_SCHEME),
             "source_order": list(SOURCE_ORDER),
             "excludes_answer_exposed_problem_revisions": True,
+            "excludes_answer_exposed_problem_families": True,
+            "excludes_assisted_assessment_families": True,
         }
         frozen_items = [
             {
@@ -384,7 +398,7 @@ class AssessmentService:
         ).fetchone()
         question_rows = connection.execute(
             "SELECT item.*,question.question_type,question.difficulty,"
-            "question.prompt_text,question.options_json,question.answer_json,"
+            "question.prompt_text,question.options_json,"
             "attempt.status AS attempt_status,attempt.answer_json AS submitted_answer_json,"
             "attempt.assistance,attempt.awarded_marks,attempt.feedback "
             "FROM assessment_blueprint_items AS item "
@@ -412,9 +426,15 @@ class AssessmentService:
                 "attempt_status": row["attempt_status"],
                 "assistance": row["assistance"],
             }
-            answer_is_available = session["status"] != "IN_PROGRESS"
+            answer_is_available = session["status"] in {"SUBMITTED", "GRADED"}
             answer_is_available = answer_is_available or row["assistance"] == "ANSWER_REVEALED"
             if answer_is_available:
+                answer = connection.execute(
+                    "SELECT answer_json FROM assessment_question_revisions WHERE id=?",
+                    (row["question_revision_id"],),
+                ).fetchone()
+                if answer is None:
+                    raise RuntimeError("The frozen Assessment answer is missing")
                 rubric = self._rubric(
                     connection,
                     str(row["question_revision_id"]),
@@ -427,7 +447,7 @@ class AssessmentService:
                         if row["submitted_answer_json"] is not None
                         else None
                     ),
-                    "answer": json.loads(row["answer_json"]),
+                    "answer": json.loads(answer["answer_json"]),
                     "awarded_marks": row["awarded_marks"],
                     "feedback": row["feedback"],
                     "rubric": [
