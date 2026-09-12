@@ -46,7 +46,7 @@ def seed_assessment_fixture(db: Database, owner: str = OWNER) -> str:
             ("EXTERNAL_INSPIRED", owner, "HUMAN_REVIEWED"),
             ("OFFICIAL", None, "OFFICIAL"),
         ]
-        for ordinal, (source, owner, verification) in enumerate(sources, start=1):
+        for ordinal, (source, question_owner, verification) in enumerate(sources, start=1):
             question_id = f"e2e-question-{fixture_key}-{ordinal}"
             prompt = f"Synthetic assessment question {ordinal}: type correct."
             answer = {"accepted": ["correct"], "case_sensitive": False}
@@ -62,7 +62,7 @@ def seed_assessment_fixture(db: Database, owner: str = OWNER) -> str:
                 "VALUES(?,'cs3481',?,?,1,?,'SHORT_TEXT',?,?,'[]',?,'VALIDATED',?,?,?)",
                 (
                     question_id,
-                    owner,
+                    question_owner,
                     f"e2e-family-{fixture_key}-{ordinal}",
                     source,
                     ordinal,
@@ -70,7 +70,7 @@ def seed_assessment_fixture(db: Database, owner: str = OWNER) -> str:
                     json.dumps(answer),
                     verification,
                     hashlib.sha256(question_content.encode()).hexdigest(),
-                    owner or "E2E_FIXTURE_ADMIN",
+                    question_owner or "E2E_FIXTURE_ADMIN",
                 ),
             )
             connection.execute(
