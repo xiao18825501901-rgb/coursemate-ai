@@ -1,23 +1,25 @@
 # CourseMate V3 — Deployment Runbook
 
-Version: Stage 7 gated handoff, 2026-09-12.
+Version: Stage 8 gated handoff, 2026-09-12.
 
-This runbook prepares a reversible V3 release; it is not proof that a deployment occurred. Current production release, provider, region, database versions, backup health, Netlify/Clerk configuration and smoke status are **UNKNOWN — REQUIRES OWNER VERIFICATION**. No production write or paid model call was executed during Stages 0–7.
+This runbook prepares a reversible V3 release; it is not proof that a deployment occurred. Current production release, provider, region, database versions, backup health, Netlify/Clerk configuration and smoke status are **UNKNOWN — REQUIRES OWNER VERIFICATION**. No production write or paid model call was executed during Stages 0–8.
 
 ## 1. Current release evidence
 
 ```text
 Branch: feature/coursemate-v3-persistent-learning
-Stage 7 implementation SHAs: 1750cfb, 5201e76
-Source scope: Stages 1–7 implemented for their recorded slices; Stage 8 incomplete
+Stage 8 implementation SHAs: 2bec11d, 7c6c54c
+Source scope: Stages 1–8 implemented for their recorded slices; listed product gaps remain
 V3 Schema in source: 1–21
 Local real RAG DB: 1–18 after documented E2E isolation incident/recovery; 019–021 not executed there
-Local tests: Python 324; Web 48; Task Agent 66; latest Playwright evidence remains Stage 5 (5 tests)
+Real-RAG-copy migration: 1–18 to isolated 1–21 PASS; active source unchanged
+Complete current two-DB/uploads restore: BLOCKED / NOT VERIFIED — authoritative Agent DB absent/unknown
+Local tests: Python 327; Web 49; Task Agent 66; V3 Playwright 3; independent V2 Playwright 4; npm audit 0
 Live qwen3.8-max: NOT VERIFIED
 Production: NOT VERIFIED
 ```
 
-Do not label this branch production-accepted while Stage 8 migration/restore/browser gates, live model review and production smoke remain incomplete. It may be deployed only to an explicitly isolated preview/staging environment after the gates below pass.
+Do not label this branch production-accepted while the complete current restore gate, live model review and production smoke remain incomplete. It may be deployed only to an explicitly isolated preview/staging environment after the gates below pass.
 
 ## 2. Hard stop conditions
 
@@ -64,7 +66,7 @@ git status --short --branch
 git rev-parse HEAD
 
 Set-Location services/rag-api
-.venv/Scripts/python.exe -m pytest
+.venv/Scripts/python.exe -m pytest -q -o cache_dir=../../work/pytest-cache
 .venv/Scripts/python.exe -m ruff check app tests ../../scripts
 .venv/Scripts/python.exe -m mypy app ../../scripts/run_model_benchmark.py ../../scripts/run_v3_model_canary.py
 Set-Location ../..
@@ -73,10 +75,13 @@ npm --workspace @coursemate/web test
 npm --workspace @coursemate/agent-api test
 npm run typecheck
 npm run build
+npm audit --json
+npm audit --omit=dev --json
 npm run test:e2e
+npm exec playwright test -- --config=playwright.v3.config.ts
 ```
 
-The default Playwright config must print a database under `work/e2e-rag-*`. Abort if server environment lacks explicit `RAG_DATABASE_PATH` and `RAG_UPLOAD_DIR`. Record the active local DB/upload hashes before and after; they must match.
+The default Playwright config must print a database under `work/e2e-rag-*` and run only `coursemate.spec.ts`. The V3 config must run only `learning.spec.ts` and start owner, second-user and Admin identities against one synthetic database. Abort if a server environment lacks explicit `RAG_DATABASE_PATH` and `RAG_UPLOAD_DIR`. Record the active local DB/upload hashes before and after; they must match.
 
 Also run a fresh migration rehearsal target and keep only content-free aggregate evidence:
 
@@ -160,6 +165,8 @@ Use `ops/backup_v2.py`/platform wrapper, verify the completed manifest/checksums
 
 If the Task Agent DB is not deployed, prove that fact from current runtime configuration; do not invent a dummy DB and call the backup complete.
 
+Current local checkpoint: `data/agent.sqlite3` is absent and no repository/runtime evidence accessible to this task identifies another authoritative Agent runtime DB. Disposable `work/agent-smoke.sqlite3` and `work/e2e-agent-*` files are not admissible substitutes. The backup preflight failed safely with exit 2 before creating its destination. Therefore stop here until the Owner/runtime identifies the actual path or proves that this release has no persistent Agent DB. This blocker does not invalidate the successful RAG-only 1–18 → 1–21 copy rehearsal, but it prevents complete restore acceptance.
+
 ## 7. Staged rollout
 
 1. Deploy reviewed backend code with `V3_ENABLED=false`; keep the current Web V3 navigation off.
@@ -201,4 +208,4 @@ LIVE_MODEL_VERIFIED: <approved canary evidence or NOT VERIFIED>
 PRODUCTION_VERIFIED: <release/auth/data/monitoring smoke or NOT VERIFIED>
 ```
 
-At this Stage 7 checkpoint, the final two lines remain `NOT VERIFIED`. A healthy local build, fake-provider flow or migration rehearsal must never be upgraded to live-model or production acceptance.
+At this Stage 8 checkpoint, `LIVE_MODEL_VERIFIED` and `PRODUCTION_VERIFIED` remain `NOT VERIFIED`; the complete current restore line is also blocked as stated above. A healthy local build, fake-provider flow or migration rehearsal must never be upgraded to live-model or production acceptance.

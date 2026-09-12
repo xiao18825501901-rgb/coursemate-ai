@@ -1,6 +1,6 @@
 # CourseMate V3 — Architecture and State Machines
 
-Version: Stage 7 current/target baseline, 2026-09-12.
+Version: Stage 8 cumulative current/target baseline, 2026-09-12.
 This document distinguishes `CURRENT` source from `TARGET` architecture. Target objects are not claimed implemented until linked tests pass.
 
 ## 1. System ownership

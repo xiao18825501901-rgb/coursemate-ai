@@ -1,17 +1,17 @@
 # CourseMate V3 — Migration and Rollback
 
-Version: Stage 7 migration/recovery evidence, 2026-09-12.
-No production migration is authorized or claimed. Local real Schema remains 1–18 after the disclosed default-E2E isolation incident and recovery; migrations 019–021 have run only in temporary test databases and must first be rehearsed on a new read-only real-data copy.
+Version: Stage 8 migration/recovery evidence, 2026-09-12.
+No production migration is authorized or claimed. Local active RAG Schema remains 1–18 after the disclosed default-E2E isolation incident and recovery. A new read-only online-backup copy has now passed 1–18 to 1–21 rehearsal; the complete current RAG + Agent DB + uploads restore remains blocked until the actual Agent runtime database is identified.
 
 ## 1. Known migration reality
 
 | Location | Last verified versions | Evidence | Status |
 |---|---:|---|---|
 | repository V2 base | 1–10 | `app/db.py`, existing tests | current stable baseline |
-| repository V3 files | 011–021 committed on the V3 feature branch | SQL source + automated tests | source implemented through Stage 7 |
+| repository V3 files | 011–021 committed on the V3 feature branch | SQL source + automated tests | source implemented through Stage 8 recorded scope |
 | pytest databases | 1–21 when `v3_enabled=True` | temporary synthetic runs, repeated initialization, budget backfill and invariants | disposable local evidence |
-| latest Playwright database | 1–18 before Stage 6 | isolated copy + separate uploads | Stage 6 browser flow not yet rerun |
-| isolated real-data copy | pre-test 1–15 → 1–18 | `work/v3-migration-rehearsal-08/migration-evidence.json` | local copy only; private, never commit/share |
+| latest V3 Playwright database | 1–21 | fresh synthetic DB + separate uploads + three test identities | 3 deterministic browser tests passed; disposable |
+| latest isolated real-data copy | active 1–18 → copy 1–21 | `work/v3-migration-rehearsal-stage8-20260912-01/migration-evidence.json` | RAG copy only; private, never commit/share |
 | local real `data/rag.sqlite3` | 1–18, integrity ok, FK 0 | post-incident recovery evidence, 2026-09-12 | pre-test rows restored; origin/time of 11–15 UNKNOWN; 016–018 actor is this disclosed test incident |
 | production database | UNKNOWN | no current access/evidence | manual verification required |
 
@@ -74,10 +74,10 @@ Example from repository root, using an unused target name:
 ```powershell
 services/rag-api/.venv/Scripts/python.exe scripts/rehearse_v3_migration.py `
   --source data/rag.sqlite3 `
-  --target work/v3-migration-rehearsal-09
+  --target work/v3-migration-rehearsal-<unique-id>
 ```
 
-This command creates a private local copy and therefore must not be run in a directory that is synced/published. The target must be a fresh name; `-09` is the next example after the retained `-08` evidence. Do not paste `migration-evidence.json` if future revisions include identifiers; inspect its schema first. The existing rehearsal does not copy uploads and is not a full-site restore drill.
+This command creates a private local copy and therefore must not be run in a directory that is synced/published. The target must be a fresh name. Do not paste `migration-evidence.json` if future revisions include identifiers; inspect its schema first. The rehearsal does not copy uploads and is not a full-site restore drill.
 
 The 2026-09-12 Stage 4 `v3-migration-rehearsal-07` run opened the current source database through SQLite read-only URI mode, copied it with SQLite online backup, initialized twice and reported:
 
@@ -116,6 +116,29 @@ invalid independent evidence=0; invalid GradeSnapshot bindings=0
 ```
 
 Zero Assessment history is deliberate: migration never converts old chat, Problem or Teaching state into a score. The single GradePolicy is the requirements seed with A- numeric value null, empty raw-score bands and provenance “not an institutional policy.”
+
+### Stage 8 real-RAG-copy rehearsal through 021
+
+`work/v3-migration-rehearsal-stage8-20260912-01/` started from the current active 1–18 RAG database, not the old 1–15 snapshot. The script used a read-only source connection and SQLite online backup, initialized the target twice, and verified both data and required migration objects:
+
+```text
+old_rows_unchanged=true; integrity=ok; foreign_key_violations=0
+schema_versions=1..21; v3_invariants_ok=true
+documents/document_versions=69/69; unbound_chunks=0
+publication request/release/resource orphans=0/0/0
+learning_model_run_evidence/reservations=6/6
+model evidence without reservation=0
+finalized reservation without evidence=0
+owner/course scope mismatches=0
+reservation/evidence status or token mismatches=0
+missing 019–021 tables/indexes/triggers=[]
+```
+
+The copy contains zero official/Overlay publication requests and releases, so those row-orphan results are not non-vacuous real-data behavior evidence. The automated publication suite supplies the nonzero behavioral coverage. The six existing model evidence rows make migration-021 backfill non-vacuous.
+
+Before and after the rehearsal, the active database remained SHA-256 `48852f977ebf37b1a9b77df1a03e5d3549bebc71ec77401673ba60f5bd6d906b`, versions 1–18, integrity `ok`, FK 0. The active upload tree remained 70 files / 124,209,888 bytes with digest `008ae984d98b4248f970eb53a351cea9068e6f6fbaabb784387e97f75ab07b23`; digest rows are relative POSIX `path|size|sha256lower`, sorted by path and LF-joined without a trailing newline before UTF-8 SHA-256.
+
+This proves only the RAG copy migration. The repository example expects `data/agent.sqlite3`, but that file is absent; `work/agent-smoke.sqlite3` and `work/e2e-agent-*` are test artifacts, not an authoritative current runtime database. `ops/backup_v2.py` returned exit 2 for the missing explicit Agent path before it created `work/stage8-current-backup-attempt`. A complete two-DB/uploads recovery unit cannot be honestly constructed until the Owner or runtime reveals whether an Agent DB is deployed and its exact path.
 
 ### Local default-E2E incident and recovery boundary
 
@@ -197,10 +220,10 @@ Rollback normally means code/flag rollback with additive tables retained. Droppi
 Migration/restore acceptance is a separate result from source and model quality:
 
 ```text
-SOURCE MIGRATIONS REVIEWED: 011–021 for the current Stage 1–7 slices
+SOURCE MIGRATIONS REVIEWED: 011–021 for the current Stage 1–8 recorded slices
 SYNTHETIC MIGRATION VERIFIED: 011–021, including repeat initialization, publication invariants and model-call reservation backfill
-REAL-DATA COPY MIGRATION VERIFIED: only pre-test source 1–15 to isolated copy 1–18; current local DB is 1–18 after documented recovery; 019–021 rehearsal is pending
-ISOLATED FULL RESTORE VERIFIED: not yet
+REAL-DATA COPY MIGRATION VERIFIED: active local RAG source 1–18 to isolated copy 1–21; active source remained unchanged
+ISOLATED FULL RESTORE VERIFIED: BLOCKED / NOT VERIFIED because the authoritative current Agent DB path is absent/unknown
 PRODUCTION MIGRATION VERIFIED: not verified
 PRODUCTION ROLLBACK DRILL VERIFIED: not verified
 ```

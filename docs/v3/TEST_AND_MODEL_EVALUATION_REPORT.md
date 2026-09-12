@@ -1,25 +1,25 @@
 # CourseMate V3 — Test and Model Evaluation Report
 
-Last updated: 2026-09-12 after Stage 7 deterministic quality/cost/failure gates and regression.
+Last updated: 2026-09-12 after Stage 8 local acceptance, real-RAG-copy migration and release handoff.
 
 Branch: `feature/coursemate-v3-persistent-learning`
 
-Stage-switch base: `c6158cf34142c311e77a58aa49a3b0b7cbe7fbd8`; Stage 1 commits are `00961ef` through `e9ecd00`; Stage 2 code commits are `6eeff90`, `5a1f9d0`, `0be1a47`, `86032bb` and `5dba760`; Stage 3 code commits are `956d849`, `da1fa2a`, `e5d14d3`, `52514d1` and `2256cf0`; Stage 4 code/evidence commits are `5b88c3e`, `ebe2ffa`, `1eb94ed` and `cf8466b`; Stage 5 implementation and hardening commits run from `141057a` through `a882d36`; Stage 6 code commits are `c324373`, `ec3a2e9` and `88c06b4`; Stage 7 code commits are `1750cfb` and official-region alignment `5201e76`.
+Stage-switch base: `c6158cf34142c311e77a58aa49a3b0b7cbe7fbd8`; Stage 1 commits are `00961ef` through `e9ecd00`; Stage 2 code commits are `6eeff90`, `5a1f9d0`, `0be1a47`, `86032bb` and `5dba760`; Stage 3 code commits are `956d849`, `da1fa2a`, `e5d14d3`, `52514d1` and `2256cf0`; Stage 4 code/evidence commits are `5b88c3e`, `ebe2ffa`, `1eb94ed` and `cf8466b`; Stage 5 implementation and hardening commits run from `141057a` through `a882d36`; Stage 6 code commits are `c324373`, `ec3a2e9` and `88c06b4`; Stage 7 code commits are `1750cfb` and `5201e76`; Stage 8 implementation baselines are `2bec11d` and `7c6c54c`.
 This report is cumulative and must be updated after every behavior change; old PASS does not cover later code.
 
 ## 1. Current evidence summary
 
 | Acceptance layer | Result | Meaning |
 |---|---|---|
-| Source implementation | PARTIAL | Stages 1–7 recorded source slices exist; live-model, final migration/restore and production stages remain incomplete |
-| Python automated tests | PASS for current Stage 7 code | 324 passed; 1 known Starlette/httpx dependency deprecation |
-| Web unit tests | PASS | 12 files / 48 tests passed |
+| Source implementation | PARTIAL | Stages 1–8 recorded source slices exist; listed product gaps, live model and production remain incomplete |
+| Python automated tests | PASS for Stage 8 implementation baseline | 327 passed; 1 known Starlette/httpx dependency deprecation |
+| Web unit tests | PASS | 12 files / 49 tests passed |
 | Task Agent unit tests | PASS | 10 files / 66 tests; Task tools remain owned by the Node service |
 | Python lint/type | PASS | Ruff app/tests/benchmark scripts; strict mypy 63 source files |
 | TS typecheck/build | PASS | both workspaces typecheck; production bundles built locally |
-| Browser regression | PARTIAL | Stage 5 had 5 isolated Playwright passes; Stage 6/7 changes have unit/production-build evidence but final Stage 8 browser rerun is pending |
+| Browser regression | PASS for deterministic local scope | V3 3 passed with owner/second-user/Admin and both entry paths; independent V2 suite 4 passed; not a full WCAG or production claim |
 | Real model | NOT VERIFIED | no paid call, account/region/endpoint unknown |
-| Real-data migration/recovery | PARTIAL | synthetic temporary DBs initialize through 021; latest real-data copy ends at 018; full two-DB/uploads restore remains unverified |
+| Real-data migration/recovery | PARTIAL | current active RAG DB 1–18 was copied and migrated to 021 with all recorded invariants; full current two-DB/uploads restore is blocked by missing authoritative Agent DB path |
 | Production | NOT VERIFIED | no current release/auth/provider/Schema smoke evidence |
 
 ## 2. Cumulative local commands and actual results
@@ -428,14 +428,62 @@ git diff --check before commit: passed
 
 No Stage 7 Playwright session, paid call, human model-quality review, real-data-copy migration through 021 or production action occurred. `LOCAL_CONTRACT_VERIFIED` and `LOCAL_FAKE_PROVIDER_VERIFIED` apply; `LIVE_MODEL_VERIFIED` and `PRODUCTION_VERIFIED` do not.
 
-## 10. Test data and privacy
+## 10. Stage 8 final local acceptance evidence
+
+Stage 8 hardened `scripts/rehearse_v3_migration.py` so a green copy run now verifies every table/index/trigger declared by migrations 019–021, publication snapshot references, unique role evidence, budget-reservation backfill, owner/course scope and finalized evidence/reservation agreement. Two new unit tests were developed red-first: a migration-20-shaped database with one existing model run must backfill one reservation, and an injected missing required governance object must fail while still writing content-free evidence. The final full Python run was:
+
+```text
+327 passed, 1 warning in 125.93s
+Ruff: All checks passed
+mypy: Success, no issues in 63 source files
+```
+
+The warning is the existing Starlette/httpx TestClient deprecation. Pytest cache was redirected to `work/pytest-cache`, so no cache-permission warning or skipped test was hidden.
+
+The fresh private target `work/v3-migration-rehearsal-stage8-20260912-01/` used SQLite online backup from the active local RAG database and initialized the copy twice from versions 1–18 to continuous 1–21. It reported:
+
+```text
+old_rows_unchanged=true
+integrity=ok
+foreign_key_violations=0
+v3_invariants_ok=true
+documents/document_versions=69/69
+unbound_chunks=0
+learning_model_run_evidence/reservations=6/6
+model runs without reservations=0
+scope/evidence mismatches=0/0
+missing governance schema objects=[]
+```
+
+The active source remained 1–18 with database SHA-256 `48852f977ebf37b1a9b77df1a03e5d3549bebc71ec77401673ba60f5bd6d906b`. Its 70 uploads total 124,209,888 bytes. Their reproducible digest is `008ae984d98b4248f970eb53a351cea9068e6f6fbaabb784387e97f75ab07b23`, computed by sorting relative POSIX paths, joining `path|size|sha256lower` rows with LF and no final newline, then hashing the UTF-8 bytes. Publication tables contain zero current rows, so their orphan assertions are structurally exercised but vacuous on this particular real-data copy; non-vacuous publication behavior remains covered by synthetic API/database tests.
+
+The complete backup utility correctly requires a real RAG DB, a distinct real Agent DB and uploads before creating a backup destination. No authoritative current Agent DB exists at the example runtime path `data/agent.sqlite3`; the similarly named files under `work/` are disposable smoke/E2E artifacts. An explicit preflight returned exit 2 for the missing path and `backup_root_created=False`. Therefore the current coordinated two-DB/uploads backup and isolated restore is **BLOCKED / NOT VERIFIED**, while its synthetic backup/restore tests remain green. No placeholder database was fabricated.
+
+Browser evidence is split by topology:
+
+```text
+V3 Playwright: 3 passed in 46.0s
+V2 Playwright: 4 passed in 30.1s
+Web Vitest: 12 files / 49 tests
+Task Agent Vitest: 10 files / 66 tests
+TypeScript typecheck: passed
+Production build: passed; Web 118 modules, JS 310.12 kB / gzip 90.85 kB
+```
+
+The V3 run covers Problem-first screenshot upload → full steps → Step knowledge question → Teaching coverage → exact return across a new browser context; Knowledge-first tree → Problem → Teaching → exact return; and owner/second-user/Admin isolation where only an explicitly selected private node enters the immutable Overlay review snapshot. It records HTTP >=400, console and request failures for the primary flow. Admin-visible controls have non-empty accessible names, first keyboard focus leaves `BODY`, and 375px pages do not horizontally overflow. These are targeted accessibility checks, not a full screen-reader/axe/WCAG certification. A review-found authorization regression was fixed red-first: valid empty current Overlay state is `200 null`; foreign workspace remains 404 and the frontend no longer converts that denial to an empty state.
+
+The first release audit found patched-version gaps in `fast-uri`, `qs` and the Vitest toolchain. Exact-pinned Vitest 4.1.11 and patched transitives were installed; both `npm audit --json` and `npm audit --omit=dev --json` now report 0 at implementation baseline `7c6c54c`. The local npm advisory output linked the GitHub Advisory Database records [GHSA-5jgf-p345-68v8](https://github.com/advisories/GHSA-5jgf-p345-68v8), [GHSA-f65p-4m7j-42xc](https://github.com/advisories/GHSA-f65p-4m7j-42xc), [GHSA-fph4-wmhf-6fwf](https://github.com/advisories/GHSA-fph4-wmhf-6fwf), [GHSA-jqff-g426-hqxp](https://github.com/advisories/GHSA-jqff-g426-hqxp), [GHSA-x5fp-wj9c-mxmx](https://github.com/advisories/GHSA-x5fp-wj9c-mxmx), [GHSA-4mjr-xmp4-gh2g](https://github.com/advisories/GHSA-4mjr-xmp4-gh2g) and [GHSA-82fw-gwwq-j7x9](https://github.com/advisories/GHSA-82fw-gwwq-j7x9); organization: GitHub Advisory Database, accessed 2026-09-12. The implementation decision was to update only to available compatible patched releases and preserve exact package pins; affected locations are the two workspace manifests and root lockfile.
+
+No live model call, human four-major quality adjudication, preview/production deploy, production migration or production smoke occurred. Those acceptance layers remain `NOT VERIFIED`.
+
+## 11. Test data and privacy
 
 - pytest uses `tmp_path` databases/uploads; V3 API fixtures set `v3_enabled=True` explicitly.
 - Playwright now uses a read-only online copy under `work/`, a separate upload root and fake content `2 + 3`; screenshots contain only synthetic values.
 - The local real RAG database was accidentally initialized once by the disclosed pre-fix default config, then recovered as documented above. The corrected run left DB and upload summaries unchanged.
 - No private course body, user identity, key, prompt body or production response is included here.
 
-## 11. Model contract versus model quality
+## 12. Model contract versus model quality
 
 Current deterministic tests can prove:
 
@@ -456,7 +504,7 @@ They cannot prove:
 - production Clerk, Netlify, server/storage or multi-instance behavior;
 - actual token cost/latency/rate-limit behavior.
 
-## 12. Required future matrices
+## 13. Required future matrices
 
 | Stage | New evidence required before PASS |
 |---|---|
@@ -467,12 +515,12 @@ They cannot prove:
 | 5 | locally verified for five unequal/100, answer secrecy, assisted evidence, rubric arithmetic, unconfigured policy and explicit weak-point replan; live grading quality remains Stage 7 |
 | 6 | locally verified for exact snapshots, consent, substitution locks, scoped downloads, independent official review, explicit Overlay selection, withdrawal/replacement and generic Admin denial; browser and real human review remain unverified |
 | 7 | local four-major/API/persistence matrix and canary/cost/failure gates verified; smallest approved live canaries and four-major human rubric remain external |
-| 8 | final full regression, final-Schema real-data copy + full restore, preview deploy and production smoke/rollback evidence |
+| 8 | full regression and final-Schema real-RAG-copy migration passed; authoritative Agent DB discovery, coordinated full restore, preview deploy and production smoke/rollback remain open |
 
-## 13. Open defects and non-PASS items
+## 14. Open defects and non-PASS items
 
-- Existing `package-lock` audit history reported one high and three moderate advisories; reachability/remediation is not yet resolved and cannot be hidden in launch PASS.
-- Current Playwright covers one synthetic owner plus existing V2 flows; two-user/Admin browser paths, Teaching→Problem reverse initiation and accessibility-tree evidence remain missing.
+- Dependency audit is currently zero after compatible patched updates; future release candidates must rerun both complete and production-only audit rather than inheriting this result.
+- Current Playwright covers two students, an Admin, Problem-first and Knowledge-first initiation plus targeted keyboard/name/responsiveness checks. Full screen-reader/axe/color-contrast certification remains unverified.
 - Model adapters now retain safe metadata on structured-output failure, enforce zero retry and daily limits, and have bounded synthetic canaries; actual qwen3.8-max account access, regional endpoint, protocol compatibility, provider usage fidelity, quality and cost remain unverified.
 - Official tree/Spec release submission, exact independent review, active-release discovery and withdrawal APIs/UI are implemented and locally verified. Source-draft authoring/import UI and real human official-content approval remain unimplemented/unverified.
 - Assessment and GradePolicy are persistent and locally verified; formal question author/review UI, integrated COMPOSITE exams and human finalization of `NEEDS_REVIEW` remain unimplemented.

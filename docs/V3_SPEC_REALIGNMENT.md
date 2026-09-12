@@ -26,7 +26,8 @@ Repository root:
 C:/Users/Hp/Documents/Codex/2026-08-11/files-mentioned-by-the-user-coursemate/outputs/coursemate-ai
 
 Current branch: feature/coursemate-v3-persistent-learning
-Current HEAD: c6158cf34142c311e77a58aa49a3b0b7cbe7fbd8
+Switch-time HEAD: c6158cf34142c311e77a58aa49a3b0b7cbe7fbd8
+Stage 8 implementation baseline: 7c6c54cdf479ceddaf308f41df786a98540a6900
 Staged changes at switch: 0
 Checkpoint: work/v3-spec-switch-checkpoint-20260912/
 Production access used: none
@@ -51,7 +52,7 @@ Paid model calls used: none
 
 2026-09-12 17:25 的 Stage 4 只读复核曾确认 `data/rag.sqlite3` 为迁移 1–15：5 courses、69 documents、1,937 chunks、31 conversations、78 messages；当时 016 演练没有改源库，谁应用 11–15 仍为 **UNKNOWN**。
 
-Stage 5 全量浏览器回归首次把旧默认 `playwright.config.ts` 与 V3 用例一起运行时，发现该配置没有显式覆盖 `RAG_DATABASE_PATH`，因而错误地对本地真实库执行了 016–018 并写入合成测试状态。任务立即停止写入，并用错误发生前由 `v3-migration-rehearsal-08` 的 SQLite online backup 捕获、再加性迁移到 18 的快照恢复全部测试前数据；没有倒改已执行迁移历史。恢复后为 1–18、5 courses、69 documents、1,937 chunks、31 conversations、78 messages，integrity `ok`、外键违规 0，受保护旧表逐行指纹与测试前一致。两份精确匹配 E2E fixture 的新上传被移入忽略目录的隔离区，污染态数据库保留两份可恢复副本。当前主文件 SHA-256 为 `48852F977EBF37B1A9B77DF1A03E5D3549BEBC71EC77401673BA60F5BD6D906B`；70 个活动 uploads、124,209,888 bytes，完整清单摘要为 `FB1DBBCEE7E46969C2F361BB8BA09534C13BE8C101AD8694A1A8E35D91E83E03`。这些都是本地事实，不外推到生产。
+Stage 5 全量浏览器回归首次把旧默认 `playwright.config.ts` 与 V3 用例一起运行时，发现该配置没有显式覆盖 `RAG_DATABASE_PATH`，因而错误地对本地真实库执行了 016–018 并写入合成测试状态。任务立即停止写入，并用错误发生前由 `v3-migration-rehearsal-08` 的 SQLite online backup 捕获、再加性迁移到 18 的快照恢复全部测试前数据；没有倒改已执行迁移历史。恢复后为 1–18、5 courses、69 documents、1,937 chunks、31 conversations、78 messages，integrity `ok`、外键违规 0，受保护旧表逐行指纹与测试前一致。两份精确匹配 E2E fixture 的新上传被移入忽略目录的隔离区，污染态数据库保留两份可恢复副本。Stage 8 再次只读复核：当前主文件 SHA-256 为 `48852f977ebf37b1a9b77df1a03e5d3549bebc71ec77401673ba60f5bd6d906b`；70 个活动 uploads、124,209,888 bytes，清单摘要为 `008ae984d98b4248f970eb53a351cea9068e6f6fbaabb784387e97f75ab07b23`。摘要算法固定为：按相对 POSIX 路径逐字排序，每行 `path|size|sha256lower`，以 LF 无末尾换行连接后对 UTF-8 求 SHA-256。Stage 5 的旧清单摘要使用了不同序列化口径，不用于 Stage 8 验收。这些都是本地事实，不外推到生产。
 
 ### 历史部署报告
 
@@ -99,11 +100,12 @@ Stage 5 全量浏览器回归首次把旧默认 `playwright.config.ts` 与 V3 �
 | 临时/合成测试库 | 已执行过 011–021；只证明当前本地合同/fake-provider 流程 |
 | 隔离真实资料副本 | `work/v3-migration-rehearsal-07/` 从当前 1–15 源库副本执行到 16；旧表指纹不变、integrity ok、FK 0、69/69 文档版本、1,937 chunks 全部绑定；2 组 legacy problem/solution/step/bridge 全部正规化且缺失数为 0 |
 | Stage 5 隔离副本 | `work/v3-migration-rehearsal-08/` 在默认 E2E 事故前从 1–15 源库 online backup，并两次初始化至 18；旧表指纹不变、integrity ok、FK 0，Assessment 表为空且只新增 1 条明确非院校官方的 `DRAFT_UNCONFIGURED` policy |
+| Stage 8 隔离副本 | `work/v3-migration-rehearsal-stage8-20260912-01/` 从当前真实活动 RAG 库 1–18 online backup 到 1–21；旧表指纹不变、integrity ok、FK 0、版本连续；69/69 DocumentVersion、1,937 chunks 全绑定；6 条旧 model-run evidence 对应 6 条预算预留；019–021 必需表/索引/trigger 无缺失 |
 | CS3481 最小子集副本 | `work/v3-cs3481-subset-01/`：3 个 DRAFT 候选节点、2 条层级边、1 条 prerequisite、2 条真实版本证据；学习者不可见、0 模型调用 |
 | 本地真实库 | 当前为 1–18；016–018 因已披露的默认 E2E 配置事故被执行，随后保留 Schema 并恢复测试前数据；11–15 的执行来源仍 UNKNOWN |
 | 生产 | UNKNOWN |
 
-审计发现并修复了两个安全边界：`Database.initialize()` 只在 `Settings.v3_enabled=True` 时执行 V3 迁移；默认 Playwright 也必须先把 RAG 库只读 online backup 到唯一 `work/e2e-rag-*` 并把新 uploads 指向该目录。V2 readiness 仍要求 1–10，当前 V3 readiness 要求 1–21。Stage 2–5 的树、教学、Problem/Bridge 与 Assessment 链保持不变；Stage 6 新增三类精确发布快照；Stage 7 新增四专业真实 API/持久化矩阵、V3 与 Agent 每日费用闸门以及零重试 live canary 工具。当前全量证据为 Python 324 passed、Web 48 passed、Task Agent 66 passed、Ruff/mypy（63 source files）/typecheck/build 通过；最新隔离数据库 Playwright 5 passed 仍是 Stage 5 证据，Stage 8 最终浏览器复验待执行。
+审计发现并修复了安全边界：`Database.initialize()` 只在 `Settings.v3_enabled=True` 时执行 V3 迁移；默认 Playwright 先把 RAG 库只读 online backup 到唯一 `work/e2e-rag-*` 并把新 uploads 指向该目录；V2 与 V3 Playwright 配置使用互斥 `testMatch`；合法空 Overlay lookup 返回 `200 null`，而外部 owner 仍得到 404，前端不再吞掉该越权错误。V2 readiness 仍要求 1–10，当前 V3 readiness 要求 1–21。Stage 2–5 的树、教学、Problem/Bridge 与 Assessment 链保持不变；Stage 6 新增三类精确发布快照；Stage 7 新增四专业真实 API/持久化矩阵、V3 与 Agent 每日费用闸门以及零重试 live canary 工具。Stage 8 最终证据为 Python 327 passed、Web 49 passed、Task Agent 66 passed、Ruff/mypy（63 source files）/typecheck/build 通过；V3 三身份/双入口 Playwright 3 passed，独立 V2 Playwright 4 passed；完整与 production-only `npm audit` 均为 0。
 
 011–021 不通过改编号或删除来掩盖已执行事实。后续结构使用 022+ 前向迁移，并在新的隔离副本演练；本地真实库仍为 1–18，不能把临时测试库通过冒充真实副本迁移。
 
@@ -134,7 +136,7 @@ NOT_VERIFIED
 6. Stage 5：Assessment、GradePolicy、父节点聚合、薄弱点与触发式重规划。
 7. Stage 6：官方树/Spec/派生物审核、撤回和版本绑定。
 8. Stage 7：四专业 E2E、合同/故障/成本控制；有预算后才做 live canary。
-9. Stage 8：全量回归、真实数据副本迁移/恢复、受控部署或准确交接。
+9. Stage 8：全量回归和真实 RAG 数据副本迁移已完成；因缺少可确认的当前 Agent DB，完整双 DB + uploads 恢复演练保留为显式阻塞，并生成准确交接，不执行生产部署。
 
 ## 8. 当前阻塞和最小人工动作
 
@@ -318,3 +320,31 @@ Stage 7 已落实：
 `SUPPLEMENTAL_ENGINEERING_DECISION`：调用额度按 UTC 日计；未知结果 fail-closed 地占用额度；V3 canary 只接受固定合成文本数据与 Owner 明确确认的本地合成图；V3/Agent 部署模板把 endpoint 改为手工 secret 配置且 `V3_ENABLED=false`。这些是成本、隐私和可恢复性补漏，不冒充 Q1–Q10 的逐条确认。
 
 下一步进入 Stage 8：在新隔离副本把当前本地 1–18 演练到 1–21，完成 RAG+Agent+uploads 协调备份/恢复、最终 Playwright/安全回归和准确生产交接。无凭证时不部署；无付费授权时不运行 live canary。
+
+## 15. Stage 8 完成检查点
+
+```text
+Source implementation: IMPLEMENTED for the recorded V3 slices
+Local contract/fake-provider verification: PASS
+Real-current RAG data COPY migration 1–18 -> 1–21: PASS
+Complete current RAG + Agent DB + uploads restore: BLOCKED / NOT VERIFIED
+Live qwen3.8-max: NOT VERIFIED — no paid call or account access
+Human four-major quality review: NOT VERIFIED
+Production deployment/smoke: NOT VERIFIED
+Repository migration head: 21
+Local active RAG database Schema: 1–18 and unchanged
+Production database migration: UNKNOWN / NOT EXECUTED BY THIS TASK
+```
+
+Stage 8 implementation commits are `2bec11d` (migration/browser/authorization gates) and `7c6c54c` (audited Node dependency updates). No Owner untracked file was staged.
+
+Final local evidence on implementation baseline `7c6c54c`:
+
+- Python: 327 passed in 125.93s; one known Starlette/httpx TestClient deprecation warning; no skipped tests.
+- Web: 12 files / 49 tests; Task Agent: 10 files / 66 tests; Ruff all checks; strict mypy 63 source files; both TypeScript workspaces and production build passed.
+- V3 Playwright: 3 passed in 46.0s, covering Problem-first and Knowledge-first paths plus owner/second-user/Admin isolation and exact selected Overlay review. V2 Playwright: 4 passed in 27.2s. Desktop 1280px and mobile 375px screenshots were visually inspected; the checks prove only the deterministic local fixture and basic keyboard/naming/responsiveness assertions, not full WCAG conformance.
+- `npm audit` and `npm audit --omit=dev`: 0 vulnerabilities after exact-pinned Vitest 4.1.11 and patched transitive updates.
+- `work/v3-migration-rehearsal-stage8-20260912-01/` contains private local-copy evidence and must stay ignored. It proves the RAG copy migrations and invariants, not a live cutover or full-site restore.
+- The repository has no authoritative current Agent database at the configured example path `data/agent.sqlite3`; `work/` contains disposable smoke/E2E Agent databases that must not be substituted. `ops/backup_v2.py` rejected that missing path with exit 2 before creating the requested backup root. Owner/runtime discovery is required before the coordinated backup/restore gate can run.
+
+The source remains a locally verified release candidate, not production accepted. Exact remaining capability gaps and operator-only steps are consolidated in `COURSEMATE_V3_HANDOFF_FOR_CHATGPT.md`.

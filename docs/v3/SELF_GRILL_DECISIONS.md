@@ -267,6 +267,26 @@ Stage 5 incident evidence reinforced this boundary: a default browser config tha
 - **剩余不确定性:** Account entitlement, regional endpoint, price, Responses/vision/stream/tool behavior and teaching quality remain live-blocked.
 - **分类:** `SUPPLEMENTAL_ENGINEERING_DECISION` implementing Q1 and Stage 7; not a claim that the Owner approved a paid run.
 
+## SG-27 — Optional current-resource lookup authenticates scope before returning empty
+
+- **问题 / 来源或缺口:** The current Overlay endpoint needs an ordinary empty state, but a blanket 404-to-null client fallback can hide a forged or foreign workspace.
+- **反例:** User B guesses User A's workspace ID; the server or Web client turns the authorization denial into the same harmless “no request yet” state.
+- **采用方案 / 取舍:** Resolve the owner-scoped workspace first. A valid owner with no request receives `200 null`; a foreign/unknown workspace remains the existing non-disclosing 404, and the Web service propagates that error.
+- **不可违反的规则:** Nullable resource state must not weaken parent-resource authorization; clients must not reinterpret permission failures as empty content.
+- **验收测试:** Backend owner-empty/foreign-404 test, Web 404 propagation test, V3 browser zero-HTTP-error primary flow.
+- **剩余不确定性:** Production identity/edge-cache behavior remains part of authenticated canary smoke.
+- **分类:** `SUPPLEMENTAL_ENGINEERING_DECISION` preserving the existing privacy requirement; not a new Q1–Q10 decision.
+
+## SG-28 — V2 and V3 browser suites use disjoint identities and topology
+
+- **问题 / 来源或缺口:** One default Playwright discovery scope previously mixed suites whose servers, Schema flags and identity assumptions differ.
+- **反例:** A V3 test is silently run against the V2 server or a local active database; a single fake identity then cannot prove cross-user/Admin isolation.
+- **采用方案 / 取舍:** Default config matches only `coursemate.spec.ts`. V3 config matches only `learning.spec.ts` and starts owner, second-user and Admin API processes sharing one fresh synthetic database. Route rewriting changes only the local test API port.
+- **不可违反的规则:** Every browser backend gets explicit database/upload paths; no E2E server may fall through to the active data path; test identities and data remain synthetic.
+- **验收测试:** Independent V2 4-test and V3 3-test commands; direct foreign-workspace 404; Admin sees only the selected immutable Overlay snapshot; source hashes unchanged.
+- **剩余不确定性:** This targeted keyboard/naming/responsive evidence is not full WCAG certification, and production Clerk role mapping still needs live smoke.
+- **分类:** `SUPPLEMENTAL_ENGINEERING_DECISION` closing a test-safety gap; not a user-confirmed product change.
+
 ## Exit check
 
-The core paths now have an owner, state/permission/failure rule and named acceptance test. Remaining unknowns are deliberately narrow: paid model/account facts, production topology/evidence, missing GradePolicy values, official content approval, and policy choices for generated-question/public-review thresholds. They do not block local implementation of contracts, safe data models and tests.
+The core paths now have an owner, state/permission/failure rule and named acceptance test. Remaining unknowns are deliberately narrow: the authoritative Agent DB/full restore gate, paid model/account facts, production topology/evidence, missing GradePolicy values, official content approval, and policy choices for generated-question/public-review thresholds. Residual source gaps such as AUTO routing, formal author/reviewer UI, complete COMPOSITE Assessment and full accessibility certification remain visible in the traceability ledger rather than being mislabeled complete.
