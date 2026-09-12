@@ -8,6 +8,8 @@ import pytest
 from test_learning_journey import setup_workspace
 from test_learning_workspace import client_at
 
+from app.db import LATEST_V3_SCHEMA_VERSION
+
 
 def seed_assessment_pool(
     client: Any,
@@ -222,7 +224,7 @@ def test_assessment_migrations_are_additive_and_seed_an_unconfigured_policy(
                 for row in connection.execute("PRAGMA table_info(teaching_plan_versions)")
             }
 
-        assert versions == list(range(1, 19))
+        assert versions == list(range(1, LATEST_V3_SCHEMA_VERSION + 1))
         assert {
             "assessment_question_revisions",
             "assessment_rubric_criteria",
@@ -238,6 +240,12 @@ def test_assessment_migrations_are_additive_and_seed_an_unconfigured_policy(
             "grade_policy_versions",
             "assessment_blueprint_grade_policies",
             "grade_snapshots",
+            "publication_review_snapshots",
+            "publication_snapshot_resources",
+            "publication_releases",
+            "publication_audit_events",
+            "official_knowledge_publication_requests",
+            "overlay_publication_requests",
         } <= tables
         assert "performance_trigger_ids_json" not in plan_columns
         assert policy["status"] == "DRAFT_UNCONFIGURED"

@@ -30,6 +30,8 @@ from app.rag.embeddings import (
 from app.rag.retrieval import HybridRetriever
 from app.repositories.chunks import ChunkRepository
 from app.services.ingestion import IngestionService, MissingEmbeddingProvider
+from app.services.knowledge_publication import KnowledgePublicationService
+from app.services.overlay_publication import OverlayPublicationService
 from app.services.publication import PublicationService
 from app.services.qa import QaService
 from app.services.teaching_profiles import TeachingProfileService
@@ -104,6 +106,8 @@ def create_app(
     teaching_profile_service = TeachingProfileService(database)
     application.state.teaching_profile_service = teaching_profile_service
     application.state.publication_service = PublicationService(database)
+    application.state.knowledge_publication_service = KnowledgePublicationService(database)
+    application.state.overlay_publication_service = OverlayPublicationService(database)
     application.state.settings = resolved_settings
     application.state.auth_verifier = (
         auth_verifier
@@ -125,7 +129,7 @@ def create_app(
         CORSMiddleware,
         allow_origins=[resolved_settings.web_origin],
         allow_credentials=False,
-        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
     )
 
@@ -144,7 +148,12 @@ def create_app(
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
-        if request.url.path.startswith("/api/learning"):
+        if (
+            request.url.path.startswith("/api/learning")
+            or request.url.path.startswith("/api/admin")
+            or request.url.path.startswith("/api/shared-overlays")
+            or "publication-requests" in request.url.path
+        ):
             response.headers["Cache-Control"] = "private, no-store"
             response.headers["Vary"] = "Authorization"
         return response

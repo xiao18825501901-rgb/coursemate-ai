@@ -166,13 +166,15 @@ class IngestionService:
         is_admin: bool = True,
     ) -> CoursePage:
         offset = (page - 1) * page_size
-        where = "1 = 1" if is_admin else "(visibility = 'public' OR owner_user_id = ?)"
+        # Administrator status grants official-content administration, not ambient access
+        # to another owner's private course metadata. Review uses scoped snapshots instead.
+        where = "(visibility = 'public' OR owner_user_id = ?)"
         if self.settings.v3_enabled:
             where += (
                 " AND NOT EXISTS (SELECT 1 FROM learning_workspaces "
                 "WHERE private_course_id=courses.id)"
             )
-        parameters: tuple[object, ...] = () if is_admin else (owner_user_id,)
+        parameters: tuple[object, ...] = (owner_user_id,)
         with self.database.connect() as connection:
             total = connection.execute(
                 f"SELECT COUNT(*) FROM courses WHERE {where}", parameters

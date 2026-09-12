@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -17,6 +17,12 @@ class ApiModel(BaseModel):
         extra="forbid",
         from_attributes=True,
     )
+
+
+PublicationResourceId = Annotated[
+    str,
+    Field(pattern=r"^[a-zA-Z0-9_-]{1,100}$"),
+]
 
 
 class DocumentStatus(StrEnum):
@@ -354,6 +360,82 @@ class PublicationSnapshot(ApiModel):
     created_at: datetime
     summary: dict[str, Any]
     resources: list[PublicationSnapshotResource]
+
+
+class OfficialKnowledgePublicationSubmit(ApiModel):
+    tree_version_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,100}$")
+
+
+class OfficialKnowledgeDraft(ApiModel):
+    tree_version_id: str
+    course_id: str
+    course_name: str
+    tree_version: int
+    title: str
+    member_count: int
+    pending_request_id: str | None
+
+
+class OfficialKnowledgeDraftPage(ApiModel):
+    items: list[OfficialKnowledgeDraft]
+
+
+class OfficialKnowledgePublicationRequest(ApiModel):
+    id: str
+    course_id: str
+    course_name: str
+    tree_version_id: str
+    tree_version: int
+    tree_title: str
+    status: str
+    submitted_by_user_id: str = Field(exclude=True)
+    submitted_at: datetime
+    reviewed_at: datetime | None
+    reviewed_by_user_id: str | None = Field(exclude=True)
+    review_note: str
+    snapshot_id: str
+    snapshot_hash: str
+    resource_count: int
+
+
+class OfficialKnowledgePublicationRequestPage(ApiModel):
+    items: list[OfficialKnowledgePublicationRequest]
+
+
+class OverlayPublicationSubmit(ApiModel):
+    node_ids: list[PublicationResourceId] = Field(default_factory=list, max_length=500)
+    document_version_ids: list[PublicationResourceId] = Field(
+        default_factory=list, max_length=500
+    )
+    artifact_ids: list[PublicationResourceId] = Field(default_factory=list, max_length=500)
+    evidence_ids: list[PublicationResourceId] = Field(default_factory=list, max_length=1_000)
+    share_selected_content_consent: bool
+    rights_confirmation: bool
+    consent_version: str = Field(pattern=r"^v[1-9][0-9]*$")
+
+
+class OverlayPublicationRequest(ApiModel):
+    id: str
+    course_id: str
+    course_name: str
+    workspace_id: str
+    owner_user_id: str = Field(exclude=True)
+    status: str
+    share_selected_content_consent: bool
+    rights_confirmation: bool
+    consent_version: str
+    consented_at: datetime
+    submitted_at: datetime
+    reviewed_at: datetime | None
+    reviewed_by_user_id: str | None = Field(exclude=True)
+    review_note: str
+    snapshot_id: str
+    snapshot_hash: str
+    resource_count: int
+
+
+class OverlayPublicationRequestPage(ApiModel):
+    items: list[OverlayPublicationRequest]
 
 
 class ConversationMessage(ApiModel):
