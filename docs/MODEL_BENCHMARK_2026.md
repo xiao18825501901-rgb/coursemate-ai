@@ -1,6 +1,25 @@
-# CourseMate AI V2 Model Benchmark (2026-08-13)
+# CourseMate AI Model Benchmark — V2 Baseline and V3 Stage 7
 
-## Decision status
+## V3 Stage 7 status (2026-09-12)
+
+**qwen3.8-max live verification: NOT RUN. Human quality review: NOT RUN.** No paid request, account login or production access occurred. Source/local work at commits `1750cfb` and `5201e76` provides two complementary harnesses:
+
+- `scripts/run_v3_model_canary.py` executes the real v3.2 Planner → major-specific Compiler → Teacher contracts for a fixed synthetic four-major × CASE_A/B matrix, then one synthetic image Problem contract. The full run is exactly 17 calls; one selected teaching case plus image is exactly 3.
+- `scripts/run_model_benchmark.py --case-id zh-01` tests the Responses event stream, while `--case-id tool-03` tests search→complete tool calls, strict arguments, `call_id` replay and a final response using content-free simulated tool output.
+
+Both runners have zero SDK retry, conservative whole-run cost ceilings, non-overwriting outputs and per-result checkpoints. Both support a non-billable `--preflight-only` path that returns before reading the API key or constructing a client. For `qwen3.8-max`, both require the exact HTTPS Model Studio compatible-mode path on the Alibaba/DashScope host allowlist. The V3 runner additionally requires `--max-provider-calls`, a bounded local PNG/JPEG and live-only `--confirm-synthetic-image`.
+
+The fixed V3 dataset is `benchmarks/v3-teaching-canary-cases.json`. Artifacts record its hash, the endpoint category rather than secret URL details, the image hash/size rather than bytes/path, Owner-supplied prices/currency, approved maximum, conservative ceiling, actual usage/cost estimate and structured synthetic output. An automated Schema pass is intentionally labeled `PENDING_HUMAN_QUALITY_REVIEW`; it cannot establish domain quality or production acceptance.
+
+Exact preflight/live command templates and the required human rubric are in `docs/v3/DEPLOYMENT_RUNBOOK.md`. Current price, account region, workspace endpoint, entitlement, quota and actual model capabilities remain **UNKNOWN — OWNER VERIFICATION REQUIRED**. Do not substitute another model or endpoint and call it a qwen3.8-max result.
+
+Official documentation rechecked on 2026-09-12:
+
+- Model Studio’s [Base URL reference](https://help.aliyun.com/en/model-studio/base-url) lists the shared and workspace-dedicated regional compatible-mode endpoints, says API keys are region-specific, and recommends workspace-dedicated domains for production. The backend allowlist follows those documented regions and rejects trial/Token Plan endpoints for application backend use.
+- The [qwen3.8-max model page](https://help.aliyun.com/en/model-studio/qwen3-8-max) lists regional deployment scopes, context/capability tables and original per-token prices, while explicitly directing users to the console for promotions. Therefore prices are Owner inputs at run time, never constants in source.
+- The official [Responses API reference](https://help.aliyun.com/en/model-studio/qwen-api-via-openai-responses) lists qwen3.8-max and structured message/tool input, and the [vision reference](https://help.aliyun.com/zh/model-studio/vision-model) lists image input, Function Calling and structured output. These are documentation-qualified capabilities only; the exact account/endpoint still needs the gated canaries.
+
+## V2 historical decision status
 
 **Live quality benchmark: NOT RUN. Final model selection: NOT APPROVED.**
 
@@ -35,15 +54,16 @@ Only the first two levels are complete. Anything stronger is recorded as unknown
 - Scoring library: `services/rag-api/app/evaluation/model_benchmark.py`.
 - Tests: `services/rag-api/tests/test_model_benchmark.py`.
 
-The runner exits before creating a client unless `--allow-billable` is explicitly supplied. A live
-run also requires explicit input/output prices, currency and `--max-cost`. Before constructing the
+The runner exits before creating a client unless either non-billable `--preflight-only` or live
+`--allow-billable` is explicitly supplied. A live run also requires explicit input/output prices,
+currency and `--max-cost`. Before constructing the
 SDK client it computes a deliberately conservative whole-run ceiling (one UTF-8 byte per possible
 input token, tool-schema/protocol allowance, and the full output-token cap) and refuses a run above
 the approved maximum. It never writes API keys to results. Automatic checks are intentionally narrow; a human must still score
 retrieval relevance, source and citation correctness, teaching depth, step-by-step quality, Chinese
 quality, follow-up coherence, hallucination, and instruction adherence.
 
-Example after billing is approved:
+Example preflight (replace `--preflight-only` with `--allow-billable` only after billing is approved):
 
 ```powershell
 services\rag-api\.venv\Scripts\python.exe scripts\run_model_benchmark.py `
@@ -56,7 +76,7 @@ services\rag-api\.venv\Scripts\python.exe scripts\run_model_benchmark.py `
   --output-price-per-million <verified-current-price> `
   --max-cost <approved-maximum> `
   --currency <ISO-4217-code> `
-  --allow-billable
+  --preflight-only
 ```
 
 Run a small compatibility canary first (`--limit 2`), then all 50 cases. Non-tool cases use the

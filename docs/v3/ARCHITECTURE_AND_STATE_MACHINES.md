@@ -1,6 +1,6 @@
 # CourseMate V3 — Architecture and State Machines
 
-Version: Stage 6 current/target baseline, 2026-09-12.
+Version: Stage 7 current/target baseline, 2026-09-12.
 This document distinguishes `CURRENT` source from `TARGET` architecture. Target objects are not claimed implemented until linked tests pass.
 
 ## 1. System ownership
@@ -38,7 +38,7 @@ Embedding provider/index -- separately configured and versioned
 | `bridges` | pinned cross-workflow context and return anchor | mutable “latest solution” lookup |
 | `assessments` | blueprint/session/question attempts, performance evidence, GradePolicy and snapshots | Learning Progress mutation |
 | `publication` | consent/review snapshot/version visibility/withdrawal audit | implicit access to unrelated private records |
-| `operations` | idempotency, base revision, model run/usage/error/events | product truth not validated by a domain module |
+| `operations` | idempotency, base revision, pre-call budget reservations, model run/usage/error/events | product truth not validated by a domain module |
 
 Shared server functions resolve principal → resource scope before any row, file, retrieval context or model call. The model never receives rows the principal could not access through the deterministic API.
 
@@ -80,7 +80,7 @@ MaterialEvidence, TeachingDeliveryEvidence and PerformanceEvidence are separate 
 | `teaching_specs` (012) | JSON items + immutable update trigger | retain historical rows; add normalized item/version metadata if needed |
 | `learning_journeys`, `teaching_units`, legacy `learning_coverage` | pinned Spec journey and saved unit state | migration 015 adds immutable Plan/Unit links and exact `teaching_delivery_evidence`; legacy rows remain visibly preserved |
 | `learning_problems/solutions/steps/bridges` | retained stable IDs and JSON projections | migration 016 adds immutable ProblemRevision/Attempt/SolutionRevision, StepKnowledgeLink and LearningBridgeContext; legacy rows are explicitly preserved, while new rows require exact versions and owner/workspace validation |
-| `learning_operations/events/model_runs` + `learning_model_run_evidence` | idempotent bounded generation and content-free call diagnostics | current path includes path IDs, base revision, safe invalid-output metadata and no hidden retry; daily aggregate caps remain target work |
+| `learning_operations/events/model_runs` + `learning_model_run_evidence` + `learning_model_call_reservations` | idempotent bounded generation, content-free call diagnostics and owner/day + owner/course/day budget reservation | current path includes path IDs, base revision, safe invalid-output metadata, no hidden retry and migration 021 atomic call caps; production counter behavior remains unverified |
 | Assessment questions/rubrics/blueprints/sessions/evidence and GradePolicy/Snapshot | migrations 017/018 + `learning/assessments.py` | implemented for atomic-node formal Assessment; author/review UI and integrated COMPOSITE exams remain target work |
 | Course/official-knowledge/Overlay publication snapshots, resources, releases and audit | migrations 019/020 + three distinct services | immutable exact-version packages, request-bound Admin reads, owner-scoped Overlay candidates, withdrawal/cache generation and official release supersession are implemented; expiring per-reviewer assignment remains target work |
 
@@ -134,6 +134,20 @@ RESERVED(base_revision, request_hash)
 ```
 
 Reservation and finalization are short transactions; provider I/O occurs outside them. Finalization uses compare-and-set on workspace revision. The canonical request hash includes method kind, workspace, path IDs and normalized body.
+
+### Model-call budget reservation
+
+```text
+PRECHECK(owner UTC day + owner/course UTC day)
+  -> RESERVED before Provider I/O
+      -> COMPLETED
+      -> FAILED
+      -> UNKNOWN (fail closed; no automatic retry)
+      -> BLOCKED (local configuration/endpoint gate; excluded from paid-call quota)
+  -> DAILY_MODEL_CALL_QUOTA (no Provider call)
+```
+
+Migration 021 serializes the count-and-insert step with `BEGIN IMMEDIATE`, so concurrent actions cannot both pass the same last slot. A reserved, failed or unknown attempt remains counted because the external charge status may be real or unknowable. Only an explicit local `MODEL_LIVE_BLOCKED`/`MODEL_ENDPOINT_INVALID` result becomes `BLOCKED`. V3 defaults to 60 calls per owner/day and 60 per owner/course/day in addition to the 30 learning-operations/day gate. The Task Agent has a separate transactional request budget: 10 chat requests/minute and 30/day, with at most four Provider rounds per accepted chat by default.
 
 ### Problem/attempt exposure
 

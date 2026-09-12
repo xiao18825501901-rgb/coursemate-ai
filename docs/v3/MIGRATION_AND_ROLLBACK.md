@@ -1,30 +1,30 @@
 # CourseMate V3 — Migration and Rollback
 
-Version: Stage 6 migration/recovery evidence, 2026-09-12.
-No production migration is authorized or claimed. Local real Schema remains 1–18 after the disclosed default-E2E isolation incident and recovery; Stage 6 migrations 019/020 have run only in temporary test databases and must first be rehearsed on a new read-only real-data copy.
+Version: Stage 7 migration/recovery evidence, 2026-09-12.
+No production migration is authorized or claimed. Local real Schema remains 1–18 after the disclosed default-E2E isolation incident and recovery; migrations 019–021 have run only in temporary test databases and must first be rehearsed on a new read-only real-data copy.
 
 ## 1. Known migration reality
 
 | Location | Last verified versions | Evidence | Status |
 |---|---:|---|---|
 | repository V2 base | 1–10 | `app/db.py`, existing tests | current stable baseline |
-| repository V3 files | 011–020 committed on the V3 feature branch | SQL source + automated tests | source implemented through Stage 6 |
-| pytest databases | 1–20 when `v3_enabled=True` | temporary synthetic runs, repeated initialization and invariants | disposable local evidence |
+| repository V3 files | 011–021 committed on the V3 feature branch | SQL source + automated tests | source implemented through Stage 7 |
+| pytest databases | 1–21 when `v3_enabled=True` | temporary synthetic runs, repeated initialization, budget backfill and invariants | disposable local evidence |
 | latest Playwright database | 1–18 before Stage 6 | isolated copy + separate uploads | Stage 6 browser flow not yet rerun |
 | isolated real-data copy | pre-test 1–15 → 1–18 | `work/v3-migration-rehearsal-08/migration-evidence.json` | local copy only; private, never commit/share |
 | local real `data/rag.sqlite3` | 1–18, integrity ok, FK 0 | post-incident recovery evidence, 2026-09-12 | pre-test rows restored; origin/time of 11–15 UNKNOWN; 016–018 actor is this disclosed test incident |
 | production database | UNKNOWN | no current access/evidence | manual verification required |
 
-011 creates owner×course workspaces and hidden private corpora. 012 creates the current minimal journey/problem/bridge/operation tables. 013 adds immutable source versions, derived artifacts and chunk-to-source-version bindings. 014 adds the Registry, aliases/lineage/material evidence, normalized Spec metadata/items, tree versions/memberships and separate prerequisite edges. 015 adds learning-preference/TeachingPlan versions, normalized Plan links, exact TeachingDeliveryEvidence and safe model-run evidence. 016 adds the structural problem index and immutable Problem/Solution revisions, Attempts, StepKnowledgeLinks and LearningBridgeContexts. 017 adds frozen Assessment questions/rubrics/blueprints/sessions/evidence and replan links. 018 adds immutable GradePolicy, Blueprint bindings and GradeSnapshots, with an explicitly unconfigured/non-institutional seed. 019 adds immutable scoped review snapshots/resources, distinct official and Overlay requests, releases and audit events without publishing legacy private data. 020 locks official/versionless resources while pending or approved, locks selected Overlay node status, and purges private course/Overlay snapshot metadata only when the owning request is deleted. Earlier applied copies may differ in exact historical shape; version number alone is not enough to prove it. Do not edit/delete/re-number applied history; correct it only with a new forward migration.
+011 creates owner×course workspaces and hidden private corpora. 012 creates the current minimal journey/problem/bridge/operation tables. 013 adds immutable source versions, derived artifacts and chunk-to-source-version bindings. 014 adds the Registry, aliases/lineage/material evidence, normalized Spec metadata/items, tree versions/memberships and separate prerequisite edges. 015 adds learning-preference/TeachingPlan versions, normalized Plan links, exact TeachingDeliveryEvidence and safe model-run evidence. 016 adds the structural problem index and immutable Problem/Solution revisions, Attempts, StepKnowledgeLinks and LearningBridgeContexts. 017 adds frozen Assessment questions/rubrics/blueprints/sessions/evidence and replan links. 018 adds immutable GradePolicy, Blueprint bindings and GradeSnapshots, with an explicitly unconfigured/non-institutional seed. 019 adds immutable scoped review snapshots/resources, distinct official and Overlay requests, releases and audit events without publishing legacy private data. 020 locks official/versionless resources while pending or approved, locks selected Overlay node status, and purges private course/Overlay snapshot metadata only when the owning request is deleted. 021 adds pre-Provider owner/day and owner×course/day call reservations and backfills existing content-free model-run evidence without inventing calls. Earlier applied copies may differ in exact historical shape; version number alone is not enough to prove it. Do not edit/delete/re-number applied history; correct it only with a new forward migration.
 
 ## 2. Activation rule
 
 `SUPPLEMENTAL_ENGINEERING_DECISION`: V3 Schema activation follows the server-side `V3_ENABLED` setting.
 
 - `V3_ENABLED=false`: initialization and readiness require versions 1–10; no V3 table is referenced by V2 course/publication paths.
-- `V3_ENABLED=true`: initialization applies 011–020 and readiness requires the complete set 1–20.
+- `V3_ENABLED=true`: initialization applies 011–021 and readiness requires the complete set 1–21.
 - Web `VITE_V3_ENABLED` controls navigation only and never authorizes a Schema migration.
-- Future 021+ migrations must be included only after their corresponding feature slice, idempotency and copy rehearsal pass.
+- Future 022+ migrations must be included only after their corresponding feature slice, idempotency and copy rehearsal pass.
 
 The rule has focused local evidence in `test_database.py` and `test_learning_workspace.py`. Production remains unverified.
 
@@ -42,6 +42,7 @@ Rows marked implemented below refer to committed migration files; only future ra
 | 018 (implemented) | GradePolicy/Blueprint binding/GradeSnapshot | missing A-/thresholds stored null/unconfigured; no default official policy |
 | 019 (implemented) | Immutable course/official/Overlay review snapshots/resources, distinct requests, releases and audit | no existing private data auto-published; old course requests receive no invented snapshot |
 | 020 (implemented) | Pending/approved official resource locks and private snapshot deletion cleanup | no source-content rewrite; withdrawn/rejected requests unlock normal owner lifecycle |
+| 021 (implemented) | Atomic daily model-call reservations by owner and owner×course | backfill one reservation per existing safe role/operation evidence; preserve `LEGACY_COMPLETED` meaning as counted `COMPLETED`; no prompt/response body copied |
 
 Migrations may be split further to keep each reviewable and recoverable. They must not be collapsed into a destructive “V3 rebuild.”
 
@@ -196,9 +197,9 @@ Rollback normally means code/flag rollback with additive tables retained. Droppi
 Migration/restore acceptance is a separate result from source and model quality:
 
 ```text
-SOURCE MIGRATIONS REVIEWED: 011–020 for the current Stage 1–6 slices
-SYNTHETIC MIGRATION VERIFIED: 011–020, including repeat initialization and publication invariants
-REAL-DATA COPY MIGRATION VERIFIED: only pre-test source 1–15 to isolated copy 1–18; current local DB is 1–18 after documented recovery; 019/020 rehearsal is pending
+SOURCE MIGRATIONS REVIEWED: 011–021 for the current Stage 1–7 slices
+SYNTHETIC MIGRATION VERIFIED: 011–021, including repeat initialization, publication invariants and model-call reservation backfill
+REAL-DATA COPY MIGRATION VERIFIED: only pre-test source 1–15 to isolated copy 1–18; current local DB is 1–18 after documented recovery; 019–021 rehearsal is pending
 ISOLATED FULL RESTORE VERIFIED: not yet
 PRODUCTION MIGRATION VERIFIED: not verified
 PRODUCTION ROLLBACK DRILL VERIFIED: not verified

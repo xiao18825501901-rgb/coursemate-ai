@@ -247,6 +247,26 @@ Stage 5 incident evidence reinforced this boundary: a default browser config tha
 - **剩余不确定性:** 是否由人工把具体 legacy link 映射到新 TeachingItem 需要后续审核产品流程。
 - **分类:** `SUPPLEMENTAL_ENGINEERING_DECISION`.
 
+## SG-25 — Model-call budgets reserve before external I/O
+
+- **问题 / 来源或缺口:** Operation/day limits did not bound two-call Teaching operations or concurrent Provider attempts, and counting only completed responses can exceed a paid limit.
+- **反例:** Two last-slot requests both pass a read-only count, call the model, then each records cost; an unknown timeout is omitted and retried automatically.
+- **采用方案 / 取舍:** Migration 021 atomically counts and inserts one owner/day and owner×course/day reservation before each role call. Reserved, completed, failed and unknown attempts count; a conclusively local configuration/endpoint block remains recorded as `BLOCKED` but does not consume a paid-call slot. Defaults are 60 calls for both scopes plus the existing 30 learning operations/day.
+- **不可违反的规则:** No Provider call before reservation; unknown charge state fails closed; no automatic retry; user/course authorization is resolved from the workspace rather than request fields.
+- **验收测试:** last-slot concurrency boundary, per-course/global owner caps, another owner, failure/unknown finalization, pre-provider block and migration backfill/idempotency.
+- **剩余不确定性:** Production multi-instance contention, real usage fidelity and business-specific quota values require staged observation.
+- **分类:** `SUPPLEMENTAL_ENGINEERING_DECISION` implementing the bounded-cost requirement; not a user-confirmed numeric quota.
+
+## SG-26 — Paid canaries use fixed synthetic scope and remain human-pending
+
+- **问题 / 来源或缺口:** A generic green Schema test cannot prove four-major teaching quality, vision, streaming or tools; using real course data in a third-party benchmark would widen privacy and cost scope.
+- **反例:** A runner sends a private screenshot to an arbitrary compatible endpoint, retries a timeout, then labels valid JSON as production-quality qwen3.8-max.
+- **采用方案 / 取舍:** Hard-lock the V3 harness to qwen3.8-max, the exact Model Studio endpoint allowlist, a versioned eight-case synthetic dataset and an explicitly confirmed bounded local synthetic image. Require Owner-supplied current prices, currency, cost/call ceilings and billable opt-in; checkpoint every completed call, never auto-retry/resume, and leave success `PENDING_HUMAN_QUALITY_REVIEW`.
+- **不可违反的规则:** No paid call without explicit authorization; no private dataset/image; no key/image bytes/path in artifacts; no model/endpoint substitution under the same claim.
+- **验收测试:** preflight without key/client, unsafe endpoint, unknown case, call/cost overrun, overwrite refusal, 17-call full ceiling, structured/image contracts and explicit human rubric fields.
+- **剩余不确定性:** Account entitlement, regional endpoint, price, Responses/vision/stream/tool behavior and teaching quality remain live-blocked.
+- **分类:** `SUPPLEMENTAL_ENGINEERING_DECISION` implementing Q1 and Stage 7; not a claim that the Owner approved a paid run.
+
 ## Exit check
 
 The core paths now have an owner, state/permission/failure rule and named acceptance test. Remaining unknowns are deliberately narrow: paid model/account facts, production topology/evidence, missing GradePolicy values, official content approval, and policy choices for generated-question/public-review thresholds. They do not block local implementation of contracts, safe data models and tests.

@@ -1,25 +1,25 @@
 # CourseMate V3 — Test and Model Evaluation Report
 
-Last updated: 2026-09-12 after Stage 6 scoped publication implementation and regression.
+Last updated: 2026-09-12 after Stage 7 deterministic quality/cost/failure gates and regression.
 
 Branch: `feature/coursemate-v3-persistent-learning`
 
-Stage-switch base: `c6158cf34142c311e77a58aa49a3b0b7cbe7fbd8`; Stage 1 commits are `00961ef` through `e9ecd00`; Stage 2 code commits are `6eeff90`, `5a1f9d0`, `0be1a47`, `86032bb` and `5dba760`; Stage 3 code commits are `956d849`, `da1fa2a`, `e5d14d3`, `52514d1` and `2256cf0`; Stage 4 code/evidence commits are `5b88c3e`, `ebe2ffa`, `1eb94ed` and `cf8466b`; Stage 5 implementation and hardening commits run from `141057a` through `a882d36`; Stage 6 code commits are `c324373`, `ec3a2e9` and `88c06b4`.
+Stage-switch base: `c6158cf34142c311e77a58aa49a3b0b7cbe7fbd8`; Stage 1 commits are `00961ef` through `e9ecd00`; Stage 2 code commits are `6eeff90`, `5a1f9d0`, `0be1a47`, `86032bb` and `5dba760`; Stage 3 code commits are `956d849`, `da1fa2a`, `e5d14d3`, `52514d1` and `2256cf0`; Stage 4 code/evidence commits are `5b88c3e`, `ebe2ffa`, `1eb94ed` and `cf8466b`; Stage 5 implementation and hardening commits run from `141057a` through `a882d36`; Stage 6 code commits are `c324373`, `ec3a2e9` and `88c06b4`; Stage 7 code commits are `1750cfb` and official-region alignment `5201e76`.
 This report is cumulative and must be updated after every behavior change; old PASS does not cover later code.
 
 ## 1. Current evidence summary
 
 | Acceptance layer | Result | Meaning |
 |---|---|---|
-| Source implementation | PARTIAL | Stages 1–6 source slices exist; live-model, final migration/restore and production stages remain incomplete |
-| Python automated tests | PASS for current Stage 6 code | 291 passed; 1 known Starlette/httpx dependency deprecation |
+| Source implementation | PARTIAL | Stages 1–7 recorded source slices exist; live-model, final migration/restore and production stages remain incomplete |
+| Python automated tests | PASS for current Stage 7 code | 324 passed; 1 known Starlette/httpx dependency deprecation |
 | Web unit tests | PASS | 12 files / 48 tests passed |
-| Task Agent unit tests | PASS | 9 files / 53 tests passed after Stage 6; V3 did not take over task tools |
-| Python lint/type | PASS | Ruff app/tests; mypy app 60 files |
+| Task Agent unit tests | PASS | 10 files / 66 tests; Task tools remain owned by the Node service |
+| Python lint/type | PASS | Ruff app/tests/benchmark scripts; strict mypy 63 source files |
 | TS typecheck/build | PASS | both workspaces typecheck; production bundles built locally |
-| Browser regression | PARTIAL | Stage 5 had 5 isolated Playwright passes; Stage 6 publication UI has unit/production-build evidence but has not yet been rerun in a real browser |
+| Browser regression | PARTIAL | Stage 5 had 5 isolated Playwright passes; Stage 6/7 changes have unit/production-build evidence but final Stage 8 browser rerun is pending |
 | Real model | NOT VERIFIED | no paid call, account/region/endpoint unknown |
-| Real-data migration/recovery | PARTIAL | synthetic temporary DBs initialize through 020; latest real-data copy ends at 018; full two-DB/uploads restore remains unverified |
+| Real-data migration/recovery | PARTIAL | synthetic temporary DBs initialize through 021; latest real-data copy ends at 018; full two-DB/uploads restore remains unverified |
 | Production | NOT VERIFIED | no current release/auth/provider/Schema smoke evidence |
 
 ## 2. Cumulative local commands and actual results
@@ -400,16 +400,42 @@ Web TypeScript + production Vite build: passed; 118 modules transformed
 Task Agent TypeScript + build: passed
 ```
 
-No Stage 6 browser session, real `qwen3.8-max` call, real-data-copy migration through 020, human official-content approval or production deployment has been performed. Exact model/account/region/cost and production status remain `NOT VERIFIED`.
+No Stage 6 browser session, real `qwen3.8-max` call, real-data-copy migration through 020, human official-content approval or production deployment was performed at that checkpoint. Exact model/account/region/cost and production status remained `NOT VERIFIED`.
 
-## 9. Test data and privacy
+## 9. Stage 7 deterministic quality, cost and failure evidence
+
+The four-major regression uses 8 independent temporary databases and the real V3 API path. Each of CS, Smart Manufacturing, Materials and Energy is exercised once as CASE_A and once as CASE_B across Chinese, English and bilingual output. Every case calls the deterministic Planner and Teacher through the versioned v3.2 templates/compiler, validates exact REQUIRED scope and 3–5 comprehension checks, persists a completed plan and validated delivery evidence, then closes/reopens the application and observes `LEARNED + NOT_ASSESSED`. Preferences are inspected as serialized low-trust context and are absent from the fixed/major instruction layer.
+
+Migration 021 adds `learning_model_call_reservations`. Tests prove that owner/day and owner×course/day limits are checked and reserved atomically before the second Provider call; separate courses are counted correctly under the shared owner cap; an exceeded request does not call the Provider; and explicit missing-configuration `BLOCKED` attempts remain auditable without consuming the paid-call quota. Existing safe run evidence backfills once and repeated initialization yields exactly versions 1–21.
+
+The Task Agent now applies transactional minute/day chat windows. The focused suite proves accepted counts in two minute windows, daily exhaustion, blocked attempts not incrementing the count and owner isolation. `qwen3.8-max` accepts only explicit Agent credentials plus an allowlisted Model Studio endpoint; SDK configuration uses `maxRetries=0`/90-second timeout, and a synthetic provider error containing private text is converted to `MODEL_PROVIDER_FAILURE` without retaining that text.
+
+The fixed V3 canary dataset covers all 8 major/case pairs. Local tests execute the actual Planner/Compiler/Teacher schemas and the multimodal Problem schema with a synthetic PNG; calculate 17 conservative call ceilings including carried Planner output and complete Base64 image bytes; reject unknown case IDs, unsafe endpoint, excess call/cost authorization, missing billable opt-in and output overwrite; and prove `--preflight-only` succeeds without a key. The generic streaming/tool runner likewise supports exact case selection and non-billable preflight, and hard-locks qwen3.8-max to the Model Studio endpoint allowlist. No test contacted a model.
+
+Final commands after commits `1750cfb` and `5201e76`:
+
+```text
+Python endpoint/runner/canary focused: 46 passed, 24.62s
+Python full: 324 passed, 1 dependency warning, 113.13s
+Web: 12 files / 48 tests passed
+Task Agent: 10 files / 66 tests passed
+Ruff: all checks passed
+mypy: 63 source files, no issues
+Web TypeScript + production Vite build: passed; 118 modules transformed
+Task Agent TypeScript + build: passed
+git diff --check before commit: passed
+```
+
+No Stage 7 Playwright session, paid call, human model-quality review, real-data-copy migration through 021 or production action occurred. `LOCAL_CONTRACT_VERIFIED` and `LOCAL_FAKE_PROVIDER_VERIFIED` apply; `LIVE_MODEL_VERIFIED` and `PRODUCTION_VERIFIED` do not.
+
+## 10. Test data and privacy
 
 - pytest uses `tmp_path` databases/uploads; V3 API fixtures set `v3_enabled=True` explicitly.
 - Playwright now uses a read-only online copy under `work/`, a separate upload root and fake content `2 + 3`; screenshots contain only synthetic values.
 - The local real RAG database was accidentally initialized once by the disclosed pre-fix default config, then recovered as documented above. The corrected run left DB and upload summaries unchanged.
 - No private course body, user identity, key, prompt body or production response is included here.
 
-## 10. Model contract versus model quality
+## 11. Model contract versus model quality
 
 Current deterministic tests can prove:
 
@@ -430,7 +456,7 @@ They cannot prove:
 - production Clerk, Netlify, server/storage or multi-instance behavior;
 - actual token cost/latency/rate-limit behavior.
 
-## 11. Required future matrices
+## 12. Required future matrices
 
 | Stage | New evidence required before PASS |
 |---|---|
@@ -440,14 +466,14 @@ They cannot prove:
 | 4 | locally verified for text/index/image revisions, solution/step link, private image, Problem→Teaching→return and persistence; reverse Teaching→Problem, two-user/Admin browser and full a11y remain overall gates |
 | 5 | locally verified for five unequal/100, answer secrecy, assisted evidence, rubric arithmetic, unconfigured policy and explicit weak-point replan; live grading quality remains Stage 7 |
 | 6 | locally verified for exact snapshots, consent, substitution locks, scoped downloads, independent official review, explicit Overlay selection, withdrawal/replacement and generic Admin denial; browser and real human review remain unverified |
-| 7 | smallest approved live canaries with exact model/region/protocol/cost; four-major human rubric |
+| 7 | local four-major/API/persistence matrix and canary/cost/failure gates verified; smallest approved live canaries and four-major human rubric remain external |
 | 8 | final full regression, final-Schema real-data copy + full restore, preview deploy and production smoke/rollback evidence |
 
-## 12. Open defects and non-PASS items
+## 13. Open defects and non-PASS items
 
 - Existing `package-lock` audit history reported one high and three moderate advisories; reachability/remediation is not yet resolved and cannot be hidden in launch PASS.
 - Current Playwright covers one synthetic owner plus existing V2 flows; two-user/Admin browser paths, Teaching→Problem reverse initiation and accessibility-tree evidence remain missing.
-- Model adapter now retains safe metadata on structured-output failure, but actual qwen3.8-max account access, regional endpoint, protocol compatibility, provider usage fidelity and cost remain unverified.
+- Model adapters now retain safe metadata on structured-output failure, enforce zero retry and daily limits, and have bounded synthetic canaries; actual qwen3.8-max account access, regional endpoint, protocol compatibility, provider usage fidelity, quality and cost remain unverified.
 - Official tree/Spec release submission, exact independent review, active-release discovery and withdrawal APIs/UI are implemented and locally verified. Source-draft authoring/import UI and real human official-content approval remain unimplemented/unverified.
 - Assessment and GradePolicy are persistent and locally verified; formal question author/review UI, integrated COMPOSITE exams and human finalization of `NEEDS_REVIEW` remain unimplemented.
 

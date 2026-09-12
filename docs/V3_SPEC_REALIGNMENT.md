@@ -44,7 +44,7 @@ Paid model calls used: none
 - FastAPI/Python RAG API 是学习状态、课程资料和 V3 编排的拟定单一写入者。
 - React/TypeScript Web 仍保留 V2 页面，并有 feature-flagged V3 双 Pane 工作区。
 - Node Task Agent 保持任务工具职责，不写学习成绩或覆盖状态。
-- V3 011–020 迁移、冻结文档版本/派生物、workspace 文件隔离、Registry、ATOMIC/COMPOSITE、双树投影、版本化 Spec、v3.2 Planner/Compiler/Executor/Problem/Assessment Grader、计划缓存与交付证据、正式 Assessment/GradePolicy、精确版本发布快照，以及版本化 Problem→Bridge→Teaching→Assessment 本地闭环已存在，但并未覆盖新版全部领域对象。
+- V3 011–021 迁移、冻结文档版本/派生物、workspace 文件隔离、Registry、ATOMIC/COMPOSITE、双树投影、版本化 Spec、v3.2 Planner/Compiler/Executor/Problem/Assessment Grader、计划缓存与交付证据、正式 Assessment/GradePolicy、精确版本发布快照、调用前预算预留，以及版本化 Problem→Bridge→Teaching→Assessment 本地闭环已存在，但并未覆盖新版全部领域对象。
 - `V3_ENABLED` 和 `VITE_V3_ENABLED` 默认关闭；目标生成模型配置锁为 `qwen3.8-max`，Embedding 独立。
 
 ### 本地真实数据库
@@ -55,7 +55,7 @@ Stage 5 全量浏览器回归首次把旧默认 `playwright.config.ts` 与 V3 �
 
 ### 历史部署报告
 
-`PRODUCTION_DEPLOYMENT_CHANGELOG_AND_FINAL_STATE.md`、V2 Runbook 等只能证明其记录时点的历史。仓库缺少 Master Prompt 提到的 `FINAL_PRODUCTION_DEPLOYMENT_COMPLETION_REPORT.md`。`render.yaml` 仍表达旧模型部署意图，不能证明线上供应商或版本。
+`PRODUCTION_DEPLOYMENT_CHANGELOG_AND_FINAL_STATE.md`、V2 Runbook 等只能证明其记录时点的历史。仓库缺少 Master Prompt 提到的 `FINAL_PRODUCTION_DEPLOYMENT_COMPLETION_REPORT.md`。当前 `render.yaml` 表达 V2 RAG 角色仍保留 qwen3.7-plus、V3/Task Agent 目标为 qwen3.8-max 且 V3 默认关闭的部署意图；它不能证明线上供应商、模型或版本。
 
 ### 实际线上运行
 
@@ -68,7 +68,7 @@ Stage 5 全量浏览器回归首次把旧默认 `playwright.config.ts` 与 V3 �
 | 能力 | 新需求依据 | 当前实现与文件/Schema | 结论与处理 | 数据影响 / 重新验证 |
 |---|---|---|---|---|
 | V2 QA、Clerk、引用、流式输出、Task Agent | §0、§19 | 既有 API/Web/Agent | KEEP | 全量 V2 回归；不得以 V3 重写替代 |
-| qwen3.8-max 主智能模型；Embedding 独立 | Q1、§3 | V3 adapter + locked setting；V2/部署模板仍有旧角色配置 | ADAPT | 增加协议/地域/能力合同；账户与 live 为 BLOCKED |
+| qwen3.8-max 主智能模型；Embedding 独立 | Q1、§3 | V3 adapter、模型锁、Model Studio endpoint allowlist、零重试 canary；V2 RAG 角色保持独立旧配置 | KEEP + VERIFY | 本地协议/Schema/故障合同已验证；账户地域、真实能力与 live 为 BLOCKED |
 | Shared Orchestrator + Teaching/Problem/AUTO | Q2 | Orchestrator 有 Teaching/Problem；AUTO 未实现 | ADAPT + ADD | 保留共享 workspace；补可解释路由与测试 |
 | 双轴学习状态 | Q3、Q8 | `knowledge.py` 分别投影 coverage 与 Assessment；017/018 保存独立证据 | KEEP | LEARNED 不读取分数；NOT_ASSESSED 不等于 0；本地合同已验证 |
 | 五题不等权、总分 100 | Q4、§13 | 冻结 Blueprint、Attempt、Evidence、API 与 Web 已实现 | KEEP + HARDEN | 服务端固定 5 题、10/15/20/25/30、总分 100；正式题库作者/审核界面仍待实现 |
@@ -76,7 +76,7 @@ Stage 5 全量浏览器回归首次把旧默认 `playwright.config.ts` 与 V3 �
 | COMPOSITE / ATOMIC | Q6 | COMPOSITE 无独立成绩写入，聚合唯一、独立、已测 ATOMIC 后代 | KEEP + HARDEN | 未测后代不按 0；完整/部分覆盖显式；综合父节点考试仍是后续能力 |
 | Canonical Node + Private Overlay / 双树 | Q7、§7 | 014、API 与 Web 已实现审核后官方视图和 owner×course 个性化版本；019/020 增加精确发布审核；同名私人节点不合并 | KEEP + HARDEN | 引用同一 node/progress，不复制成绩；发布管理已本地验证，官方源草稿 author/import UI 仍待实现 |
 | REQUIRED coverage 决定 LEARNED | Q8、§8 | 后端集合判定已有最小实现 | KEEP + HARDEN | 验证完整正文、Spec/Item/Step 版本与撤权 |
-| 动态 Teaching Unit 状态机 | Q9 | planner + unit 已有最小路径 | ADAPT | 补暂停/恢复、缓存、失败/预算状态 |
+| 动态 Teaching Unit 状态机 | Q9 | planner + unit、计划缓存、失败状态与 021 调用前预算预留 | KEEP + ADAPT | 自动继续仍未启用；暂停/恢复与 Owner 可见预算展示继续补齐 |
 | 四层教学规范 | Q10、§11–12 | v3.2 Planner/Common/四专业策略、两 CASE、完整计划与缓存键已进代码；v3.1 保留 | KEEP + ADD | Teaching 本地合同已验证；Problem Solver 和 Grader 分属 Stage 4/5 |
 | 私人 workspace 与联合检索 | §5–6 | 011、workspaces.py、learning API | KEEP + HARDEN | A/B/Admin/匿名、metadata/HEAD/Range/chunk/citation 矩阵 |
 | 文档版本和派生预览 | §4–6 | 013 冻结版本/派生物/Chunk 绑定；安全文本、CSV、静态 Notebook、PDF、图片与 Office 诚实 fallback | KEEP + HARDEN | 本地 ACL/篡改测试通过；受控 Office converter、生产存储、清理重试仍待实现/核验 |
@@ -95,17 +95,17 @@ Stage 5 全量浏览器回归首次把旧默认 `playwright.config.ts` 与 V3 �
 
 | 范围 | 状态 |
 |---|---|
-| 011–020 文件 | 已在 V3 feature branch 提交；已执行的本地迁移历史不重编号、不删除，后续只用 021+ 前向修复 |
-| 临时/合成测试库 | 已执行过 011–020；只证明当前本地合同/fake-provider 流程 |
+| 011–021 文件 | 已在 V3 feature branch 提交；已执行的本地迁移历史不重编号、不删除，后续只用 022+ 前向修复 |
+| 临时/合成测试库 | 已执行过 011–021；只证明当前本地合同/fake-provider 流程 |
 | 隔离真实资料副本 | `work/v3-migration-rehearsal-07/` 从当前 1–15 源库副本执行到 16；旧表指纹不变、integrity ok、FK 0、69/69 文档版本、1,937 chunks 全部绑定；2 组 legacy problem/solution/step/bridge 全部正规化且缺失数为 0 |
 | Stage 5 隔离副本 | `work/v3-migration-rehearsal-08/` 在默认 E2E 事故前从 1–15 源库 online backup，并两次初始化至 18；旧表指纹不变、integrity ok、FK 0，Assessment 表为空且只新增 1 条明确非院校官方的 `DRAFT_UNCONFIGURED` policy |
 | CS3481 最小子集副本 | `work/v3-cs3481-subset-01/`：3 个 DRAFT 候选节点、2 条层级边、1 条 prerequisite、2 条真实版本证据；学习者不可见、0 模型调用 |
 | 本地真实库 | 当前为 1–18；016–018 因已披露的默认 E2E 配置事故被执行，随后保留 Schema 并恢复测试前数据；11–15 的执行来源仍 UNKNOWN |
 | 生产 | UNKNOWN |
 
-审计发现并修复了两个安全边界：`Database.initialize()` 只在 `Settings.v3_enabled=True` 时执行 V3 迁移；默认 Playwright 也必须先把 RAG 库只读 online backup 到唯一 `work/e2e-rag-*` 并把新 uploads 指向该目录。V2 readiness 仍要求 1–10，当前 V3 readiness 要求 1–20。Stage 2–5 的树、教学、Problem/Bridge 与 Assessment 链保持不变；Stage 6 新增三类精确发布快照、独立审核、撤回/替代与派生物权限。当前全量证据为 Python 291 passed、Web 48 passed、Task Agent 53 passed、Ruff/mypy（60 source files）/typecheck/build 通过；最新隔离数据库 Playwright 5 passed 仍是 Stage 5 证据，Stage 6 浏览器复验待执行。
+审计发现并修复了两个安全边界：`Database.initialize()` 只在 `Settings.v3_enabled=True` 时执行 V3 迁移；默认 Playwright 也必须先把 RAG 库只读 online backup 到唯一 `work/e2e-rag-*` 并把新 uploads 指向该目录。V2 readiness 仍要求 1–10，当前 V3 readiness 要求 1–21。Stage 2–5 的树、教学、Problem/Bridge 与 Assessment 链保持不变；Stage 6 新增三类精确发布快照；Stage 7 新增四专业真实 API/持久化矩阵、V3 与 Agent 每日费用闸门以及零重试 live canary 工具。当前全量证据为 Python 324 passed、Web 48 passed、Task Agent 66 passed、Ruff/mypy（63 source files）/typecheck/build 通过；最新隔离数据库 Playwright 5 passed 仍是 Stage 5 证据，Stage 8 最终浏览器复验待执行。
 
-011–020 不通过改编号或删除来掩盖已执行事实。后续结构使用 021+ 前向迁移，并在新的隔离副本演练；本地真实库仍为 1–18，不能把临时测试库通过冒充真实副本迁移。
+011–021 不通过改编号或删除来掩盖已执行事实。后续结构使用 022+ 前向迁移，并在新的隔离副本演练；本地真实库仍为 1–18，不能把临时测试库通过冒充真实副本迁移。
 
 ## 6. 新验收层级
 
@@ -286,4 +286,35 @@ Stage 6 已落实：
 
 Stage 6 本地证据：发布专项 7 passed；全量 Python 291 passed；Web 48 passed；Task Agent 53 passed；Ruff、mypy（60 source files）、两个 TypeScript workspace 与生产构建通过。Stage 6 尚未重新执行 Playwright，migrations 019/020 尚未在真实数据副本演练，也没有真实人工审核、付费模型或生产访问。
 
-仍然公开保留的源码缺口：正式题库作者/审核 UI、完整官方源草稿 author/import UI、综合 COMPOSITE 考试、人工终审 `NEEDS_REVIEW`、AUTO 语义路由、每日聚合模型预算闸门与完整 a11y/双用户+Admin 浏览器覆盖。下一步按 Stage 7 先完成四专业确定性端到端矩阵及受预算门控的真实模型 canary 准备；未获真实调用授权时不发起付费请求。
+当时公开保留的源码缺口包括每日聚合模型预算闸门；该项已在 Stage 7 由 migration 021 和 Task Agent 双窗口限额完成。正式题库作者/审核 UI、完整官方源草稿 author/import UI、综合 COMPOSITE 考试、人工终审 `NEEDS_REVIEW`、AUTO 语义路由与完整 a11y/双用户+Admin 浏览器覆盖仍未关闭。
+
+## 14. Stage 7 完成检查点
+
+```text
+Source implementation: IMPLEMENTED for deterministic quality/cost/failure gates
+Local contract and fake-provider tests: VERIFIED
+Live qwen3.8-max: NOT VERIFIED — no paid call or account access
+Human four-major quality review: NOT VERIFIED
+Production: NOT VERIFIED
+Repository migration head: 21
+Local real database Schema: 1–18; migrations 019–021 NOT EXECUTED there
+Production database migration: UNKNOWN / NOT EXECUTED BY THIS TASK
+```
+
+阶段代码提交：`1750cfb`；官方 regional endpoint 对齐修复：`5201e76`。
+
+Stage 7 已落实：
+
+- 四专业 × CASE_A/CASE_B 共 8 条真实 API、Planner→专业 Compiler→Teacher、数据库提交与重启恢复用例；验证语言/偏好留在低信任数据层、REQUIRED 覆盖精确、`LEARNED` 与 `NOT_ASSESSED` 独立。
+- migration 021 在 Provider 调用前以 `BEGIN IMMEDIATE` 按 owner/day 与 owner×course/day 原子预留。`COMPLETED/FAILED/UNKNOWN/RESERVED` 均占额度；明确在本地配置阶段阻断的 `BLOCKED` 不占付费调用额度。旧安全 model-run ledger 前向回填，不改历史表或响应正文。
+- V3 默认每用户每天 60 次、每用户×课程每天 60 次模型调用；每次显式操作仍受 30 operations/day 与最多 12 个计划单元约束，不存在无人值守的无限继续。
+- Task Agent 增加每分钟 10、每 UTC 日 30 次 chat 的原子限额；默认最多 4 个模型回合，因此配置的最坏 Provider 尝试上界为 120 calls/user/day。SDK timeout 90 秒、自动重试 0；原始 Provider 错误体被转换为不含用户内容的稳定错误。
+- `scripts/run_v3_model_canary.py` 固定 qwen3.8-max、固定仓库内 8 条合成数据、严格 Model Studio endpoint allowlist，并执行实际 v3.2 Planner/Teacher Schema 及一条本地合成 PNG/JPEG Problem Schema。完整矩阵上限 17 次调用；单一专业 CASE 上限 3 次。运行前必须给出实时价格、币种、最大费用、最大调用数和 `--allow-billable`，且图像还要 `--confirm-synthetic-image`。零重试、逐次 checkpoint、输出不含 key/image bytes/path。
+- 通用 streaming/tool benchmark 增加精确 `--case-id` 和不读 key/不构造客户端的 `--preflight-only`；目标模型为 qwen3.8-max 时同样强制 Model Studio 精确 endpoint。Task tool 只回放合成结果，不写真实 Task DB。
+- 自动 Schema 检查通过只标 `PENDING_HUMAN_QUALITY_REVIEW`。没有 Owner 对实际账号、地域、权限、价格和结果逐项复核时，不得写 `LIVE_MODEL_VERIFIED`。
+
+最终 Stage 7 回归：Python 324 passed（仅 1 个既有 Starlette/httpx deprecation warning）；Web 12 files/48 tests；Task Agent 10 files/66 tests；Ruff all checks；严格 mypy 63 source files；两个 TypeScript typecheck/build 通过，Web Vite 118 modules。没有重新执行 Playwright，没有迁移本地真实库，没有真实模型/人工质量/生产访问。
+
+`SUPPLEMENTAL_ENGINEERING_DECISION`：调用额度按 UTC 日计；未知结果 fail-closed 地占用额度；V3 canary 只接受固定合成文本数据与 Owner 明确确认的本地合成图；V3/Agent 部署模板把 endpoint 改为手工 secret 配置且 `V3_ENABLED=false`。这些是成本、隐私和可恢复性补漏，不冒充 Q1–Q10 的逐条确认。
+
+下一步进入 Stage 8：在新隔离副本把当前本地 1–18 演练到 1–21，完成 RAG+Agent+uploads 协调备份/恢复、最终 Playwright/安全回归和准确生产交接。无凭证时不部署；无付费授权时不运行 live canary。
