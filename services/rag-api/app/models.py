@@ -414,6 +414,49 @@ class OverlayPublicationSubmit(ApiModel):
     consent_version: str = Field(pattern=r"^v[1-9][0-9]*$")
 
 
+class OverlayNodeCandidate(ApiModel):
+    id: str
+    title: str
+    kind: str
+    spec_version: int | None
+
+
+class OverlayDocumentCandidate(ApiModel):
+    id: str
+    document_id: str
+    version: int
+    filename: str
+    sha256: str
+    byte_size: int
+    status: str
+
+
+class OverlayArtifactCandidate(ApiModel):
+    id: str
+    document_version_id: str
+    kind: str
+    producer_version: str
+    sha256: str
+    byte_size: int
+
+
+class OverlayEvidenceCandidate(ApiModel):
+    id: str
+    node_id: str
+    node_title: str
+    node_is_private: bool
+    document_version_id: str
+    locator_type: str
+    locator_value: str
+
+
+class OverlayPublicationCandidates(ApiModel):
+    nodes: list[OverlayNodeCandidate]
+    documents: list[OverlayDocumentCandidate]
+    artifacts: list[OverlayArtifactCandidate]
+    evidence: list[OverlayEvidenceCandidate]
+
+
 class OverlayPublicationRequest(ApiModel):
     id: str
     course_id: str

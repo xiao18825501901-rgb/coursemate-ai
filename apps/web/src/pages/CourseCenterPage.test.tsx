@@ -178,6 +178,7 @@ describe("CourseSettingsPage", () => {
       status: "pending", shareMaterialsConsent: true, rightsConfirmation: true,
       consentVersion: "v1", consentedAt: "2026-08-13T00:00:00Z",
       submittedAt: "2026-08-13T00:00:00Z", reviewedAt: null, reviewNote: "",
+      snapshotId: "snapshot_1", snapshotHash: "a".repeat(64), resourceCount: 1,
     });
   });
 
@@ -243,6 +244,21 @@ describe("CourseSettingsPage", () => {
     renderRoutes("/courses/my-course/settings");
 
     fireEvent.click(await screen.findByRole("button", { name: "Withdraw publication request" }));
+
+    await waitFor(() => expect(withdrawPublicationRequest).toHaveBeenCalledWith(
+      expect.any(Function), "my-course",
+    ));
+    expect(await screen.findByRole("button", { name: "Submit for admin review" })).toBeVisible();
+  });
+
+  it("allows the owner to withdraw an approved course release", async () => {
+    vi.mocked(withdrawPublicationRequest).mockResolvedValue();
+    vi.mocked(getCourse)
+      .mockResolvedValueOnce({ ...mine, publicationStatus: "published" })
+      .mockResolvedValueOnce(mine);
+    renderRoutes("/courses/my-course/settings");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw published course" }));
 
     await waitFor(() => expect(withdrawPublicationRequest).toHaveBeenCalledWith(
       expect.any(Function), "my-course",

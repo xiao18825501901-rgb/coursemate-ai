@@ -113,6 +113,117 @@ export interface PublicationRequest {
   submittedAt: string;
   reviewedAt: string | null;
   reviewNote: string;
+  snapshotId: string | null;
+  snapshotHash: string | null;
+  resourceCount: number;
+}
+
+export type PublicationSubjectKind = "COURSE" | "OFFICIAL_KNOWLEDGE" | "OVERLAY";
+
+export interface PublicationSnapshotResource {
+  kind: string;
+  id: string;
+  version: string;
+  displayName: string;
+  sourceScope: string;
+  contentHash: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface PublicationSnapshot {
+  id: string;
+  subjectKind: PublicationSubjectKind;
+  requestId: string;
+  courseId: string;
+  workspaceId: string | null;
+  contentHash: string;
+  createdAt: string;
+  summary: Record<string, unknown>;
+  resources: PublicationSnapshotResource[];
+}
+
+export interface OfficialKnowledgeDraft {
+  treeVersionId: string;
+  courseId: string;
+  courseName: string;
+  treeVersion: number;
+  title: string;
+  memberCount: number;
+  pendingRequestId: string | null;
+}
+
+export interface OfficialKnowledgePublicationRequest {
+  id: string;
+  courseId: string;
+  courseName: string;
+  treeVersionId: string;
+  treeVersion: number;
+  treeTitle: string;
+  status: "pending" | "approved" | "rejected" | "withdrawn";
+  submittedAt: string;
+  reviewedAt: string | null;
+  reviewNote: string;
+  snapshotId: string;
+  snapshotHash: string;
+  resourceCount: number;
+}
+
+export interface OverlayPublicationSubmitInput {
+  nodeIds: string[];
+  documentVersionIds: string[];
+  artifactIds: string[];
+  evidenceIds: string[];
+  shareSelectedContentConsent: boolean;
+  rightsConfirmation: boolean;
+  consentVersion: string;
+}
+
+export interface OverlayPublicationRequest {
+  id: string;
+  courseId: string;
+  courseName: string;
+  workspaceId: string;
+  status: "pending" | "approved" | "rejected" | "withdrawn";
+  shareSelectedContentConsent: boolean;
+  rightsConfirmation: boolean;
+  consentVersion: string;
+  consentedAt: string;
+  submittedAt: string;
+  reviewedAt: string | null;
+  reviewNote: string;
+  snapshotId: string;
+  snapshotHash: string;
+  resourceCount: number;
+}
+
+export interface OverlayPublicationCandidates {
+  nodes: Array<{ id: string; title: string; kind: string; specVersion: number | null }>;
+  documents: Array<{
+    id: string;
+    documentId: string;
+    version: number;
+    filename: string;
+    sha256: string;
+    byteSize: number;
+    status: string;
+  }>;
+  artifacts: Array<{
+    id: string;
+    documentVersionId: string;
+    kind: string;
+    producerVersion: string;
+    sha256: string;
+    byteSize: number;
+  }>;
+  evidence: Array<{
+    id: string;
+    nodeId: string;
+    nodeTitle: string;
+    nodeIsPrivate: boolean;
+    documentVersionId: string;
+    locatorType: string;
+    locatorValue: string;
+  }>;
 }
 
 export interface Citation {

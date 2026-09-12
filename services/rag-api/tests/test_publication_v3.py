@@ -287,12 +287,20 @@ def test_official_tree_and_specs_require_exact_independent_review_and_withdrawal
             json={"decision": "approve", "reviewNote": "Tree and exact Spec reviewed."},
             headers={"Authorization": "Bearer admin-reviewer"},
         )
+        active_releases = client.get(
+            "/api/admin/knowledge-publication-releases",
+            headers={"Authorization": "Bearer admin-reviewer"},
+        )
         visible = client.get(
             f"/api/learning/workspaces/{workspace['id']}/knowledge",
             headers={"Authorization": "Bearer owner"},
         )
         withdrawn = client.delete(
             f"/api/admin/knowledge-publication-requests/{request_id}",
+            headers={"Authorization": "Bearer admin-reviewer"},
+        )
+        releases_after_withdrawal = client.get(
+            "/api/admin/knowledge-publication-releases",
             headers={"Authorization": "Bearer admin-reviewer"},
         )
         hidden = client.get(
@@ -326,11 +334,85 @@ def test_official_tree_and_specs_require_exact_independent_review_and_withdrawal
     assert self_review.json()["error"]["code"] == "INDEPENDENT_REVIEW_REQUIRED"
     assert approved.status_code == 200, approved.text
     assert approved.json()["status"] == "approved"
+    assert active_releases.status_code == 200
+    assert [item["id"] for item in active_releases.json()["items"]] == [request_id]
     assert visible.json()["official_tree"]["status"] == "PUBLISHED"
     assert withdrawn.status_code == 204
+    assert releases_after_withdrawal.json()["items"] == []
     assert hidden.json()["official_tree"]["status"] == "NO_REVIEWED_TREE"
     assert tuple(statuses) == ("RETIRED", "PUBLISHED", "PUBLISHED")
     assert tuple(release) == ("WITHDRAWN", 2)
+
+
+def test_new_official_release_withdraws_the_superseded_release(tmp_path: Path) -> None:
+    with v3_client(tmp_path) as client:
+        seed_official_tree(client)
+        first = client.post(
+            "/api/admin/knowledge-publication-requests",
+            json={"treeVersionId": "official-cs3481-v1"},
+            headers={"Authorization": "Bearer admin-author"},
+        ).json()
+        first_review = client.post(
+            f"/api/admin/knowledge-publication-requests/{first['id']}/review",
+            json={"decision": "approve", "reviewNote": "First exact release."},
+            headers={"Authorization": "Bearer admin-reviewer"},
+        )
+        assert first_review.status_code == 200, first_review.text
+        with client.app.state.database.connect() as connection:
+            connection.execute(
+                "INSERT INTO knowledge_tree_versions("
+                "id,course_id,workspace_id,owner_user_id,tree_kind,version,status,title,"
+                "change_reason,content_hash) VALUES("
+                "'official-cs3481-v2','cs3481',NULL,NULL,'OFFICIAL',2,'DRAFT',"
+                "'CS3481 reviewed map v2','Supersede v1',?)",
+                ("d" * 64,),
+            )
+            connection.execute(
+                "INSERT INTO knowledge_tree_memberships("
+                "tree_version_id,node_id,parent_node_id,ordinal,teaching_spec_version) "
+                "VALUES('official-cs3481-v2','rasterization',NULL,0,1)"
+            )
+        second = client.post(
+            "/api/admin/knowledge-publication-requests",
+            json={"treeVersionId": "official-cs3481-v2"},
+            headers={"Authorization": "Bearer admin-author"},
+        ).json()
+        second_review = client.post(
+            f"/api/admin/knowledge-publication-requests/{second['id']}/review",
+            json={"decision": "approve", "reviewNote": "Replacement exact release."},
+            headers={"Authorization": "Bearer admin-reviewer"},
+        )
+        active = client.get(
+            "/api/admin/knowledge-publication-releases",
+            headers={"Authorization": "Bearer admin-reviewer"},
+        )
+        forbidden = client.get(
+            "/api/admin/knowledge-publication-releases",
+            headers={"Authorization": "Bearer owner"},
+        )
+        with client.app.state.database.connect() as connection:
+            first_state = connection.execute(
+                "SELECT request.status,release.status,tree.status "
+                "FROM official_knowledge_publication_requests AS request "
+                "JOIN publication_releases AS release ON release.request_id=request.id "
+                "JOIN knowledge_tree_versions AS tree ON tree.id=request.tree_version_id "
+                "WHERE request.id=?",
+                (first["id"],),
+            ).fetchone()
+            second_state = connection.execute(
+                "SELECT request.status,release.status,tree.status "
+                "FROM official_knowledge_publication_requests AS request "
+                "JOIN publication_releases AS release ON release.request_id=request.id "
+                "JOIN knowledge_tree_versions AS tree ON tree.id=request.tree_version_id "
+                "WHERE request.id=?",
+                (second["id"],),
+            ).fetchone()
+
+    assert second_review.status_code == 200, second_review.text
+    assert [item["id"] for item in active.json()["items"]] == [second["id"]]
+    assert forbidden.status_code == 403
+    assert tuple(first_state) == ("withdrawn", "WITHDRAWN", "RETIRED")
+    assert tuple(second_state) == ("approved", "ACTIVE", "PUBLISHED")
 
 
 def test_overlay_shares_only_explicit_private_versions_and_revokes_future_access(
@@ -422,6 +504,14 @@ def test_overlay_shares_only_explicit_private_versions_and_revokes_future_access
                 "INSERT INTO messages(id,conversation_id,role,content) "
                 "VALUES('private-message','private-chat','user','NEVER PUBLISH THIS CHAT')"
             )
+        candidates = client.get(
+            f"/api/learning/workspaces/{workspace['id']}/overlay-publication-candidates",
+            headers={"Authorization": "Bearer owner"},
+        )
+        foreign_candidates = client.get(
+            f"/api/learning/workspaces/{workspace['id']}/overlay-publication-candidates",
+            headers={"Authorization": "Bearer other"},
+        )
         submitted = client.post(
             f"/api/learning/workspaces/{workspace['id']}/overlay-publication-requests",
             json={
@@ -437,6 +527,16 @@ def test_overlay_shares_only_explicit_private_versions_and_revokes_future_access
         )
         assert submitted.status_code == 201, submitted.text
         request_id = submitted.json()["id"]
+        owner_snapshot = client.get(
+            f"/api/learning/workspaces/{workspace['id']}/"
+            "overlay-publication-requests/current/snapshot",
+            headers={"Authorization": "Bearer owner"},
+        )
+        foreign_owner_snapshot = client.get(
+            f"/api/learning/workspaces/{workspace['id']}/"
+            "overlay-publication-requests/current/snapshot",
+            headers={"Authorization": "Bearer other"},
+        )
         pending_public = client.get(
             f"/api/shared-overlays/{request_id}",
             headers={"Authorization": "Bearer other"},
@@ -486,6 +586,24 @@ def test_overlay_shares_only_explicit_private_versions_and_revokes_future_access
             ).fetchone()
 
     assert pending_public.status_code == 404
+    assert owner_snapshot.status_code == 200
+    assert selected_node["id"] in owner_snapshot.text
+    assert hidden_node["id"] not in owner_snapshot.text
+    assert foreign_owner_snapshot.status_code == 404
+    assert candidates.status_code == 200, candidates.text
+    assert {item["id"] for item in candidates.json()["nodes"]} == {
+        selected_node["id"],
+        hidden_node["id"],
+    }
+    assert {item["id"] for item in candidates.json()["documents"]} == {
+        selected_version,
+        hidden_version,
+    }
+    assert [item["id"] for item in candidates.json()["evidence"]] == [
+        "selected-evidence"
+    ]
+    assert "SECRET CHAT" not in candidates.text
+    assert foreign_candidates.status_code == 404
     assert generic_admin_browse.status_code == 404
     assert review_snapshot.status_code == 200
     serialized_review = review_snapshot.text

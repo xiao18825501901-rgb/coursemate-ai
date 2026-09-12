@@ -6,6 +6,7 @@ from uuid import uuid4
 from app.db import Database
 from app.errors import ApiError
 from app.models import (
+    OverlayPublicationCandidates,
     OverlayPublicationRequest,
     OverlayPublicationSubmit,
     PublicationReview,
@@ -143,6 +144,83 @@ class OverlayPublicationService:
             rows = [self._select_request(connection, request_id) for request_id in ids]
         return [self._request(row) for row in rows if row is not None]
 
+    def candidates(
+        self,
+        workspace_id: str,
+        *,
+        owner_user_id: str,
+    ) -> OverlayPublicationCandidates:
+        self._require_v3()
+        with self.database.connect() as connection:
+            workspace = connection.execute(
+                "SELECT course_id,private_course_id FROM learning_workspaces "
+                "WHERE id=? AND owner_user_id=?",
+                (workspace_id, owner_user_id),
+            ).fetchone()
+            if workspace is None:
+                raise ApiError(404, "WORKSPACE_NOT_FOUND", "The workspace was not found.")
+            nodes = connection.execute(
+                "SELECT node.id,node.title,node.kind,("
+                "SELECT MAX(metadata.version) FROM teaching_spec_metadata AS metadata "
+                "WHERE metadata.node_id=node.id AND metadata.status='PRIVATE_ACTIVE'"
+                ") AS spec_version FROM knowledge_nodes AS node "
+                "WHERE node.course_id=? AND node.owner_user_id=? AND node.status='PRIVATE' "
+                "ORDER BY node.title,node.id",
+                (workspace["course_id"], owner_user_id),
+            ).fetchall()
+            documents = connection.execute(
+                "SELECT version.id,version.document_id,version.version,version.filename,"
+                "version.sha256,version.byte_size,documents.status "
+                "FROM document_versions AS version "
+                "JOIN documents ON documents.id=version.document_id "
+                "WHERE version.course_id=? AND version.owner_user_id=? "
+                "AND version.source_scope='WORKSPACE_PRIVATE' "
+                "ORDER BY version.filename,version.version DESC,version.id",
+                (workspace["private_course_id"], owner_user_id),
+            ).fetchall()
+            artifacts = connection.execute(
+                "SELECT artifact.id,artifact.document_version_id,artifact.kind,"
+                "artifact.producer_version,artifact.sha256,artifact.byte_size "
+                "FROM derived_artifacts AS artifact "
+                "JOIN document_versions AS version "
+                "ON version.id=artifact.document_version_id "
+                "WHERE version.course_id=? AND version.owner_user_id=? "
+                "AND version.source_scope='WORKSPACE_PRIVATE' AND artifact.status='READY' "
+                "ORDER BY version.filename,artifact.kind,artifact.id",
+                (workspace["private_course_id"], owner_user_id),
+            ).fetchall()
+            evidence_rows = connection.execute(
+                "SELECT evidence.id,evidence.node_id,node.title AS node_title,"
+                "CASE WHEN node.owner_user_id IS NULL THEN 0 ELSE 1 END AS node_is_private,"
+                "evidence.document_version_id,evidence.locator_type,evidence.locator_value "
+                "FROM material_evidence AS evidence "
+                "JOIN knowledge_nodes AS node ON node.id=evidence.node_id "
+                "JOIN document_versions AS version "
+                "ON version.id=evidence.document_version_id "
+                "WHERE evidence.owner_user_id=? "
+                "AND evidence.source_scope='WORKSPACE_PRIVATE' "
+                "AND evidence.status='ACTIVE' AND node.course_id=? "
+                "AND version.course_id=? AND version.owner_user_id=? "
+                "ORDER BY node.title,evidence.id",
+                (
+                    owner_user_id,
+                    workspace["course_id"],
+                    workspace["private_course_id"],
+                    owner_user_id,
+                ),
+            ).fetchall()
+        return OverlayPublicationCandidates.model_validate(
+            {
+                "nodes": [dict(row) for row in nodes],
+                "documents": [dict(row) for row in documents],
+                "artifacts": [dict(row) for row in artifacts],
+                "evidence": [
+                    {**dict(row), "node_is_private": bool(row["node_is_private"])}
+                    for row in evidence_rows
+                ],
+            }
+        )
+
     def current(self, workspace_id: str, *, owner_user_id: str) -> OverlayPublicationRequest:
         self._require_v3()
         with self.database.connect() as connection:
@@ -156,6 +234,34 @@ class OverlayPublicationService:
         if request is None:
             raise ApiError(404, "OVERLAY_PUBLICATION_NOT_FOUND", "No Overlay request was found.")
         return self._request(request)
+
+    def owner_snapshot(
+        self,
+        workspace_id: str,
+        *,
+        owner_user_id: str,
+    ) -> PublicationSnapshot:
+        self._require_v3()
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT request.id FROM overlay_publication_requests AS request "
+                "JOIN learning_workspaces AS workspace ON workspace.id=request.workspace_id "
+                "WHERE request.workspace_id=? AND request.owner_user_id=? "
+                "AND workspace.owner_user_id=? "
+                "ORDER BY request.submitted_at DESC LIMIT 1",
+                (workspace_id, owner_user_id, owner_user_id),
+            ).fetchone()
+            if row is None:
+                raise ApiError(
+                    404,
+                    "OVERLAY_PUBLICATION_NOT_FOUND",
+                    "No Overlay review snapshot was found.",
+                )
+            return snapshot_view(
+                connection,
+                subject_kind="OVERLAY",
+                request_id=row["id"],
+            )
 
     def snapshot(self, request_id: str) -> PublicationSnapshot:
         self._require_v3()

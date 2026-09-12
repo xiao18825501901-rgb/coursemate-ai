@@ -1256,6 +1256,101 @@ button:disabled,
   gap: 1rem;
 }
 
+.publication-admin-page {
+  max-width: 88rem;
+}
+
+.publication-queue {
+  display: grid;
+  gap: 1rem;
+  margin-block: 2rem;
+}
+
+.publication-queue > .panel-heading {
+  padding-bottom: 0.65rem;
+  border-bottom: 2px solid var(--ink);
+}
+
+.publication-queue .panel-heading h2,
+.publication-queue .panel-heading h3 {
+  margin: 0;
+}
+
+.official-draft-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr));
+  gap: 1rem;
+}
+
+.review-snapshot {
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+
+.review-snapshot summary {
+  padding: 0.75rem;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.review-resource-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0 0.75rem 0.75rem;
+  list-style: none;
+}
+
+.review-resource-list li {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+  padding-block: 0.65rem;
+  border-top: 1px solid var(--line);
+}
+
+.review-resource-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.review-resource-list span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.review-resource-list small {
+  display: block;
+  color: var(--ink-soft);
+}
+
+.review-resource-metadata {
+  min-width: 0;
+}
+
+.review-resource-metadata summary {
+  padding: 0.35rem 0;
+  font-size: 0.82rem;
+}
+
+.review-resource-metadata pre {
+  max-height: 22rem;
+  margin: 0;
+  padding: 0.75rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--surface);
+}
+
+.publication-admin-page code {
+  overflow-wrap: anywhere;
+}
+
 .settings-panel .course-form {
   padding: 0;
   border: 0;
@@ -1569,6 +1664,19 @@ button:disabled,
 
   .site-footer span {
     display: block;
+  }
+}
+
+@media (max-width: 640px) {
+  .publication-queue > .panel-heading,
+  .publication-queue .settings-panel > .panel-heading,
+  .review-resource-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .review-resource-list .text-button {
+    min-height: 2.75rem;
   }
 }
 

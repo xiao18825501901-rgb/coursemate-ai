@@ -11,6 +11,7 @@ from app.models import (
     OfficialKnowledgePublicationRequest,
     OfficialKnowledgePublicationRequestPage,
     OfficialKnowledgePublicationSubmit,
+    OverlayPublicationCandidates,
     OverlayPublicationRequest,
     OverlayPublicationRequestPage,
     OverlayPublicationSubmit,
@@ -194,6 +195,19 @@ def pending_official_knowledge(
 
 
 @router.get(
+    "/api/admin/knowledge-publication-releases",
+    response_model=OfficialKnowledgePublicationRequestPage,
+)
+def active_official_knowledge(
+    request: Request,
+    _admin: Annotated[AuthenticatedUser, Depends(require_admin)],
+) -> OfficialKnowledgePublicationRequestPage:
+    return OfficialKnowledgePublicationRequestPage(
+        items=_knowledge_service(request).list_active()
+    )
+
+
+@router.get(
     "/api/admin/knowledge-publication-requests/{request_id}/snapshot",
     response_model=PublicationSnapshot,
 )
@@ -254,6 +268,21 @@ def submit_overlay_publication(
 
 
 @router.get(
+    "/api/learning/workspaces/{workspace_id}/overlay-publication-candidates",
+    response_model=OverlayPublicationCandidates,
+)
+def overlay_publication_candidates(
+    workspace_id: str,
+    request: Request,
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+) -> OverlayPublicationCandidates:
+    return _overlay_service(request).candidates(
+        workspace_id,
+        owner_user_id=user.user_id,
+    )
+
+
+@router.get(
     "/api/learning/workspaces/{workspace_id}/overlay-publication-requests/current",
     response_model=OverlayPublicationRequest,
 )
@@ -263,6 +292,22 @@ def current_overlay_publication(
     user: Annotated[AuthenticatedUser, Depends(require_user)],
 ) -> OverlayPublicationRequest:
     return _overlay_service(request).current(workspace_id, owner_user_id=user.user_id)
+
+
+@router.get(
+    "/api/learning/workspaces/{workspace_id}/"
+    "overlay-publication-requests/current/snapshot",
+    response_model=PublicationSnapshot,
+)
+def current_overlay_publication_snapshot(
+    workspace_id: str,
+    request: Request,
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+) -> PublicationSnapshot:
+    return _overlay_service(request).owner_snapshot(
+        workspace_id,
+        owner_user_id=user.user_id,
+    )
 
 
 @router.delete(

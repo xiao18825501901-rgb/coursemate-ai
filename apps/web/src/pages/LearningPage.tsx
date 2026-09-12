@@ -4,6 +4,7 @@ import { useCourseMateAuth } from "../auth/AuthProvider";
 import { AssessmentPanel } from "../components/AssessmentPanel";
 import { KnowledgeTrees } from "../components/KnowledgeTrees";
 import { LearningFiles } from "../components/LearningFiles";
+import { OverlayPublicationPanel } from "../components/OverlayPublicationPanel";
 import {
   getAssessment,
   getLearningState,
@@ -244,6 +245,7 @@ export function LearningPage() {
         <button disabled={busy || !title.trim()} onClick={() => void createNode()}>建立私人教学范围</button>
       </details>
       <LearningFiles workspace={state.id} onDocumentsChanged={refreshProblemSources} />
+      <OverlayPublicationPanel workspace={state.id} />
       <p role="status">{busy ? "正在执行一个有界操作。刷新后请读取保存状态，不会自动重新调用模型。" : `已恢复 · 状态版本 ${state.revision}`}</p>
       <div className={`learning-panes ${layout.orientation} ${layout.swapped ? "swapped" : ""}`} style={{ "--teaching-ratio": `${layout.ratio}%` } as CSSProperties}>
         <section className="teaching-pane learning-pane" aria-label="知识教学"><h2>知识教学</h2>

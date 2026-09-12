@@ -10,8 +10,14 @@ import type {
   CourseUpdateInput,
   IngestionJob,
   LanguagePreference,
+  OfficialKnowledgeDraft,
+  OfficialKnowledgePublicationRequest,
+  OverlayPublicationCandidates,
+  OverlayPublicationRequest,
+  OverlayPublicationSubmitInput,
   Page,
   PublicationRequest,
+  PublicationSnapshot,
   QaStreamMeta,
   TeachingProfile,
   TeachingProfileInput,
@@ -342,6 +348,208 @@ export async function reviewPublication(
       body: JSON.stringify({ decision, reviewNote }),
     },
   );
+}
+
+export async function getCoursePublicationSnapshot(
+  getToken: GetSessionToken,
+  requestId: string,
+): Promise<PublicationSnapshot> {
+  return requestJson<PublicationSnapshot>(
+    getToken,
+    `${RAG_API}/api/admin/publication-requests/${encodeURIComponent(requestId)}/snapshot`,
+  );
+}
+
+export async function listOfficialKnowledgeDrafts(
+  getToken: GetSessionToken,
+): Promise<{ items: OfficialKnowledgeDraft[] }> {
+  return requestJson<{ items: OfficialKnowledgeDraft[] }>(
+    getToken,
+    `${RAG_API}/api/admin/knowledge-publication-drafts`,
+  );
+}
+
+export async function submitOfficialKnowledgePublication(
+  getToken: GetSessionToken,
+  treeVersionId: string,
+): Promise<OfficialKnowledgePublicationRequest> {
+  return requestJson<OfficialKnowledgePublicationRequest>(
+    getToken,
+    `${RAG_API}/api/admin/knowledge-publication-requests`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ treeVersionId }),
+    },
+  );
+}
+
+export async function listPendingOfficialKnowledgePublications(
+  getToken: GetSessionToken,
+): Promise<{ items: OfficialKnowledgePublicationRequest[] }> {
+  return requestJson<{ items: OfficialKnowledgePublicationRequest[] }>(
+    getToken,
+    `${RAG_API}/api/admin/knowledge-publication-requests`,
+  );
+}
+
+export async function listActiveOfficialKnowledgePublications(
+  getToken: GetSessionToken,
+): Promise<{ items: OfficialKnowledgePublicationRequest[] }> {
+  return requestJson<{ items: OfficialKnowledgePublicationRequest[] }>(
+    getToken,
+    `${RAG_API}/api/admin/knowledge-publication-releases`,
+  );
+}
+
+export async function getOfficialKnowledgePublicationSnapshot(
+  getToken: GetSessionToken,
+  requestId: string,
+): Promise<PublicationSnapshot> {
+  return requestJson<PublicationSnapshot>(
+    getToken,
+    `${RAG_API}/api/admin/knowledge-publication-requests/${encodeURIComponent(requestId)}/snapshot`,
+  );
+}
+
+export async function reviewOfficialKnowledgePublication(
+  getToken: GetSessionToken,
+  requestId: string,
+  decision: "approve" | "reject",
+  reviewNote: string,
+): Promise<OfficialKnowledgePublicationRequest> {
+  return requestJson<OfficialKnowledgePublicationRequest>(
+    getToken,
+    `${RAG_API}/api/admin/knowledge-publication-requests/${encodeURIComponent(requestId)}/review`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision, reviewNote }),
+    },
+  );
+}
+
+export async function withdrawOfficialKnowledgePublication(
+  getToken: GetSessionToken,
+  requestId: string,
+): Promise<void> {
+  await requireOk(await authenticatedFetch(
+    getToken,
+    `${RAG_API}/api/admin/knowledge-publication-requests/${encodeURIComponent(requestId)}`,
+    { method: "DELETE" },
+  ));
+}
+
+export async function listOverlayPublicationCandidates(
+  getToken: GetSessionToken,
+  workspaceId: string,
+): Promise<OverlayPublicationCandidates> {
+  return requestJson<OverlayPublicationCandidates>(
+    getToken,
+    `${RAG_API}/api/learning/workspaces/${encodeURIComponent(workspaceId)}/overlay-publication-candidates`,
+  );
+}
+
+export async function getCurrentOverlayPublication(
+  getToken: GetSessionToken,
+  workspaceId: string,
+): Promise<OverlayPublicationRequest | null> {
+  const response = await authenticatedFetch(
+    getToken,
+    `${RAG_API}/api/learning/workspaces/${encodeURIComponent(workspaceId)}/overlay-publication-requests/current`,
+  );
+  if (response.status === 404) return null;
+  await requireOk(response);
+  return (await response.json()) as OverlayPublicationRequest;
+}
+
+export async function getCurrentOverlayPublicationSnapshot(
+  getToken: GetSessionToken,
+  workspaceId: string,
+): Promise<PublicationSnapshot> {
+  return requestJson<PublicationSnapshot>(
+    getToken,
+    `${RAG_API}/api/learning/workspaces/${encodeURIComponent(workspaceId)}/overlay-publication-requests/current/snapshot`,
+  );
+}
+
+export async function submitOverlayPublication(
+  getToken: GetSessionToken,
+  workspaceId: string,
+  input: OverlayPublicationSubmitInput,
+): Promise<OverlayPublicationRequest> {
+  return requestJson<OverlayPublicationRequest>(
+    getToken,
+    `${RAG_API}/api/learning/workspaces/${encodeURIComponent(workspaceId)}/overlay-publication-requests`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export async function withdrawOverlayPublication(
+  getToken: GetSessionToken,
+  workspaceId: string,
+): Promise<void> {
+  await requireOk(await authenticatedFetch(
+    getToken,
+    `${RAG_API}/api/learning/workspaces/${encodeURIComponent(workspaceId)}/overlay-publication-requests/current`,
+    { method: "DELETE" },
+  ));
+}
+
+export async function listPendingOverlayPublications(
+  getToken: GetSessionToken,
+): Promise<{ items: OverlayPublicationRequest[] }> {
+  return requestJson<{ items: OverlayPublicationRequest[] }>(
+    getToken,
+    `${RAG_API}/api/admin/overlay-publication-requests`,
+  );
+}
+
+export async function getOverlayPublicationSnapshot(
+  getToken: GetSessionToken,
+  requestId: string,
+): Promise<PublicationSnapshot> {
+  return requestJson<PublicationSnapshot>(
+    getToken,
+    `${RAG_API}/api/admin/overlay-publication-requests/${encodeURIComponent(requestId)}/snapshot`,
+  );
+}
+
+export async function reviewOverlayPublication(
+  getToken: GetSessionToken,
+  requestId: string,
+  decision: "approve" | "reject",
+  reviewNote: string,
+): Promise<OverlayPublicationRequest> {
+  return requestJson<OverlayPublicationRequest>(
+    getToken,
+    `${RAG_API}/api/admin/overlay-publication-requests/${encodeURIComponent(requestId)}/review`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision, reviewNote }),
+    },
+  );
+}
+
+export async function downloadPublicationDocument(
+  getToken: GetSessionToken,
+  subjectKind: "COURSE" | "OVERLAY",
+  requestId: string,
+  versionId: string,
+): Promise<Blob> {
+  const route = subjectKind === "COURSE"
+    ? `/api/admin/publication-requests/${encodeURIComponent(requestId)}`
+    : `/api/admin/overlay-publication-requests/${encodeURIComponent(requestId)}`;
+  const response = await requireOk(await authenticatedFetch(
+    getToken,
+    `${RAG_API}${route}/documents/${encodeURIComponent(versionId)}/content`,
+  ));
+  return response.blob();
 }
 
 export async function streamQa(

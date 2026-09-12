@@ -141,6 +141,25 @@ class KnowledgePublicationService:
             rows = [self._select_request(connection, request_id) for request_id in request_ids]
         return [self._request(row) for row in rows if row is not None]
 
+    def list_active(self) -> list[OfficialKnowledgePublicationRequest]:
+        self._require_v3()
+        with self.database.connect() as connection:
+            request_ids = [
+                row["id"]
+                for row in connection.execute(
+                    "SELECT request.id FROM official_knowledge_publication_requests AS request "
+                    "JOIN publication_releases AS release "
+                    "ON release.subject_kind='OFFICIAL_KNOWLEDGE' "
+                    "AND release.request_id=request.id AND release.status='ACTIVE' "
+                    "JOIN knowledge_tree_versions AS tree "
+                    "ON tree.id=request.tree_version_id AND tree.status='PUBLISHED' "
+                    "WHERE request.status='approved' "
+                    "ORDER BY request.reviewed_at DESC,request.id"
+                ).fetchall()
+            ]
+            rows = [self._select_request(connection, request_id) for request_id in request_ids]
+        return [self._request(row) for row in rows if row is not None]
+
     def snapshot(self, request_id: str) -> PublicationSnapshot:
         self._require_v3()
         with self.database.connect() as connection:
@@ -190,6 +209,35 @@ class KnowledgePublicationService:
                 )
             approved = payload.decision == "approve"
             if approved:
+                superseded_ids = [
+                    row["id"]
+                    for row in connection.execute(
+                        "SELECT id FROM official_knowledge_publication_requests "
+                        "WHERE course_id=? AND status='approved' AND id!=?",
+                        (request["course_id"], request_id),
+                    ).fetchall()
+                ]
+                for superseded_id in superseded_ids:
+                    withdraw_release(
+                        connection,
+                        subject_kind="OFFICIAL_KNOWLEDGE",
+                        request_id=superseded_id,
+                        actor_user_id=reviewer_user_id,
+                    )
+                    record_audit_event(
+                        connection,
+                        subject_kind="OFFICIAL_KNOWLEDGE",
+                        request_id=superseded_id,
+                        actor_user_id=reviewer_user_id,
+                        action="WITHDRAWN",
+                        details={"supersededByRequestId": request_id},
+                    )
+                if superseded_ids:
+                    connection.executemany(
+                        "UPDATE official_knowledge_publication_requests "
+                        "SET status='withdrawn' WHERE id=?",
+                        [(superseded_id,) for superseded_id in superseded_ids],
+                    )
                 connection.execute(
                     "UPDATE knowledge_tree_versions SET status='RETIRED' "
                     "WHERE course_id=? AND tree_kind='OFFICIAL' AND status='PUBLISHED' "

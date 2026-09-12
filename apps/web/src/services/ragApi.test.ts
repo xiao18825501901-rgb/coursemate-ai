@@ -6,17 +6,26 @@ import {
   deleteCourse,
   deleteConversation,
   deleteDocument,
+  getCoursePublicationSnapshot,
+  getCurrentOverlayPublication,
+  getCurrentOverlayPublicationSnapshot,
   getIngestionJob,
   getCourse,
   getConversation,
   listConversations,
+  listOfficialKnowledgeDrafts,
+  listActiveOfficialKnowledgePublications,
+  listOverlayPublicationCandidates,
   renameConversation,
   saveTeachingProfile,
   SseDecoder,
   streamQa,
+  submitOfficialKnowledgePublication,
+  submitOverlayPublication,
   updateCourse,
   uploadDocument,
   withdrawPublicationRequest,
+  withdrawOverlayPublication,
 } from "./ragApi";
 import type { TeachingProfilePreview } from "../types/api";
 
@@ -178,6 +187,100 @@ describe("private course API", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/api/courses/my-course/publication-requests/current"),
       expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+});
+
+describe("version-bound publication API", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("loads only scoped review snapshots and submits an exact official tree version", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "snapshot-1", resources: [] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "official-request-1" })));
+    vi.stubGlobal("fetch", fetchMock);
+    const getToken = vi.fn().mockResolvedValue("admin-token");
+
+    await getCoursePublicationSnapshot(getToken, "course request/1");
+    await listOfficialKnowledgeDrafts(getToken);
+    await listActiveOfficialKnowledgePublications(getToken);
+    await submitOfficialKnowledgePublication(getToken, "tree version/1");
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method ?? "GET"]))
+      .toEqual([
+        [expect.stringContaining("/api/admin/publication-requests/course%20request%2F1/snapshot"), "GET"],
+        [expect.stringContaining("/api/admin/knowledge-publication-drafts"), "GET"],
+        [expect.stringContaining("/api/admin/knowledge-publication-releases"), "GET"],
+        [expect.stringContaining("/api/admin/knowledge-publication-requests"), "POST"],
+      ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body))).toEqual({
+      treeVersionId: "tree version/1",
+    });
+  });
+
+  it("submits only explicitly selected Overlay resources and treats no request as empty state", async () => {
+    const notFound = {
+      error: { code: "OVERLAY_PUBLICATION_NOT_FOUND", message: "No request", details: {} },
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ nodes: [], documents: [], artifacts: [], evidence: [] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify(notFound), { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "overlay-1" }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const getToken = vi.fn().mockResolvedValue("owner-token");
+
+    await listOverlayPublicationCandidates(getToken, "workspace/1");
+    expect(await getCurrentOverlayPublication(getToken, "workspace/1")).toBeNull();
+    await submitOverlayPublication(getToken, "workspace/1", {
+      nodeIds: ["node-1"],
+      documentVersionIds: ["version-1"],
+      artifactIds: [],
+      evidenceIds: ["evidence-1"],
+      shareSelectedContentConsent: true,
+      rightsConfirmation: true,
+      consentVersion: "v1",
+    });
+    await withdrawOverlayPublication(getToken, "workspace/1");
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method ?? "GET"]))
+      .toEqual([
+        [expect.stringContaining("/api/learning/workspaces/workspace%2F1/overlay-publication-candidates"), "GET"],
+        [expect.stringContaining("/api/learning/workspaces/workspace%2F1/overlay-publication-requests/current"), "GET"],
+        [expect.stringContaining("/api/learning/workspaces/workspace%2F1/overlay-publication-requests"), "POST"],
+        [expect.stringContaining("/api/learning/workspaces/workspace%2F1/overlay-publication-requests/current"), "DELETE"],
+      ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
+      nodeIds: ["node-1"],
+      documentVersionIds: ["version-1"],
+      artifactIds: [],
+      evidenceIds: ["evidence-1"],
+      shareSelectedContentConsent: true,
+      rightsConfirmation: true,
+      consentVersion: "v1",
+    });
+  });
+
+  it("loads the owner's exact current Overlay snapshot through the workspace scope", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: "snapshot-1",
+      subjectKind: "OVERLAY",
+      resources: [],
+    })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getCurrentOverlayPublicationSnapshot(
+      vi.fn().mockResolvedValue("owner-token"),
+      "workspace/1",
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "/api/learning/workspaces/workspace%2F1/overlay-publication-requests/current/snapshot",
+      ),
+      expect.any(Object),
     );
   });
 });
