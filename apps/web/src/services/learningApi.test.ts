@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { listLearningDocuments, listProblemIndex } from "./learningApi";
+import { getAssessment, listLearningDocuments, listProblemIndex } from "./learningApi";
 
 
 describe("V3 problem source API", () => {
@@ -25,5 +25,21 @@ describe("V3 problem source API", () => {
     for (const [, init] of fetchMock.mock.calls) {
       expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer owner-token");
     }
+  });
+
+  it("restores one assessment only through its authenticated workspace path", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "assessment-1" })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const getToken = vi.fn().mockResolvedValue("owner-token");
+
+    await getAssessment(getToken, "workspace-a", "assessment-1");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain(
+      "/api/learning/workspaces/workspace-a/assessments/assessment-1",
+    );
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("Authorization"))
+      .toBe("Bearer owner-token");
   });
 });

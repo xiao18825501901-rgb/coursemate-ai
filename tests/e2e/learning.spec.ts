@@ -74,6 +74,25 @@ test("V3 private image problem teaches and returns across browser contexts", asy
   await reopened.screenshot({ path: "work/v3-mobile.png", fullPage: true });
   await page.screenshot({ path: "work/v3-desktop.png", fullPage: true });
   await context.close();
+  await page.getByText("建立或更新个人学习树", { exact: true }).click();
+  await page.getByRole("button", {
+    name: "Assessment Grade NOT_ASSESSED for Assessment Addition",
+  }).click();
+  await expect(page.locator("#assessment-panel").getByText("Assessment Addition", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "开始五题测评" }).click();
+  await expect(page.getByText("总分 100 · 五题不等权", { exact: true })).toBeVisible();
+  for (let ordinal = 1; ordinal <= 5; ordinal += 1) {
+    await page.getByLabel(`回答第 ${ordinal} 题`).fill("correct");
+  }
+  await page.getByRole("button", { name: "提交测评" }).click();
+  await expect(page.getByRole("heading", { name: "Raw Score：100 / 100" })).toBeVisible();
+  await expect(page.getByText("评分映射待配置", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Raw Score：100 / 100" })).toBeVisible();
+  await page.screenshot({ path: "work/v3-assessment-desktop.png", fullPage: true });
+  await page.setViewportSize({ width: 375, height: 812 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: "work/v3-assessment-mobile.png", fullPage: true });
   expect(browserErrors).toEqual([]);
   expect(failedRequests).toEqual([]);
 });

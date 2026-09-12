@@ -12,9 +12,17 @@ export interface LearningProgress {
   historical_learned_spec_versions: number[];
 }
 export interface AssessmentState {
-  status: "NOT_ASSESSED" | "IN_PROGRESS" | "GRADED" | "UNCONFIGURED";
+  status: "NOT_ASSESSED" | "IN_PROGRESS" | "SUBMITTED" | "NEEDS_REVIEW" | "GRADED" | "PARTIALLY_ASSESSED";
   raw_score: number | null;
   grade_label: string | null;
+  numeric_value?: number | null;
+  mapping_status?: "CONFIGURED" | "UNCONFIGURED" | "COMPOSITE_RAW_ONLY";
+  independent_eligible?: boolean;
+  session_id?: string;
+  mode?: "INDEPENDENT" | "PRACTICE";
+  assistance_status?: "UNASSISTED" | "ASSISTED" | "ANSWER_EXPOSED";
+  assessed_atomic_count?: number;
+  atomic_descendant_count?: number;
 }
 export interface KnowledgeNodeState { learning: LearningProgress; assessment: AssessmentState }
 export interface LearningNode {
@@ -116,7 +124,79 @@ export interface Unit {
   plan_version?: number;
   plan_unit_key?: string;
   plan_reused?: boolean;
+  remediation_trigger_ids?: string[];
 }
+export type AssessmentStatus = "IN_PROGRESS" | "SUBMITTED" | "GRADED" | "ABANDONED" | "INVALIDATED";
+export interface AssessmentQuestionReview {
+  submitted_answer: string | null;
+  answer: Record<string, unknown>;
+  awarded_marks: number | null;
+  feedback: string | null;
+  rubric: {
+    criterion_id: string;
+    dimension: string;
+    max_fraction: number;
+    description: string;
+  }[];
+}
+export interface AssessmentQuestion {
+  id: string;
+  question_revision_id: string;
+  ordinal: number;
+  family_id: string;
+  marks: number;
+  source_kind: "OFFICIAL" | "WORKSPACE_PRIVATE" | "MODEL_GENERATED" | "EXTERNAL_INSPIRED";
+  verification_method: string;
+  question_type: "MCQ_SINGLE" | "NUMERIC" | "SHORT_TEXT" | "EXPLANATION" | "CODE";
+  difficulty: number;
+  prompt: string;
+  options: string[];
+  attempt_status: string;
+  assistance: "NONE" | "HINT" | "TEACHING" | "ANSWER_REVEALED";
+  review?: AssessmentQuestionReview;
+}
+export interface PerformanceEvidence {
+  id: string;
+  question_attempt_id: string;
+  criterion_id: string;
+  node_id: string;
+  spec_version: number;
+  item_id: string;
+  dimension: string;
+  awarded_marks: number;
+  max_marks: number;
+  confidence: number;
+  independent_eligible: boolean;
+  performance_band: "STRONG" | "DEVELOPING" | "WEAK" | "NEEDS_REVIEW";
+}
+export interface AssessmentSession {
+  id: string;
+  workspace_id: string;
+  node_id: string;
+  blueprint_id: string;
+  blueprint_version: number;
+  blueprint_hash: string;
+  spec_version: number;
+  status: AssessmentStatus;
+  mode: "INDEPENDENT" | "PRACTICE";
+  assistance_status: "UNASSISTED" | "ASSISTED" | "ANSWER_EXPOSED";
+  raw_score: number | null;
+  independent_eligible: boolean;
+  grade: {
+    mapping_status: "CONFIGURED" | "UNCONFIGURED";
+    label: string | null;
+    numeric_value: number | null;
+    message: string;
+  };
+  grade_policy: { id: string; name: string; provenance: string };
+  questions: AssessmentQuestion[];
+  performance_evidence: PerformanceEvidence[];
+  assistance_message?: string;
+  started_at: string;
+  submitted_at: string | null;
+  graded_at: string | null;
+}
+export interface AssessmentAnswerDraft { blueprint_item_id: string; answer: string }
 export interface LayoutPreference { orientation: "columns" | "rows"; swapped: boolean; ratio: number }
 export interface KnowledgeRegistryNode {
   id: string;
@@ -174,7 +254,7 @@ export interface PersonalPlanDraft {
 }
 export interface LearningState {
   id: string; course_id: string; revision: number; mode: Mode; layout: Partial<LayoutPreference>;
-  cursor: { node_id?: string; step_id?: string; solution_id?: string; unit_id?: string; bridge_id?: string; pane?: string };
+  cursor: { node_id?: string; step_id?: string; solution_id?: string; unit_id?: string; bridge_id?: string; assessment_session_id?: string; pane?: string };
   nodes: LearningNode[]; solutions: Solution[]; bridges: Bridge[]; units: Unit[];
   operations: { id: string; kind: string; status: string }[];
 }

@@ -15,15 +15,28 @@ interface KnowledgeTreesProps {
   revision: number;
   busy: boolean;
   onCreatePlan: (draft: PersonalPlanDraft) => Promise<void> | void;
+  onAssessNode: (nodeId: string) => void;
   onSelectNode: (nodeId: string) => void;
 }
 
-function AxisState({ state }: { state: KnowledgeNodeState }) {
+function AxisState({
+  nodeId,
+  onAssessNode,
+  onSelectNode,
+  state,
+  title,
+}: {
+  nodeId: string;
+  onAssessNode: (nodeId: string) => void;
+  onSelectNode: (nodeId: string) => void;
+  state: KnowledgeNodeState;
+  title: string;
+}) {
   const assessment = state.assessment.grade_label ?? state.assessment.status;
   return (
     <dl className="knowledge-axes">
-      <div><dt>Learning Progress</dt><dd>{state.learning.status}</dd></div>
-      <div><dt>Assessment Grade</dt><dd>{assessment}</dd></div>
+      <div><dt>Learning Progress</dt><dd><button aria-label={`Learning Progress ${state.learning.status} for ${title}`} onClick={() => onSelectNode(nodeId)} type="button">{state.learning.status}</button></dd></div>
+      <div><dt>Assessment Grade</dt><dd><button aria-label={`Assessment Grade ${assessment} for ${title}`} onClick={() => onAssessNode(nodeId)} type="button">{assessment}</button></dd></div>
     </dl>
   );
 }
@@ -32,11 +45,13 @@ function TreePanel({
   empty,
   heading,
   tree,
+  onAssessNode,
   onSelectNode,
 }: {
   empty: string;
   heading: string;
   tree: KnowledgeTree;
+  onAssessNode: (nodeId: string) => void;
   onSelectNode: (nodeId: string) => void;
 }) {
   const membersById = new Map(tree.members.map((member) => [member.node_id, member]));
@@ -65,7 +80,13 @@ function TreePanel({
                 <strong>{member.title}</strong>
                 <small>{member.kind === "COMPOSITE" ? "知识分组" : `Teaching Spec v${member.spec_version ?? "—"}`} · {member.source === "PRIVATE" ? "仅本人" : "官方规范节点"}</small>
               </div>
-              <AxisState state={member.state} />
+              <AxisState
+                nodeId={member.node_id}
+                onAssessNode={onAssessNode}
+                onSelectNode={onSelectNode}
+                state={member.state}
+                title={member.title}
+              />
               <button type="button" onClick={() => onSelectNode(member.node_id)}>在工作区选择 {member.title}</button>
             </li>
           ))}
@@ -80,6 +101,7 @@ export function KnowledgeTrees({
   revision,
   busy,
   onCreatePlan,
+  onAssessNode,
   onSelectNode,
 }: KnowledgeTreesProps) {
   const { getToken } = useCourseMateAuth();
@@ -145,12 +167,14 @@ export function KnowledgeTrees({
           <TreePanel
             empty="尚无已审核发布的官方树"
             heading="官方课程树"
+            onAssessNode={onAssessNode}
             onSelectNode={onSelectNode}
             tree={currentSnapshot.official_tree}
           />
           <TreePanel
             empty="尚未建立个人学习树"
             heading="我的个性化树"
+            onAssessNode={onAssessNode}
             onSelectNode={onSelectNode}
             tree={currentSnapshot.personalized_tree}
           />
@@ -172,7 +196,13 @@ export function KnowledgeTrees({
                   />
                   <span><strong>{node.title}</strong><small>{node.source === "PRIVATE" ? "仅本人" : "官方规范节点"}</small></span>
                 </label>
-                <AxisState state={node.state} />
+                <AxisState
+                  nodeId={node.id}
+                  onAssessNode={onAssessNode}
+                  onSelectNode={onSelectNode}
+                  state={node.state}
+                  title={node.title}
+                />
                 <button type="button" onClick={() => onSelectNode(node.id)}>在工作区选择 {node.title}</button>
               </div>
             ))}

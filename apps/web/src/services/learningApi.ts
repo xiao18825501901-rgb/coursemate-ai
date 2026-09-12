@@ -1,5 +1,6 @@
 import type { GetSessionToken } from "../auth/AuthProvider";
 import type {
+  AssessmentSession,
   KnowledgeSnapshot,
   LearningDocumentSource,
   LearningState,
@@ -19,6 +20,16 @@ export function getLearningState(getToken: GetSessionToken, workspace: string) {
 }
 export function getKnowledgeState(getToken: GetSessionToken, workspace: string) {
   return requestJson<KnowledgeSnapshot>(getToken, `${learningBase}/workspaces/${workspace}/knowledge`);
+}
+export function getAssessment(
+  getToken: GetSessionToken,
+  workspace: string,
+  assessmentId: string,
+) {
+  return requestJson<AssessmentSession>(
+    getToken,
+    `${learningBase}/workspaces/${workspace}/assessments/${assessmentId}`,
+  );
 }
 export function listProblemIndex(
   getToken: GetSessionToken,

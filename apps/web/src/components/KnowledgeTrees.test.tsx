@@ -86,6 +86,7 @@ describe("KnowledgeTrees", () => {
         <KnowledgeTrees
           busy={false}
           onCreatePlan={vi.fn()}
+          onAssessNode={vi.fn()}
           onSelectNode={vi.fn()}
           revision={3}
           workspace="workspace-1"
@@ -107,12 +108,14 @@ describe("KnowledgeTrees", () => {
   it("builds an ordered personal plan from explicitly selected atomic nodes", async () => {
     const onCreatePlan = vi.fn<(draft: PersonalPlanDraft) => Promise<void>>()
       .mockResolvedValue(undefined);
+    const onAssessNode = vi.fn();
     const onSelectNode = vi.fn();
     render(
       <TestAuthProvider token="token-a">
         <KnowledgeTrees
           busy={false}
           onCreatePlan={onCreatePlan}
+          onAssessNode={onAssessNode}
           onSelectNode={onSelectNode}
           revision={3}
           workspace="workspace-1"
@@ -135,6 +138,10 @@ describe("KnowledgeTrees", () => {
     }));
     fireEvent.click(screen.getByRole("button", { name: "在工作区选择 Rasterization" }));
     expect(onSelectNode).toHaveBeenCalledWith("canonical-node");
+    fireEvent.click(screen.getByRole("button", {
+      name: "Assessment Grade NOT_ASSESSED for Rasterization",
+    }));
+    expect(onAssessNode).toHaveBeenCalledWith("canonical-node");
   });
 
   it("does not retain private registry content while switching workspaces", async () => {
@@ -146,6 +153,7 @@ describe("KnowledgeTrees", () => {
     const props = {
       busy: false,
       onCreatePlan: vi.fn(),
+      onAssessNode: vi.fn(),
       onSelectNode: vi.fn(),
       revision: 3,
     };

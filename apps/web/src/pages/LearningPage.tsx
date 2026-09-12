@@ -1,9 +1,11 @@
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useCourseMateAuth } from "../auth/AuthProvider";
+import { AssessmentPanel } from "../components/AssessmentPanel";
 import { KnowledgeTrees } from "../components/KnowledgeTrees";
 import { LearningFiles } from "../components/LearningFiles";
 import {
+  getAssessment,
   getLearningState,
   joinLearning,
   learningAction,
@@ -11,6 +13,8 @@ import {
   listProblemIndex,
 } from "../services/learningApi";
 import type {
+  AssessmentAnswerDraft,
+  AssessmentSession,
   LearningDocumentSource,
   LearningState,
   LayoutPreference,
@@ -25,6 +29,7 @@ export function LearningPage() {
   const { courseId = "" } = useParams();
   const { getToken } = useCourseMateAuth();
   const [state, setState] = useState<LearningState | null>(null);
+  const [assessment, setAssessment] = useState<AssessmentSession | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
@@ -43,7 +48,7 @@ export function LearningPage() {
   const [layout, setLayout] = useState<LayoutPreference>({ orientation: "columns", swapped: false, ratio: 50 });
   const [mode, setMode] = useState<Mode>("AUTO");
   useEffect(() => {
-    let active = true; setState(null); setError(""); setNodeId(""); setQuestion("");
+    let active = true; setState(null); setAssessment(null); setError(""); setNodeId(""); setQuestion("");
     void joinLearning(getToken, courseId).then(w => getLearningState(getToken, w.id)).then(s => {
       if (!active) return;
       setState(s); setNodeId(s.cursor.node_id ?? s.nodes[0]?.id ?? "");
@@ -69,6 +74,21 @@ export function LearningPage() {
     return () => { active = false; };
   }, [state?.id, getToken]);
   useEffect(() => {
+    const selected = state?.nodes.find(candidate => candidate.id === nodeId);
+    const assessmentId = selected?.assessment.session_id;
+    if (!state || !assessmentId) {
+      setAssessment(null);
+      return;
+    }
+    let active = true;
+    void getAssessment(getToken, state.id, assessmentId)
+      .then(result => { if (active) setAssessment(result); })
+      .catch(cause => {
+        if (active) setError(cause instanceof Error ? cause.message : "测评状态无法恢复");
+      });
+    return () => { active = false; };
+  }, [getToken, nodeId, state]);
+  useEffect(() => {
     if (state?.cursor.pane === "PROBLEM" && state.cursor.step_id) {
       document.getElementById(`step-${state.cursor.step_id}`)?.focus({ preventScroll: false });
     }
@@ -87,6 +107,23 @@ export function LearningPage() {
       if (path === "bridges") setNodeId(next?.cursor.node_id ?? nodeId);
     } catch (e) {
       setError(e instanceof Error ? e.message : "操作未完成；请读取已保存状态，不要重复生成。");
+      await refresh().catch(() => undefined);
+    } finally { lock.current = false; setBusy(false); }
+  }
+  async function assessmentAction(path: string, payload: object = {}) {
+    if (!state || lock.current) return;
+    lock.current = true; setBusy(true); setError("");
+    try {
+      const result = await learningAction<AssessmentSession>(
+        getToken,
+        state.id,
+        path,
+        { operation_id: crypto.randomUUID(), revision: state.revision, ...payload },
+      );
+      setAssessment(result);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "测评操作未完成；请读取已保存状态。");
       await refresh().catch(() => undefined);
     } finally { lock.current = false; setBusy(false); }
   }
@@ -146,6 +183,14 @@ export function LearningPage() {
     { item_id: "principle", requirement: "REQUIRED", objective: `解释 ${title} 的原理并应用到当前题`,
       acceptance: "保存完整原理解释、具体例子与当前题 Step 应用；仅标题不能计覆盖", evidence_ids: [] },
   ] });
+  const selectLearningNode = (selectedNodeId: string) => {
+    setNodeId(selectedNodeId);
+    document.querySelector<HTMLElement>(".teaching-pane")?.scrollIntoView?.({ block: "start" });
+  };
+  const selectAssessmentNode = (selectedNodeId: string) => {
+    setNodeId(selectedNodeId);
+    document.getElementById("assessment-panel")?.scrollIntoView?.({ block: "start" });
+  };
   return <div className="page learning-page">
     <header className="page-intro"><span className="eyebrow">CourseMate V3 · 内测</span><h1>协同学习工作区</h1>
       <p>教学与题目共享学习进度。完成必需教学即可 LEARNED；成绩独立记录。</p>
@@ -166,9 +211,31 @@ export function LearningPage() {
       <KnowledgeTrees
         busy={busy}
         onCreatePlan={(draft: PersonalPlanDraft) => action("plans", draft)}
-        onSelectNode={setNodeId}
+        onAssessNode={selectAssessmentNode}
+        onSelectNode={selectLearningNode}
         revision={state.revision}
         workspace={state.id}
+      />
+      <AssessmentPanel
+        assessment={assessment?.node_id === nodeId ? assessment : null}
+        busy={busy}
+        nodeKind={node?.kind}
+        nodeTitle={node?.title ?? ""}
+        onAbandon={() => assessment
+          ? assessmentAction(`assessments/${assessment.id}/abandon`)
+          : undefined}
+        onAssist={(blueprintItemId, assistAction) => assessment
+          ? assessmentAction(`assessments/${assessment.id}/assist`, {
+              blueprint_item_id: blueprintItemId,
+              action: assistAction,
+            })
+          : undefined}
+        onStart={() => nodeId
+          ? assessmentAction("assessments", { node_id: nodeId })
+          : undefined}
+        onSubmit={(answers: AssessmentAnswerDraft[]) => assessment
+          ? assessmentAction(`assessments/${assessment.id}/submit`, { answers })
+          : undefined}
       />
       <details><summary>建立私人知识教学范围（不发布官方树）</summary>
         <p>当前内测支持手动建立一个原子教学范围；这不是已审核的官方 Teaching Spec。</p>

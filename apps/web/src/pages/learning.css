@@ -44,6 +44,23 @@
 .knowledge-axes div { min-width: 0; padding: .45rem; border: 1px solid var(--line); }
 .knowledge-axes dt { color: var(--ink-soft); font-size: .75rem; }
 .knowledge-axes dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
+.knowledge-axes button { width: 100%; margin: 0; text-align: left; font-weight: 700; }
+.assessment-panel { margin: 1rem 0; padding: 1rem; border: 1px solid var(--line); background: var(--surface); scroll-margin-top: 1rem; }
+.assessment-panel > header, .assessment-question-list li > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.assessment-panel h2 { margin: 0; }
+.assessment-node { max-width: 28rem; padding: .25rem .5rem; border: 1px solid var(--line); border-radius: 999px; overflow-wrap: anywhere; }
+.assessment-summary { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; margin-block: .75rem; padding: .75rem; background: var(--surface-soft); }
+.assessment-warning { padding: .75rem; border-left: .25rem solid var(--warning, #a66b00); background: var(--surface-soft); }
+.assessment-question-list { display: grid; gap: 1rem; padding: 0; list-style: none; }
+.assessment-question-list > li { min-width: 0; padding: 1rem; border: 1px solid var(--line); }
+.assessment-question-list small { color: var(--ink-soft); }
+.assessment-options { display: grid; gap: .35rem; border: 0; padding: 0; }
+.assessment-options label { display: flex; align-items: center; gap: .5rem; }
+.assessment-options input { min-width: auto; }
+.assessment-review { margin-block: .75rem; padding: .75rem; background: var(--surface-soft); }
+.assessment-review pre { max-width: 100%; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.assessment-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.assessment-result { margin-top: 1rem; padding: 1rem; border: 1px solid var(--line); background: var(--surface-soft); }
 .personal-plan-builder { margin-top: 1rem; }
 .personal-plan-builder fieldset { display: grid; gap: .65rem; min-width: 0; border: 0; padding: 0; }
 .knowledge-plan-option { display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(16rem, 1fr) auto; align-items: center; gap: .75rem; padding: .65rem; border: 1px solid var(--line); }
@@ -63,5 +80,5 @@
 .notebook-preview article { margin-top: .75rem; padding: .75rem; border: 1px solid var(--line); }
 .notebook-output { background: var(--surface-soft); }
 .learning-page summary { cursor: pointer; padding: .5rem; }
-@media (max-width: 767px) { .learning-panes.columns { flex-direction: column; } .learning-pane { padding: .75rem; } .learning-toolbar { align-items: stretch; } .learning-file-list li { align-items: flex-start; flex-direction: column; } .knowledge-map-heading, .knowledge-tree-card > header { flex-direction: column; } .knowledge-tree-grid, .knowledge-axes { grid-template-columns: 1fr; } .knowledge-plan-option { grid-template-columns: 1fr; } .knowledge-tree-list li { margin-inline-start: min(calc(var(--tree-depth) * .5rem), 2rem); } }
+@media (max-width: 767px) { .learning-panes.columns { flex-direction: column; } .learning-pane { padding: .75rem; } .learning-toolbar { align-items: stretch; } .learning-file-list li { align-items: flex-start; flex-direction: column; } .knowledge-map-heading, .knowledge-tree-card > header, .assessment-panel > header, .assessment-question-list li > header { flex-direction: column; } .knowledge-tree-grid, .knowledge-axes { grid-template-columns: 1fr; } .knowledge-plan-option { grid-template-columns: 1fr; } .knowledge-tree-list li { margin-inline-start: min(calc(var(--tree-depth) * .5rem), 2rem); } }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
