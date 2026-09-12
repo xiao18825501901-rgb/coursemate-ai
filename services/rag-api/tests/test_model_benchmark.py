@@ -26,7 +26,10 @@ from app.evaluation.model_benchmark import (
     run_benchmark,
     summarize_results,
 )
-from app.evaluation.provider_safety import validate_provider_base_url
+from app.evaluation.provider_safety import (
+    validate_model_studio_base_url,
+    validate_provider_base_url,
+)
 
 DATASET = Path(__file__).parents[3] / "benchmarks" / "tutor-model-cases.json"
 RUNNER = Path(__file__).parents[3] / "scripts" / "run_model_benchmark.py"
@@ -409,6 +412,23 @@ def test_provider_base_url_allows_https_and_explicit_loopback_development() -> N
 
 
 @pytest.mark.parametrize(
+    "url",
+    [
+        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "https://workspace.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+    ],
+)
+def test_v3_model_studio_base_url_requires_an_exact_allowlisted_endpoint(url: str) -> None:
+    assert validate_model_studio_base_url(url) == url
+
+    with pytest.raises(ValueError, match="outside the V3 allowlist"):
+        validate_model_studio_base_url("https://provider.example/compatible-mode/v1")
+    with pytest.raises(ValueError, match="outside the V3 allowlist"):
+        validate_model_studio_base_url(url.replace("/compatible-mode/v1", "/api/v1"))
+
+
+@pytest.mark.parametrize(
     ("input_tokens", "output_tokens", "input_price", "output_price"),
     [
         ([-1], 100, 1.0, 1.0),
@@ -463,6 +483,127 @@ def test_runner_refuses_over_budget_before_constructing_provider_client(
     assert process.returncode == 2
     assert "exceeds approved maximum" in process.stdout
     assert "not-a-real-key" not in process.stdout + process.stderr
+    assert not (tmp_path / "must-not-exist.json").exists()
+
+
+def test_runner_rejects_unknown_exact_case_before_constructing_provider_client(
+    tmp_path: Path,
+) -> None:
+    process = subprocess.run(
+        [
+            sys.executable,
+            str(RUNNER),
+            "--provider",
+            "test-provider",
+            "--model",
+            "test-model",
+            "--api-key-env",
+            "BENCHMARK_TEST_KEY",
+            "--output",
+            str(tmp_path / "must-not-exist.json"),
+            "--case-id",
+            "not-a-real-case",
+            "--input-price-per-million",
+            "1",
+            "--output-price-per-million",
+            "1",
+            "--max-cost",
+            "1",
+            "--currency",
+            "USD",
+            "--allow-billable",
+        ],
+        check=False,
+        capture_output=True,
+        env={**os.environ, "BENCHMARK_TEST_KEY": "not-a-real-key"},
+        text=True,
+    )
+
+    assert process.returncode == 2
+    assert "Unknown --case-id" in process.stdout
+    assert "not-a-real-key" not in process.stdout + process.stderr
+    assert not (tmp_path / "must-not-exist.json").exists()
+
+
+def test_qwen38_runner_requires_the_exact_model_studio_endpoint_before_client(
+    tmp_path: Path,
+) -> None:
+    process = subprocess.run(
+        [
+            sys.executable,
+            str(RUNNER),
+            "--provider",
+            "alibaba-model-studio",
+            "--model",
+            "qwen3.8-max",
+            "--base-url",
+            "https://provider.example/compatible-mode/v1",
+            "--api-key-env",
+            "BENCHMARK_TEST_KEY",
+            "--output",
+            str(tmp_path / "must-not-exist.json"),
+            "--case-id",
+            "zh-01",
+            "--input-price-per-million",
+            "1",
+            "--output-price-per-million",
+            "1",
+            "--max-cost",
+            "1",
+            "--currency",
+            "USD",
+            "--allow-billable",
+        ],
+        check=False,
+        capture_output=True,
+        env={**os.environ, "BENCHMARK_TEST_KEY": "not-a-real-key"},
+        text=True,
+    )
+
+    assert process.returncode == 2
+    assert "outside the V3 allowlist" in process.stdout
+    assert "not-a-real-key" not in process.stdout + process.stderr
+    assert not (tmp_path / "must-not-exist.json").exists()
+
+
+def test_runner_preflight_is_non_billable_and_does_not_require_a_key(
+    tmp_path: Path,
+) -> None:
+    process = subprocess.run(
+        [
+            sys.executable,
+            str(RUNNER),
+            "--provider",
+            "alibaba-model-studio",
+            "--model",
+            "qwen3.8-max",
+            "--base-url",
+            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            "--api-key-env",
+            "BENCHMARK_TEST_KEY",
+            "--output",
+            str(tmp_path / "must-not-exist.json"),
+            "--case-id",
+            "zh-01",
+            "--input-price-per-million",
+            "1",
+            "--output-price-per-million",
+            "1",
+            "--max-cost",
+            "1",
+            "--currency",
+            "USD",
+            "--preflight-only",
+        ],
+        check=False,
+        capture_output=True,
+        env={key: value for key, value in os.environ.items() if key != "BENCHMARK_TEST_KEY"},
+        text=True,
+    )
+
+    assert process.returncode == 0, process.stdout + process.stderr
+    assert "at most 1 provider calls" in process.stdout
+    assert "preflight" in process.stdout.casefold()
     assert not (tmp_path / "must-not-exist.json").exists()
 
 

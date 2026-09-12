@@ -684,8 +684,61 @@ class LearningOrchestrator:
             (encode({**previous, **values}), workspace_id),
         )
 
-    def record_run(self, workspace_id: str, operation: str, run: dict[str, Any]) -> None:
+    def reserve_model_call(self, workspace_id: str, operation: str, role: str) -> str:
+        reservation_id = identifier()
         with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            workspace = db.execute(
+                "SELECT owner_user_id,course_id FROM learning_workspaces WHERE id=?",
+                (workspace_id,),
+            ).fetchone()
+            if workspace is None:
+                raise ApiError(404, "WORKSPACE_NOT_FOUND", "The workspace was not found.")
+            user_calls = db.execute(
+                "SELECT COUNT(*) FROM learning_model_call_reservations "
+                "WHERE owner_user_id=? AND created_at>=date('now') AND status!='BLOCKED'",
+                (workspace["owner_user_id"],),
+            ).fetchone()[0]
+            course_calls = db.execute(
+                "SELECT COUNT(*) FROM learning_model_call_reservations "
+                "WHERE owner_user_id=? AND course_id=? AND created_at>=date('now') "
+                "AND status!='BLOCKED'",
+                (workspace["owner_user_id"], workspace["course_id"]),
+            ).fetchone()[0]
+            if (
+                user_calls >= self.settings.v3_daily_model_calls_per_user
+                or course_calls >= self.settings.v3_daily_model_calls_per_user_course
+            ):
+                raise ApiError(
+                    429,
+                    "DAILY_MODEL_CALL_QUOTA",
+                    "The daily model-call budget has been reached; no provider call was made.",
+                )
+            db.execute(
+                "INSERT INTO learning_model_call_reservations("
+                "id,workspace_id,operation_id,owner_user_id,course_id,role,"
+                "reserved_output_tokens,status) VALUES(?,?,?,?,?,?,?,'RESERVED')",
+                (
+                    reservation_id,
+                    workspace_id,
+                    operation,
+                    workspace["owner_user_id"],
+                    workspace["course_id"],
+                    role,
+                    self.settings.v3_max_output_tokens,
+                ),
+            )
+        return reservation_id
+
+    def record_run(
+        self,
+        workspace_id: str,
+        operation: str,
+        run: dict[str, Any],
+        reservation_id: str,
+    ) -> None:
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             db.execute(
                 "INSERT INTO learning_model_run_evidence("
                 "id,workspace_id,operation_id,role,model_id,provider_label,protocol,"
@@ -714,6 +767,28 @@ class LearningOrchestrator:
                     run.get("provider_response_id"),
                 ),
             )
+            if (
+                db.execute(
+                    "UPDATE learning_model_call_reservations SET status=?,input_tokens=?,"
+                    "output_tokens=?,finished_at=? WHERE id=? AND workspace_id=? "
+                    "AND operation_id=? AND status='RESERVED'",
+                    (
+                        run.get("status", "UNKNOWN"),
+                        run.get("input_tokens", 0),
+                        run.get("output_tokens", 0),
+                        run.get("finished_at", "1970-01-01T00:00:00Z"),
+                        reservation_id,
+                        workspace_id,
+                        operation,
+                    ),
+                ).rowcount
+                != 1
+            ):
+                raise ApiError(
+                    409,
+                    "MODEL_CALL_RESERVATION_CONFLICT",
+                    "The model-call reservation could not be finalized safely.",
+                )
 
     def generate(
         self,
@@ -728,6 +803,7 @@ class LearningOrchestrator:
         schema_version: str,
         images: list[ProviderImage] | None = None,
     ) -> tuple[Output, dict[str, Any]]:
+        reservation_id = self.reserve_model_call(workspace_id, operation, role)
         try:
             output, run = self.provider.generate(
                 schema,
@@ -739,9 +815,9 @@ class LearningOrchestrator:
                 images=images,
             )
         except ProviderCallFailure as error:
-            self.record_run(workspace_id, operation, error.run)
+            self.record_run(workspace_id, operation, error.run, reservation_id)
             raise error.cause from error
-        self.record_run(workspace_id, operation, run)
+        self.record_run(workspace_id, operation, run, reservation_id)
         return output, run
 
     @staticmethod

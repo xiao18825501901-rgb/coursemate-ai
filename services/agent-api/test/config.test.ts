@@ -29,6 +29,24 @@ describe("Agent security configuration", () => {
       PORT: "10000",
     });
     expect(config.port).toBe(10_000);
+    expect(config.agentChatRequestsPerDay).toBe(30);
+  });
+
+  it("validates the explicit daily Agent chat budget", () => {
+    const environment = {
+      CLERK_PUBLISHABLE_KEY: "pk_test_example",
+      CLERK_SECRET_KEY: "sk_test_example",
+      AGENT_CHAT_REQUESTS_PER_DAY: "12",
+    };
+    expect(loadConfig(environment).agentChatRequestsPerDay).toBe(12);
+    expect(() => loadConfig({
+      ...environment,
+      AGENT_CHAT_REQUESTS_PER_DAY: "0",
+    })).toThrow(/between 1 and 1000/);
+    expect(() => loadConfig({
+      ...environment,
+      AGENT_CHAT_REQUESTS_PER_DAY: "12requests",
+    })).toThrow(/between 1 and 1000/);
   });
 
   it("binds to loopback by default", () => {
@@ -82,5 +100,40 @@ describe("Agent security configuration", () => {
     expect(config.openaiApiKey).toBe("agent-key");
     expect(config.openaiBaseUrl).toBe("https://agent.example/v1");
     expect(config.openaiChatModel).toBe("agent-model");
+  });
+
+  it("accepts qwen3.8-max only with explicit Agent credentials and an allowlisted endpoint", () => {
+    const config = loadConfig({
+      CLERK_PUBLISHABLE_KEY: "pk_test_example",
+      CLERK_SECRET_KEY: "sk_test_example",
+      AGENT_MODEL_API_KEY: "agent-key",
+      AGENT_MODEL_BASE_URL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      AGENT_MODEL_NAME: "qwen3.8-max",
+    });
+
+    expect(config.openaiChatModel).toBe("qwen3.8-max");
+    expect(config.openaiBaseUrl).toBe(
+      "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    );
+  });
+
+  it.each([
+    {},
+    { AGENT_MODEL_API_KEY: "agent-key" },
+    {
+      AGENT_MODEL_API_KEY: "agent-key",
+      AGENT_MODEL_BASE_URL: "https://provider.example/compatible-mode/v1",
+    },
+    {
+      AGENT_MODEL_API_KEY: "agent-key",
+      AGENT_MODEL_BASE_URL: "http://dashscope.aliyuncs.com/compatible-mode/v1",
+    },
+  ])("fails closed for incomplete or unsafe qwen3.8-max configuration", (modelConfig) => {
+    expect(() => loadConfig({
+      CLERK_PUBLISHABLE_KEY: "pk_test_example",
+      CLERK_SECRET_KEY: "sk_test_example",
+      AGENT_MODEL_NAME: "qwen3.8-max",
+      ...modelConfig,
+    })).toThrow(/qwen3\.8-max requires explicit/);
   });
 });

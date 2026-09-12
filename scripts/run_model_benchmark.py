@@ -39,7 +39,10 @@ from app.evaluation.model_benchmark import (  # noqa: E402
     run_benchmark,
     summarize_results,
 )
-from app.evaluation.provider_safety import validate_provider_base_url  # noqa: E402
+from app.evaluation.provider_safety import (  # noqa: E402
+    validate_model_studio_base_url,
+    validate_provider_base_url,
+)
 
 MAX_OUTPUT_TOKENS = 1_200
 PROTOCOL_OVERHEAD_TOKENS = 512
@@ -68,11 +71,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--category")
+    parser.add_argument("--case-id", action="append")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--input-price-per-million", type=float, required=True)
     parser.add_argument("--output-price-per-million", type=float, required=True)
     parser.add_argument("--max-cost", type=float, required=True)
     parser.add_argument("--currency", required=True)
+    parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--allow-billable", action="store_true")
     parser.add_argument("--allow-insecure-loopback", action="store_true")
     return parser.parse_args()
@@ -80,17 +85,20 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    if not args.allow_billable:
+    if not args.preflight_only and not args.allow_billable:
         print("Refusing provider calls: pass --allow-billable after approving model charges.")
-        return 2
-    api_key = os.environ.get(args.api_key_env)
-    if not api_key:
-        print(f"Missing credential environment variable: {args.api_key_env}")
         return 2
 
     cases = load_benchmark_cases(args.dataset)
     if args.category:
         cases = [case for case in cases if case.category == args.category]
+    if args.case_id:
+        requested = set(args.case_id)
+        known = {case.id for case in cases}
+        if not requested <= known:
+            print("Unknown --case-id for the selected benchmark dataset/category.")
+            return 2
+        cases = [case for case in cases if case.id in requested]
     if args.limit is not None:
         if args.limit <= 0:
             print("--limit must be positive.")
@@ -110,9 +118,13 @@ def main() -> int:
         print("--currency must be a three-letter uppercase ISO 4217 code.")
         return 2
     try:
-        base_url = validate_provider_base_url(
-            args.base_url,
-            allow_insecure_loopback=args.allow_insecure_loopback,
+        base_url = (
+            validate_model_studio_base_url(args.base_url)
+            if args.model == "qwen3.8-max"
+            else validate_provider_base_url(
+                args.base_url,
+                allow_insecure_loopback=args.allow_insecure_loopback,
+            )
         )
     except ValueError as error:
         print(str(error))
@@ -153,6 +165,19 @@ def main() -> int:
             f"Refusing provider calls: conservative {args.currency} cost ceiling "
             f"{cost_ceiling:.8f} exceeds approved maximum {args.max_cost:.8f}."
         )
+        return 2
+
+    provider_call_count = len(input_token_ceilings)
+    print(
+        f"Benchmark preflight: at most {provider_call_count} provider calls, "
+        f"conservative {args.currency} ceiling {cost_ceiling:.8f}, model {args.model}."
+    )
+    if args.preflight_only:
+        return 0
+
+    api_key = os.environ.get(args.api_key_env)
+    if not api_key:
+        print(f"Missing credential environment variable: {args.api_key_env}")
         return 2
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -227,6 +252,9 @@ def main() -> int:
             output_price_per_million=args.output_price_per_million,
         )
         summary["currency"] = args.currency
+        summary["input_price_per_million"] = args.input_price_per_million
+        summary["output_price_per_million"] = args.output_price_per_million
+        summary["price_basis"] = "OWNER_SUPPLIED_AT_RUN_TIME"
         summary["approved_max_cost"] = args.max_cost
         summary["preflight_cost_ceiling"] = cost_ceiling
         summary["selected_case_count"] = len(cases)

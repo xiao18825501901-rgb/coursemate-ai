@@ -14,11 +14,38 @@ export interface AgentConfig {
   clerkSecretKey: string;
   clerkJwtKey: string | undefined;
   agentChatRequestsPerMinute: number;
+  agentChatRequestsPerDay: number;
   authTestUserId: string | undefined;
 }
 
+const V3_PRIMARY_MODEL = "qwen3.8-max";
+
+function isAllowedModelStudioEndpoint(value: string): boolean {
+  if (/[\u0000-\u001f\u007f]/.test(value)) return false;
+  try {
+    const endpoint = new URL(value);
+    const path = endpoint.pathname.replace(/\/+$/, "");
+    const allowedHost =
+      endpoint.hostname === "dashscope.aliyuncs.com" ||
+      endpoint.hostname === "dashscope-intl.aliyuncs.com" ||
+      endpoint.hostname.endsWith(".maas.aliyuncs.com");
+    return (
+      endpoint.protocol === "https:" &&
+      allowedHost &&
+      path === "/compatible-mode/v1" &&
+      endpoint.username === "" &&
+      endpoint.password === "" &&
+      endpoint.search === "" &&
+      endpoint.hash === "" &&
+      (endpoint.port === "" || endpoint.port === "443")
+    );
+  } catch {
+    return false;
+  }
+}
+
 function boundedInteger(value: string | undefined, fallback: number, min: number, max: number): number {
-  const parsed = value === undefined ? fallback : Number.parseInt(value, 10);
+  const parsed = value === undefined ? fallback : Number(value);
   if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
     throw new Error(`Expected an integer between ${min} and ${max}.`);
   }
@@ -43,17 +70,34 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AgentC
   if (authTestUserId === undefined && (!clerkPublishableKey || !clerkSecretKey)) {
     throw new Error("CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY are required.");
   }
+  const openaiApiKey = environment.AGENT_MODEL_API_KEY ?? environment.OPENAI_API_KEY ?? "";
+  const openaiBaseUrl =
+    environment.AGENT_MODEL_BASE_URL || environment.OPENAI_BASE_URL || undefined;
+  const openaiChatModel =
+    environment.AGENT_MODEL_NAME ?? environment.OPENAI_CHAT_MODEL ?? "gpt-5.6-luna";
+  if (
+    providerMode === "openai" &&
+    openaiChatModel === V3_PRIMARY_MODEL &&
+    (
+      !environment.AGENT_MODEL_API_KEY?.trim() ||
+      !environment.AGENT_MODEL_BASE_URL ||
+      !isAllowedModelStudioEndpoint(environment.AGENT_MODEL_BASE_URL)
+    )
+  ) {
+    throw new Error(
+      "qwen3.8-max requires explicit AGENT_MODEL_API_KEY and an allowlisted " +
+      "AGENT_MODEL_BASE_URL.",
+    );
+  }
   return {
     databasePath:
       configuredPath === ":memory:" ? configuredPath : path.resolve(process.cwd(), configuredPath),
     host: environment.AGENT_HOST?.trim() || "127.0.0.1",
     port: boundedInteger(environment.AGENT_PORT ?? environment.PORT, 8001, 1, 65_535),
     webOrigin: environment.WEB_ORIGIN ?? "http://localhost:5173",
-    openaiApiKey: environment.AGENT_MODEL_API_KEY ?? environment.OPENAI_API_KEY ?? "",
-    openaiBaseUrl:
-      environment.AGENT_MODEL_BASE_URL || environment.OPENAI_BASE_URL || undefined,
-    openaiChatModel:
-      environment.AGENT_MODEL_NAME ?? environment.OPENAI_CHAT_MODEL ?? "gpt-5.6-luna",
+    openaiApiKey,
+    openaiBaseUrl,
+    openaiChatModel,
     maxToolRounds: boundedInteger(environment.AGENT_MAX_TOOL_ROUNDS, 4, 1, 10),
     providerMode,
     clerkPublishableKey,
@@ -62,6 +106,12 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AgentC
     agentChatRequestsPerMinute: boundedInteger(
       environment.AGENT_CHAT_REQUESTS_PER_MINUTE,
       10,
+      1,
+      1_000,
+    ),
+    agentChatRequestsPerDay: boundedInteger(
+      environment.AGENT_CHAT_REQUESTS_PER_DAY,
+      30,
       1,
       1_000,
     ),

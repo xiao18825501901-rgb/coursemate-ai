@@ -32,7 +32,9 @@ def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
     if schema == "ProblemSolutionOutput":
         # Not an answerer: only a labelled, fixed synthetic integration-test question is supported.
         candidate = context.get("transcription_hint") or context["question"]
-        if "2+3" not in candidate.replace(" ", "").lower():
+        if context.get("input_kind") != "IMAGE" and "2+3" not in candidate.replace(
+            " ", ""
+        ).lower():
             raise ValueError("Fake provider supports only the synthetic 2+3 fixture")
         is_image = context.get("input_kind") == "IMAGE"
         node = context["nodes"][0]

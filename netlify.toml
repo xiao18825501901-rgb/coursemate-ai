@@ -5,8 +5,9 @@
 [build.environment]
   NODE_VERSION = "24.14.0"
 
-# Configure VITE_CLERK_PUBLISHABLE_KEY, VITE_RAG_API_URL, and
-# VITE_AGENT_API_URL in the Netlify UI. Never place Clerk secret keys here.
+# Configure VITE_CLERK_PUBLISHABLE_KEY, VITE_RAG_API_URL, VITE_AGENT_API_URL,
+# and VITE_V3_ENABLED in the Netlify UI. Keep V3 false until the gated canary.
+# Never place Clerk secret keys here.
 
 [[redirects]]
   from = "/*"

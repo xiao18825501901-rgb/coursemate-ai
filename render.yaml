@@ -42,6 +42,22 @@ services:
         sync: false
       - key: RAG_QA_REQUESTS_PER_MINUTE
         value: 10
+      - key: V3_ENABLED
+        value: "false"
+      - key: V3_MODEL
+        value: qwen3.8-max
+      - key: V3_MODEL_API_KEY
+        sync: false
+      - key: V3_MODEL_BASE_URL
+        sync: false
+      - key: V3_MAX_OUTPUT_TOKENS
+        value: 4000
+      - key: V3_DAILY_OPERATIONS
+        value: 30
+      - key: V3_DAILY_MODEL_CALLS_PER_USER
+        value: 60
+      - key: V3_DAILY_MODEL_CALLS_PER_USER_COURSE
+        value: 60
       - key: USER_COURSE_MAX_COURSES
         value: 10
       - key: USER_COURSE_MAX_FILES
@@ -72,9 +88,9 @@ services:
       - key: AGENT_MODEL_API_KEY
         sync: false
       - key: AGENT_MODEL_BASE_URL
-        value: https://ws-fcszqpvmuz5bcq72.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+        sync: false
       - key: AGENT_MODEL_NAME
-        value: qwen3.7-plus
+        value: qwen3.8-max
       - key: WEB_ORIGIN
         sync: false
       - key: CLERK_PUBLISHABLE_KEY
@@ -85,3 +101,5 @@ services:
         sync: false
       - key: AGENT_CHAT_REQUESTS_PER_MINUTE
         value: 10
+      - key: AGENT_CHAT_REQUESTS_PER_DAY
+        value: 30

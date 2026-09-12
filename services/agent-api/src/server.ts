@@ -49,6 +49,7 @@ const application = createApp({
     : createTestAuthStrategy(config.authTestUserId),
   modelRateLimiter: new SqliteModelRateLimiter(database.connection, {
     limitPerMinute: config.agentChatRequestsPerMinute,
+    limitPerDay: config.agentChatRequestsPerDay,
   }),
   readinessCheck: () => database.isReady(),
 });

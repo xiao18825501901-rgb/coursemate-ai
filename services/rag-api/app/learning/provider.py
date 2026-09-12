@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from app.config import Settings
 from app.errors import ApiError
+from app.evaluation.provider_safety import validate_model_studio_base_url
 
 Output = TypeVar("Output", bound=BaseModel)
 
@@ -137,32 +138,20 @@ class LearningProvider:
                         "MODEL_LIVE_BLOCKED",
                         "Configure the explicit V3 Model Studio endpoint and key.",
                     )
-                url = urlsplit(settings.v3_model_base_url)
-                host = url.hostname or ""
-                if (
-                    url.scheme != "https"
-                    or url.username
-                    or url.password
-                    or url.query
-                    or url.fragment
-                    or url.port not in (None, 443)
-                    or url.path.rstrip("/") != "/compatible-mode/v1"
-                    or not (
-                        host.endswith(".maas.aliyuncs.com")
-                        or host in ("dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com")
-                    )
-                ):
+                try:
+                    base_url = validate_model_studio_base_url(settings.v3_model_base_url)
+                except ValueError:
                     raise ApiError(
                         503,
                         "MODEL_ENDPOINT_INVALID",
                         "Use an explicit Model Studio compatible-mode endpoint.",
-                    )
+                    ) from None
                 if len(serialized) > 60000:
                     raise ApiError(422, "CONTEXT_BUDGET", "The bounded unit context is too large.")
                 if self.client is None:
                     self.client = OpenAI(
                         api_key=settings.v3_model_api_key.get_secret_value(),
-                        base_url=settings.v3_model_base_url,
+                        base_url=base_url,
                         max_retries=0,
                         timeout=90,
                     )

@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     v3_model_base_url: str | None = None
     v3_max_output_tokens: int = Field(default=4000, ge=500, le=8000)
     v3_daily_operations: int = Field(default=30, ge=1, le=500)
+    v3_daily_model_calls_per_user: int = Field(default=60, ge=1, le=1_000)
+    v3_daily_model_calls_per_user_course: int = Field(default=60, ge=1, le=1_000)
     v3_problem_image_max_bytes: int = Field(
         default=10 * 1024 * 1024, ge=1_024, le=20 * 1024 * 1024
     )

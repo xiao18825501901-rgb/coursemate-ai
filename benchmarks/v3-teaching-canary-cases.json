@@ -1,0 +1,162 @@
+[
+  {
+    "id": "cs-case-a",
+    "case_type": "CASE_A",
+    "major": "CS",
+    "language": "zh-CN",
+    "preference": "",
+    "node_id": "canary_cs_a",
+    "node_title": "梯度下降的一次更新",
+    "node_description": "理解标量二次损失上的梯度、学习率与一次参数更新。",
+    "item": {
+      "item_id": "gradient_update",
+      "requirement": "REQUIRED",
+      "objective": "解释并计算一次梯度下降更新",
+      "acceptance": "用小输入写出梯度、学习率和更新后的参数，并检查方向",
+      "evidence_ids": ["evidence_cs_a"]
+    },
+    "evidence_id": "evidence_cs_a",
+    "evidence_text": "Synthetic benchmark evidence: for L(w)=(w-3)^2, dL/dw=2(w-3), and one update is w_next=w-eta*dL/dw.",
+    "expected_signals": ["梯度", "学习率", "更新"]
+  },
+  {
+    "id": "cs-case-b",
+    "case_type": "CASE_B",
+    "major": "CS",
+    "language": "en",
+    "preference": "Use a tiny state table before pseudocode, then give one boundary check.",
+    "node_id": "canary_cs_b",
+    "node_title": "Breadth-first search state transitions",
+    "node_description": "Trace queue and visited-state changes for a small graph.",
+    "item": {
+      "item_id": "bfs_trace",
+      "requirement": "REQUIRED",
+      "objective": "Trace breadth-first search without replacing the mechanism with a library call",
+      "acceptance": "Show queue and visited states, termination, and one boundary case",
+      "evidence_ids": ["evidence_cs_b"]
+    },
+    "evidence_id": "evidence_cs_b",
+    "evidence_text": "Synthetic benchmark evidence: BFS marks a discovered vertex and enqueues it once; vertices leave the queue in first-in-first-out order.",
+    "expected_signals": ["queue", "visited", "FIFO"]
+  },
+  {
+    "id": "smart-manufacturing-case-a",
+    "case_type": "CASE_A",
+    "major": "SMART_MANUFACTURING",
+    "language": "zh-CN",
+    "preference": "",
+    "node_id": "canary_smart_a",
+    "node_title": "闭环制造控制中的反馈",
+    "node_description": "识别目标、传感测量、控制决策、执行与质量反馈。",
+    "item": {
+      "item_id": "closed_loop_feedback",
+      "requirement": "REQUIRED",
+      "objective": "解释制造过程闭环反馈的信息流",
+      "acceptance": "明确系统边界、测量量、执行量、反馈方向和一个故障影响",
+      "evidence_ids": ["evidence_smart_a"]
+    },
+    "evidence_id": "evidence_smart_a",
+    "evidence_text": "Synthetic benchmark evidence: a sensor measures the process output, the controller compares it with the target, and the actuator changes the process input.",
+    "expected_signals": ["传感", "控制", "执行", "反馈"]
+  },
+  {
+    "id": "smart-manufacturing-case-b",
+    "case_type": "CASE_B",
+    "major": "SMART_MANUFACTURING",
+    "language": "bilingual",
+    "preference": "Use a bilingual signal-flow table and finish with a short fault-chain exam answer.",
+    "node_id": "canary_smart_b",
+    "node_title": "Sensor bias and quality deviation",
+    "node_description": "Connect measurement bias to control action and downstream quality.",
+    "item": {
+      "item_id": "sensor_bias_chain",
+      "requirement": "REQUIRED",
+      "objective": "Explain a bounded sensor-bias fault chain",
+      "acceptance": "Separate measured value, true value, controller action and quality effect without inventing device parameters",
+      "evidence_ids": ["evidence_smart_b"]
+    },
+    "evidence_id": "evidence_smart_b",
+    "evidence_text": "Synthetic benchmark evidence: a positive sensor bias makes the measured output exceed the true output and can therefore change the controller command in the wrong direction.",
+    "expected_signals": ["sensor bias", "measured", "controller", "quality"]
+  },
+  {
+    "id": "materials-case-a",
+    "case_type": "CASE_A",
+    "major": "MATERIALS",
+    "language": "zh-CN",
+    "preference": "",
+    "node_id": "canary_materials_a",
+    "node_title": "晶粒尺寸与屈服强度",
+    "node_description": "建立晶粒尺度、位错运动阻碍与宏观强度之间的因果链。",
+    "item": {
+      "item_id": "grain_strength_chain",
+      "requirement": "REQUIRED",
+      "objective": "解释细化晶粒影响屈服强度的机制链",
+      "acceptance": "从微观组织到位错机制再到性能，说明条件和边界",
+      "evidence_ids": ["evidence_materials_a"]
+    },
+    "evidence_id": "evidence_materials_a",
+    "evidence_text": "Synthetic benchmark evidence: grain boundaries impede dislocation motion; the Hall-Petch relation is often written sigma_y=sigma_0+k*d^(-1/2) within its applicable regime.",
+    "expected_signals": ["晶界", "位错", "屈服强度"]
+  },
+  {
+    "id": "materials-case-b",
+    "case_type": "CASE_B",
+    "major": "MATERIALS",
+    "language": "en",
+    "preference": "Start with a scale diagram in words, then compare mechanism and observable property in a table.",
+    "node_id": "canary_materials_b",
+    "node_title": "Diffusion distance and temperature",
+    "node_description": "Relate atomic diffusion, time, temperature and an observable processing outcome.",
+    "item": {
+      "item_id": "diffusion_scale",
+      "requirement": "REQUIRED",
+      "objective": "Explain the scale and assumptions behind a diffusion-distance estimate",
+      "acceptance": "State the mechanism, variables, units, assumptions and one limit of the estimate",
+      "evidence_ids": ["evidence_materials_b"]
+    },
+    "evidence_id": "evidence_materials_b",
+    "evidence_text": "Synthetic benchmark evidence: a characteristic one-dimensional diffusion distance scales with the square root of diffusivity times time; diffusivity is temperature dependent.",
+    "expected_signals": ["diffusion", "temperature", "assumption", "scale"]
+  },
+  {
+    "id": "energy-case-a",
+    "case_type": "CASE_A",
+    "major": "ENERGY",
+    "language": "zh-CN",
+    "preference": "",
+    "node_id": "canary_energy_a",
+    "node_title": "稳流控制体能量平衡",
+    "node_description": "从系统边界和符号约定建立单入口单出口稳流能量方程。",
+    "item": {
+      "item_id": "steady_flow_balance",
+      "requirement": "REQUIRED",
+      "objective": "建立并解释稳流控制体的能量平衡",
+      "acceptance": "标明控制体、流入流出、热功符号、单位、假设与量纲检查",
+      "evidence_ids": ["evidence_energy_a"]
+    },
+    "evidence_id": "evidence_energy_a",
+    "evidence_text": "Synthetic benchmark evidence: at steady state, the control-volume energy accumulation is zero; heat, work, enthalpy, kinetic energy and potential energy terms must use a consistent sign convention.",
+    "expected_signals": ["控制体", "稳态", "能量", "量纲"]
+  },
+  {
+    "id": "energy-case-b",
+    "case_type": "CASE_B",
+    "major": "ENERGY",
+    "language": "bilingual",
+    "preference": "Teach intuition first, keep English terms, then substitute a tiny numerical example with units and a limit check.",
+    "node_id": "canary_energy_b",
+    "node_title": "Power, energy and conversion efficiency",
+    "node_description": "Distinguish rate, accumulated quantity and dimensionless efficiency.",
+    "item": {
+      "item_id": "power_energy_efficiency",
+      "requirement": "REQUIRED",
+      "objective": "Distinguish power, energy and efficiency in a bounded conversion example",
+      "acceptance": "Use consistent units, state the time interval and check that efficiency stays within its model boundary",
+      "evidence_ids": ["evidence_energy_b"]
+    },
+    "evidence_id": "evidence_energy_b",
+    "evidence_text": "Synthetic benchmark evidence: energy equals power integrated over time; for a constant rate E=P*t, and a bounded classroom efficiency is useful output divided by supplied input.",
+    "expected_signals": ["power", "energy", "efficiency", "unit"]
+  }
+]
