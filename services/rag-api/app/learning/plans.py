@@ -49,7 +49,13 @@ class TeachingPlanRepository:
         return dict(cast(sqlite3.Row, row))
 
     @staticmethod
-    def invalidation_reason(row: sqlite3.Row, identity: dict[str, Any]) -> str:
+    def invalidation_reason(
+        row: sqlite3.Row,
+        identity: dict[str, Any],
+        stored_trigger_ids: list[str],
+    ) -> str:
+        if stored_trigger_ids != identity["performance_trigger_ids"]:
+            return "PERFORMANCE_CHANGED"
         if row["preference_hash"] != identity["preference_hash"]:
             return "PREFERENCE_CHANGED"
         if json.loads(row["source_version_ids_json"]) != identity["source_version_ids"]:
@@ -92,11 +98,23 @@ class TeachingPlanRepository:
                 (workspace_id, node_id, journey_id),
             ).fetchall()
             for row in rows:
+                stored_trigger_ids = sorted(
+                    str(trigger[0])
+                    for trigger in connection.execute(
+                        "SELECT trigger_id FROM teaching_plan_performance_triggers "
+                        "WHERE plan_version_id=?",
+                        (row["id"],),
+                    )
+                )
                 if explicit_replan or row["cache_key"] != cache_key:
                     reason = (
                         "EXPLICIT_REPLAN"
                         if explicit_replan
-                        else self.invalidation_reason(row, identity)
+                        else self.invalidation_reason(
+                            row,
+                            identity,
+                            stored_trigger_ids,
+                        )
                     )
                     connection.execute(
                         "UPDATE teaching_plan_versions SET status='INVALIDATED',"
@@ -199,6 +217,12 @@ class TeachingPlanRepository:
                         encode(unit.target_item_ids),
                         encode(unit.model_dump()),
                     ),
+                )
+            for trigger_id in identity["performance_trigger_ids"]:
+                connection.execute(
+                    "INSERT INTO teaching_plan_performance_triggers("
+                    "plan_version_id,trigger_id) VALUES(?,?)",
+                    (plan_id, trigger_id),
                 )
             row = connection.execute(
                 "SELECT * FROM teaching_plan_versions WHERE id=?", (plan_id,)

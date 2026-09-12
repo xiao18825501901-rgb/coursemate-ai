@@ -844,6 +844,10 @@ class LearningOrchestrator:
             "source_version_ids": source_version_ids,
             "bridge_id": bridge["id"] if bridge is not None else None,
             "bridge_revision": bridge["revision"] if bridge is not None else None,
+            "performance_trigger_ids": sorted(
+                trigger["id"]
+                for trigger in planner_context["performance_replan_triggers"]
+            ),
         }
         cache_key = self._hash(identity)
         input_hash = self._hash(
@@ -1421,15 +1425,36 @@ class LearningOrchestrator:
                     if request.bridge_id
                     else None
                 )
+                replan_triggers = self.assessments.pending_replan(
+                    db,
+                    workspace,
+                    node["id"],
+                )
             if request.bridge_id and (
                 bridge is None or bridge["status"] in ("CANCELLED", "SOURCE_UNAVAILABLE")
             ):
                 raise ApiError(404, "BRIDGE_NOT_FOUND", "The active bridge was not found.")
             items = [TeachingItem.model_validate(i) for i in json.loads(spec[0])]
-            eligible = [
+            uncovered_required = [
                 i for i in items if i.item_id not in covered and i.requirement == "REQUIRED"
             ]
+            replan_item_ids = {
+                item_id
+                for trigger in replan_triggers
+                for item_id in trigger["item_ids"]
+            }
+            known_item_ids = {item.item_id for item in items}
+            eligible_item_ids = {
+                item.item_id for item in uncovered_required
+            } | (replan_item_ids & known_item_ids)
+            eligible = [item for item in items if item.item_id in eligible_item_ids]
             if not eligible:
+                if replan_triggers:
+                    raise ApiError(
+                        409,
+                        "REPLAN_SPEC_CHANGED",
+                        "Pending performance evidence targets a retired Teaching Spec item.",
+                    )
                 raise ApiError(
                     409, "SCOPE_COMPLETE", "All REQUIRED teaching content has been saved."
                 )
@@ -1453,6 +1478,12 @@ class LearningOrchestrator:
                 ],
                 "eligible": [i.model_dump() for i in eligible],
                 "covered_item_ids": sorted(covered),
+                "performance_replan_triggers": replan_triggers,
+                "planning_scope": (
+                    "REMEDIATION_AND_REQUIRED"
+                    if replan_triggers
+                    else "UNCOVERED_REQUIRED"
+                ),
                 "preference": request.preference,
                 "language": request.language,
                 "major_policy": node["major"],
@@ -1532,6 +1563,7 @@ class LearningOrchestrator:
                 unit,
                 selected_evidence,
                 plan_reused,
+                replan_triggers,
             )
 
         def save(db: sqlite3.Connection, workspace: sqlite3.Row, data: Any) -> dict[str, Any]:
@@ -1545,6 +1577,7 @@ class LearningOrchestrator:
                 unit,
                 evidence,
                 plan_reused,
+                replan_triggers,
             ) = data
             self.node(workspace, node["id"])
             self.check_evidence(workspace, {e["id"] for e in evidence})
@@ -1575,6 +1608,11 @@ class LearningOrchestrator:
                 "plan_version": plan_row["version"],
                 "plan_unit_key": unit_plan.unit_key,
                 "plan_reused": plan_reused,
+                "remediation_trigger_ids": [
+                    trigger["id"]
+                    for trigger in replan_triggers
+                    if set(trigger["item_ids"]) & set(unit_plan.target_item_ids)
+                ],
             }
             db.execute(
                 "INSERT INTO "
@@ -1650,7 +1688,42 @@ class LearningOrchestrator:
             required = {i.item_id for i in items if i.requirement == "REQUIRED"}
             progress = "LEARNED" if required <= covered else "LEARNING"
             db.execute("UPDATE learning_journeys SET status=? WHERE id=?", (progress, journey_id))
+            for trigger in replan_triggers:
+                if set(trigger["item_ids"]) & set(unit_plan.target_item_ids):
+                    db.execute(
+                        "INSERT OR IGNORE INTO teaching_unit_remediations("
+                        "trigger_id,teaching_unit_id) VALUES(?,?)",
+                        (trigger["id"], unit_id),
+                    )
             self.plans.complete_if_delivered(db, plan_row["id"])
+            completed_plan = db.execute(
+                "SELECT status FROM teaching_plan_versions WHERE id=?",
+                (plan_row["id"],),
+            ).fetchone()
+            if completed_plan is not None and completed_plan["status"] == "COMPLETED":
+                for trigger in replan_triggers:
+                    remediated_items = {
+                        str(row[0])
+                        for row in db.execute(
+                            "SELECT DISTINCT target.value "
+                            "FROM teaching_unit_remediations AS remediation "
+                            "JOIN teaching_unit_plan_links AS link "
+                            "ON link.teaching_unit_id=remediation.teaching_unit_id "
+                            "JOIN teaching_plan_units AS plan_unit "
+                            "ON plan_unit.plan_version_id=link.plan_version_id "
+                            "AND plan_unit.unit_key=link.plan_unit_key,"
+                            "json_each(plan_unit.target_item_ids_json) AS target "
+                            "WHERE remediation.trigger_id=?",
+                            (trigger["id"],),
+                        )
+                    }
+                    if set(trigger["item_ids"]) <= remediated_items:
+                        db.execute(
+                            "UPDATE learning_replan_triggers SET status='APPLIED',"
+                            "applied_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                            "WHERE id=? AND status='PENDING'",
+                            (trigger["id"],),
+                        )
             if request.bridge_id:
                 db.execute(
                     "UPDATE learning_bridges SET status=? WHERE id=? AND "
@@ -1676,12 +1749,19 @@ class LearningOrchestrator:
                 "coverage.updated",
                 {"node_id": node["id"], "progress": progress},
             )
+            assessment_state = self.knowledge._atomic_assessment(
+                db,
+                workspace_id,
+                node["id"],
+            )
             return {
                 **saved_unit,
                 "id": unit_id,
                 "journey_id": journey_id,
                 "progress": progress,
-                "grade": "NOT_ASSESSED",
+                "assessment": assessment_state,
+                "grade": assessment_state.get("grade_label")
+                or assessment_state["status"],
                 "evidence_ids": [e["id"] for e in evidence],
                 "plan_version_id": plan_row["id"],
                 "plan_version": plan_row["version"],

@@ -500,6 +500,48 @@ class AssessmentService:
         with self.db.connect() as connection:
             return self._session_view(connection, workspace, session_id)
 
+    @staticmethod
+    def pending_replan(
+        connection: sqlite3.Connection,
+        workspace: sqlite3.Row,
+        node_id: str,
+    ) -> list[dict[str, Any]]:
+        triggers: list[dict[str, Any]] = []
+        rows = connection.execute(
+            "SELECT * FROM learning_replan_triggers WHERE workspace_id=? AND node_id=? "
+            "AND status='PENDING' ORDER BY created_at,id",
+            (workspace["id"], node_id),
+        ).fetchall()
+        for row in rows:
+            evidence_ids = json.loads(row["performance_evidence_ids_json"])
+            placeholders = ",".join("?" for _ in evidence_ids)
+            evidence = connection.execute(
+                "SELECT id,item_id,dimension,performance_band,awarded_marks,max_marks,"
+                "confidence,independent_eligible FROM performance_evidence WHERE id IN ("
+                + placeholders
+                + ") AND workspace_id=? AND node_id=? ORDER BY item_id,dimension,id",
+                (*evidence_ids, workspace["id"], node_id),
+            ).fetchall()
+            if len(evidence) != len(evidence_ids):
+                raise ApiError(
+                    409,
+                    "REPLAN_EVIDENCE_UNAVAILABLE",
+                    "A pending learning replan trigger has incomplete evidence.",
+                )
+            triggers.append(
+                {
+                    "id": row["id"],
+                    "kind": row["trigger_kind"],
+                    "source_assessment_session_id": row[
+                        "source_assessment_session_id"
+                    ],
+                    "reason_summary": row["reason_summary"],
+                    "item_ids": sorted({str(item["item_id"]) for item in evidence}),
+                    "evidence": [dict(item) for item in evidence],
+                }
+            )
+        return triggers
+
     def _submission_context(
         self,
         connection: sqlite3.Connection,

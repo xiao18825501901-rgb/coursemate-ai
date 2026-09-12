@@ -4,6 +4,31 @@ from typing import Any
 
 
 def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
+    if schema == "AssessmentGradeProposal":
+        return {
+            "schema_version": "v3.2",
+            "questions": [
+                {
+                    "blueprint_item_id": question["blueprint_item_id"],
+                    "criteria": [
+                        {
+                            "criterion_id": criterion["criterion_id"],
+                            "score_fraction": 1,
+                            "answer_evidence": "submitted_answer",
+                            "feedback": (
+                                "[FAKE TEST FIXTURE] The synthetic explanation matches "
+                                "the frozen reference criterion."
+                            ),
+                            "confidence": 1,
+                            "needs_review": False,
+                        }
+                        for criterion in question["rubric"]
+                    ],
+                }
+                for question in context["questions"]
+            ],
+            "uncertainties": ["Synthetic fixture, not live grading quality proof"],
+        }
     if schema == "ProblemSolutionOutput":
         # Not an answerer: only a labelled, fixed synthetic integration-test question is supported.
         candidate = context.get("transcription_hint") or context["question"]
