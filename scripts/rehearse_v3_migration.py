@@ -8,8 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/rag-api"))
-from app.config import Settings  # noqa: E402
-from app.db import LATEST_V3_SCHEMA_VERSION, Database  # noqa: E402
+from app.config import Settings
+from app.db import LATEST_V3_SCHEMA_VERSION, Database
 
 TABLES = (
     "courses",
@@ -78,11 +78,80 @@ def rehearse(source: Path, target: Path) -> dict[str, object]:
                 "(source_scope='OFFICIAL' AND owner_user_id IS NOT NULL) OR "
                 "(source_scope!='OFFICIAL' AND owner_user_id IS NULL)"
             ).fetchone()[0],
+            "problem_index_entries": copied.execute(
+                "SELECT COUNT(*) FROM problem_index_entries"
+            ).fetchone()[0],
+            "learning_problems": copied.execute(
+                "SELECT COUNT(*) FROM learning_problems"
+            ).fetchone()[0],
+            "problem_revisions": copied.execute(
+                "SELECT COUNT(*) FROM problem_revisions"
+            ).fetchone()[0],
+            "learning_solutions": copied.execute(
+                "SELECT COUNT(*) FROM learning_solutions"
+            ).fetchone()[0],
+            "solution_revisions": copied.execute(
+                "SELECT COUNT(*) FROM solution_revisions"
+            ).fetchone()[0],
+            "learning_steps": copied.execute(
+                "SELECT COUNT(*) FROM learning_steps"
+            ).fetchone()[0],
+            "step_knowledge_links": copied.execute(
+                "SELECT COUNT(*) FROM step_knowledge_links"
+            ).fetchone()[0],
+            "learning_bridges": copied.execute(
+                "SELECT COUNT(*) FROM learning_bridges"
+            ).fetchone()[0],
+            "learning_bridge_contexts": copied.execute(
+                "SELECT COUNT(*) FROM learning_bridge_contexts"
+            ).fetchone()[0],
+            "invalid_problem_index_sources": copied.execute(
+                "SELECT COUNT(*) FROM problem_index_entries AS problem "
+                "LEFT JOIN chunks AS chunk ON chunk.id=problem.chunk_id "
+                "LEFT JOIN chunk_source_versions AS source "
+                "ON source.chunk_id=problem.chunk_id "
+                "LEFT JOIN document_versions AS version "
+                "ON version.id=problem.document_version_id "
+                "WHERE chunk.id IS NULL OR source.document_version_id IS NULL "
+                "OR source.document_version_id!=problem.document_version_id "
+                "OR version.id IS NULL OR version.document_id!=chunk.document_id "
+                "OR problem.course_id!=chunk.course_id"
+            ).fetchone()[0],
+            "problems_without_revisions": copied.execute(
+                "SELECT COUNT(*) FROM learning_problems AS problem "
+                "WHERE NOT EXISTS(SELECT 1 FROM problem_revisions AS revision "
+                "WHERE revision.problem_id=problem.id)"
+            ).fetchone()[0],
+            "solutions_without_revisions": copied.execute(
+                "SELECT COUNT(*) FROM learning_solutions AS solution "
+                "WHERE NOT EXISTS(SELECT 1 FROM solution_revisions AS revision "
+                "WHERE revision.solution_id=solution.id)"
+            ).fetchone()[0],
+            "legacy_step_links_without_normalized_rows": copied.execute(
+                "SELECT COUNT(*) FROM learning_steps AS step, "
+                "json_each(json_extract(step.content_json, '$.knowledge_links')) AS link "
+                "WHERE json_type(link.value, '$.node_id')='text' "
+                "AND json_type(link.value, '$.question_text')='text' "
+                "AND json_type(link.value, '$.reason')='text' "
+                "AND NOT EXISTS(SELECT 1 FROM step_knowledge_links AS normalized "
+                "WHERE normalized.step_id=step.id "
+                "AND normalized.ordinal=CAST(link.key AS INTEGER)+1)"
+            ).fetchone()[0],
+            "bridges_without_contexts": copied.execute(
+                "SELECT COUNT(*) FROM learning_bridges AS bridge "
+                "WHERE NOT EXISTS(SELECT 1 FROM learning_bridge_contexts AS context "
+                "WHERE context.bridge_id=bridge.id)"
+            ).fetchone()[0],
         }
     invariants_ok = (
         v3_invariants["document_versions"] == v3_invariants["documents"]
         and v3_invariants["unbound_chunks"] == 0
         and v3_invariants["invalid_source_owners"] == 0
+        and v3_invariants["invalid_problem_index_sources"] == 0
+        and v3_invariants["problems_without_revisions"] == 0
+        and v3_invariants["solutions_without_revisions"] == 0
+        and v3_invariants["legacy_step_links_without_normalized_rows"] == 0
+        and v3_invariants["bridges_without_contexts"] == 0
         and versions == list(range(1, LATEST_V3_SCHEMA_VERSION + 1))
     )
     result = {
