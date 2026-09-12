@@ -25,13 +25,27 @@ function isAllowedModelStudioEndpoint(value: string): boolean {
   try {
     const endpoint = new URL(value);
     const path = endpoint.pathname.replace(/\/+$/, "");
-    const allowedHost =
+    // Source: https://help.aliyun.com/en/model-studio/base-url
+    const sharedHost =
       endpoint.hostname === "dashscope.aliyuncs.com" ||
       endpoint.hostname === "dashscope-intl.aliyuncs.com" ||
-      endpoint.hostname.endsWith(".maas.aliyuncs.com");
+      endpoint.hostname === "dashscope-us.aliyuncs.com" ||
+      endpoint.hostname === "cn-hongkong.dashscope.aliyuncs.com";
+    const workspaceSuffixes = [
+      ".cn-beijing.maas.aliyuncs.com",
+      ".ap-southeast-1.maas.aliyuncs.com",
+      ".ap-northeast-1.maas.aliyuncs.com",
+      ".eu-central-1.maas.aliyuncs.com",
+      ".us-east-1.maas.aliyuncs.com",
+      ".cn-hongkong.maas.aliyuncs.com",
+    ];
+    const workspaceHost =
+      !endpoint.hostname.startsWith("trial.") &&
+      !endpoint.hostname.startsWith("token-plan.") &&
+      workspaceSuffixes.some((suffix) => endpoint.hostname.endsWith(suffix));
     return (
       endpoint.protocol === "https:" &&
-      allowedHost &&
+      (sharedHost || workspaceHost) &&
       path === "/compatible-mode/v1" &&
       endpoint.username === "" &&
       endpoint.password === "" &&

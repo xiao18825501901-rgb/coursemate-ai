@@ -102,19 +102,22 @@ describe("Agent security configuration", () => {
     expect(config.openaiChatModel).toBe("agent-model");
   });
 
-  it("accepts qwen3.8-max only with explicit Agent credentials and an allowlisted endpoint", () => {
+  it.each([
+    "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
+    "https://cn-hongkong.dashscope.aliyuncs.com/compatible-mode/v1",
+    "https://workspace.eu-central-1.maas.aliyuncs.com/compatible-mode/v1",
+  ])("accepts qwen3.8-max with explicit credentials and endpoint %s", (endpoint) => {
     const config = loadConfig({
       CLERK_PUBLISHABLE_KEY: "pk_test_example",
       CLERK_SECRET_KEY: "sk_test_example",
       AGENT_MODEL_API_KEY: "agent-key",
-      AGENT_MODEL_BASE_URL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      AGENT_MODEL_BASE_URL: endpoint,
       AGENT_MODEL_NAME: "qwen3.8-max",
     });
 
     expect(config.openaiChatModel).toBe("qwen3.8-max");
-    expect(config.openaiBaseUrl).toBe(
-      "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-    );
+    expect(config.openaiBaseUrl).toBe(endpoint);
   });
 
   it.each([
@@ -127,6 +130,16 @@ describe("Agent security configuration", () => {
     {
       AGENT_MODEL_API_KEY: "agent-key",
       AGENT_MODEL_BASE_URL: "http://dashscope.aliyuncs.com/compatible-mode/v1",
+    },
+    {
+      AGENT_MODEL_API_KEY: "agent-key",
+      AGENT_MODEL_BASE_URL:
+        "https://trial.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+    },
+    {
+      AGENT_MODEL_API_KEY: "agent-key",
+      AGENT_MODEL_BASE_URL:
+        "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
     },
   ])("fails closed for incomplete or unsafe qwen3.8-max configuration", (modelConfig) => {
     expect(() => loadConfig({

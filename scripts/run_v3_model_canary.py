@@ -18,6 +18,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 RAG_SERVICE = ROOT / "services" / "rag-api"
@@ -85,13 +86,12 @@ def _artifact(
     max_cost: float,
     cost_ceiling: float,
 ) -> dict[str, Any]:
-    endpoint_label = (
-        "ENDPOINT_INTL"
-        if "dashscope-intl.aliyuncs.com" in base_url
-        else "ENDPOINT_CN"
-        if "dashscope.aliyuncs.com" in base_url
-        else "ENDPOINT_WORKSPACE"
-    )
+    endpoint_label = {
+        "dashscope.aliyuncs.com": "ENDPOINT_CN",
+        "dashscope-intl.aliyuncs.com": "ENDPOINT_INTL",
+        "dashscope-us.aliyuncs.com": "ENDPOINT_US",
+        "cn-hongkong.dashscope.aliyuncs.com": "ENDPOINT_HK",
+    }.get(urlsplit(base_url).hostname or "", "ENDPOINT_WORKSPACE")
     return {
         "artifact_version": "v3-live-canary-v1",
         "status": "RUNNING",

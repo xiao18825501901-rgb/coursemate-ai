@@ -67,6 +67,12 @@ class LearningProvider:
             return "ENDPOINT_INTL"
         if host == "dashscope.aliyuncs.com":
             return "ENDPOINT_CN"
+        if host == "dashscope-us.aliyuncs.com":
+            return "ENDPOINT_US"
+        if host == "cn-hongkong.dashscope.aliyuncs.com":
+            return "ENDPOINT_HK"
+        if host.endswith(".maas.aliyuncs.com"):
+            return "ENDPOINT_WORKSPACE"
         return "ENDPOINT_UNVERIFIED"
 
     def generate(

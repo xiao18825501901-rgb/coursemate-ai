@@ -416,7 +416,11 @@ def test_provider_base_url_allows_https_and_explicit_loopback_development() -> N
     [
         "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
+        "https://cn-hongkong.dashscope.aliyuncs.com/compatible-mode/v1",
         "https://workspace.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+        "https://workspace.ap-northeast-1.maas.aliyuncs.com/compatible-mode/v1",
+        "https://workspace.eu-central-1.maas.aliyuncs.com/compatible-mode/v1",
     ],
 )
 def test_v3_model_studio_base_url_requires_an_exact_allowlisted_endpoint(url: str) -> None:
@@ -426,6 +430,19 @@ def test_v3_model_studio_base_url_requires_an_exact_allowlisted_endpoint(url: st
         validate_model_studio_base_url("https://provider.example/compatible-mode/v1")
     with pytest.raises(ValueError, match="outside the V3 allowlist"):
         validate_model_studio_base_url(url.replace("/compatible-mode/v1", "/api/v1"))
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://trial.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+        "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+        "https://workspace.unknown-region.maas.aliyuncs.com/compatible-mode/v1",
+    ],
+)
+def test_v3_backend_rejects_trial_plan_and_unknown_maas_endpoints(url: str) -> None:
+    with pytest.raises(ValueError, match="outside the V3 allowlist"):
+        validate_model_studio_base_url(url)
 
 
 @pytest.mark.parametrize(
