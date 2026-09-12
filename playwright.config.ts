@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 
 import { defineConfig } from "@playwright/test";
@@ -8,6 +9,12 @@ const nodeExecutable = "C:\\Users\\Hp\\.cache\\codex-runtimes\\codex-primary-run
 const pythonExecutable = path.join(repositoryRoot, "services", "rag-api", ".venv", "Scripts", "python.exe");
 const chromeExecutable = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const e2eUserId = `e2e-user-${process.pid}`;
+const e2eData = path.join(repositoryRoot, "work", `e2e-rag-${process.pid}-${Date.now()}`);
+execFileSync(
+  pythonExecutable,
+  [path.join(repositoryRoot, "scripts", "prepare_full_e2e.py"), e2eData, e2eUserId],
+  { stdio: "inherit" },
+);
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -35,6 +42,8 @@ export default defineConfig({
         AUTH_TEST_USER_ID: e2eUserId,
         ADMIN_USER_IDS: "",
         WEB_ORIGIN: "http://127.0.0.1:5173",
+        RAG_DATABASE_PATH: path.join(e2eData, "rag.sqlite3"),
+        RAG_UPLOAD_DIR: path.join(e2eData, "uploads"),
       },
       url: "http://127.0.0.1:8000/health",
       reuseExistingServer: false,

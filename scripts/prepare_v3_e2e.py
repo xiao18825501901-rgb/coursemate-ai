@@ -12,11 +12,12 @@ from app.db import Database  # noqa: E402 - repository-local service bootstrap
 from app.learning.workspaces import join_course  # noqa: E402 - repository-local service bootstrap
 
 OWNER = "v3-e2e-owner"
-ASSESSMENT_NODE = "e2e-assessment-node"
 
 
-def seed_assessment_fixture(db: Database) -> None:
-    join_course(db, "cs3481", OWNER, 10)
+def seed_assessment_fixture(db: Database, owner: str = OWNER) -> str:
+    fixture_key = hashlib.sha256(owner.encode()).hexdigest()[:12]
+    assessment_node = f"e2e-assessment-node-{fixture_key}"
+    join_course(db, "cs3481", owner, 10)
     item = {
         "item_id": "principle",
         "requirement": "REQUIRED",
@@ -31,22 +32,22 @@ def seed_assessment_fixture(db: Database) -> None:
             "id,course_id,owner_user_id,title,description,major,kind,status) "
             "VALUES(?,'cs3481',?,'Assessment Addition',"
             "'Synthetic browser-only assessment node','CS','ATOMIC','PRIVATE')",
-            (ASSESSMENT_NODE, OWNER),
+            (assessment_node, owner),
         )
         connection.execute(
             "INSERT INTO teaching_specs(node_id,version,content_json,content_hash) "
             "VALUES(?,1,?,?)",
-            (ASSESSMENT_NODE, content, hashlib.sha256(content.encode()).hexdigest()),
+            (assessment_node, content, hashlib.sha256(content.encode()).hexdigest()),
         )
         sources = [
             ("OFFICIAL", None, "OFFICIAL"),
-            ("WORKSPACE_PRIVATE", OWNER, "OWNER_AUTHORED"),
-            ("MODEL_GENERATED", OWNER, "DETERMINISTIC"),
-            ("EXTERNAL_INSPIRED", OWNER, "HUMAN_REVIEWED"),
+            ("WORKSPACE_PRIVATE", owner, "OWNER_AUTHORED"),
+            ("MODEL_GENERATED", owner, "DETERMINISTIC"),
+            ("EXTERNAL_INSPIRED", owner, "HUMAN_REVIEWED"),
             ("OFFICIAL", None, "OFFICIAL"),
         ]
         for ordinal, (source, owner, verification) in enumerate(sources, start=1):
-            question_id = f"e2e-question-{ordinal}"
+            question_id = f"e2e-question-{fixture_key}-{ordinal}"
             prompt = f"Synthetic assessment question {ordinal}: type correct."
             answer = {"accepted": ["correct"], "case_sensitive": False}
             question_content = json.dumps(
@@ -62,7 +63,7 @@ def seed_assessment_fixture(db: Database) -> None:
                 (
                     question_id,
                     owner,
-                    f"e2e-family-{ordinal}",
+                    f"e2e-family-{fixture_key}-{ordinal}",
                     source,
                     ordinal,
                     prompt,
@@ -78,8 +79,9 @@ def seed_assessment_fixture(db: Database) -> None:
                 "dimension,max_fraction,description,deterministic_rule_json) "
                 "VALUES(?,'correctness',?,1,'principle','CONCEPT',100,"
                 "'Matches the synthetic fixture answer.','{}')",
-                (question_id, ASSESSMENT_NODE),
+                (question_id, assessment_node),
             )
+    return assessment_node
 
 
 def main() -> None:
