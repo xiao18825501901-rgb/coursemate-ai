@@ -44,12 +44,12 @@ Paid model calls used: none
 - FastAPI/Python RAG API 是学习状态、课程资料和 V3 编排的拟定单一写入者。
 - React/TypeScript Web 仍保留 V2 页面，并有 feature-flagged V3 双 Pane 工作区。
 - Node Task Agent 保持任务工具职责，不写学习成绩或覆盖状态。
-- V3 011–015 迁移、冻结文档版本/派生物、workspace 文件隔离、Registry、ATOMIC/COMPOSITE、双树投影、版本化 Spec、v3.2 Planner/Compiler/Executor、计划缓存与交付证据，以及 Problem→Bridge→Teaching→Return 本地闭环已存在，但并未覆盖新版全部领域对象。
+- V3 011–016 迁移、冻结文档版本/派生物、workspace 文件隔离、Registry、ATOMIC/COMPOSITE、双树投影、版本化 Spec、v3.2 Planner/Compiler/Executor、计划缓存与交付证据，以及版本化 Problem→Bridge→Teaching→Return 本地闭环已存在，但并未覆盖新版全部领域对象。
 - `V3_ENABLED` 和 `VITE_V3_ENABLED` 默认关闭；目标生成模型配置锁为 `qwen3.8-max`，Embedding 独立。
 
 ### 本地真实数据库
 
-2026-09-12 最新隔离迁移脚本以 SQLite read-only URI 打开 `data/rag.sqlite3`：源库仍为迁移 1–10；5 courses、69 documents、1,937 chunks、31 conversations、78 messages。源库未由本任务初始化或迁移，这些数量也不外推到生产。此前冻结时的 3 courses/67 documents 是旧快照，已被本次更晚的只读证据取代。
+2026-09-12 17:25 的最新只读复核显示 `data/rag.sqlite3` 当前为迁移 1–15，而不是本文此前写下的 1–10；5 courses、69 documents、1,937 chunks、31 conversations、78 messages。迁移 016 演练前后源文件 SHA-256 均为 `BCB04E8814D5FF0E4301845C541DBAABF9EF6CE65F6F18853E501B3205AE93ED`，文件最后写入时间早于本次演练，因此本次脚本没有改源库。谁在何时应用 11–15 **UNKNOWN**，不得从 Git 或测试结果反推。此前 1–10 与 3 courses/67 documents 均为已被当前证据取代的旧快照；这些本地数量也不外推到生产。
 
 ### 历史部署报告
 
@@ -93,16 +93,16 @@ Paid model calls used: none
 
 | 范围 | 状态 |
 |---|---|
-| 011–015 文件 | 已在 V3 feature branch 提交并视为迁移历史冻结；后续只用 016+ 前向修复 |
-| 临时/合成测试库 | 已执行过 011–015；只证明当前本地合同/fake-provider 流程 |
-| 隔离真实资料副本 | `work/v3-migration-rehearsal-05/` 执行到 15；旧表摘要不变、integrity ok、FK 0、69/69 文档版本、1,937 chunks 全部绑定 |
+| 011–016 文件 | 已在 V3 feature branch 提交并视为迁移历史冻结；后续只用 017+ 前向修复 |
+| 临时/合成测试库 | 已执行过 011–016；只证明当前本地合同/fake-provider 流程 |
+| 隔离真实资料副本 | `work/v3-migration-rehearsal-07/` 从当前 1–15 源库副本执行到 16；旧表指纹不变、integrity ok、FK 0、69/69 文档版本、1,937 chunks 全部绑定；2 组 legacy problem/solution/step/bridge 全部正规化且缺失数为 0 |
 | CS3481 最小子集副本 | `work/v3-cs3481-subset-01/`：3 个 DRAFT 候选节点、2 条层级边、1 条 prerequisite、2 条真实版本证据；学习者不可见、0 模型调用 |
-| 本地真实库 | 仍为 1–10；未执行 V3 |
+| 本地真实库 | 当前只读证据为 1–15；本任务未对它应用 016，11–15 的执行来源 UNKNOWN |
 | 生产 | UNKNOWN |
 
-审计发现并修复了一个安全边界：此前 `Database.initialize()` 无条件执行 011/012。现在只有 `Settings.v3_enabled=True` 才执行 V3 迁移，V2 readiness 要求 1–10，V3 readiness 要求 1–15；V2 课程/发布查询也不会在 flag 关闭时引用 V3 表。Stage 2 在服务与 SQLite 双层约束树 source，并让损坏的历史树读取失败关闭；Stage 3 将计划、计划单元、交付证据和模型调用元数据加入显式版本链。当前全量证据为 Python 264 passed、Web 33 passed、Task Agent 53 passed、Ruff/mypy/typecheck/build 通过，以及隔离合成数据库 Playwright 1 passed。
+审计发现并修复了一个安全边界：此前 `Database.initialize()` 无条件执行 011/012。现在只有 `Settings.v3_enabled=True` 才执行 V3 迁移，V2 readiness 要求 1–10，当前 V3 readiness 要求 1–16；V2 课程/发布查询也不会在 flag 关闭时引用 V3 表。Stage 2 在服务与 SQLite 双层约束树 source，并让损坏的历史树读取失败关闭；Stage 3 将计划、计划单元、交付证据和模型调用元数据加入显式版本链；Stage 4 将 Problem、Attempt、Solution、StepKnowledgeLink 与 LearningBridge Context 正规化。当前全量证据为 Python 270 passed、Web 35 passed、Task Agent 53 passed、Ruff/mypy（56 source files）/typecheck/build 通过，以及隔离合成数据库 Playwright 1 passed。
 
-011–015 不再通过改编号或删除来掩盖曾在合成/副本数据库执行的事实。后续结构使用 016+ 前向迁移，并在新的隔离副本演练。
+011–016 不再通过改编号或删除来掩盖曾在本地/合成/副本数据库执行的事实。后续结构使用 017+ 前向迁移，并在新的隔离副本演练。
 
 ## 6. 新验收层级
 
@@ -195,3 +195,32 @@ Stage 3 已落实：
 Stage 3 本地证据：Python 264 passed；Web 33 passed；Task Agent 53 passed；Ruff、mypy（55 source files）、TypeScript、生产构建通过；Playwright 黄金闭环 1 passed，并目检桌面和 375px 截图。`work/v3-migration-rehearsal-05/` 从最新真实库只读备份副本升级到 1–15，旧表指纹不变、integrity ok、FK 0、69/69 document versions、1,937 chunks 全绑定；CS3481 DRAFT 子集仍对学习者不可见且 0 模型调用。
 
 Stage 3 不包含 Problem 图片/版本化解法、正式 Assessment、官方审核发布、真实 qwen 调用或生产部署；这些仍按 Stage 4–8 执行。
+
+## 11. Stage 4 完成检查点
+
+```text
+Source implementation: IMPLEMENTED for Stage 4 Problem/Bridge scope
+Local contract tests: VERIFIED
+Local fake-provider/browser flow: VERIFIED
+Live qwen3.8-max: NOT VERIFIED
+Production: NOT VERIFIED
+Local real database migration 016: NOT EXECUTED
+Production database migration: UNKNOWN / NOT EXECUTED BY THIS TASK
+```
+
+阶段提交：`5b88c3e`（016 Schema 与结构化题目索引）、`ebe2ffa`（v3.2 Problem Solver、多模态与正规化运行时）、`1eb94ed`（Web 文字/文件题号/私人图片入口及恢复）、`cf8466b`（迁移 016 专项不变量）。
+
+Stage 4 已落实：
+
+- 导入时只为带明确 `question_number` 结构元数据的 Chunk 建立增量题目索引；查询在候选选择前按 official/current-owner 范围过滤，并再次验证 DocumentVersion，绝不在每次提问时全库扫描。
+- 文字、精确索引条目与已授权私人 PNG/JPEG 都生成不可变 ProblemRevision、ProblemAttempt、SolutionRevision；索引/图片保存精确 DocumentVersion、SHA-256 与 locator。私人图片经 owner/course/path/size/hash 双重校验后，以本次请求内 Base64 data URI 发送，不建立公开 URL，原始 Base64 不进入运行证据。
+- v3.2 `problem.md` 与严格 Schema 输出题意、条件、考试版答案、编号步骤、公式、单位、检查、错点、来源、图片转录和显式不确定性。`MODEL_PROPOSED / NOT_INDEPENDENTLY_VERIFIED` 不冒充官方答案或视觉正确性。
+- StepKnowledgeLink 只有在 node/spec/item 精确存在且属于当前 workspace 时才可标 `VALIDATED`；无法可靠绑定时保存 `UNRESOLVED` 并禁用跳转。旧 JSON link 只迁移为 `LEGACY_PRESERVED`，不静默升级。
+- LearningBridgeContext 固定 problem/attempt/solution/step/link/node/spec/item/journey/return anchor 与幂等键。重复点击不重复建行；刷新、重新登录和新浏览器上下文可恢复并返回原 Step。
+- Web 上传图片后会自动刷新授权来源，展示转录与不确定性；桌面双 Pane 和 375px 单栏均已目检。E2E 使用 1×1 合成 PNG 加显式文字提示，只证明权限、传输、持久化与交互合同，不证明真实视觉质量。
+
+`SUPPLEMENTAL_ENGINEERING_DECISION`：本地模型图片上限 10 MiB（低于当前官方文档上限）；只接受 PNG/JPEG 进入模型；使用完整 data URI；来源撤回时索引级联删除、历史 revision 的外键只允许置 null 而保留来源 hash 与历史答案。这些是安全/可恢复工程选择，不冒充 Q1–Q10 的逐条确认。
+
+Stage 4 全量证据：Python 270 passed；Web 35 passed；Task Agent 53 passed；Ruff、mypy（56 source files）、两 workspace TypeScript、生产构建通过；Playwright 1 passed。`work/v3-migration-rehearsal-07/` 从当前本地 1–15 源库只读备份副本升级到 1–16，两次初始化后旧表指纹不变、integrity ok、FK 0；现有 2 组 legacy problem/solution/step/bridge 均有一一对应正规化行，缺失计数全为 0。当前源库本身为 1–15 且本次未迁移 016。
+
+Stage 4 不包含正式 Assessment、GradePolicy、完整 AUTO 语义路由、官方审核发布、真实 qwen 视觉/教学质量验证或生产部署；这些继续按 Stage 5–8 执行。

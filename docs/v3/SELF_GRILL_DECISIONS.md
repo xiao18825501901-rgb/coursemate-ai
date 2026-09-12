@@ -9,7 +9,7 @@ Q1–Q10 are `LOCKED_REQUIREMENT`. Every new implementation choice below is expl
 
 - **问题 / 来源或缺口:** V3 UI/API was feature-gated, but `Database.initialize()` applied 011/012 unconditionally.
 - **反例:** Starting an otherwise V2 release against the real migration-10 database silently adds V3 tables.
-- **采用方案 / 取舍:** Store `v3_enabled` in `Database`; V2 requires migrations 1–10 and never queries V3 tables; V3 applies/requires the current V3 migration set (1–15 after Stage 3). This couples migration activation to the release flag, so production migration remains an explicit rollout event.
+- **采用方案 / 取舍:** Store `v3_enabled` in `Database`; V2 requires migrations 1–10 and never queries V3 tables; V3 applies/requires the current V3 migration set (1–16 after Stage 4). This couples migration activation to the release flag, so production migration remains an explicit rollout event.
 - **不可违反的规则:** Disabled V3 cannot mutate or depend on V3 Schema.
 - **验收测试:** `test_v3_migrations_require_explicit_feature_enablement`, `test_feature_defaults_off`, readiness tests, full V2 regression.
 - **剩余不确定性:** Production migration state is unknown and needs preflight.
@@ -203,6 +203,46 @@ Q1–Q10 are `LOCKED_REQUIREMENT`. Every new implementation choice below is expl
 - **不可违反的规则:** Cleanup never follows an unresolved, symlinked or out-of-root path; a cleanup failure cannot restore API/model access; no broad recursive delete.
 - **验收测试:** Happy-path source+derivative deletion now; injected unlink failure, restart retry and retention audit before production acceptance.
 - **剩余不确定性:** Final production storage and retention/SLA determine the outbox executor and alerting.
+- **分类:** `SUPPLEMENTAL_ENGINEERING_DECISION`.
+
+## SG-21 — Problem discovery is a structural index, not query-time corpus scanning
+
+- **问题 / 来源或缺口:** “检索所有文件中的题目”可能被误解为每次请求遍历全部文档，也可能仅凭相同题号误配。
+- **反例:** 两份讲义都有 Q3，系统只按 `question_number=3` 取第一条并把另一题的答案套上去。
+- **采用方案 / 取舍:** 仅在 ingestion 产生明确 `question_number` 元数据时创建增量索引；条目固定 course、DocumentVersion、Chunk、题号/小问、locator 与题干。查询先做 owner/scope 过滤，选用前再次授权并绑定精确版本。没有结构元数据就诚实返回无索引题，不猜。
+- **不可违反的规则:** 不以文件名或题号单独认定题目身份；不为提高命中率越权或制造索引。
+- **验收测试:** 同题号不同文件、版本更新、owner A/B、缺元数据、伪造 entry ID 与增量 ingestion。
+- **剩余不确定性:** 现有 1,937 个 legacy chunks 没有结构题号元数据，迁移副本索引数为 0；需未来受控重解析或新增上传才能产生真实条目。
+- **分类:** `SUPPLEMENTAL_ENGINEERING_DECISION` implementing Problem Mode.
+
+## SG-22 — Revocation removes future source access without rewriting history
+
+- **问题 / 来源或缺口:** ProblemRevision 必须可审计，但被删除的私人原图/题目不能通过旧 Bridge 恢复给模型。
+- **反例:** 删除图片后，历史 solution JSON 中的文件 ID 被用来重新读取或再次发送原图。
+- **采用方案 / 取舍:** 可检索索引随源版本删除；历史 ProblemRevision 的 source FK 仅允许由具体值转为 null，保留 SHA、locator、转录和已生成答案作为历史。状态投影在源字节缺失/失配时只返回 `SOURCE_UNAVAILABLE` tombstone，不重新水合内容。
+- **不可违反的规则:** immutable revision 不能被任意改写；撤权后的原始字节不能进入新模型上下文。
+- **验收测试:** 删除源后索引消失、revision hash 保留、状态 tombstone、Bridge/重新生成失败关闭、非法 FK 改写被 trigger 拒绝。
+- **剩余不确定性:** 完整物理清理重试仍受 SG-20 的 outbox 后续工作约束。
+- **分类:** `SUPPLEMENTAL_ENGINEERING_DECISION`.
+
+## SG-23 — Private image transport is request-bounded and content-free in logs
+
+- **问题 / 来源或缺口:** 视觉模型需要图片，但永久公开 URL、路径信任或把 Base64 记日志都会泄漏私人内容。
+- **反例:** 模型错误对象序列化整个 data URI，或上传后文件被同长度替换再发送。
+- **采用方案 / 取舍:** 仅接收当前应用可预览且当前模型路径支持的 PNG/JPEG，应用 10 MiB 本地上限；读取前验证 owner/course、resolved path、大小和 SHA，构造 ProviderImage 时再次 hash；只在单次 Responses 请求中生成完整 Base64 data URI。模型运行记录只保存版本 ID、MIME、大小与 hash，不保存路径/原字节/data URI。
+- **不可违反的规则:** 不由客户端提交远程图片 URL；不跳过最终字节完整性校验；不把视觉合同测试冒充视觉准确率。
+- **验收测试:** owner B、MIME/扩展不符、缺失/篡改文件、超限、payload 形状、序列化证据无 Base64。
+- **剩余不确定性:** qwen3.8-max 当前账户/地域的真实视觉权限和准确性尚未 live 验证。
+- **分类:** `SUPPLEMENTAL_ENGINEERING_DECISION` implementing Q1.
+
+## SG-24 — Legacy links are preserved but never silently promoted
+
+- **问题 / 来源或缺口:** 012 的 step JSON 只有 node ID/question/reason，没有精确 Spec/TeachingItem，不能满足新版覆盖身份。
+- **反例:** 迁移把旧 link 自动标 `VALIDATED`，用户点击后对当前新 Spec 记入错误 REQUIRED coverage。
+- **采用方案 / 取舍:** 016 一一 backfill Problem/Solution/Attempt/Step link/Bridge context，但 link/context 标 `LEGACY_PRESERVED` 并保留明确缺失原因。新生成 link 必须精确 node/spec/item 才是 `VALIDATED`；无法绑定则 `UNRESOLVED` 且 UI 不创建 Bridge。
+- **不可违反的规则:** Legacy 保留用于恢复历史，不等于通过当前 Schema/语义验证。
+- **验收测试:** 非空 legacy 副本 2/2 backfill、重复 initialize、伪造 item、UNRESOLVED 禁止 Bridge、VALIDATED 全链 DB trigger。
+- **剩余不确定性:** 是否由人工把具体 legacy link 映射到新 TeachingItem 需要后续审核产品流程。
 - **分类:** `SUPPLEMENTAL_ENGINEERING_DECISION`.
 
 ## Exit check

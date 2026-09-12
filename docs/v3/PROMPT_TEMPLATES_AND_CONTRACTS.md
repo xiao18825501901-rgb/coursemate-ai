@@ -1,7 +1,7 @@
 # CourseMate V3 — Prompt Templates and Contracts
 
-Version: Stage 3 executable contract, 2026-09-12.
-This is an executable-asset ledger. It does not claim live-model quality or completion of the future Problem/Assessment templates.
+Version: Stage 4 executable contract, 2026-09-12.
+This is an executable-asset ledger. It does not claim live-model quality or completion of the future Assessment template.
 
 ## 1. Current executable assets
 
@@ -16,8 +16,9 @@ This is an executable-asset ledger. It does not claim live-model quality or comp
 | `SMART_MANUFACTURING.md` | Smart Manufacturing strategy | compiled by major |
 | `MATERIALS.md` | Materials Science strategy | compiled by major |
 | `ENERGY.md` | Energy strategy | compiled by major |
+| `problem.md` | complete answer, multimodal transcription/uncertainty and exact Step knowledge links | compiled for text/indexed/image Problem calls |
 
-The files are real code assets and have compiler/runtime tests. v3.2 implements the Master seed for both scenarios, all four major strategies, complete-plan scheduling and 3–5 comprehension checks per unit. The versioned Problem Solver and Assessment Grader remain `PLANNED` for Stages 4 and 5; they are not silently attributed to v3.2.
+The files are real code assets and have compiler/runtime tests. v3.2 implements the Master seed for both Teaching scenarios, all four major strategies, complete-plan scheduling, 3–5 comprehension checks per unit and the Stage 4 Problem Solver contract. The Assessment Grader remains `PLANNED` for Stage 5; it is not silently attributed to v3.2.
 
 ## 2. Trust and instruction precedence
 
@@ -87,14 +88,9 @@ The CS3481 Word file informs bilingual explanation, knowledge map, code/data con
 
 ## 5. Strict Schemas and later additions
 
-`TeachingPlanUnit`, full-path `TeachingPlan`, `CheckQuestion` and `TeachingUnitOutput` are active v3.2 contracts. Target additions for later stages include:
+`TeachingPlanUnit`, full-path `TeachingPlan`, `CheckQuestion`, `TeachingUnitOutput`, `ProblemSolutionOutput` and `StepKnowledgeLink` are active v3.2 contracts. Target additions for later stages include:
 
 ```text
-ProblemSolutionOutputV2
-  problem_revision_id, source_scope, conditions, steps,
-  StepKnowledgeLink(node/spec/item IDs), assumptions,
-  visual_uncertainties, answer_origin, verification
-
 AssessmentGradeProposal
   assessment_session_id, question_attempt_id, rubric_version_id,
   criteria[{criterion_id, awarded, evidence, uncertainty}],
@@ -142,4 +138,4 @@ Structured-output failure now raises a typed `ProviderCallFailure` carrying safe
 | pre-submit Assessment response | no answer/rubric/grader prompt in client payload |
 | Grader arithmetic mismatch | backend recomputes/rejects; model cannot publish grade |
 
-Current conclusion: Teaching v3.2 is `SOURCE_IMPLEMENTED` and `LOCAL_CONTRACT_VERIFIED`; its deterministic Problem→Teaching browser path is `LOCAL_FAKE_PROVIDER_VERIFIED`. Tests cover four majors × two cases, REQUIRED preservation, injection handling, malformed output evidence, exact delivery bindings, cache reuse/invalidation and failed-Executor resume. Problem Solver v2, Grader and all live quality remain `NOT_VERIFIED` until their own stages.
+Current conclusion: Teaching and Problem v3.2 are `SOURCE_IMPLEMENTED` and `LOCAL_CONTRACT_VERIFIED`; their deterministic private-image Problem→Teaching→exact-return browser path is `LOCAL_FAKE_PROVIDER_VERIFIED`. Tests cover four majors × two cases, REQUIRED preservation, injection handling, malformed output evidence, exact delivery bindings, cache reuse/invalidation, failed-Executor resume, text/index/image source identity, visual uncertainty, validated/unresolved links and Bridge persistence. The fake 1×1 PNG does not establish visual accuracy. Assessment Grader, AUTO router and all live-model quality remain `NOT_VERIFIED` until their own stages.

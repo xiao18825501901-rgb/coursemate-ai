@@ -1,6 +1,6 @@
 # CourseMate V3 — Requirements and Traceability
 
-Version: Stage 3 implementation baseline, 2026-09-12
+Version: Stage 4 implementation baseline, 2026-09-12
 
 Primary source: `COURSEMATE_V3_CODEX_IMPLEMENTATION_MASTER_PROMPT.md` SHA-256 `9C1E377EA1CDA0516FBEFB66F7A85F94C8C699C5F0546A7CEDEE8ECD7EE82FD7`
 Status vocabulary: `IMPLEMENTED`, `PARTIAL`, `PLANNED`, `EXTERNAL_BLOCKED`, `NOT_VERIFIED`.
@@ -31,7 +31,7 @@ No evidence level implies a higher one.
 | Q5 | Hybrid pool: official, own private, generated, external-inspired original | Authorized selector; source/provenance on immutable question revision | planned question bank/attempt schema | T-Q5 source mix, privacy, exposure/family exclusion, weak-point coverage | PLANNED |
 | Q6 | KnowledgeNode is `COMPOSITE` or `ATOMIC`; parent has no contradictory mastery fact | Registry owns type/graph; aggregate parent projection | migration 014 + `learning/knowledge.py`; COMPOSITE has no Spec/journey and derives unique ATOMIC descendants | T-Q6 atomic/composite constraints, DAG cycle/orphan, deterministic aggregation | SOURCE_IMPLEMENTED / LOCAL_CONTRACT_VERIFIED |
 | Q7 | Canonical node + private overlay; personal tree references nodes and shared state | Course-scoped semantic identity; owner-scoped private nodes/evidence | migration 014 + tree API/Web projection; node IDs are referenced, not copied | T-Q7 no name-only/global merge, no copied grades/progress, cross-user isolation | SOURCE_IMPLEMENTED / LOCAL_CONTRACT_VERIFIED; official authoring Stage 6 |
-| Q8 | LEARNED iff all REQUIRED Teaching Items have valid delivery coverage; no assessment gate | Backend set inclusion over fixed Spec version and exact persisted delivery evidence | normalized `teaching_items`, exact-version journeys, migration 015 delivery ledger and compiler validation | T-Q8 incomplete/fake item/wrong Spec/Plan/Unit/Section rejected; score irrelevant | SOURCE_IMPLEMENTED / LOCAL_CONTRACT_VERIFIED for Teaching delivery; Problem coverage remains Stage 4 |
+| Q8 | LEARNED iff all REQUIRED Teaching Items have valid delivery coverage; no assessment gate | Backend set inclusion over fixed Spec version and exact persisted delivery evidence | normalized `teaching_items`, exact-version journeys, migration 015 delivery ledger and compiler validation | T-Q8 incomplete/fake item/wrong Spec/Plan/Unit/Section rejected; score irrelevant | SOURCE_IMPLEMENTED / LOCAL_CONTRACT_VERIFIED for Teaching delivery; validated Problem-step coverage contribution remains Stage 5 hardening |
 | Q9 | Teaching state machine + dynamic bounded Teaching Units; backend says what, model says how | Journey state, one bounded operation, explicit continue/replan/failure; reusable full plan | operation/unit runtime + `learning/plans.py` + migration 015 | T-Q9 resume/idempotency/stale revision/invalid output/unknown outcome/cache; daily cap remains later | PARTIAL; full-plan cache and failed-Executor resume LOCAL_CONTRACT_VERIFIED |
 | Q10 | Major → Course → Node Spec → User Adaptation; versioned REQUIRED/RECOMMENDED/OPTIONAL; official review | Versioned templates/specs; server compiler establishes rule precedence | `prompts/v3.2`, `models.py`, `compiler.py`, immutable Spec/Plan triggers | T-Q10 four majors × case A/B; preferences cannot delete REQUIRED; unpublished official changes invisible | SOURCE_IMPLEMENTED / LOCAL_CONTRACT_VERIFIED for Teaching; official review Stage 6 |
 
@@ -46,15 +46,15 @@ No evidence level implies a higher one.
 | R-FILE-03 | No notebook execution; bounded CSV/text; safe Office conversion; no fake previews | Preview policy and converter sandbox | `learning/previews.py`, `learning/uploads.py`; converter absent by design | Malformed/oversize/macro/symlink tests; Content-Disposition and nosniff | SOURCE_IMPLEMENTED / LOCAL_CONTRACT_VERIFIED; production converter NOT_VERIFIED |
 | R-PRIV-01 | A user adding files to an official course creates a private overlay | Workspace private course/corpus | 011 + workspace upload + frozen version scope | Official course unchanged; private original+chunks+citations owner-only | SOURCE_IMPLEMENTED / LOCAL_CONTRACT_VERIFIED |
 | R-PRIV-02 | Retrieval defaults to official + current owner’s private data, never another user’s | Authorized evidence resolver | pre-candidate repository SQL + orchestrator recheck | A/B/Admin/anonymous retrieval and citation tests | SOURCE_IMPLEMENTED / LOCAL_CONTRACT_VERIFIED for retrieval; public citation API pending |
-| R-PRIV-03 | Every document/chunk/question/citation keeps scope, owner, course and source version | Provenance columns/contracts | 013 versions/chunk bindings; learning evidence response | Row/API contract and cross-user cache tests | PARTIAL; documents/chunks implemented, question/cache provenance pending |
+| R-PRIV-03 | Every document/chunk/question/citation keeps scope, owner, course and source version | Provenance columns/contracts | 013 versions/chunk bindings; 016 problem index/revisions; learning evidence response | Row/API contract and cross-user cache tests | PARTIAL; documents/chunks/questions implemented, public citation/cache provenance hardening pending |
 | R-TREE-01 | Stable reviewed canonical tree and private personalized plan tree share nodes/state | TreeVersion/Membership/PlanVersion | migration 014, `knowledge.py`, API and `KnowledgeTrees.tsx` | publish freeze, personalized references, same progress projection | SOURCE_IMPLEMENTED / LOCAL_CONTRACT_VERIFIED; review UI Stage 6 |
 | R-TREE-02 | Hierarchy differs from prerequisite DAG; invalid cycles/orphans rejected | Registry transaction | separate membership/edge tables, service validator and DB source constraints | graph constraint/property tests | SOURCE_IMPLEMENTED / LOCAL_CONTRACT_VERIFIED |
 | R-SPEC-01 | Teaching Spec is immutable by version and items are classified | Spec registry | 012 immutable JSON retained; 014 normalized items/metadata; exact-version journey resolution | old journey retains pinned version; new version starts independently | SOURCE_IMPLEMENTED / LOCAL_FAKE_PROVIDER_VERIFIED |
 | R-TEACH-01 | Planner supports “what only” and “what+how”; Executor receives bounded evidence | Versioned templates + strict Pydantic compiler | `prompts/v3.2`, full-path plan compiler, selected-evidence Executor context | four majors × both cases; injection and invalid ID tests | SOURCE_IMPLEMENTED / LOCAL_CONTRACT_VERIFIED |
 | R-TEACH-02 | Plans are cached and regenerated only on defined triggers | PlanVersion cache key includes owner/workspace/course/node/spec/preferences/model/protocol/policy/sources/bridge | migration 015 + `learning/plans.py` / orchestrator | cache hit, explicit/preference invalidation, failed Executor reuse, no second Planner tests | SOURCE_IMPLEMENTED / LOCAL_CONTRACT_VERIFIED |
-| R-PROB-01 | Problem Mode defaults to full reference answer and steps | Problem service; solution revision | minimal text flow | provenance/disclaimer, image uncertainty, failure and persistence | PARTIAL |
-| R-PROB-02 | Each step offers knowledge questions and can contribute validated coverage | StepKnowledgeLink and delivery evidence | Bridge exists; generic question per step | exact node/spec/item/version tests | PARTIAL |
-| R-BRIDGE-01 | Bridge binds problem, solution revision, step, node, teaching journey, context and return anchor | Immutable bridge + revision/idempotency | 012 minimal columns | refresh/relogin, stale solution, path-ID idempotency, one-click return | PARTIAL |
+| R-PROB-01 | Problem Mode defaults to full reference answer and steps | Problem service; immutable source/problem/attempt/solution revisions | migration 016 + `learning/problems.py` + v3.2 `problem.md` | text/index/image provenance, disclaimer, image uncertainty, failure and persistence | SOURCE_IMPLEMENTED / LOCAL_FAKE_PROVIDER_VERIFIED; live visual quality NOT_VERIFIED |
+| R-PROB-02 | Each step offers knowledge questions and can contribute validated coverage | normalized StepKnowledgeLink and delivery evidence | exact node/spec/item link or explicit UNRESOLVED; Bridge consumes server link ID | exact node/spec/item/version tests; Problem delivery contribution | PARTIAL; link/Bridge identity LOCAL_CONTRACT_VERIFIED, direct Problem coverage contribution pending |
+| R-BRIDGE-01 | Bridge binds problem, solution revision, step, node, teaching journey, context and return anchor | Immutable normalized context + revision/idempotency | 012 stable bridge + 016 `learning_bridge_contexts` | refresh/relogin, forged link, semantic duplicate, path-ID idempotency, one-click return | SOURCE_IMPLEMENTED / LOCAL_FAKE_PROVIDER_VERIFIED for Problem→Teaching→return |
 | R-UI-01 | Two collaborative panes share state; horizontal/vertical, resizable; narrow screen preserves both | Server workspace state + React view | dual pane/range control plus reviewed/personal tree cards and dual axes | keyboard, screen-reader labels, 320px, refresh/relogin, race tests | PARTIAL; 375px Playwright and tree flow verified, drag/tab/a11y audit pending |
 | R-ASSESS-01 | Formal Assessment is distinct; answers/rubrics never shipped before submission | Assessment service and server-only revisions | absent | bundle/network inspection; assisted practice cannot become independent evidence | PLANNED |
 | R-ASSESS-02 | Interruption/unsubmitted is not F; unassessed is `NOT_ASSESSED` | Session state machine | absent | abandon/retry/timeout tests | PLANNED |
@@ -65,7 +65,7 @@ No evidence level implies a higher one.
 | R-PUB-02 | Private learning data is not visible through generic Admin; review uses scoped snapshot | Owner ACL + explicit review grant | workspace owner-only partial | Admin 404 matrix and expiring snapshot tests | PARTIAL |
 | R-LIFE-01 | Revocation/deletion disables future retrieval and artifact/context access without erasing history silently | Lifecycle state + tombstone/audit | raw missing file explicit; full model absent | revoke while bridge open, citations/history behavior, no orphan leaks | PLANNED |
 | R-OPS-01 | No infinite autonomous loop; bounded operations, explicit continuation and cost controls | Operation state/idempotency, max 12-unit Plan, safe call ledger; daily cap later | orchestrator/provider + migration 015 | concurrency, invalid/unknown outcome, no hidden retry, token/latency/usage ledger; daily cap | PARTIAL; bounded calls and ledger LOCAL_CONTRACT_VERIFIED |
-| R-MIG-01 | Additive migration on isolated copies; preserve V2 rows/files/index/history | SQLite backup + numbered migrations | 011–015 + rehearsal/subset scripts | two-run idempotency, hashes/counts, integrity/FK, isolated restore | PARTIAL; DB-copy rehearsal through 015 passed, uploads/full restore pending |
+| R-MIG-01 | Additive migration on isolated copies; preserve V2 rows/files/index/history | SQLite backup + numbered migrations | 011–016 + rehearsal/subset scripts | two-run idempotency, hashes/counts, normalization, integrity/FK, isolated restore | PARTIAL; current 1–15 DB-copy to 016 passed, uploads/full restore pending |
 | R-DEPLOY-01 | Feature-flagged controlled release and rollback; production evidence is explicit | deploy config/runbook | flags exist; deploy template incomplete | V3-off/old frontend compatibility; preview; canary; rollback drill | PARTIAL |
 
 ## Required prompt assets
@@ -80,7 +80,7 @@ No evidence level implies a higher one.
 | P-06 | Energy strategy | `prompts/v3.2/ENERGY.md` | compiler selection | SOURCE_IMPLEMENTED / LOCAL_CONTRACT_VERIFIED |
 | P-07 | Case A: target known, method unknown | `prompts/v3.2/cases.md` | compiler selection | SOURCE_IMPLEMENTED / LOCAL_CONTRACT_VERIFIED |
 | P-08 | Case B: target and method known | `prompts/v3.2/cases.md` | compiler selection | SOURCE_IMPLEMENTED / LOCAL_CONTRACT_VERIFIED |
-| P-09 | Problem Solver | inline/minimal deterministic path | solution generation | PLANNED versioned asset |
+| P-09 | Problem Solver | `prompts/v3.2/problem.md` | text/index/image solution generation | SOURCE_IMPLEMENTED / LOCAL_CONTRACT_VERIFIED |
 | P-10 | Assessment Grader | absent | post-submit grader only | PLANNED versioned asset |
 
 ## Mandatory negative test matrix
@@ -102,9 +102,9 @@ No evidence level implies a higher one.
 
 ## Current critical path
 
-1. Keep migrations 011–015 frozen and retain the Stage 1–3 regression suites.
-2. Stage 4: version Problem/image inputs, solutions and StepKnowledgeLinks; harden Bridge persistence without weakening current owner/workspace/version checks.
-3. Preserve the v3.2 Teaching cache/delivery contracts while both pane directions and image uncertainty are added.
-4. Rerun the isolated real-data-copy rehearsal after every new migration, while leaving the real source database unchanged.
+1. Keep migrations 011–016 frozen and retain the Stage 1–4 regression suites.
+2. Stage 5: implement frozen five-question Assessment, assisted/exposed separation, deterministic score validation, PerformanceEvidence and incomplete GradePolicy behavior.
+3. Preserve the v3.2 Teaching/Problem/Bridge contracts while Assessment feeds weak-point and trigger-bound replan projections without changing Q8.
+4. Rerun the isolated real-data-copy rehearsal after every new migration; never infer the current real-local/production Schema from older notes.
 
 External blockers do not stop the local critical path: live account/region/budget, production credentials, GradePolicy missing business values, and official publication approval remain explicitly unverified.

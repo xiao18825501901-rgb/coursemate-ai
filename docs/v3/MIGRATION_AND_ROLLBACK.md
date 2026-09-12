@@ -1,29 +1,29 @@
 # CourseMate V3 — Migration and Rollback
 
-Version: Stage 3 migration rehearsal evidence, 2026-09-12.
-No production or real local database migration is authorized or claimed by this document.
+Version: Stage 4 migration rehearsal evidence, 2026-09-12.
+No production migration or real-local migration 016 is authorized or claimed by this document.
 
 ## 1. Known migration reality
 
 | Location | Last verified versions | Evidence | Status |
 |---|---:|---|---|
 | repository V2 base | 1–10 | `app/db.py`, existing tests | current stable baseline |
-| repository V3 files | 011–015 committed on the V3 feature branch | SQL source + automated tests | source implemented through Stage 3 |
-| pytest/E2E databases | 1–15 when `v3_enabled=True` | temporary synthetic runs | disposable local evidence |
-| isolated real-data copy | 1–15 | `work/v3-migration-rehearsal-05/migration-evidence.json` | local copy only; private, never commit/share |
-| local real `data/rag.sqlite3` | 1–10, integrity ok | SQLite read-only audit | deliberately unchanged |
+| repository V3 files | 011–016 committed on the V3 feature branch | SQL source + automated tests | source implemented through Stage 4 |
+| pytest/E2E databases | 1–16 when `v3_enabled=True` | temporary synthetic runs | disposable local evidence |
+| isolated real-data copy | 1–16 | `work/v3-migration-rehearsal-07/migration-evidence.json` | local copy only; private, never commit/share |
+| local real `data/rag.sqlite3` | 1–15, integrity ok | 2026-09-12 17:25 SQLite read-only audit | not changed by the 016 rehearsal; origin/time of 11–15 UNKNOWN |
 | production database | UNKNOWN | no current access/evidence | manual verification required |
 
-011 creates owner×course workspaces and hidden private corpora. 012 creates the current minimal journey/problem/bridge/operation tables. 013 adds immutable source versions, derived artifacts and chunk-to-source-version bindings, and backfills every existing document/chunk without rewriting original bytes. 014 adds the Registry, aliases/lineage/material evidence, normalized Spec metadata/items, tree versions/memberships and separate prerequisite edges while retaining all 012 node/Spec IDs. 015 adds immutable learning-preference/TeachingPlan versions, normalized Plan units and links, exact TeachingDeliveryEvidence and safe model-run evidence; legacy coverage is preserved with an explicit non-v3.2 validation status. Earlier disposable copies may contain an early 011 `CASCADE` variant while the current file uses `RESTRICT`; therefore version number alone is not enough to prove exact shape. Do not edit/delete/re-number applied history to hide that fact. Migrations 011–015 are now frozen; correct forward with 016+.
+011 creates owner×course workspaces and hidden private corpora. 012 creates the current minimal journey/problem/bridge/operation tables. 013 adds immutable source versions, derived artifacts and chunk-to-source-version bindings. 014 adds the Registry, aliases/lineage/material evidence, normalized Spec metadata/items, tree versions/memberships and separate prerequisite edges. 015 adds learning-preference/TeachingPlan versions, normalized Plan links, exact TeachingDeliveryEvidence and safe model-run evidence. 016 adds the structural problem index and immutable Problem/Solution revisions, Attempts, StepKnowledgeLinks and LearningBridgeContexts; old rows remain and are explicitly marked `LEGACY_PRESERVED`. Earlier applied copies may differ in exact historical shape; version number alone is not enough to prove it. Do not edit/delete/re-number applied history. Migrations 011–016 are frozen; correct forward with 017+.
 
 ## 2. Activation rule
 
 `SUPPLEMENTAL_ENGINEERING_DECISION`: V3 Schema activation follows the server-side `V3_ENABLED` setting.
 
 - `V3_ENABLED=false`: initialization and readiness require versions 1–10; no V3 table is referenced by V2 course/publication paths.
-- `V3_ENABLED=true`: initialization applies 011–015 and readiness requires the complete set 1–15.
+- `V3_ENABLED=true`: initialization applies 011–016 and readiness requires the complete set 1–16.
 - Web `VITE_V3_ENABLED` controls navigation only and never authorizes a Schema migration.
-- Future 016+ migrations must be included only after their corresponding feature slice, idempotency and copy rehearsal pass.
+- Future 017+ migrations must be included only after their corresponding feature slice, idempotency and copy rehearsal pass.
 
 The rule has focused local evidence in `test_database.py` and `test_learning_workspace.py`. Production remains unverified.
 
@@ -36,7 +36,7 @@ Actual table/column names are finalized test-first; numbers below are allocation
 | 013 (implemented) | DocumentVersion, DerivedArtifact and chunk source provenance | one immutable version per existing document; bind every existing chunk without rewriting bytes/chunks |
 | 014 (implemented) | MaterialEvidence, Registry/aliases/lineage, normalized Spec items, TreeVersion/Membership and prerequisite edges | preserve existing node/Spec IDs; draft official trees stay invisible; no global name merge or automatic publication |
 | 015 (implemented) | TeachingPlan/preference versions, cache identity, normalized Plan units/links, exact delivery evidence and safe model-run evidence | retain JSON Spec and old journeys; old coverage becomes `LEGACY_PRESERVED`, never silently reclassified as validated |
-| 016 | Problem revisions/images/knowledge links/attempt exposure and hardened Bridge | preserve current problem/solution/step IDs through mapping columns |
+| 016 (implemented) | Problem index/revisions/images/knowledge links/attempt exposure and hardened Bridge context | preserve current problem/solution/step/bridge IDs; backfill as `LEGACY_PRESERVED`, never silently validate |
 | 017 | Assessment pool/blueprint/session/attempt/performance | no legacy grade inference; all users begin `NOT_ASSESSED` |
 | 018 | GradePolicy/GradeSnapshot | missing A-/thresholds stored null/unconfigured; no default official policy |
 | 019+ | Publication review snapshots/grants/outbox/audit hardening | no existing private data auto-published |
@@ -71,28 +71,34 @@ Example from repository root, using an unused target name:
 ```powershell
 services/rag-api/.venv/Scripts/python.exe scripts/rehearse_v3_migration.py `
   --source data/rag.sqlite3 `
-  --target work/v3-migration-rehearsal-06
+  --target work/v3-migration-rehearsal-08
 ```
 
-This command creates a private local copy and therefore must not be run in a directory that is synced/published. The target must be a fresh name; `-06` is only the next example after the retained `-05` evidence. Do not paste `migration-evidence.json` if future revisions include identifiers; inspect its schema first. The existing rehearsal does not copy uploads and is not a full-site restore drill.
+This command creates a private local copy and therefore must not be run in a directory that is synced/published. The target must be a fresh name; `-08` is only the next example after the retained `-07` evidence. Do not paste `migration-evidence.json` if future revisions include identifiers; inspect its schema first. The existing rehearsal does not copy uploads and is not a full-site restore drill.
 
-The 2026-09-12 Stage 3 `v3-migration-rehearsal-05` run opened the then-current source database through SQLite read-only URI mode, copied it with SQLite online backup, initialized twice and reported:
+The 2026-09-12 Stage 4 `v3-migration-rehearsal-07` run opened the current source database through SQLite read-only URI mode, copied it with SQLite online backup, initialized twice and reported:
 
 ```text
 old_rows_unchanged=true
 integrity=ok
 foreign_key_violations=0
-schema_versions=1..15
+schema_versions=1..16
 documents=69
 document_versions=69
 chunks_without_source_version=0 of 1937
 invalid_source_owners=0
+problem_index_entries=0; invalid_problem_index_sources=0
+learning problems/revisions=2/2
+learning solutions/revisions=2/2
+learning steps/normalized links=2/2
+learning bridges/contexts=2/2
+all missing-normalization counters=0
 v3_invariants_ok=true
 ```
 
-Those are aggregate local-copy facts only. Upload bytes were not copied, no application smoke was run against the copy, and the source `data/rag.sqlite3` remained at versions 1–10.
+The zero problem-index count is an honest source fact: the current 1,937 legacy chunks contain no `question_number` structural metadata, so the migration did not manufacture question identity. The nonzero 2/2 runtime counts prove the legacy normalization assertions were not vacuous. These remain aggregate local-copy facts only. Upload bytes were not copied and no application smoke was run against the copy. The source hash was unchanged across rehearsal and the source remained at versions 1–15; who previously applied 11–15 is unknown.
 
-The same fresh `-05` copy then ran `scripts/validate_v3_cs3481_subset.py`. It bound two existing CS3481 Chunk/version references to a three-node DRAFT fixture, kept reviewer fields null, separated two hierarchy edges from one prerequisite edge, and confirmed that the learner view still returned `NO_REVIEWED_TREE`. This validation makes zero model calls and refuses database paths outside ignored `work/`. It is a Schema/provenance rehearsal, not approval of the fixture as official course content.
+The same fresh `-07` copy then ran `scripts/validate_v3_cs3481_subset.py`. It bound two existing CS3481 Chunk/version references to a three-node DRAFT fixture, kept reviewer fields null, separated two hierarchy edges from one prerequisite edge, and confirmed that the learner view still returned `NO_REVIEWED_TREE`. This validation makes zero model calls and refuses database paths outside ignored `work/`. It is a Schema/provenance rehearsal, not approval of the fixture as official course content.
 
 Required database assertions:
 
@@ -159,9 +165,9 @@ Rollback normally means code/flag rollback with additive tables retained. Droppi
 Migration/restore acceptance is a separate result from source and model quality:
 
 ```text
-SOURCE MIGRATIONS REVIEWED: 011–015 for the current Stage 1–3 slices
-SYNTHETIC MIGRATION VERIFIED: 011–015, including repeat initialization
-REAL-DATA COPY MIGRATION VERIFIED: 011–015 only; must rerun for every later final Schema
+SOURCE MIGRATIONS REVIEWED: 011–016 for the current Stage 1–4 slices
+SYNTHETIC MIGRATION VERIFIED: 011–016, including repeat initialization
+REAL-DATA COPY MIGRATION VERIFIED: current source 1–15 to isolated copy 1–16; must rerun for every later final Schema
 ISOLATED FULL RESTORE VERIFIED: not yet
 PRODUCTION MIGRATION VERIFIED: not verified
 PRODUCTION ROLLBACK DRILL VERIFIED: not verified

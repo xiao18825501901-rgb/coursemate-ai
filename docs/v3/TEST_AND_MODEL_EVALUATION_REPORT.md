@@ -1,25 +1,25 @@
 # CourseMate V3 — Test and Model Evaluation Report
 
-Last updated: 2026-09-12 after Stage 3 implementation and review.
+Last updated: 2026-09-12 after Stage 4 implementation and review.
 
 Branch: `feature/coursemate-v3-persistent-learning`
 
-Stage-switch base: `c6158cf34142c311e77a58aa49a3b0b7cbe7fbd8`; Stage 1 commits are `00961ef` through `e9ecd00`; Stage 2 code commits are `6eeff90`, `5a1f9d0`, `0be1a47`, `86032bb` and `5dba760`; Stage 3 code commits are `956d849`, `da1fa2a`, `e5d14d3`, `52514d1` and `2256cf0`.
+Stage-switch base: `c6158cf34142c311e77a58aa49a3b0b7cbe7fbd8`; Stage 1 commits are `00961ef` through `e9ecd00`; Stage 2 code commits are `6eeff90`, `5a1f9d0`, `0be1a47`, `86032bb` and `5dba760`; Stage 3 code commits are `956d849`, `da1fa2a`, `e5d14d3`, `52514d1` and `2256cf0`; Stage 4 code/evidence commits are `5b88c3e`, `ebe2ffa`, `1eb94ed` and `cf8466b`.
 This report is cumulative and must be updated after every behavior change; old PASS does not cover later code.
 
 ## 1. Current evidence summary
 
 | Acceptance layer | Result | Meaning |
 |---|---|---|
-| Source implementation | PARTIAL | Stages 1–3 source slices exist; Stages 4–8 are not complete |
-| Python automated tests | PASS for current Stage 3 code | 264 passed; 1 known dependency deprecation plus local pytest-cache ACL warning |
-| Web unit tests | PASS | 8 files / 33 tests passed |
+| Source implementation | PARTIAL | Stages 1–4 source slices exist; Stages 5–8 are not complete |
+| Python automated tests | PASS for current Stage 4 code | 270 passed; 1 known dependency deprecation plus local pytest-cache ACL warning |
+| Web unit tests | PASS | 9 files / 35 tests passed |
 | Task Agent unit tests | PASS | 53 passed; V3 did not take over task tools |
-| Python lint/type | PASS | Ruff all checks; mypy strict app 55 files |
+| Python lint/type | PASS | Ruff all checks; mypy strict app 56 files |
 | TS typecheck/build | PASS | both workspaces typecheck; production bundles built locally |
 | V3 browser flow | LOCAL_FAKE_PROVIDER_VERIFIED | 1 Playwright flow passed with isolated synthetic DB/test identity/deterministic provider |
 | Real model | NOT VERIFIED | no paid call, account/region/endpoint unknown |
-| Real-data final migration/restore | PARTIAL | 011–015 passed on an isolated read-only-source copy; uploads/full restore/final Schema remain unverified |
+| Real-data final migration/restore | PARTIAL | current local 1–15 source copied read-only and upgraded through 016; uploads/full restore/final Schema remain unverified |
 | Production | NOT VERIFIED | no current release/auth/provider/Schema smoke evidence |
 
 ## 2. Cumulative local commands and actual results
@@ -247,16 +247,65 @@ chunks=1937; unbound_chunks=0; invalid_source_owners=0
 CS3481 fixture: DRAFT, learner view NO_REVIEWED_TREE, model_calls=0
 ```
 
-The source database was opened read-only and stayed at 1–10. The private evidence directory is ignored and is not a deployment artifact. This is not a full uploads/Task Agent restore drill.
+The Stage 3 note originally described the source as 1–10. The later Stage 4 read-only audit found the actual current source at 1–15 with a last-write time predating the Stage 4 rehearsal; therefore 1–10 is retained only as a superseded historical observation, not current fact. The private evidence directory is ignored and is not a deployment artifact. This is not a full uploads/Task Agent restore drill.
 
-## 6. Test data and privacy
+## 6. Stage 4 Problem, multimodal and Bridge evidence
+
+Stage 4 was driven by failing tests for missing Problem revision/index tables, exact knowledge-link identity, private image authorization and restored normalized state. A final UI test was added red-first for the missing post-upload source refresh. The first targeted command used a root-relative test path after npm had already changed into the Web workspace and found no tests; rerunning with `src/...` exercised the intended file. The first Playwright edit also used a RegExp label with `selectOption`, which only accepts a concrete string/value/index; the test was corrected to select the first authorized option. No product assertion was deleted.
+
+Current full-gate results:
+
+```text
+Python pytest: 270 passed, 2 warnings, 76.29s
+Ruff app/tests and migration script: All checks passed
+mypy: Success, 56 source files
+Web Vitest: 9 files / 35 tests passed
+Task Agent Vitest: 9 files / 53 tests passed
+TypeScript typecheck: Web PASS; Agent PASS
+Production build: Web 116 modules PASS; Agent tsc PASS
+Playwright V3 private-image path: 1 passed, 14.7s; test body 5.8s
+```
+
+The warning categories remain Starlette's `httpx` TestClient deprecation and inability to write repository-local `.pytest_cache`; neither changed selection. Browser console errors and failed requests remained empty. Desktop 1280px and mobile 375px screenshots were visually inspected: panes remain side-by-side on desktop and become a non-overflowing single column on mobile.
+
+Locally verified Problem/Bridge behavior:
+
+- migration 016 builds the incremental structured index only from chunks with explicit question metadata and adds immutable ProblemRevision, Attempt, SolutionRevision, StepKnowledgeLink and LearningBridgeContext chains;
+- authorized indexed lookup pins exact document version/hash/locator; User B and forged workspace IDs are rejected before retrieval or model context;
+- image input accepts an existing authorized PNG/JPEG DocumentVersion, checks scope/path/size/hash, repeats byte hash in the provider value, and sends one private Base64 data URI without a public URL;
+- provider/model-run serialization excludes image bytes, data URI, prompt body and private content while retaining content-free version/hash/size metadata;
+- strict v3.2 Problem output includes transcription, visual uncertainty, conditions, exam answer, numbered steps, formulae, units, checks, common mistakes, sources and answer verification;
+- a VALIDATED knowledge link requires exact node/spec/item and a DB-authorized workspace chain; UNRESOLVED links cannot create a Bridge; legacy links remain visibly `LEGACY_PRESERVED`;
+- duplicate semantic Bridge creation is idempotent, forged links fail, and normalized state plus exact return anchor survive refresh/new browser context;
+- uploading a private image refreshes the Problem source selector without a page reload.
+
+The Playwright fixture is a synthetic 1×1 PNG plus an explicit transcription hint and a deterministic fake provider. It proves browser upload, ACL, request shape, persistence, uncertainty display and navigation; it explicitly does **not** prove qwen vision accuracy, OCR quality or answer correctness.
+
+Fresh isolated copy rehearsal `work/v3-migration-rehearsal-07/`:
+
+```text
+source/current versions=1..15; copied result=1..16
+source SHA-256 before == after = BCB04E...AE93ED
+old_rows_unchanged=true; integrity=ok; foreign_key_violations=0
+documents/document_versions=69/69; unbound_chunks=0
+problem_index_entries=0; invalid_problem_index_sources=0
+legacy problem/revision=2/2; solution/revision=2/2
+steps/normalized links=2/2; bridges/contexts=2/2
+all missing-normalization counters=0
+```
+
+The zero index is expected and important: legacy chunks contain no structural `question_number`, so the migration does not invent problem identities. The nonzero 2/2 runtime rows prove backfill checks are not vacuous. The source DB was read-only during rehearsal and its SHA remained unchanged. Contrary to the prior Stage 3 note, the current real-local DB was already at 1–15 before this rehearsal; its modification time predates the rehearsal, and the actor/time applying 11–15 is unknown. No migration 016 was applied to it.
+
+Official current Model Studio documentation was checked for the local adapter decision: `qwen3.8-max` is listed for Responses and multimodal image input; Responses image content accepts a complete Base64 data URI. This verifies only the documented contract. The actual account, region, endpoint, model entitlement, response quality, usage and price were not called or verified.
+
+## 7. Test data and privacy
 
 - pytest uses `tmp_path` databases/uploads; V3 API fixtures set `v3_enabled=True` explicitly.
 - Playwright uses a new path under `work/` and fake content `2 + 3`; screenshots contain only synthetic values.
 - The local real RAG database was queried read-only for aggregate baseline facts and never passed to application initialization.
 - No private course body, user identity, key, prompt body or production response is included here.
 
-## 7. Model contract versus model quality
+## 8. Model contract versus model quality
 
 Current deterministic tests can prove:
 
@@ -277,23 +326,23 @@ They cannot prove:
 - production Clerk, Netlify, server/storage or multi-instance behavior;
 - actual token cost/latency/rate-limit behavior.
 
-## 8. Required future matrices
+## 9. Required future matrices
 
 | Stage | New evidence required before PASS |
 |---|---|
 | 1 | implemented preview/provenance slice is locally green; production storage, converter, full citation API and crash-safe deletion cleanup remain later gates |
 | 2 | locally verified; official author/review management remains Stage 6 and Assessment values remain Stage 5 |
 | 3 | locally verified; live provider quality/usage/cost remains Stage 7 and production remains Stage 8 |
-| 4 | text/image problem revisions, solution/step link, Bridge idempotency/revision/race, both directional pane flows, a11y/console/network |
+| 4 | locally verified for text/index/image revisions, solution/step link, private image, Problem→Teaching→return and persistence; reverse Teaching→Problem, two-user/Admin browser and full a11y remain overall gates |
 | 5 | five unequal/100, answer secrecy, assisted evidence, rubric arithmetic, unconfigured policy, weak points/replan triggers |
 | 6 | scoped review snapshot, consent/version substitution, withdraw/re-publish and generic Admin denial |
 | 7 | smallest approved live canaries with exact model/region/protocol/cost; four-major human rubric |
 | 8 | final full regression, final-Schema real-data copy + full restore, preview deploy and production smoke/rollback evidence |
 
-## 9. Open defects and non-PASS items
+## 10. Open defects and non-PASS items
 
 - Existing `package-lock` audit history reported one high and three moderate advisories; reachability/remediation is not yet resolved and cannot be hidden in launch PASS.
-- Current Playwright covers one owner and Problem→Teaching→return; two-user/Admin browser paths, Teaching→Problem reverse initiation and accessibility-tree evidence remain missing.
+- Current Playwright covers one owner and private-image Problem→Teaching→return; two-user/Admin browser paths, Teaching→Problem reverse initiation and accessibility-tree evidence remain missing.
 - Model adapter now retains safe metadata on structured-output failure, but actual qwen3.8-max account access, regional endpoint, protocol compatibility, provider usage fidelity and cost remain unverified.
 - Official tree author/review APIs are not implemented; Stage 2 publication behavior is exercised only through direct local fixtures and cannot be called production-ready.
 - Assessment, GradePolicy and publication snapshot tests are not yet implemented. The displayed Assessment axis is an explicit `NOT_ASSESSED` placeholder, not persistent Assessment evidence.

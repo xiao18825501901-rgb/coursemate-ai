@@ -1,6 +1,6 @@
 # CourseMate V3 — Architecture and State Machines
 
-Version: Stage 3 current/target baseline, 2026-09-12.
+Version: Stage 4 current/target baseline, 2026-09-12.
 This document distinguishes `CURRENT` source from `TARGET` architecture. Target objects are not claimed implemented until linked tests pass.
 
 ## 1. System ownership
@@ -79,7 +79,7 @@ MaterialEvidence, TeachingDeliveryEvidence and PerformanceEvidence are separate 
 | `knowledge_nodes` (012) | minimal private/canonical ID fields | extend through registry/evidence/aliases, not rewrite 012 |
 | `teaching_specs` (012) | JSON items + immutable update trigger | retain historical rows; add normalized item/version metadata if needed |
 | `learning_journeys`, `teaching_units`, legacy `learning_coverage` | pinned Spec journey and saved unit state | migration 015 adds immutable Plan/Unit links and exact `teaching_delivery_evidence`; legacy rows remain visibly preserved |
-| `learning_problems/solutions/steps/bridges` | text problem and pinned step context | add immutable revision/source/image/knowledge-link/exposure fields |
+| `learning_problems/solutions/steps/bridges` | retained stable IDs and JSON projections | migration 016 adds immutable ProblemRevision/Attempt/SolutionRevision, StepKnowledgeLink and LearningBridgeContext; legacy rows are explicitly preserved, while new rows require exact versions and owner/workspace validation |
 | `learning_operations/events/model_runs` + `learning_model_run_evidence` | idempotent bounded generation and content-free call diagnostics | current path includes path IDs, base revision, safe invalid-output metadata and no hidden retry; daily aggregate caps remain target work |
 | Assessment/tree/publication snapshot tables | absent | add in numbered migrations after focused tests |
 
@@ -137,20 +137,22 @@ Reservation and finalization are short transactions; provider I/O occurs outside
 ### Problem/attempt exposure
 
 ```text
-DRAFT -> SOLUTION_AVAILABLE -> ANSWER_EXPOSED
-                       \----> PRACTICE_ATTEMPT(assisted)
+ProblemRevision(VALIDATED or LEGACY_PRESERVED)
+  -> ProblemAttempt(ACTIVE, assistance=ANSWER_EXPOSED)
+  -> SolutionRevision(MODEL_PROPOSED / NOT_INDEPENDENTLY_VERIFIED by default)
+  -> COMPLETED or CANCELLED
 ```
 
-Problem Mode deliberately exposes a full solution. Formal Assessment uses a distinct session and server-held answers. A question or family previously exposed cannot be silently counted as independent evidence.
+Problem Mode deliberately exposes a full solution and therefore creates `ANSWER_EXPOSED` evidence. Text, indexed and image inputs retain immutable source identity; source revocation may null only source FKs and never the retained hash/history. Formal Assessment uses a distinct session and server-held answers. A question or family previously exposed cannot be silently counted as independent evidence.
 
 ### LearningBridge
 
 ```text
-OPEN -> TEACHING_ACTIVE -> READY_TO_RETURN -> RETURNED
-  \----------> SOURCE_REVOKED / STALE_VERSION
+OPEN -> LEARNING -> READY_TO_RETURN -> COMPLETED
+  \---------------------> CANCELLED / SOURCE_UNAVAILABLE
 ```
 
-The bridge pins problem revision, solution revision, step, node, Spec/journey, original conditions, selected step content and return anchor. Return is still allowed to historical UI context when safe, but revoked source content is not rehydrated into new model context.
+The normalized bridge context pins problem revision, attempt, solution revision, step, validated knowledge link, node/Spec/item, journey, original conditions, selected question/reason and return anchor. Legacy contexts retain explicit `LEGACY_PRESERVED` status. Return is allowed to historical UI context when safe, but revoked source content is not rehydrated into new model context.
 
 ### Assessment session
 
