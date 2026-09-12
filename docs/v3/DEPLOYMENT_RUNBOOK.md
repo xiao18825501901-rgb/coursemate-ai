@@ -9,8 +9,8 @@ This runbook prepares a reversible V3 release; it is not proof that a deployment
 ```text
 Branch: feature/coursemate-v3-persistent-learning
 Source scope: Stages 1–5 implemented; Stages 6–8 incomplete
-V3 Schema in source: 1–18
-Local real RAG DB: 1–18 after documented E2E isolation incident/recovery
+V3 Schema in source: 1–20
+Local real RAG DB: 1–18 after documented E2E isolation incident/recovery; 019/020 not executed there
 Local tests: Python 284; Web 39; Task Agent 53; Playwright 5
 Live qwen3.8-max: NOT VERIFIED
 Production: NOT VERIFIED
@@ -112,7 +112,7 @@ If the Task Agent DB is not deployed, prove that fact from current runtime confi
 
 1. Deploy reviewed backend code with `V3_ENABLED=false`; keep the current Web V3 navigation off.
 2. Verify `/health`, V2 QA/citation/history/private-course and Task Agent flows with real Clerk identities.
-3. Drain writes, take the final verified backup, apply 011–018 once from one backend instance, then re-run Schema/integrity/count checks.
+3. Drain writes, take the final verified backup, apply 011–020 once from one backend instance, then re-run Schema/integrity/count/publication checks.
 4. Enable backend V3 only for an Owner/internal canary. Confirm generic Admin cannot access private workspace/Assessment data.
 5. With explicit budget, run the smallest live `qwen3.8-max` text/structured/image/stream canaries and record exact model/protocol/region/usage. Do not retry unknown paid outcomes automatically.
 6. Deploy Web with `VITE_V3_ENABLED=true` to preview/canary users only.
@@ -135,7 +135,7 @@ Advance only when error rate is within 10% and p95 within 20% of baseline with n
 | migration gate fails before exposure | keep writers drained and abort rollout | validate restore in isolation before any cutover |
 | post-exposure corruption | stop writers; preserve DB/WAL/uploads | Owner-authorized complete snapshot restore; preserve post-backup deltas separately |
 
-Do not drop 011–018 tables to “roll back.” Older code should ignore additive tables with V3 disabled. A database restore is a last-resort data operation requiring the exact target, verified recovery unit and Owner-controlled maintenance window.
+Do not drop 011–020 tables to “roll back.” Older code should ignore additive tables with V3 disabled. A database restore is a last-resort data operation requiring the exact target, verified recovery unit and Owner-controlled maintenance window.
 
 ## 9. Acceptance record
 

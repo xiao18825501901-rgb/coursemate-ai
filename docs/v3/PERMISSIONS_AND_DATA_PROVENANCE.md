@@ -1,6 +1,6 @@
 # CourseMate V3 — Permissions and Data Provenance
 
-Version: Stage 5 implemented security contract, 2026-09-12.
+Version: Stage 6 implemented security contract, 2026-09-12.
 Authentication is necessary but never sufficient: every API, file read, retrieval query, model context, cache and derivative must authorize the specific resource.
 
 ## 1. Principals and scopes
@@ -11,8 +11,8 @@ Authentication is necessary but never sufficient: every API, file read, retrieva
 | authenticated user | server-verified stable user ID | published official course data + their own courses/workspaces/records |
 | course owner | authenticated owner of a private user course | mutate that course within lifecycle/policy constraints |
 | workspace owner | authenticated owner of User×official-course workspace | all records in that workspace, unless source revoked/missing |
-| generic admin | ID in server-side admin allowlist | official course and V2 publication operations; **not** implicit access to private learning records |
-| scoped reviewer | authenticated actor with a server-issued review grant | only immutable review-snapshot versions during grant lifetime |
+| generic admin | ID in server-side admin allowlist | official drafts/releases and request-bound course/Overlay review snapshots; **not** implicit access to private learning records |
+| scoped reviewer | target role not separately implemented | future per-request/expiring assignment; current reviewer is an allowlisted Admin constrained by request-bound routes |
 | background worker | service identity with one job/resource capability | only the exact source/version/output path in the job |
 
 The client never chooses its owner ID, role or visibility. Test identities are accepted only when `app_env=test` and the deterministic provider is active.
@@ -48,7 +48,7 @@ Legend: `R` read; `W` mutate; `P` publish/review action; `—` denied/hidden. Al
 | Problem/solution/bridge/position | — | — | R/W through workflow | — | — |
 | Assessment answers/rubric before submit | — | — | server only | — | — |
 | submitted attempt/performance/grade | — | — | R; workflow writes | — | — |
-| publication request | — | — | create/withdraw | P for official workflow | snapshot review |
+| publication request | — | — | create/withdraw own course or exact Overlay selection | P for separate course/official/Overlay workflows | target: assigned snapshot only |
 | content-free operational diagnostics | — | — | own safe status | aggregate/server logs | — |
 
 Denial after authentication uses resource-not-found semantics for private objects so ID probing cannot distinguish nonexistent from unauthorized.
@@ -131,7 +131,7 @@ Original bytes are immutable. Conversion does not replace `stored_path`; it crea
 | user revokes/deletes private document | future retrieval, preview, conversion and context denied; jobs cancelled | opaque citations/event history per retention policy | async owned artifacts after tombstone/check |
 | workspace archived | no new operations/uploads; owner may export/read allowed history | journeys/coverage/assessment/audit | no implicit cascade |
 | course deletion request | blocked while active workspace/publication references exist | audit and explicit conflict | only after approved dependency plan |
-| publication withdrawn | public snapshot unavailable | immutable review/publication audit | private source remains owner data |
+| publication withdrawn | future public/shared access unavailable; cache generation changes | immutable review/publication audit | private source remains owner data; prior lawful downloads are not recallable |
 | reviewer grant expires | review routes denied | decision/audit | no owner data deletion |
 
 Deletion is not implemented through `git clean`, database rebuild or broad recursive filesystem commands. Foreign keys default to `RESTRICT` at ownership boundaries where silent cascading would lose private history.
@@ -140,4 +140,4 @@ Deletion is not implemented through `git clean`, database rebuild or broad recur
 
 Stage acceptance requires tests with two ordinary users, one admin, anonymous, and where applicable a scoped reviewer. At minimum test guessed IDs, list/count leakage, `HEAD`/`Range`, stale signed/derived URL, cross-user cache, missing file, symlink, unsafe media, revoked source during an open Bridge, provider error/log redaction and hidden assessment answer inspection.
 
-Current local evidence covers owner vs second user/Admin/anonymous for private metadata, stable source versions, preview, original and derived content including `GET`, `HEAD` and byte `Range`; reviewed owner-course sharing is revoked when publication is withdrawn. Retrieval SQL filters frozen source versions before candidate generation and evidence is authorized again before prompt assembly. Assessment tests exclude another owner’s private questions, `MODEL_ONLY` candidates and answer-exposed Problem families; pre-submit DTO tests find no hidden answer/rubric. Malformed/oversized Office, image, CSV/notebook preview and source/artifact integrity cases are covered. Dedicated public chunk/citation endpoints, scoped reviewer grants, production object storage and crash-safe cleanup retry remain unimplemented or unverified, so this document is not a production security acceptance.
+Current local evidence covers owner vs second user/Admin/anonymous for private metadata, stable source versions, preview, original and derived content including `GET`, `HEAD` and byte `Range`. Stage 6 additionally proves that reviewed course sharing is version-bound and revoked on withdrawal; an Overlay candidate list exposes only the current owner's private nodes/specs/document versions/artifacts/evidence; unselected resources and chats stay outside the snapshot; another user receives a non-disclosing 404; and generic Admin has no ambient private-document listing. Official publication requires a second Admin, locks reviewed node/tree/Spec/evidence inputs, publishes only the exact snapshot, withdraws a superseded release and increments withdrawal cache generation. Retrieval SQL filters frozen source versions before candidate generation and evidence is authorized again before prompt assembly. Assessment tests exclude another owner’s private questions, `MODEL_ONLY` candidates and answer-exposed Problem families; pre-submit DTO tests find no hidden answer/rubric. Malformed/oversized Office, image, CSV/notebook preview and source/artifact integrity cases are covered. Expiring per-reviewer assignment, dedicated public chunk/citation endpoints, production object storage and crash-safe cleanup retry remain unimplemented or unverified, so this document is not a production security acceptance.

@@ -1,6 +1,6 @@
 # CourseMate V3 — Architecture and State Machines
 
-Version: Stage 5 current/target baseline, 2026-09-12.
+Version: Stage 6 current/target baseline, 2026-09-12.
 This document distinguishes `CURRENT` source from `TARGET` architecture. Target objects are not claimed implemented until linked tests pass.
 
 ## 1. System ownership
@@ -82,7 +82,7 @@ MaterialEvidence, TeachingDeliveryEvidence and PerformanceEvidence are separate 
 | `learning_problems/solutions/steps/bridges` | retained stable IDs and JSON projections | migration 016 adds immutable ProblemRevision/Attempt/SolutionRevision, StepKnowledgeLink and LearningBridgeContext; legacy rows are explicitly preserved, while new rows require exact versions and owner/workspace validation |
 | `learning_operations/events/model_runs` + `learning_model_run_evidence` | idempotent bounded generation and content-free call diagnostics | current path includes path IDs, base revision, safe invalid-output metadata and no hidden retry; daily aggregate caps remain target work |
 | Assessment questions/rubrics/blueprints/sessions/evidence and GradePolicy/Snapshot | migrations 017/018 + `learning/assessments.py` | implemented for atomic-node formal Assessment; author/review UI and integrated COMPOSITE exams remain target work |
-| Publication review snapshot/grant tables | absent | add in 019+ after focused authorization/version-substitution tests |
+| Course/official-knowledge/Overlay publication snapshots, resources, releases and audit | migrations 019/020 + three distinct services | immutable exact-version packages, request-bound Admin reads, owner-scoped Overlay candidates, withdrawal/cache generation and official release supersession are implemented; expiring per-reviewer assignment remains target work |
 
 ## 5. State machines
 
@@ -190,9 +190,15 @@ PRIVATE_DRAFT -> REVIEW_PENDING -> PUBLISHED_SNAPSHOT
        ^             |                    |
        |             +-> REJECTED         +-> WITHDRAWN
        `------- edit creates new draft/version --------'
+
+OFFICIAL_DRAFT -> INDEPENDENT_REVIEW -> ACTIVE_RELEASE
+                                           |
+                       replacement --------+-> prior release WITHDRAWN
+
+OWNER_PRIVATE_SELECTION -> OVERLAY_REVIEW -> ACTIVE_SELECTED_OVERLAY
 ```
 
-Approval binds exact versions. Editing private source never changes an approved snapshot. Withdrawal changes public visibility but does not delete owner data or rewrite history.
+Approval binds exact versions. Course, official knowledge and selected private Overlay use separate request types and routes. Generic Admin access does not provide ambient private-workspace browsing: it exposes only request-bound snapshot resources. Editing private source never changes an approved snapshot. Withdrawal increments the release cache generation and stops future access without deleting owner data or rewriting the review history; prior lawful downloads cannot be recalled. Approving a replacement official tree withdraws the prior request/release in the same transaction and retires its tree.
 
 ## 6. Transaction and concurrency rules
 

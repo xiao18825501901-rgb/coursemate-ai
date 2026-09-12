@@ -1,25 +1,25 @@
 # CourseMate V3 — Test and Model Evaluation Report
 
-Last updated: 2026-09-12 after Stage 5 implementation, migration rehearsal and browser isolation recovery.
+Last updated: 2026-09-12 after Stage 6 scoped publication implementation and regression.
 
 Branch: `feature/coursemate-v3-persistent-learning`
 
-Stage-switch base: `c6158cf34142c311e77a58aa49a3b0b7cbe7fbd8`; Stage 1 commits are `00961ef` through `e9ecd00`; Stage 2 code commits are `6eeff90`, `5a1f9d0`, `0be1a47`, `86032bb` and `5dba760`; Stage 3 code commits are `956d849`, `da1fa2a`, `e5d14d3`, `52514d1` and `2256cf0`; Stage 4 code/evidence commits are `5b88c3e`, `ebe2ffa`, `1eb94ed` and `cf8466b`; Stage 5 implementation and hardening commits run from `141057a` through `a882d36`.
+Stage-switch base: `c6158cf34142c311e77a58aa49a3b0b7cbe7fbd8`; Stage 1 commits are `00961ef` through `e9ecd00`; Stage 2 code commits are `6eeff90`, `5a1f9d0`, `0be1a47`, `86032bb` and `5dba760`; Stage 3 code commits are `956d849`, `da1fa2a`, `e5d14d3`, `52514d1` and `2256cf0`; Stage 4 code/evidence commits are `5b88c3e`, `ebe2ffa`, `1eb94ed` and `cf8466b`; Stage 5 implementation and hardening commits run from `141057a` through `a882d36`; Stage 6 code commits are `c324373`, `ec3a2e9` and `88c06b4`.
 This report is cumulative and must be updated after every behavior change; old PASS does not cover later code.
 
 ## 1. Current evidence summary
 
 | Acceptance layer | Result | Meaning |
 |---|---|---|
-| Source implementation | PARTIAL | Stages 1–5 source slices exist; Stages 6–8 are not complete |
-| Python automated tests | PASS for current Stage 5 code | 284 passed; 1 known dependency deprecation plus local pytest-cache ACL warning |
-| Web unit tests | PASS | 10 files / 39 tests passed |
-| Task Agent unit tests | PASS | 53 passed; V3 did not take over task tools |
-| Python lint/type | PASS | Ruff app/tests/scripts; mypy strict app 57 files |
+| Source implementation | PARTIAL | Stages 1–6 source slices exist; live-model, final migration/restore and production stages remain incomplete |
+| Python automated tests | PASS for current Stage 6 code | 291 passed; 1 known Starlette/httpx dependency deprecation |
+| Web unit tests | PASS | 12 files / 48 tests passed |
+| Task Agent unit tests | PASS | 9 files / 53 tests passed after Stage 6; V3 did not take over task tools |
+| Python lint/type | PASS | Ruff app/tests; mypy app 60 files |
 | TS typecheck/build | PASS | both workspaces typecheck; production bundles built locally |
-| Browser regression | LOCAL_FAKE_PROVIDER_VERIFIED | 5 Playwright tests passed against an isolated DB copy; source DB/uploads before/after summaries matched |
+| Browser regression | PARTIAL | Stage 5 had 5 isolated Playwright passes; Stage 6 publication UI has unit/production-build evidence but has not yet been rerun in a real browser |
 | Real model | NOT VERIFIED | no paid call, account/region/endpoint unknown |
-| Real-data migration/recovery | PARTIAL | pre-test 1–15 snapshot copied and upgraded through 018; local E2E incident recovery verified; full two-DB/uploads restore remains unverified |
+| Real-data migration/recovery | PARTIAL | synthetic temporary DBs initialize through 020; latest real-data copy ends at 018; full two-DB/uploads restore remains unverified |
 | Production | NOT VERIFIED | no current release/auth/provider/Schema smoke evidence |
 
 ## 2. Cumulative local commands and actual results
@@ -363,14 +363,53 @@ upload manifest sha256=FB1DBBCEE7E46969C2F361BB8BA09534C13BE8C101AD8694A1A8E35D9
 
 This proves recovery and isolation for the current local run only. It is not production evidence.
 
-## 8. Test data and privacy
+## 8. Stage 6 scoped publication evidence
+
+Stage 6 separates three workflows instead of granting an Admin generic access to private data:
+
+- a user-course request freezes exact course metadata, document versions/chunks, derived artifacts and Teaching Profile after explicit material-sharing and rights confirmations;
+- an official-knowledge request freezes the exact tree, memberships, canonical node metadata, Teaching Spec versions/items and official evidence, and requires a different Admin to approve;
+- an Overlay request starts with every owner-private candidate unchecked and freezes only selected node/Spec, document version, artifact and evidence resources. Chats, solutions, progress, grades, assessments and unselected resources are outside the package.
+
+Migrations 019/020 add immutable review snapshots/resources, distinct official and Overlay requests, active/withdrawn releases, audit events and pending/approved resource locks. Withdrawal stops future access and increments the cache generation without claiming that prior lawful downloads can be recalled. Publishing a replacement official tree withdraws the prior request/release and retires its tree in the same transaction. A regression found and fixed an over-broad document lock that had prevented normal course deletion after withdrawal; snapshot cleanup now follows the deleted private request.
+
+Focused publication evidence after the final release-supersession fix:
+
+```text
+services/rag-api/.venv/Scripts/python.exe -m pytest -p no:cacheprovider \
+  services/rag-api/tests/test_publication_v3.py -q
+7 passed, 1 known dependency warning
+
+npm --prefix apps/web test -- --run \
+  src/pages/AdminPublicationPage.test.tsx \
+  src/pages/CourseCenterPage.test.tsx \
+  src/services/ragApi.test.ts \
+  src/components/OverlayPublicationPanel.test.tsx
+4 files / 25 tests passed
+```
+
+Final Stage 6 local regression:
+
+```text
+Python: 291 passed, 1 Starlette/httpx deprecation warning, 100.97s
+Web: 12 files / 48 tests passed
+Task Agent: 9 files / 53 tests passed
+Ruff: all checks passed
+mypy: 60 source files, no issues
+Web TypeScript + production Vite build: passed; 118 modules transformed
+Task Agent TypeScript + build: passed
+```
+
+No Stage 6 browser session, real `qwen3.8-max` call, real-data-copy migration through 020, human official-content approval or production deployment has been performed. Exact model/account/region/cost and production status remain `NOT VERIFIED`.
+
+## 9. Test data and privacy
 
 - pytest uses `tmp_path` databases/uploads; V3 API fixtures set `v3_enabled=True` explicitly.
 - Playwright now uses a read-only online copy under `work/`, a separate upload root and fake content `2 + 3`; screenshots contain only synthetic values.
 - The local real RAG database was accidentally initialized once by the disclosed pre-fix default config, then recovered as documented above. The corrected run left DB and upload summaries unchanged.
 - No private course body, user identity, key, prompt body or production response is included here.
 
-## 9. Model contract versus model quality
+## 10. Model contract versus model quality
 
 Current deterministic tests can prove:
 
@@ -391,7 +430,7 @@ They cannot prove:
 - production Clerk, Netlify, server/storage or multi-instance behavior;
 - actual token cost/latency/rate-limit behavior.
 
-## 10. Required future matrices
+## 11. Required future matrices
 
 | Stage | New evidence required before PASS |
 |---|---|
@@ -400,16 +439,16 @@ They cannot prove:
 | 3 | locally verified; live provider quality/usage/cost remains Stage 7 and production remains Stage 8 |
 | 4 | locally verified for text/index/image revisions, solution/step link, private image, Problem→Teaching→return and persistence; reverse Teaching→Problem, two-user/Admin browser and full a11y remain overall gates |
 | 5 | locally verified for five unequal/100, answer secrecy, assisted evidence, rubric arithmetic, unconfigured policy and explicit weak-point replan; live grading quality remains Stage 7 |
-| 6 | scoped review snapshot, consent/version substitution, withdraw/re-publish and generic Admin denial |
+| 6 | locally verified for exact snapshots, consent, substitution locks, scoped downloads, independent official review, explicit Overlay selection, withdrawal/replacement and generic Admin denial; browser and real human review remain unverified |
 | 7 | smallest approved live canaries with exact model/region/protocol/cost; four-major human rubric |
 | 8 | final full regression, final-Schema real-data copy + full restore, preview deploy and production smoke/rollback evidence |
 
-## 11. Open defects and non-PASS items
+## 12. Open defects and non-PASS items
 
 - Existing `package-lock` audit history reported one high and three moderate advisories; reachability/remediation is not yet resolved and cannot be hidden in launch PASS.
 - Current Playwright covers one synthetic owner plus existing V2 flows; two-user/Admin browser paths, Teaching→Problem reverse initiation and accessibility-tree evidence remain missing.
 - Model adapter now retains safe metadata on structured-output failure, but actual qwen3.8-max account access, regional endpoint, protocol compatibility, provider usage fidelity and cost remain unverified.
-- Official tree author/review APIs are not implemented; Stage 2 publication behavior is exercised only through direct local fixtures and cannot be called production-ready.
-- Assessment and GradePolicy are persistent and locally verified; question author/review UI, integrated COMPOSITE exams, human finalization of `NEEDS_REVIEW` and publication snapshots remain unimplemented.
+- Official tree/Spec release submission, exact independent review, active-release discovery and withdrawal APIs/UI are implemented and locally verified. Source-draft authoring/import UI and real human official-content approval remain unimplemented/unverified.
+- Assessment and GradePolicy are persistent and locally verified; formal question author/review UI, integrated COMPOSITE exams and human finalization of `NEEDS_REVIEW` remain unimplemented.
 
 No live or production claim should be inferred from the local green checks.

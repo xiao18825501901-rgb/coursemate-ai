@@ -44,7 +44,7 @@ Paid model calls used: none
 - FastAPI/Python RAG API 是学习状态、课程资料和 V3 编排的拟定单一写入者。
 - React/TypeScript Web 仍保留 V2 页面，并有 feature-flagged V3 双 Pane 工作区。
 - Node Task Agent 保持任务工具职责，不写学习成绩或覆盖状态。
-- V3 011–018 迁移、冻结文档版本/派生物、workspace 文件隔离、Registry、ATOMIC/COMPOSITE、双树投影、版本化 Spec、v3.2 Planner/Compiler/Executor/Problem/Assessment Grader、计划缓存与交付证据、正式 Assessment/GradePolicy，以及版本化 Problem→Bridge→Teaching→Assessment 本地闭环已存在，但并未覆盖新版全部领域对象。
+- V3 011–020 迁移、冻结文档版本/派生物、workspace 文件隔离、Registry、ATOMIC/COMPOSITE、双树投影、版本化 Spec、v3.2 Planner/Compiler/Executor/Problem/Assessment Grader、计划缓存与交付证据、正式 Assessment/GradePolicy、精确版本发布快照，以及版本化 Problem→Bridge→Teaching→Assessment 本地闭环已存在，但并未覆盖新版全部领域对象。
 - `V3_ENABLED` 和 `VITE_V3_ENABLED` 默认关闭；目标生成模型配置锁为 `qwen3.8-max`，Embedding 独立。
 
 ### 本地真实数据库
@@ -71,10 +71,10 @@ Stage 5 全量浏览器回归首次把旧默认 `playwright.config.ts` 与 V3 �
 | qwen3.8-max 主智能模型；Embedding 独立 | Q1、§3 | V3 adapter + locked setting；V2/部署模板仍有旧角色配置 | ADAPT | 增加协议/地域/能力合同；账户与 live 为 BLOCKED |
 | Shared Orchestrator + Teaching/Problem/AUTO | Q2 | Orchestrator 有 Teaching/Problem；AUTO 未实现 | ADAPT + ADD | 保留共享 workspace；补可解释路由与测试 |
 | 双轴学习状态 | Q3、Q8 | `knowledge.py` 分别投影 coverage 与 Assessment；017/018 保存独立证据 | KEEP | LEARNED 不读取分数；NOT_ASSESSED 不等于 0；本地合同已验证 |
-| 五题不等权、总分 100 | Q4、§13 | 冻结 Blueprint、Attempt、Evidence、API 与 Web 已实现 | KEEP + HARDEN | 服务端固定 5 题、10/15/20/25/30、总分 100；Stage 6 补作者/审核界面 |
+| 五题不等权、总分 100 | Q4、§13 | 冻结 Blueprint、Attempt、Evidence、API 与 Web 已实现 | KEEP + HARDEN | 服务端固定 5 题、10/15/20/25/30、总分 100；正式题库作者/审核界面仍待实现 |
 | Hybrid Assessment Pool | Q5 | 017 + `assessments.py` 支持 official/本人私人/已验证生成/外部启发原创 | KEEP + HARDEN | owner ACL、MODEL_ONLY/已泄题 family 排除和 source diversity 已测 |
 | COMPOSITE / ATOMIC | Q6 | COMPOSITE 无独立成绩写入，聚合唯一、独立、已测 ATOMIC 后代 | KEEP + HARDEN | 未测后代不按 0；完整/部分覆盖显式；综合父节点考试仍是后续能力 |
-| Canonical Node + Private Overlay / 双树 | Q7、§7 | 014、API 与 Web 已实现审核后官方视图和 owner×course 个性化版本；同名私人节点不合并 | KEEP + ADD | 引用同一 node/progress，不复制成绩；Stage 6 补管理审核 UI |
+| Canonical Node + Private Overlay / 双树 | Q7、§7 | 014、API 与 Web 已实现审核后官方视图和 owner×course 个性化版本；019/020 增加精确发布审核；同名私人节点不合并 | KEEP + HARDEN | 引用同一 node/progress，不复制成绩；发布管理已本地验证，官方源草稿 author/import UI 仍待实现 |
 | REQUIRED coverage 决定 LEARNED | Q8、§8 | 后端集合判定已有最小实现 | KEEP + HARDEN | 验证完整正文、Spec/Item/Step 版本与撤权 |
 | 动态 Teaching Unit 状态机 | Q9 | planner + unit 已有最小路径 | ADAPT | 补暂停/恢复、缓存、失败/预算状态 |
 | 四层教学规范 | Q10、§11–12 | v3.2 Planner/Common/四专业策略、两 CASE、完整计划与缓存键已进代码；v3.1 保留 | KEEP + ADD | Teaching 本地合同已验证；Problem Solver 和 Grader 分属 Stage 4/5 |
@@ -83,7 +83,7 @@ Stage 5 全量浏览器回归首次把旧默认 `playwright.config.ts` 与 V3 �
 | Problem 完整解答与步骤问题 | Q2、§9 | 最小文本题闭环已实现 | ADAPT | 模板版本化、题目/图片版本、答案 provenance、流式状态 |
 | LearningBridge 精确返回 | §10 | 012 + API/UI 有 step/node/context/anchor | KEEP + HARDEN | 修复路径 ID 幂等摘要、并发 revision；重启/重新登录复验 |
 | 两 Pane UI | §14 | 横向/纵向布局、双树与双轴、个人计划、Assessment 与状态恢复已进入 Web | ADAPT | AUTO、拖拽/窄屏 tab 和完整 a11y 仍待补齐 |
-| 公开版本审核/撤回 | §15 | V2 course publication；无树/Spec/派生物版本绑定 | ADD | 私人内容不进入普通 Admin 视图；发布只绑定冻结版本 |
+| 公开版本审核/撤回 | §15 | 019/020 + 三类独立发布服务/API/UI | KEEP + VERIFY | 私人内容不进入普通 Admin 视图；只绑定冻结版本；Stage 6 本地合同通过，真实人工审核/生产未验证 |
 | GradePolicy 缺项 | §13 | 018 + Admin create/preview/publish 与冻结 Blueprint 绑定 | KEEP + CONFIGURE | 原始已知值留存；A- 与 thresholds 仍为 UNCONFIGURED，不能发布/冒充官方 |
 | 旧计划“先黄金闭环、后文件/树” | 新 §18 | 已按旧顺序做了最小闭环 | RETIRE as ordering | 不删除成果；改按 Stage 1→8 重验与扩展 |
 | SG01–SG24 作为“用户逐项确认” | 本次要求 | 旧文档曾用 SG 编号 | REPLACE classification | 只把 Q1–Q10 标 LOCKED；新增规则统一标 SUPPLEMENTAL |
@@ -95,17 +95,17 @@ Stage 5 全量浏览器回归首次把旧默认 `playwright.config.ts` 与 V3 �
 
 | 范围 | 状态 |
 |---|---|
-| 011–018 文件 | 已在 V3 feature branch 提交；已执行的本地迁移历史不重编号、不删除，后续只用 019+ 前向修复 |
-| 临时/合成测试库 | 已执行过 011–018；只证明当前本地合同/fake-provider 流程 |
+| 011–020 文件 | 已在 V3 feature branch 提交；已执行的本地迁移历史不重编号、不删除，后续只用 021+ 前向修复 |
+| 临时/合成测试库 | 已执行过 011–020；只证明当前本地合同/fake-provider 流程 |
 | 隔离真实资料副本 | `work/v3-migration-rehearsal-07/` 从当前 1–15 源库副本执行到 16；旧表指纹不变、integrity ok、FK 0、69/69 文档版本、1,937 chunks 全部绑定；2 组 legacy problem/solution/step/bridge 全部正规化且缺失数为 0 |
 | Stage 5 隔离副本 | `work/v3-migration-rehearsal-08/` 在默认 E2E 事故前从 1–15 源库 online backup，并两次初始化至 18；旧表指纹不变、integrity ok、FK 0，Assessment 表为空且只新增 1 条明确非院校官方的 `DRAFT_UNCONFIGURED` policy |
 | CS3481 最小子集副本 | `work/v3-cs3481-subset-01/`：3 个 DRAFT 候选节点、2 条层级边、1 条 prerequisite、2 条真实版本证据；学习者不可见、0 模型调用 |
 | 本地真实库 | 当前为 1–18；016–018 因已披露的默认 E2E 配置事故被执行，随后保留 Schema 并恢复测试前数据；11–15 的执行来源仍 UNKNOWN |
 | 生产 | UNKNOWN |
 
-审计发现并修复了两个安全边界：`Database.initialize()` 只在 `Settings.v3_enabled=True` 时执行 V3 迁移；默认 Playwright 也必须先把 RAG 库只读 online backup 到唯一 `work/e2e-rag-*` 并把新 uploads 指向该目录。V2 readiness 仍要求 1–10，当前 V3 readiness 要求 1–18。Stage 2–4 的树、教学和 Problem/Bridge 链保持不变；Stage 5 新增冻结 Assessment、PerformanceEvidence、GradePolicy 和显式触发式重规划。当前全量证据为 Python 284 passed、Web 39 passed、Task Agent 53 passed、Ruff/mypy（57 source files）/typecheck/build 通过，以及隔离数据库 Playwright 5 passed。
+审计发现并修复了两个安全边界：`Database.initialize()` 只在 `Settings.v3_enabled=True` 时执行 V3 迁移；默认 Playwright 也必须先把 RAG 库只读 online backup 到唯一 `work/e2e-rag-*` 并把新 uploads 指向该目录。V2 readiness 仍要求 1–10，当前 V3 readiness 要求 1–20。Stage 2–5 的树、教学、Problem/Bridge 与 Assessment 链保持不变；Stage 6 新增三类精确发布快照、独立审核、撤回/替代与派生物权限。当前全量证据为 Python 291 passed、Web 48 passed、Task Agent 53 passed、Ruff/mypy（60 source files）/typecheck/build 通过；最新隔离数据库 Playwright 5 passed 仍是 Stage 5 证据，Stage 6 浏览器复验待执行。
 
-011–018 不通过改编号或删除来掩盖已执行事实。后续结构使用 019+ 前向迁移，并在新的隔离副本演练。
+011–020 不通过改编号或删除来掩盖已执行事实。后续结构使用 021+ 前向迁移，并在新的隔离副本演练；本地真实库仍为 1–18，不能把临时测试库通过冒充真实副本迁移。
 
 ## 6. 新验收层级
 
@@ -257,3 +257,33 @@ Stage 5 证据：新增 Assessment 专项 13 passed，Teaching/Problem/Safety �
 迁移副本 `work/v3-migration-rehearsal-08/` 从事故前 1–15 源状态两次初始化至 18：旧表指纹不变、integrity ok、FK 0、版本连续 1–18；Assessment/GradeSnapshot 历史均为 0，不推断旧成绩；唯一 GradePolicy 是明确未配置的需求草案。该目录及 `work/v3-e2e-incident-recovery-20260912/` 含私人数据库证据，只能本机保留，不提交、不分享。
 
 Stage 5 不包含正式题库作者/审核 UI、完整官方树发布、综合 COMPOSITE 考试、人工复核终审、AUTO 语义路由、真实 qwen 评分质量或生产部署；这些继续按 Stage 6–8 执行。
+
+## 13. Stage 6 完成检查点
+
+```text
+Source implementation: IMPLEMENTED for scoped course/official/Overlay publication
+Local contract and Web unit tests: VERIFIED
+Stage 6 real-browser flow: NOT VERIFIED
+Live qwen3.8-max: NOT VERIFIED
+Production: NOT VERIFIED
+Repository migration head: 20
+Local real database Schema: 1–18; migrations 019/020 NOT EXECUTED there
+Production database migration: UNKNOWN / NOT EXECUTED BY THIS TASK
+```
+
+阶段提交：`c324373`（课程发布绑定精确快照）、`ec3a2e9`（019/020、官方知识与私人 Overlay 发布治理）、`88c06b4`（Owner/Admin 管理界面、活动官方 release 与替代撤回）。
+
+Stage 6 已落实：
+
+- 课程、官方知识、私人 Overlay 使用三套独立请求/路由；审核均绑定不可变 Snapshot/Resource hash，不能以审核后的新私人版本替换旧内容。
+- 官方树/Node/Teaching Spec/官方 Evidence 只有经第二名 Admin 审核的精确版本才发布；同一课程的新 release 会在同一事务撤回旧 request/release 并退休旧树。Admin UI 可发现活动 release 并撤回。
+- Owner 的 Overlay 候选端点只返回本人当前 workspace 的私人节点/Spec、DocumentVersion、ready Artifact 与私人 Evidence。前端默认全不勾选，并要求选中精确依赖、内容同意和权利确认；聊天、Problem/Solution、进度、Grade、Assessment 及未选资源不进入快照。
+- 通用 Admin 不获得私人 workspace/document 列表，只能访问 request-bound 快照与其中已选文件。另一个普通用户对候选、Owner 快照和共享内容均得到不泄露存在性的 404。
+- Course/Overlay/official withdrawal 停止未来访问并增加 release cache generation；界面明确既有合法下载无法召回。Owner 撤回已发布课程后不再错误显示“再次提交”状态。
+- migration 020 只锁定 pending/approved 审核实际引用的资源；撤回/拒绝后恢复正常私有生命周期，删除课程时清理其私有发布快照元数据，不保留孤儿文件名或 consent。
+
+`SUPPLEMENTAL_ENGINEERING_DECISION`：Overlay 的 Artifact 必须先选其精确 DocumentVersion，私人 Evidence 必须先选其 DocumentVersion 及对应私人 Node；活动官方 release 查询同时要求 request approved、release ACTIVE、tree PUBLISHED；替代发布自动撤回旧 release。这些是实现发布一致性与最小权限的工程补漏，不冒充 Q1–Q10 的逐条确认。
+
+Stage 6 本地证据：发布专项 7 passed；全量 Python 291 passed；Web 48 passed；Task Agent 53 passed；Ruff、mypy（60 source files）、两个 TypeScript workspace 与生产构建通过。Stage 6 尚未重新执行 Playwright，migrations 019/020 尚未在真实数据副本演练，也没有真实人工审核、付费模型或生产访问。
+
+仍然公开保留的源码缺口：正式题库作者/审核 UI、完整官方源草稿 author/import UI、综合 COMPOSITE 考试、人工终审 `NEEDS_REVIEW`、AUTO 语义路由、每日聚合模型预算闸门与完整 a11y/双用户+Admin 浏览器覆盖。下一步按 Stage 7 先完成四专业确定性端到端矩阵及受预算门控的真实模型 canary 准备；未获真实调用授权时不发起付费请求。
