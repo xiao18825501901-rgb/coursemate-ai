@@ -129,7 +129,13 @@ function TablePreviewView({ name, data }: { name: string; data: TablePreview }) 
   );
 }
 
-export function LearningFiles({ workspace }: { workspace: string }) {
+export function LearningFiles({
+  workspace,
+  onDocumentsChanged,
+}: {
+  workspace: string;
+  onDocumentsChanged?: () => void | Promise<void>;
+}) {
   const { getToken } = useCourseMateAuth();
   const [files, setFiles] = useState<FileItem[]>([]);
   const [scope, setScope] = useState("union");
@@ -249,6 +255,7 @@ export function LearningFiles({ workspace }: { workspace: string }) {
         ),
       );
       await load();
+      await onDocumentsChanged?.();
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : "上传失败");
     } finally {

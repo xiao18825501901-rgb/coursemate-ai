@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("V3 problem step teaches and returns across browser contexts", async ({ page, browser }) => {
+test("V3 private image problem teaches and returns across browser contexts", async ({ page, browser }) => {
   test.setTimeout(60_000);
   const browserErrors: string[] = [];
   const failedRequests: string[] = [];
@@ -26,6 +26,14 @@ test("V3 problem step teaches and returns across browser contexts", async ({ pag
   await expect(page.getByRole("table", { name: "scores.csv 表格预览" })).toBeVisible();
   await expect(page.getByText("=2+2", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "关闭预览" }).click();
+  await page.getByLabel("添加私人资料").setInputFiles({
+    name: "question.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64",
+    ),
+  });
   await page.getByText("建立私人知识教学范围（不发布官方树）", { exact: true }).click();
   await page.getByLabel("新私人知识节点").fill("Addition");
   await page.getByRole("button", { name: "建立私人教学范围" }).click();
@@ -35,9 +43,15 @@ test("V3 problem step teaches and returns across browser contexts", async ({ pag
   await page.getByRole("button", { name: "建立个人学习树" }).click();
   await expect(page.getByLabel("我的个性化树").getByText("ACTIVE", { exact: true })).toBeVisible();
   await expect(page.getByLabel("我的个性化树").getByText("NOT_ASSESSED", { exact: true })).toBeVisible();
-  await page.getByLabel("题目内容").fill("What is 2 + 3?");
-  await page.getByRole("button", { name: "获取完整解答" }).click();
+  await page.getByRole("radio", { name: "私人题目图片" }).check();
+  await page.getByLabel("已授权 PNG/JPEG").selectOption({ index: 1 });
+  await page.getByLabel("给转录的提示（可选，不视为已核验题干）").fill("What is 2 + 3?");
+  await page.getByLabel("解题要求").fill("Please solve the question in this image.");
+  await page.getByRole("button", { name: "获取完整参考解答" }).click();
+  await expect(page.getByText("[FAKE TEST FIXTURE] What is 2 + 3?", { exact: true })).toBeVisible();
+  await expect(page.getByText("[FAKE TEST FIXTURE] Visual correctness was not evaluated.", { exact: true })).toBeVisible();
   await expect(page.getByText("[FAKE TEST FIXTURE] 2 + 3 = 5.", { exact: true })).toBeVisible();
+  await expect(page.getByText("公式 / 计算：2 + 3 = 5", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Why do we add these counts?" }).click();
   await expect(page.getByText("原题条件", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "继续一个教学单元" }).click();

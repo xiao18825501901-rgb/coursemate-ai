@@ -29,10 +29,78 @@ export interface LearningNode {
   learning: LearningProgress;
   assessment: AssessmentState;
 }
-export interface KnowledgeLink { node_id: string; question_text: string; reason: string }
-export interface SolutionStep { id: string; ordinal: number; operation: string; result: string; explanation: string; knowledge_links: KnowledgeLink[] }
-export interface Solution { id: string; status?: string; question: string; exam_answer: string; steps: SolutionStep[]; answer_origin: string; assumptions: string[] }
-export interface Bridge { id: string; status: string; node_id: string; return_anchor: string; problem_snapshot: { question: string; conditions: string[]; step: SolutionStep } }
+export interface KnowledgeLink {
+  id: string;
+  resolution_status: "VALIDATED" | "UNRESOLVED" | "LEGACY_PRESERVED";
+  node_id: string | null;
+  spec_version: number | null;
+  item_id: string | null;
+  question_text: string;
+  reason: string;
+  unresolved_reason: string | null;
+}
+export interface SolutionStep {
+  id: string;
+  ordinal: number;
+  operation: string;
+  result: string;
+  explanation: string;
+  formulae: string[];
+  units: string[];
+  check: string | null;
+  knowledge_links: KnowledgeLink[];
+  source_refs: string[];
+}
+export interface ProblemSource {
+  id: string;
+  document_version_id: string;
+  document_sha256: string;
+  filename: string;
+  source_scope: "OFFICIAL" | "OWNER_COURSE" | "WORKSPACE_PRIVATE";
+  question_number: string;
+  question_part: string | null;
+  heading_path: string | null;
+  locator_type: string;
+  locator_value: string;
+  question_text: string;
+}
+export interface LearningDocumentSource {
+  id: string;
+  filename: string;
+  extension: string;
+  version_id?: string;
+  version_number?: number;
+  source_scope?: "OFFICIAL" | "OWNER_COURSE" | "WORKSPACE_PRIVATE";
+  status: string;
+}
+export interface Solution {
+  id: string;
+  status?: string;
+  question: string;
+  exam_answer: string;
+  conditions: string[];
+  steps: SolutionStep[];
+  answer_origin: string;
+  verification: string;
+  assumptions: string[];
+  common_mistakes: string[];
+  question_transcription: string | null;
+  visual_uncertainties: string[];
+  input_kind: "TEXT" | "INDEXED" | "IMAGE";
+  problem_index_entry_id: string | null;
+  input_document_version_id: string | null;
+  sources: { id: string; document_version_id: string; locator_type: string; locator_value: string }[];
+}
+export interface Bridge {
+  id: string;
+  status: string;
+  node_id: string;
+  knowledge_link_id?: string;
+  selected_question?: string;
+  reason_for_learning?: string;
+  return_anchor: string;
+  problem_snapshot: { question: string; conditions: string[]; step: SolutionStep };
+}
 export interface ComprehensionCheck {
   check_id: string;
   kind: "DEFINITION" | "DISTINCTION" | "ENGLISH" | "APPLICATION" | "SYNTHESIS";

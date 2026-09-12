@@ -21,6 +21,14 @@
 .question-prefix { color: var(--accent-dark); font-weight: 700; }
 .solution-step { border-top: 1px solid var(--line); margin-top: 1rem; padding: .75rem 0; scroll-margin-top: 2rem; }
 .solution-step:focus { outline: 3px solid var(--focus); outline-offset: .25rem; }
+.problem-source-picker { display: flex; flex-wrap: wrap; gap: .75rem; margin-block: .75rem; padding: .75rem; border: 1px solid var(--line); }
+.problem-source-picker label { display: flex; align-items: center; gap: .35rem; margin: 0; }
+.problem-source-picker input { min-width: auto; }
+.problem-index-picker blockquote { margin-inline: 0; padding: .75rem; border-left: .25rem solid var(--accent); background: var(--surface-soft); overflow-wrap: anywhere; }
+.problem-transcription, .problem-uncertainties { margin-block: 1rem; padding: .75rem; border: 1px solid var(--line); background: var(--surface-soft); }
+.problem-uncertainties { border-color: var(--warning, #a66b00); }
+.step-knowledge-links { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.unresolved-link { display: inline-block; padding: .45rem .65rem; border: 1px dashed var(--line); color: var(--ink-soft); overflow-wrap: anywhere; }
 .learning-files { margin: 1rem 0; padding: .75rem; border: 1px solid var(--line); }
 .knowledge-map { margin: 1rem 0; padding: 1rem; border: 1px solid var(--line); background: var(--surface); }
 .knowledge-map-heading, .knowledge-tree-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }

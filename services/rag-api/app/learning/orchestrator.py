@@ -38,7 +38,7 @@ from app.learning.models import (
 from app.learning.plans import TeachingPlanRepository
 from app.learning.problems import ProblemIndexScope, ProblemRepository
 from app.learning.provider import LearningProvider, ProviderCallFailure, ProviderImage
-from app.learning.workspaces import document_version_for, workspace_for
+from app.learning.workspaces import document_version_for, original_path, workspace_for
 from app.rag.retrieval import HybridRetriever
 from app.repositories.chunks import RetrievalAccess
 
@@ -1586,15 +1586,80 @@ class LearningOrchestrator:
             for node in knowledge["registry"]
         ]
         with self.db.connect() as db:
-            solutions = [
-                json.loads(r[0])
-                for r in db.execute(
-                    "SELECT s.content_json FROM learning_solutions s "
-                    "JOIN learning_problems p ON p.id=s.problem_id WHERE p.workspace_id=? "
-                    "ORDER BY s.rowid DESC LIMIT 25",
+            solution_rows = db.execute(
+                "SELECT s.id,s.content_json FROM learning_solutions s "
+                "JOIN learning_problems p ON p.id=s.problem_id WHERE p.workspace_id=? "
+                "ORDER BY s.rowid DESC LIMIT 25",
+                (workspace_id,),
+            ).fetchall()
+            revision_by_solution = {
+                row["solution_id"]: row
+                for row in db.execute(
+                    "SELECT revision.solution_id,revision.id AS solution_revision_id,"
+                    "revision.revision AS solution_revision,problem_revision.* "
+                    "FROM solution_revisions AS revision "
+                    "JOIN problem_revisions AS problem_revision "
+                    "ON problem_revision.id=revision.problem_revision_id "
+                    "WHERE revision.workspace_id=? ORDER BY revision.revision",
                     (workspace_id,),
                 )
-            ]
+            }
+            links_by_step: dict[str, list[dict[str, Any]]] = {}
+            for row in db.execute(
+                "SELECT link.* FROM step_knowledge_links AS link "
+                "JOIN learning_steps AS step ON step.id=link.step_id "
+                "JOIN learning_solutions AS solution ON solution.id=step.solution_id "
+                "JOIN learning_problems AS problem ON problem.id=solution.problem_id "
+                "WHERE problem.workspace_id=? ORDER BY link.step_id,link.ordinal",
+                (workspace_id,),
+            ):
+                links_by_step.setdefault(row["step_id"], []).append(
+                    {
+                        "id": row["id"],
+                        "resolution_status": row["resolution_status"],
+                        "node_id": row["node_id"],
+                        "spec_version": row["spec_version"],
+                        "item_id": row["item_id"],
+                        "question_text": row["question_text"],
+                        "reason": row["reason"],
+                        "unresolved_reason": row["unresolved_reason"],
+                    }
+                )
+            solutions = []
+            for solution_row in solution_rows:
+                solution = json.loads(solution_row["content_json"])
+                for step in solution.get("steps", []):
+                    step.setdefault("formulae", [])
+                    step.setdefault("units", [])
+                    step.setdefault("check", None)
+                    step.setdefault("source_refs", [])
+                    if step.get("id") in links_by_step:
+                        step["knowledge_links"] = links_by_step[step["id"]]
+                revision = revision_by_solution.get(solution_row["id"])
+                if revision is not None:
+                    solution.update(
+                        problem_revision=int(revision["revision"]),
+                        problem_revision_id=revision["id"],
+                        solution_revision=int(revision["solution_revision"]),
+                        solution_revision_id=revision["solution_revision_id"],
+                        input_kind=revision["input_kind"],
+                        problem_index_entry_id=revision["problem_index_entry_id"],
+                        input_document_version_id=revision["input_document_version_id"],
+                    )
+                    solution.setdefault(
+                        "question_transcription", revision["question_transcription"]
+                    )
+                    solution.setdefault(
+                        "visual_uncertainties",
+                        json.loads(revision["visual_uncertainties_json"]),
+                    )
+                solution.setdefault("conditions", [])
+                solution.setdefault("common_mistakes", [])
+                solution.setdefault("question_transcription", None)
+                solution.setdefault("visual_uncertainties", [])
+                solution.setdefault("verification", "NOT_INDEPENDENTLY_VERIFIED")
+                solution.setdefault("sources", [])
+                solutions.append(solution)
             bridges = [
                 {**json.loads(r["snapshot_json"]), "status": r["status"]}
                 for r in db.execute(
@@ -1629,6 +1694,17 @@ class LearningOrchestrator:
         def safe(artifact: dict[str, Any]) -> dict[str, Any]:
             try:
                 self.check_evidence(workspace, set(artifact.get("evidence_ids", [])))
+                if artifact.get("input_kind") == "IMAGE":
+                    version_id = artifact.get("input_document_version_id")
+                    if not isinstance(version_id, str):
+                        raise ApiError(
+                            410, "SOURCE_UNAVAILABLE", "The image source is unavailable."
+                        )
+                    version = document_version_for(self.db, version_id, owner)
+                    if original_path(self.db, version) is None:
+                        raise ApiError(
+                            410, "SOURCE_UNAVAILABLE", "The image source is unavailable."
+                        )
                 return artifact
             except ApiError:
                 return {"id": artifact["id"], "status": "SOURCE_UNAVAILABLE"}

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TestAuthProvider } from "../auth/AuthProvider";
 import { authenticatedFetch, requestJson, requireOk } from "../services/http";
@@ -25,6 +25,7 @@ const csvFile = {
 
 describe("LearningFiles", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.mocked(requestJson).mockResolvedValue({
       data: [
         csvFile,
@@ -78,5 +79,22 @@ describe("LearningFiles", () => {
     expect(screen.getAllByText(/仅本人/)).toHaveLength(2);
     expect(screen.getByRole("button", { name: "预览 legacy.doc" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "下载 legacy.doc" })).toBeEnabled();
+  });
+
+  it("notifies the workspace after a private upload becomes visible", async () => {
+    const onDocumentsChanged = vi.fn();
+    vi.mocked(authenticatedFetch).mockResolvedValue(new Response("{}", { status: 201 }));
+    render(
+      <TestAuthProvider>
+        <LearningFiles workspace="workspace-1" onDocumentsChanged={onDocumentsChanged} />
+      </TestAuthProvider>,
+    );
+
+    fireEvent.change(screen.getByLabelText("添加私人资料"), {
+      target: { files: [new File(["image"], "question.png", { type: "image/png" })] },
+    });
+
+    await waitFor(() => expect(onDocumentsChanged).toHaveBeenCalledTimes(1));
+    expect(requestJson).toHaveBeenCalledTimes(2);
   });
 });
