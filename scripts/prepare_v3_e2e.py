@@ -7,9 +7,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/rag-api"))
 
-from app.config import Settings
-from app.db import Database
-from app.learning.workspaces import join_course
+from app.config import Settings  # noqa: E402 - repository-local service bootstrap
+from app.db import Database  # noqa: E402 - repository-local service bootstrap
+from app.learning.workspaces import join_course  # noqa: E402 - repository-local service bootstrap
 
 OWNER = "v3-e2e-owner"
 ASSESSMENT_NODE = "e2e-assessment-node"

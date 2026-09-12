@@ -8,8 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/rag-api"))
-from app.config import Settings
-from app.db import LATEST_V3_SCHEMA_VERSION, Database
+from app.config import Settings  # noqa: E402 - repository-local service bootstrap
+from app.db import LATEST_V3_SCHEMA_VERSION, Database  # noqa: E402
 
 TABLES = (
     "courses",

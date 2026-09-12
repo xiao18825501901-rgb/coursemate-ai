@@ -15,10 +15,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/rag-api"))
 
-from app.config import Settings
-from app.db import LATEST_V3_SCHEMA_VERSION, Database
-from app.learning.knowledge import KnowledgeService
-from app.learning.workspaces import join_course
+from app.config import Settings  # noqa: E402 - repository-local service bootstrap
+from app.db import LATEST_V3_SCHEMA_VERSION, Database  # noqa: E402
+from app.learning.knowledge import KnowledgeService  # noqa: E402
+from app.learning.workspaces import join_course  # noqa: E402
 
 COURSE_ID = "cs3481"
 OWNER_ID = "stage2-cs3481-validator"
