@@ -311,7 +311,7 @@ sqlite3 CLI: MISSING
 
 /srv/coursemate: PRESENT — independent candidate root, not serving production traffic
 /srv/coursemate/current: symlink to releases/9806a55
-/srv/coursemate/data: PRESENT AND EMPTY — final source snapshot not copied yet
+/srv/coursemate/data: DIRECTORY SKELETON ONLY — 0 files; RAG/Agent DB absent
 /srv/coursemate/backups: PRESENT — verified local copy of initial recovery unit
 /etc/coursemate: PRESENT — root-owned, group-readable candidate env files
 /home/admin/coursemate-ai: MISSING
@@ -398,7 +398,7 @@ Private smoke: PASS — V2 compatibility, V3 migration/routes, auth/CORS, proxy 
 Release publication: COMPLETE — branch pushed non-force; 9806a55 reachable from origin branch history
 TLS readiness: BLOCKED — no destination certificate or 443 listener; issuance/key method requires Owner decision
 Reboot readiness: BLOCKED — SRSZQ staging is running but absent from the saved PM2 resurrection dump
-Pre-cutover: COMPLETE FOR NON-ACTIVATING WORK — final data remains empty and candidate remains inactive
+Pre-cutover: COMPLETE FOR NON-ACTIVATING WORK — final data has 0 files and candidate remains inactive
 Cutover: NOT STARTED — OWNER GATE
 Post-cutover: NOT STARTED
 Observation: NOT STARTED

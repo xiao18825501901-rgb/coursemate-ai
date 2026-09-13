@@ -269,7 +269,7 @@ System disk: d-bp1f0vqhds2341pces7h; ESSD PL0; 40 GiB; unencrypted
 Restart required: YES
 CourseMate candidate root: /srv/coursemate — PREPARED, INACTIVE, NOT SERVING TRAFFIC
 Candidate release/runtime: exact 9806a55 under /srv/coursemate; independent Python 3.12.14 venv
-Final candidate data: EMPTY — final source snapshot not copied
+Final candidate data: DIRECTORY SKELETON ONLY — 0 files; RAG/Agent DB absent
 Initial recovery copies: PRESENT under /srv/coursemate-migration and /srv/coursemate/backups
 CourseMate units: INSTALLED/LOADED but inactive and disabled
 CourseMate nginx site: sites-available only; not enabled; nginx not reloaded
@@ -333,11 +333,11 @@ local RAG process would return the same OpenAPI artifact; these artifacts differ
 | CourseMate RAG present | yes | yes | final candidate installed; inactive |
 | RAG API path count | 6 | 18 | exact candidate validated privately; not routed |
 | RAG release SHA | `ef7795b1e41aefbfdf9738e88a7eca053ea621db` | `cb7d0633e5026d042014512b72273f4439c9cff4` detached release | candidate `9806a553a30c0531f727ba1538543fe6225e4c44` |
-| RAG DB | `/srv/coursemate/rag/rag.sqlite3` | `/srv/coursemate/rag/rag.sqlite3` | pristine restore + disposable smoke copies; final data empty |
+| RAG DB | `/srv/coursemate/rag/rag.sqlite3` | `/srv/coursemate/rag/rag.sqlite3` | pristine restore + disposable smoke copies; final DB absent |
 | RAG schema | migration 1 | migration 10 | V2 smoke 10; V3 disposable smoke 21; no final live DB |
 | RAG aggregate rows | 2 courses, 1 document, 0 chunks, 1 job, 0 conversations/messages | 2 courses, 66 documents, 1,936 chunks, 69 jobs, 39 conversations, 86 messages | restored aggregates match; not serving |
 | Agent present | active local service | active local service | final candidate installed; inactive |
-| Agent DB | `/srv/coursemate/agent/agent.sqlite3` | `/srv/coursemate/agent/agent.sqlite3` | pristine restore + disposable smoke copy; final data empty |
+| Agent DB | `/srv/coursemate/agent/agent.sqlite3` | `/srv/coursemate/agent/agent.sqlite3` | pristine restore + disposable smoke copy; final DB absent |
 | Uploads | `/srv/coursemate/rag/uploads`; 1 file / 229 bytes | `/srv/coursemate/rag/uploads`; 67 files / 124,209,790 bytes | verified restore/smoke copies; final uploads empty |
 | Reverse proxy | Caddy -> local 8000/8001 | Caddy -> local 8000/8001 | live nginx -> SRSZQ; CourseMate site prepared but disabled |
 | Auth config | Clerk-protected; exact production CORS | Clerk-protected; exact production CORS | secret-safe candidate; private auth/CORS smoke pass; inactive |
@@ -349,10 +349,10 @@ local RAG process would return the same OpenAPI artifact; these artifacts differ
 
 | Fact | 8.210.58.22 | 47.237.179.69 | 47.114.34.175 |
 |---|---|---|---|
-| RAG DB | `/srv/coursemate/rag/rag.sqlite3` | `/srv/coursemate/rag/rag.sqlite3` | restore/rehearsal/smoke copies; final data empty |
+| RAG DB | `/srv/coursemate/rag/rag.sqlite3` | `/srv/coursemate/rag/rag.sqlite3` | restore/rehearsal/smoke copies; final DB absent |
 | RAG schema | migration 1 | migration 10 | V2 copied smoke 10; V3 copied smoke 21; not live |
 | RAG aggregate rows | 2 courses, 1 document, 0 chunks | 2 courses, 66 documents, 1,936 chunks | copied aggregates match |
-| Agent DB | `/srv/coursemate/agent/agent.sqlite3` | `/srv/coursemate/agent/agent.sqlite3` | restore/smoke copies; final data empty |
+| Agent DB | `/srv/coursemate/agent/agent.sqlite3` | `/srv/coursemate/agent/agent.sqlite3` | restore/smoke copies; final DB absent |
 | Agent schema | migration 1 | migration 1 | isolated migration 1 |
 | Agent aggregate rows | 0 tasks | 1 task | copied aggregate matches |
 | Integrity / FK | both OK / 0 violations | both OK / 0 violations | copied DBs OK / 0 violations |
@@ -479,7 +479,8 @@ Python 3.12.14 runtime/venv under `/srv/coursemate/runtime` and a `current` syml
 dependencies passed build validation and were production-pruned. The candidate is owned for execution
 by the unprivileged `coursemate` account. The initial recovery unit was also copied into
 `/srv/coursemate/backups` and its five manifest-covered artifacts revalidated; final data paths remain
-empty because the drained source snapshot has not been authorized or created.
+an empty uploads directory skeleton because the drained source snapshot has not been authorized or
+created. File count is 0 and both final database files are absent.
 
 Source secrets moved directly through protected server files and an allowlisted transform; no value
 was printed. Candidate RAG/Agent/monitor environment files are root-owned and group-readable only.
@@ -508,7 +509,7 @@ running `srszq-staging` process. Neither TLS activation nor reboot is authorized
 Production DB copy: YES — initial SQLite-online snapshots only
 Uploads transfer: YES — initial verified archive to isolated and candidate backup roots only
 Schema migration: COPIED-DATABASE REHEARSAL ONLY — PASS; SOURCE/LIVE NO
-Candidate release/runtime/env/units: PREPARED — INACTIVE/DISABLED; FINAL DATA EMPTY
+Candidate release/runtime/env/units: PREPARED — INACTIVE/DISABLED; FINAL DATA FILES=0
 Private smoke service starts: YES — TRANSIENT/LOCALHOST ONLY; STOPPED; PORTS CLOSED
 Existing service stop/restart/replacement: NO
 Nginx configuration: CANDIDATE FILE VALIDATED; NOT ENABLED; NO RELOAD
