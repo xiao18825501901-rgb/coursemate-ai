@@ -2,6 +2,8 @@
 
 Report time: 2026-09-14 02:05 CST / 2026-09-13 18:05 UTC
 
+Last resume verification: 2026-09-14 02:43 CST / 2026-09-13 18:43 UTC
+
 Outcome: `HARD EXTERNAL BLOCKER — PRODUCTION CUTOVER NOT PERFORMED`
 
 This report records the authorized unattended cutover attempt. It is deliberately not a success
@@ -223,6 +225,26 @@ Network and TLS reachability to the exact workspace are good (`/models` without 
 return `401 invalid_api_key`. This rules out application env parsing, endpoint DNS and basic transport
 as causes. The remaining external causes include revoked/disabled key, wrong Singapore account or
 workspace assignment, or an IP/model access restriction in Model Studio.
+
+### Resume verification after Owner-reported remediation
+
+The Owner subsequently reported that the source had been restored and the Singapore key replaced.
+The workflow restarted from both non-mutating gates rather than trusting the prior result or
+advancing directly to production writes. The reported remediation was not visible at the required
+runtime surfaces:
+
+- strict SSH to `47.237.179.69` still timed out;
+- TCP 22, 80 and 443 still timed out from the Owner workstation, destination ECS and legacy ECS;
+- a second local check after a 30-second startup window still timed out on all three ports;
+- `/etc/coursemate/secrets/qwen-singapore.key` was still a 117-byte root-owned mode-0600 file with
+  modification time `2026-09-14 00:47:38 +0800`;
+- the actual destination RAG configuration loaded that file, but both the exact workspace and shared
+  Singapore `/models` probes still returned `401 invalid_api_key`.
+
+No inference request, token use, source mutation, service activation, DNS update or Netlify
+production promotion occurred during this resume verification. The two external blockers therefore
+remain active; the cutover must not resume until the source is reachable and the non-billable key
+probe passes from the destination.
 
 ## Completed work before the stop
 
