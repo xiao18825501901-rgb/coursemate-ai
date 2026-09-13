@@ -70,9 +70,6 @@ def main() -> int:
     if not api_key:
         print(f"Missing credential environment variable: {args.api_key_env}")
         return 2
-    if not args.database.is_file():
-        print("Embedding benchmark database is unavailable.")
-        return 2
     if args.output.exists() or args.output.with_name(f".{args.output.name}.partial").exists():
         print("Refusing to overwrite an existing embedding benchmark output.")
         return 2
@@ -99,6 +96,24 @@ def main() -> int:
 
     try:
         cases = load_embedding_cases(args.dataset)
+        query_cost_ceiling = calculate_embedding_cost_ceiling(
+            [len(case.query.encode()) + PROTOCOL_OVERHEAD_TOKENS for case in cases],
+            price_per_million=args.input_price_per_million,
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(f"Embedding benchmark preflight failed: {type(error).__name__}.")
+        return 2
+    if query_cost_ceiling > args.max_total_cost:
+        print(
+            f"Refusing provider calls: conservative query-only {args.currency} cost ceiling "
+            f"{query_cost_ceiling:.8f} exceeds approved maximum {args.max_total_cost:.8f}."
+        )
+        return 2
+    if not args.database.is_file():
+        print("Embedding benchmark database is unavailable.")
+        return 2
+
+    try:
         chunks, expected_ids = load_official_corpus(args.database, cases)
         texts = [case.query for case in cases] + [chunk.content for chunk in chunks]
         token_ceilings = [len(text.encode()) + PROTOCOL_OVERHEAD_TOKENS for text in texts]

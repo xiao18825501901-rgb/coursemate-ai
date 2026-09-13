@@ -86,10 +86,11 @@ def test_embedding_cost_ceiling_requires_positive_finite_price() -> None:
         calculate_embedding_cost_ceiling([-1], price_per_million=1.0)
 
 
-def test_embedding_runner_refuses_over_budget_before_provider_client(
+def test_embedding_runner_refuses_over_budget_before_database_or_provider_client(
     tmp_path: Path,
 ) -> None:
     output = tmp_path / "embedding.json"
+    missing_database = tmp_path / "missing.sqlite3"
     process = subprocess.run(
         [
             sys.executable,
@@ -101,7 +102,7 @@ def test_embedding_runner_refuses_over_budget_before_provider_client(
             "--api-key-env",
             "EMBEDDING_TEST_KEY",
             "--database",
-            str(CORPUS_DATABASE),
+            str(missing_database),
             "--output",
             str(output),
             "--input-price-per-million",
@@ -161,9 +162,10 @@ def test_embedding_runner_refuses_without_explicit_billable_opt_in(
     assert not output.exists()
 
 
-def test_embedding_runner_rejects_unsafe_base_url_before_provider_client(
+def test_embedding_runner_rejects_unsafe_base_url_before_database_or_provider_client(
     tmp_path: Path,
 ) -> None:
+    missing_database = tmp_path / "missing.sqlite3"
     process = subprocess.run(
         [
             sys.executable,
@@ -177,7 +179,7 @@ def test_embedding_runner_rejects_unsafe_base_url_before_provider_client(
             "--api-key-env",
             "EMBEDDING_TEST_KEY",
             "--database",
-            str(CORPUS_DATABASE),
+            str(missing_database),
             "--output",
             str(tmp_path / "embedding.json"),
             "--input-price-per-million",
