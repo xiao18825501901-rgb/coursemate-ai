@@ -1,8 +1,8 @@
 # CourseMate V3 — New Alibaba ECS Migration State
 
-Last updated: 2026-09-13 18:02:25 CST / 2026-09-13 10:02:25 UTC
+Last updated: 2026-09-13 20:02:56 CST / 2026-09-13 12:02:56 UTC
 
-Current phase: `Phase A1 public revalidation complete; Alibaba resource ownership/manual access required`
+Current phase: `Source Result B proven; initial verified backup and isolated restore preparation`
 
 Production data copied: `NO`
 
@@ -19,18 +19,18 @@ provider responses.
 
 ## Executive gate
 
-The Owner-designated old and destination aliases pass strict, public-key-only BatchMode
-authentication, but the current public backend does not yet have a trusted alias:
+All three dedicated aliases pass strict, public-key-only BatchMode authentication:
 
 ```text
 coursemate-prod-old -> root@8.210.58.22     READY
 coursemate-prod-new -> root@47.114.34.175   READY
-coursemate-prod-current -> 47.237.179.69     NOT CREATED / TRUST GATE OPEN
+coursemate-prod-current -> admin@47.237.179.69 READY
 ```
 
-Public DNS plus pinned-IP HTTPS/TLS evidence identify `47.237.179.69` as the current CourseMate
-backend address, but its Alibaba resource type, release, databases, uploads and reverse-proxy
-upstreams remain unknown. This keeps the source authority and data-migration gates closed. The full
+Public DNS, pinned-IP HTTPS/TLS, Owner-console host identity and trusted SSH inventory identify
+`47.237.179.69` as the complete current CourseMate application and data source. The source decision is
+**Result B**. Initial backup/off-host copy/isolated restore work is authorized; final drain, production
+cutover, DNS, paid model calls, destructive actions and destination reboot remain gated. The full
 three-host evidence ledger is in
 [`PRODUCTION_SOURCE_OF_TRUTH_AUDIT.md`](PRODUCTION_SOURCE_OF_TRUTH_AUDIT.md).
 
@@ -63,43 +63,51 @@ SHA256:TWqeYbYv83dw67sg6BWf3gv3C4LjRWeioaA5/qbq4k4
 Verification: PASS against the Owner's ECS-console fingerprint and strict known_hosts validation
 
 coursemate-prod-current:
-NOT CREATED
+READY
 Public IP: 47.237.179.69
-Public role: CURRENT PUBLIC COURSEMATE BACKEND
-Internal role: UNKNOWN
-Alibaba resource type/ownership: UNKNOWN
+Private IP: 172.17.61.74
+Host: iZt4n0k005125h6vlxoiloZ
+User: admin
+Role: AUTHORITATIVE CURRENT COURSEMATE APPLICATION/DATA SOURCE (RESULT B)
+Alibaba resource attachment ID/region: NOT RECORDED IN REPOSITORY EVIDENCE
 Authentication advertised: publickey,password
-Previously observed candidate ED25519 fingerprint:
+Verified server ED25519 fingerprint:
 SHA256:xrg8yao3PqVrTPP5Qx0st1pxeHt4jVR13L7CY38D8iw
-Fingerprint verification: TOFU ONLY — not authoritative until Alibaba-console verification
-Existing-key non-interactive attempts: NO AUTHENTICATED USER/KEY PAIR
+Fingerprint verification: PASS against Owner-console evidence and strict known_hosts validation
+Authentication: PUBLIC KEY
+BatchMode: PASS
+Dedicated public-key fingerprint:
+SHA256:60v7oW8NOi6YEdRCBGY4b3xIfyW4Fy94thVTAhRWWi8
+Remote authorized_keys backup:
+/home/admin/.ssh/authorized_keys.pre-coursemate-20260913T115433Z
 
 Password included in scripts/files: NO
 Private key exposed: NO
 Ready for old/destination-host read-only preparation: YES
-Ready for current-host inventory: NO — TRUSTED LOGIN REQUIRED
-Ready for production data transfer/cutover: NO — SOURCE AUTHORITY UNRESOLVED
+Ready for current-host inventory: YES — COMPLETED
+Ready for initial backup/off-host copy/isolated restore: YES
+Ready for final drain/cutover: NO — LATER OWNER GATES APPLY
 ```
 
 The verified destination fingerprint
 `SHA256:TWqeYbYv83dw67sg6BWf3gv3C4LjRWeioaA5/qbq4k4` belongs only to `47.114.34.175`. It is not
-expected to equal the prior TOFU candidate for `47.237.179.69`; rechecking the destination does not
-verify the current public backend.
+expected to equal the separately verified current-source fingerprint
+`SHA256:xrg8yao3PqVrTPP5Qx0st1pxeHt4jVR13L7CY38D8iw`.
 
 ### Local SSH state and rollback
 
-- The four dedicated CourseMate key files were already in `C:\Users\Hp\.ssh` when this run began.
-  Their private/public fingerprints match. The mistaken `C:\Users\Hp.ssh` directory no longer
-  exists, so no duplicate private-key deletion was required.
-- Windows `ssh-agent` is `Running` with startup type `Automatic`. Both dedicated identities were
-  loaded for the acceptance test. Re-run BatchMode validation after a Windows reboot or agent reset.
-- The final two alias blocks specify the exact host, `root`, port 22, the dedicated identity,
-  `IdentitiesOnly yes`, `PreferredAuthentications publickey`, and `BatchMode yes`.
-- Both private key ACLs are limited to the current user, `SYSTEM`, and local Administrators; no
+- The old/destination keypairs pre-existed. A separate passphrase-protected
+  `C:\Users\Hp\.ssh\coursemate-prod-current` ED25519 keypair was created for the authoritative source;
+  no old/destination private key was reused.
+- Windows `ssh-agent` is `Running` with startup type `Automatic`. All three CourseMate identities were
+  loaded for acceptance. Re-run BatchMode validation after a Windows reboot or agent reset.
+- The three alias blocks specify exact hosts/users/port 22, dedicated identities, `IdentitiesOnly yes`,
+  `PreferredAuthentications publickey`, and `BatchMode yes`.
+- All three private-key ACLs are limited to the current user, `SYSTEM`, and local Administrators; no
   `Everyone` or ordinary `Users` grant was observed.
-- Before appending each dedicated public key, the existing remote `authorized_keys` was backed up as
-  `/root/.ssh/authorized_keys.pre-coursemate-20260912T193152Z`. Both remote files remain mode 600
-  under root-owned mode-700 `.ssh` directories.
+- Before the current-source public key was appended, `/home/admin/.ssh/authorized_keys` was backed up
+  as `/home/admin/.ssh/authorized_keys.pre-coursemate-20260913T115433Z`. Earlier root-owned backups for
+  the old/destination aliases remain separate.
 - Rollback of the key append is possible through the corresponding backup, but only while retaining
   another verified management path. No rollback was needed.
 - `PASSWORD ROTATION REQUIRED`: the Owner reported that server passwords had appeared in an external
@@ -130,19 +138,27 @@ currently valid through 2026-11-10 UTC; TLS 1.3, Caddy, the exact production COR
 restrictive security headers were observed. This proves only the current public routing/edge, not the
 Alibaba resource type or data location.
 
-The previously observed SSH endpoint at `47.237.179.69:22` presented candidate ED25519 fingerprint
-`SHA256:xrg8yao3PqVrTPP5Qx0st1pxeHt4jVR13L7CY38D8iw`, but that remains TOFU-only evidence and no
-trusted login identity is available. Its release, systemd configuration, databases, uploads,
-environment files, provider, and cloud region therefore remain:
+Owner-console evidence confirmed ED25519 fingerprint
+`SHA256:xrg8yao3PqVrTPP5Qx0st1pxeHt4jVR13L7CY38D8iw`, user `admin`, hostname
+`iZt4n0k005125h6vlxoiloZ` and private IP `172.17.61.74`. A dedicated key then passed BatchMode.
+Trusted inventory found Ubuntu 24.04.2 LTS, Caddy on 80/443, local RAG on 127.0.0.1:8000 and local
+Agent on 127.0.0.1:8001. All three services are active/enabled.
 
-```text
-UNKNOWN — REQUIRES MANUAL VERIFICATION OR TRUSTED SSH ACCESS
-```
+The running code is detached release `cb7d0633e5026d042014512b72273f4439c9cff4` under
+`/home/admin/coursemate-v2-candidate-cb7d0633309c`. The older `/home/admin/coursemate-ai` directory
+is `main@e1ef57a...`. Systemd drop-ins explicitly select the detached release, and its local 18-path
+OpenAPI SHA-256 exactly matches the public artifact. No daemon-reload, restart or service mutation
+was performed.
 
-This host is classified as `CURRENT PUBLIC COURSEMATE BACKEND / INTERNAL ROLE UNKNOWN`. The public
-API artifact is materially different from the 6-path API on `8.210.58.22`, so it is not a transparent
-pass-through to that currently running RAG process. A split Agent or storage topology remains
-possible until the trusted current-host inventory is complete.
+The same host owns `/srv/coursemate/rag/rag.sqlite3`, `/srv/coursemate/agent/agent.sqlite3` and
+`/srv/coursemate/rag/uploads`. Both databases report integrity OK and zero FK violations. RAG is at
+migration 10 with 2 courses, 66 documents, 1,936 chunks, 39 conversations and 86 messages; Agent is
+at migration 1 with one task. Uploads contain 67 files / 124,209,790 bytes. The runtime uses the
+Alibaba DashScope international OpenAI-compatible endpoint with `qwen3.7-plus` and
+`text-embedding-v4`; secret values were not read or printed.
+
+This proves `RESULT B`: `47.237.179.69` is the authoritative application/data source. The trusted
+local Caddy upstreams, services, databases and uploads reject the previous split-production case.
 
 ### Owner-designated old server evidence
 
@@ -155,8 +171,8 @@ only 6 paths and a different SHA-256:
 
 This proves that `8.210.58.22` and the current DNS backend do not expose the same RAG release. Its
 database content and upload mtimes are stale since 2026-08-13 and its Caddy access logs are not
-configured. It is therefore classified as `LEGACY/STANDBY CANDIDATE`; a split Agent/storage role is
-not excluded until `47.237.179.69` can be inventoried.
+configured. It is therefore classified as `LEGACY/STANDBY`; it is not part of the selected migration
+source.
 
 ## Local release candidate
 
@@ -165,8 +181,8 @@ Repository root:
 C:\Users\Hp\Documents\Codex\2026-08-11\files-mentioned-by-the-user-coursemate\outputs\coursemate-ai
 
 Branch: feature/coursemate-v3-persistent-learning
-Baseline HEAD before this state update: 0ef3653c775aa7d3d4d3f0f0c59208c74863544c
-Baseline subject: docs(ops): audit current production source
+Baseline HEAD before this state update: 6367f9f2e190834dba3a9ee1d59edb96df387415
+Baseline subject: docs(ops): record phase A1 production revalidation
 Working tree at start: two preserved Owner untracked files; no tracked or staged changes
 Owner files preserved: ACTUAL_IMPLEMENTED_CHANGES_AUDIT.md, curl
 Origin main last observed: 73e7595dc8fc7179e4cd9693dd024e7a983792c2
@@ -307,12 +323,12 @@ binding Caddy or another proxy to ports 80/443.
 ## Migration state
 
 ```text
-SSH access: COMPLETE for Owner-designated old/new aliases
-Discovery: COMPLETE for 8.210.58.22 and 47.114.34.175
-Current public discovery: PARTIAL — Phase A1 DNS/HTTPS/TLS/OpenAPI revalidated; resource ownership and internals unknown
-Current public SSH: BLOCKED — Alibaba resource discovery plus fingerprint/user verification required
-Authoritative source selection: NOT YET DETERMINED
-Preparation: NOT STARTED
+SSH access: COMPLETE for old/current/destination aliases
+Discovery: COMPLETE for 8.210.58.22, 47.237.179.69 and 47.114.34.175
+Current public discovery: COMPLETE — host, runtime, proxy, release, DBs, uploads and safe provider config inventoried
+Current public SSH: READY — strict public-key BatchMode PASS
+Authoritative source selection: RESULT B — 47.237.179.69
+Preparation: IN PROGRESS — reviewed backup/restore contract and destination isolation preflight
 Initial sync: NOT STARTED
 Consistent backup: NOT STARTED
 Isolated restore: NOT STARTED
@@ -326,47 +342,32 @@ Completed: NO
 
 ## Current blockers and risks
 
-1. **Trusted current-backend access:** `47.237.179.69` may be ECS, EIP, a load balancer or NAT/proxy;
-   its Alibaba resource ownership is not yet known. The prior ED25519 value remains TOFU-only, and no
-   existing local user/key combination authenticates. Resource topology, fingerprint and actual login
-   user must be verified through the Alibaba Cloud console before an alias is created.
-2. **Source authority unresolved:** public DNS and health traffic use `47.237.179.69`, while
-   `8.210.58.22` exposes a different, smaller RAG API and stale storage evidence. Migrating from the
-   latter now can omit current production data; a split topology also remains possible.
-3. **Destination service collision:** new ECS ports 80, 8080, and 8081 already support `srszq-api`.
+1. **Destination service collision:** new ECS ports 80, 8080, and 8081 already support `srszq-api`.
    Replacing nginx or stopping PM2 could break an unrelated live service.
-4. **Destination hardening:** the machine requires a reboot, UFW is inactive, Caddy and SQLite CLI
+2. **Destination hardening:** the machine requires a reboot, UFW is inactive, Caddy and SQLite CLI
    are absent, and the Alibaba Security Group is unverified.
-5. **Release immutability:** the reviewed V3 branch is still absent on origin. Do not deploy by
+3. **Release immutability:** the reviewed V3 branch is still absent on origin. Do not deploy by
    copying an old working tree or by an unfrozen branch name.
-6. **Recovery gate:** no source-authoritative coordinated RAG DB + Agent DB + uploads backup,
+4. **Recovery gate:** no source-authoritative coordinated RAG DB + Agent DB + uploads backup,
    off-host copy, ECS snapshot, isolated restore, write-drain plan, or rollback smoke proof exists.
-7. **Credential hygiene:** rotate previously exposed server passwords after a separate approved
+5. **Credential hygiene:** rotate previously exposed server passwords after a separate approved
    maintenance window. Do not disable public-key access until replacement credentials are verified.
 
 ## First safe next actions
 
-1. In Alibaba Cloud, search `47.237.179.69` in order under ECS public IPv4, EIP associations, NAT
-   Gateway forwarding, SLB/ALB/NLB listeners and backend groups, then other resources/accounts/
-   regions under Owner control. Record the resource type and backend topology without modifying it;
-   do not assume the public IP is an ECS interface.
-2. If the result identifies a Linux ECS/backend, enter through Workbench/Session Manager/VNC and run
-   `sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`, `whoami`, `hostname`, and `hostname -I`.
-   Compare the result with the prior TOFU candidate
-   `SHA256:xrg8yao3PqVrTPP5Qx0st1pxeHt4jVR13L7CY38D8iw`. A mismatch requires reconciliation, not host-key
-   regeneration, verification bypass or blind acceptance. Report only resource type, match/no-match,
-   actual user, hostname and private IP; never send a password or private key.
-3. After resource and host identity are reconciled, authorize a dedicated public key, create a strict
-   `coursemate-prod-current` alias, and perform the allowlisted read-only process/proxy/Git/database/
-   upload inventory. Do not create a production backup from either candidate before this evidence
-   resolves the source topology.
+1. Validate the reviewed online-backup/restore scripts against the authoritative source paths and
+   available disk; create an initial backup without stopping or reloading live services.
+2. Copy that verified backup to an isolated path on the destination, re-verify all checksums, restore
+   there, and prove aggregate DB/upload equivalence without exposing private filenames or rows.
+3. Rehearse the reviewed 10 -> 21 RAG migration twice only on the isolated restored copy; never point
+   migration or tests at either live source paths.
 4. In Alibaba Cloud, verify the new ECS Security Group and take a rollback snapshot before any
    package installation, reboot, proxy change, or application write.
 5. Establish a coexistence plan for destination nginx/PM2 `srszq-api`. Preserve its files, process
    definitions, domains, ports, and rollback path; do not overwrite it with CourseMate config.
 6. Publish or otherwise freeze the exact reviewed V3 release SHA before deployment.
-7. Only after source authority is resolved: create a consistent two-database/uploads backup, copy it
-   off-host, verify checksums, restore to an isolated destination path, and rehearse migrations 1-21.
+7. Prepare a final maintenance/drain + delta backup plan after the initial restore rehearsal passes;
+   do not perform the final drain until its availability window and rollback conditions are approved.
 8. Keep DNS unchanged until the restored release passes private/local smoke tests, authentication,
    data invariants, monitoring, and rollback rehearsal.
 
@@ -375,13 +376,14 @@ Completed: NO
 - No production database, upload, repository, environment file, systemd service, proxy, firewall,
   package set, provider configuration, or DNS record was modified.
 - The 2026-09-13 18:02 CST Phase A1 slice performed DNS and pinned-IP HTTPS/TLS/OpenAPI reads only.
-  The local Alibaba CLI is unavailable, and no Alibaba resource lookup or mutation was attempted.
-  `coursemate-prod-current` remains absent from the effective SSH configuration.
-- Public DNS, TLS/HTTP/OpenAPI, SSH handshake, current-host key authentication, and aggregate
-  old/destination-host evidence were checked read-only. No `coursemate-prod-current` alias was
-  created; the isolated TOFU-only known-host file used for safe probes was removed afterward.
+  The local Alibaba CLI remains unavailable.
+- Owner-console evidence and strict known_hosts verification established current-host identity. The
+  dedicated `coursemate-prod-current` alias and key were created, loaded and accepted in BatchMode.
+- Current/old runtime, proxy, release, safe environment names/allowlisted values, aggregate database
+  health/counts and upload digests were read without exposing secrets, rows or private filenames.
 - The only remote writes were the explicitly requested SSH public-key append operations. Each
   original `authorized_keys` file received a timestamped backup first.
-- No application backup/restore, schema migration, model call, restart, deployment, or cutover ran.
+- No application backup/restore, schema migration, model call, restart, deployment or cutover has run
+  as of this source-decision checkpoint.
 - Secret values and private keys were never printed, copied to the repository, or placed in command
   arguments. Owner passphrase entry occurred only in a local interactive PowerShell prompt.

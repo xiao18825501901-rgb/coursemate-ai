@@ -4,9 +4,11 @@ Initial audit time: 2026-09-13 04:22 CST / 2026-09-12 20:22 UTC
 
 Last public-surface revalidation: 2026-09-13 18:02:25 CST / 2026-09-13 10:02:25 UTC
 
-Status: `BLOCKED ON ALIBABA RESOURCE OWNERSHIP AND TRUSTED ACCESS TO CURRENT PUBLIC BACKEND`
+Last trusted current-host inventory: 2026-09-13 20:02:07 CST / 2026-09-13 12:02:07 UTC
 
-Data migration authorized: `NO`
+Status: `AUTHORITATIVE SOURCE PROVEN — RESULT B; INITIAL BACKUP/ISOLATED RESTORE PREPARATION`
+
+Data migration authorized: `YES — INITIAL BACKUP/ISOLATED RESTORE ONLY; FINAL DRAIN/CUTOVER REMAINS GATED`
 
 This audit records only non-secret infrastructure facts, aggregate database/upload evidence, and
 public HTTP behavior. It does not contain credentials, private key material, environment secrets,
@@ -18,15 +20,15 @@ user IDs, conversation text, private filenames, course content, or database rows
 API plus the Agent health/auth surface. It is not a transparent pass-through to the currently running
 6-path RAG process on `8.210.58.22`.
 
-However, no existing safe local key can authenticate to `47.237.179.69`, and its SSH host key has not
-yet been verified through the Alibaba Cloud console. Its process topology, reverse-proxy upstreams,
-release SHA, RAG DB, Agent DB, uploads and model configuration remain unknown. A split topology—such
-as current RAG on `47.237.179.69` with Agent or storage elsewhere—cannot yet be excluded.
+Owner-console evidence verified the host ED25519 fingerprint, login user, hostname and private IP.
+The dedicated `coursemate-prod-current` identity then passed strict public-key BatchMode. Trusted
+inventory proves that the host runs Caddy plus local RAG and Agent services, stores both SQLite
+databases and the upload tree, and serves the same 18-path OpenAPI artifact observed publicly.
 
-Therefore this audit does not issue Result A, B, or C and does not select a migration source. The
-strongest candidate is `47.237.179.69`, but production data movement remains blocked until trusted
-SSH inventory proves whether it is a complete application host, a gateway, or one part of a split
-deployment.
+This audit therefore issues **Result B**: `47.237.179.69` is the authoritative CourseMate application
+and data source. `8.210.58.22` is a legacy/standby candidate and is not a source for migration. The
+initial online-backup and isolated-restore phases may proceed; production write drain, final delta,
+DNS cutover, destructive operations, paid model calls and destination reboot remain separately gated.
 
 ## 1. DNS topology
 
@@ -161,25 +163,32 @@ CORS allows the exact origin `https://qqttai.com`. These are facts about this ho
 
 ```text
 Current DNS backend: YES
-Alibaba resource type/ownership: UNKNOWN — manual console discovery required
-Effective local coursemate-prod-current alias: ABSENT
+Owner-console host identity: VERIFIED
+Alibaba resource attachment ID/region: NOT RECORDED IN REPOSITORY EVIDENCE
+Effective local coursemate-prod-current alias: READY
+Alias target: admin@47.237.179.69:22
+BatchMode public-key acceptance: PASS
+Dedicated public-key fingerprint:
+SHA256:60v7oW8NOi6YEdRCBGY4b3xIfyW4Fy94thVTAhRWWi8
+Verified login user: admin
+Verified hostname: iZt4n0k005125h6vlxoiloZ
+Verified private IP: 172.17.61.74
 Local Alibaba CLI: UNAVAILABLE
 Reachable ports: 22, 80, 443
 Common alternative SSH ports checked and closed: 2022, 2200, 2222, 8022, 8822
 SSH banner: OpenSSH_9.6p1 Ubuntu-3ubuntu13.19
 SSH authentication advertised: publickey,password
-Previously observed candidate ED25519 host fingerprint:
+Verified ED25519 host fingerprint:
 SHA256:xrg8yao3PqVrTPP5Qx0st1pxeHt4jVR13L7CY38D8iw
-Host fingerprint trust: TOFU ONLY — not authoritative until Alibaba-console verified
+Host fingerprint trust: PASS — Owner-console value matches strict local known_hosts validation
 ```
 
-Existing local keys were tried non-interactively against the plausible `root`, `admin`, `ubuntu`,
-and `ecs-user` accounts. No combination authenticated. No password was requested, collected, placed
-on a command line, or stored. No `coursemate-prod-current` alias was created because neither the login
-identity nor the host fingerprint is yet trusted.
-
-The temporary TOFU-only host-key file used for the key matrix was deleted after the probe and was
-never referenced by the main SSH configuration.
+A dedicated encrypted ED25519 key was created with restrictive Windows ACLs and loaded into
+`ssh-agent`. The Owner installed only its public half under the verified `admin` account after backing
+up `authorized_keys` to
+`/home/admin/.ssh/authorized_keys.pre-coursemate-20260913T115433Z`. No password was requested in chat,
+put on a command line, logged or stored. The temporary verification file was removed after the exact
+host public key was promoted into the normal strict `known_hosts` file.
 
 ### Public API facts
 
@@ -290,34 +299,34 @@ local RAG process would return the same OpenAPI artifact; these artifacts differ
 
 | Fact | 8.210.58.22 | 47.237.179.69 | 47.114.34.175 |
 |---|---|---|---|
-| Role | legacy/standby candidate; split role not excluded | current public backend; internals unknown | destination + existing SRSZQ |
+| Role | legacy/standby only | authoritative current application/data source | destination + existing SRSZQ |
 | Public DNS receives traffic | no | yes | no |
 | CourseMate RAG present | yes | yes | no; deployment target only |
 | RAG API path count | 6 | 18 | not deployed |
-| RAG release SHA | `ef7795b1e41aefbfdf9738e88a7eca053ea621db` | unknown | not deployed |
-| RAG DB | `/srv/coursemate/rag/rag.sqlite3` | unknown | absent |
-| RAG schema | migration 1 | unknown | not deployed |
-| RAG aggregate rows | 2 courses, 1 document, 0 chunks, 1 job, 0 conversations/messages | unknown | none |
-| Agent present | active local service | public health/auth surface only; runtime unknown | no CourseMate Agent |
-| Agent DB | `/srv/coursemate/agent/agent.sqlite3` | unknown | absent |
-| Uploads | `/srv/coursemate/rag/uploads`; 1 file / 229 bytes | root and aggregate unknown | absent |
-| Reverse proxy | Caddy -> local 8000/8001 | Caddy -> unknown upstreams | nginx -> SRSZQ 8080/8081 |
+| RAG release SHA | `ef7795b1e41aefbfdf9738e88a7eca053ea621db` | `cb7d0633e5026d042014512b72273f4439c9cff4` detached release | not deployed |
+| RAG DB | `/srv/coursemate/rag/rag.sqlite3` | `/srv/coursemate/rag/rag.sqlite3` | absent |
+| RAG schema | migration 1 | migration 10 | not deployed |
+| RAG aggregate rows | 2 courses, 1 document, 0 chunks, 1 job, 0 conversations/messages | 2 courses, 66 documents, 1,936 chunks, 69 jobs, 39 conversations, 86 messages | none |
+| Agent present | active local service | active local service | no CourseMate Agent |
+| Agent DB | `/srv/coursemate/agent/agent.sqlite3` | `/srv/coursemate/agent/agent.sqlite3` | absent |
+| Uploads | `/srv/coursemate/rag/uploads`; 1 file / 229 bytes | `/srv/coursemate/rag/uploads`; 67 files / 124,209,790 bytes | absent |
+| Reverse proxy | Caddy -> local 8000/8001 | Caddy -> local 8000/8001 | nginx -> SRSZQ 8080/8081 |
 | Auth config | Clerk-protected; exact production CORS | Clerk-protected; exact production CORS | CourseMate absent |
-| Model config | OpenAI-compatible; named models verified | unknown | CourseMate absent |
-| Last activity | content/storage stale since 2026-08-13; no access log | current HTTP responses only | SRSZQ active; CourseMate absent |
-| Candidate authoritative source | unsupported as sole RAG source | strongest candidate; unproven | no |
+| Model config | OpenAI-compatible; named models verified | Alibaba DashScope international OpenAI-compatible endpoint; `qwen3.7-plus` + `text-embedding-v4` | CourseMate absent |
+| Last activity | content/storage stale since 2026-08-13; no access log | messages through 2026-09-07; services restarted 2026-09-12; live HTTP verified 2026-09-13 | SRSZQ active; CourseMate absent |
+| Authoritative source | no | **yes — Result B** | no |
 
 ## 7. Database comparison
 
 | Fact | 8.210.58.22 | 47.237.179.69 | 47.114.34.175 |
 |---|---|---|---|
-| RAG DB | `/srv/coursemate/rag/rag.sqlite3` | unknown | absent |
-| RAG schema | migration 1 | unknown | not deployed |
-| RAG aggregate rows | 2 courses, 1 document, 0 chunks | unknown | none |
-| Agent DB | `/srv/coursemate/agent/agent.sqlite3` | unknown | absent |
-| Agent schema | migration 1 | unknown | not deployed |
-| Agent aggregate rows | 0 tasks | unknown | none |
-| Integrity / FK | both OK / 0 violations | unknown | not applicable |
+| RAG DB | `/srv/coursemate/rag/rag.sqlite3` | `/srv/coursemate/rag/rag.sqlite3` | absent |
+| RAG schema | migration 1 | migration 10 | not deployed |
+| RAG aggregate rows | 2 courses, 1 document, 0 chunks | 2 courses, 66 documents, 1,936 chunks | none |
+| Agent DB | `/srv/coursemate/agent/agent.sqlite3` | `/srv/coursemate/agent/agent.sqlite3` | absent |
+| Agent schema | migration 1 | migration 1 | not deployed |
+| Agent aggregate rows | 0 tasks | 1 task | none |
+| Integrity / FK | both OK / 0 violations | both OK / 0 violations | not applicable |
 
 Database size was not used as the production decision criterion.
 
@@ -325,10 +334,10 @@ Database size was not used as the production decision criterion.
 
 | Fact | 8.210.58.22 | 47.237.179.69 | 47.114.34.175 |
 |---|---|---|---|
-| Root | `/srv/coursemate/rag/uploads` | unknown | absent |
-| Files / bytes | 1 / 229 | unknown | 0 / 0 for CourseMate |
-| Manifest digest | `672a2a76...9e170` | unknown | not applicable |
-| Latest content mtime | 2026-08-13 06:00:47 CST | unknown | not applicable |
+| Root | `/srv/coursemate/rag/uploads` | `/srv/coursemate/rag/uploads` | absent |
+| Files / bytes | 1 / 229 | 67 / 124,209,790 | 0 / 0 for CourseMate |
+| Fresh normalized manifest digest | `53e037ba...941e` | `c5fb27c3...0a2d` | not applicable |
+| Latest content mtime | 2026-08-13 06:00:47 CST | 2026-08-11 15:15:45 CST | not applicable |
 
 No private filename or file content was printed.
 
@@ -341,33 +350,34 @@ Verified:
   rag.qqttai.com   -> 127.0.0.1:8000
   agent.qqttai.com -> 127.0.0.1:8001
 
-47.237.179.69 public headers:
-  HTTPS edge/proxy = Caddy
-  RAG upstream = UNKNOWN
-  Agent upstream = UNKNOWN
+47.237.179.69 Caddy:
+  rag.qqttai.com   -> 127.0.0.1:8000
+  agent.qqttai.com -> 127.0.0.1:8001
+  RAG/Agent processes, databases and uploads are local to the same host
 
 47.114.34.175 nginx:
   default :80 -> SRSZQ 127.0.0.1:8080 / :8081
 ```
 
-No config on `8.210.58.22` references `47.237.179.69`, and its current RAG artifact differs from the
-public one. This rejects the narrow hypothesis “47.237.179.69 transparently proxies the running old
-RAG process,” but does not identify the current Caddy upstream or rule out split Agent/storage.
+The trusted current-host inventory identifies both Caddy upstreams and both local services. Together
+with the local database/upload paths and the exact public/local OpenAPI digest match, this rules out
+the previously plausible split Agent/storage topology for the current deployment.
 
 ## 10. Source-of-truth decision
 
 ```text
 AUTHORITATIVE COURSEMATE MIGRATION SOURCE:
-NOT YET DETERMINED
+47.237.179.69 (`coursemate-prod-current`)
 
 Result A (8.210.58.22): NOT SUPPORTED by current RAG/DNS/activity evidence
-Result B (47.237.179.69): LEADING CANDIDATE, but DB/storage/runtime proof is missing
-Result C (SPLIT PRODUCTION): STILL POSSIBLE until current proxy/process/storage inventory is read
+Result B (47.237.179.69): PROVEN — SELECTED
+Result C (SPLIT PRODUCTION): REJECTED by trusted proxy/process/database/upload evidence
 
-SAFE TO START DATA MIGRATION: NO
+SAFE TO START INITIAL BACKUP / OFF-HOST COPY / ISOLATED RESTORE: YES
+SAFE TO START FINAL WRITE DRAIN / CUTOVER / DNS CHANGE: NO — LATER OWNER GATES APPLY
 ```
 
-The required evidence threshold deliberately prevents selecting a host from API size or DNS alone.
+The decision uses trusted runtime and data evidence, not API size or DNS alone.
 
 ## 11. New-ECS coexistence constraints
 
@@ -388,61 +398,21 @@ Caddy must not bind public ports 80/443 while nginx owns them. Replacing nginx i
 
 ## 12. Next migration action
 
-### Manual action required
-
-```text
-MANUAL ACTION REQUIRED: 需要为 47.237.179.69 建立 SSH public-key login。
-```
-
-In the Alibaba Cloud console, search for `47.237.179.69` in this order without changing any resource:
-
-1. ECS public IPv4;
-2. EIP / Elastic IP and its associated resource;
-3. NAT Gateway forwarding/DNAT;
-4. SLB / ALB / NLB listeners and backend server groups;
-5. other network resources and, if absent, other Owner-controlled accounts/regions.
-
-Do not assume that a public address is attached directly to an ECS network interface. Record only the
-resource type, region, associated resource identifier/name and backend private IP/port topology; do
-not expose cloud credentials or unrelated resources.
-
-If the address resolves to a Linux ECS or an associated backend ECS, enter it through Workbench,
-Session Manager, VNC or another already trusted console channel and run:
-
-```bash
-sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
-whoami
-hostname
-hostname -I
-```
-
-The prior network probe recorded this candidate fingerprint:
-
-```text
-SHA256:xrg8yao3PqVrTPP5Qx0st1pxeHt4jVR13L7CY38D8iw
-```
-
-If the console fingerprint matches, record `HOST_IDENTITY_VERIFIED`. If it differs, do not regenerate
-or change host keys, disable verification, or accept the network key blindly. Record
-`FINGERPRINT_RECONCILIATION_REQUIRED` and investigate IP/EIP reassociation, a changed system disk,
-load-balancer/proxy topology and the provenance of the old TOFU value. The identity observed inside the
-current Alibaba console instance has higher evidentiary priority than the prior unverified text.
-
-Report only the resource type, whether the fingerprint matches, the actual login user, hostname and
-private IP. Do not send a password, private key, token, `.env`, database, or screenshot containing
-secrets. After the resource and host identity are reconciled, create/authorize a dedicated public key
-through a visible terminal password prompt or the trusted console, then add `coursemate-prod-current`
-with strict public-key BatchMode settings.
-
-Only after that alias passes may the next automated phase read the current host's systemd/process,
-Git/artifact, proxy upstream, allowlisted path configuration, aggregate DB health, upload manifest and
-last-activity evidence. The source decision and coordinated backup plan must then be updated before
-any data transfer.
+1. Validate the reviewed `ops/backup_v2.py` and `ops/restore_v2.py` contracts against the authoritative
+   paths and available disk without changing live services.
+2. Create an **initial** SQLite-online backup plus upload archive on the source. This is bulk-migration
+   evidence, not the final cutover snapshot and does not claim cross-artifact point-in-time atomicity.
+3. Copy the verified backup to an isolated destination-owned path, verify checksums, and run the
+   restore script without touching SRSZQ, nginx, ports 80/8080/8081 or any live CourseMate path.
+4. Freeze an exact reviewed V3 release SHA and rehearse Schema 10 -> 21 twice against only the isolated
+   restored RAG database. Keep `V3_ENABLED=false` for the initial compatibility deployment.
+5. Prepare, but do not yet execute, destination systemd/nginx coexistence configuration and the final
+   write-drain/delta plan. Final drain, DNS cutover, paid model calls and reboot remain Owner gates.
 
 ## Safety ledger
 
 ```text
-Production DB copy: NO
+Production DB copy: NO (initial backup is the next authorized slice)
 Uploads transfer: NO
 Schema migration: NO
 Service stop/restart/replacement: NO
@@ -452,4 +422,5 @@ Paid model call: NO
 Password collected/stored: NO
 Private key exposed: NO
 User/course content read: NO
+Authorized remote write: dedicated public key only; prior authorized_keys backed up first
 ```
