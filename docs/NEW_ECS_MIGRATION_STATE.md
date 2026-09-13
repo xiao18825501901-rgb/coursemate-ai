@@ -317,7 +317,8 @@ sqlite3 CLI: MISSING
 /home/admin/coursemate-ai: MISSING
 /root/coursemate-ai: MISSING
 /opt/coursemate: MISSING
-CourseMate RAG/Agent/monitor units: INSTALLED AND LOADED; inactive and disabled
+CourseMate RAG/Agent units: INSTALLED/LOADED; inactive and disabled
+CourseMate monitor service/timer: INSTALLED/LOADED; service static/inactive, timer disabled/inactive
 CourseMate nginx site: INSTALLED in sites-available; not enabled; nginx not reloaded
 Isolated initial RAG DB / Agent DB / uploads copy: PRESENT under /srv/coursemate-migration
 Exact validated candidate release: /srv/coursemate/releases/9806a55
@@ -393,7 +394,7 @@ Destination rollback snapshot: RECORDED — exact system disk, before runtime in
 Isolated runtime: COMPLETE — Python 3.12.14, locked production/test venvs and locked Node dependencies
 Schema migration: REHEARSAL PASS — 10 -> 21 twice on fresh copies; live source/pristine restore untouched
 Exact-release validation: PASS — Python, Web, Agent, typecheck and production build on 9806a55
-Final candidate: PREPARED — exact release, independent runtime/user/paths, secret-safe env and disabled units/site
+Final candidate: PREPARED — exact release, independent runtime/user/paths, secret-safe env and non-started units/site
 Private smoke: PASS — V2 compatibility, V3 migration/routes, auth/CORS, proxy and monitor; all transient services stopped
 Release publication: COMPLETE — branch pushed non-force; 9806a55 reachable from origin branch history
 TLS readiness: BLOCKED — no destination certificate or 443 listener; issuance/key method requires Owner decision
@@ -502,7 +503,8 @@ ownership. Secret values were never printed. Compatibility remains on the curren
 DashScope/OpenAI-compatible configuration; `V3_MODEL=qwen3.8-max` is only an inactive intent and
 `V3_ENABLED=false` remains the initial activation policy.
 
-The loaded RAG, Agent, monitor service and monitor timer units are inactive and disabled. The
+The loaded RAG and Agent units are inactive/disabled; the monitor service is static/inactive and its
+timer is inactive/disabled. The
 CourseMate nginx file is present only in `sites-available`; it is not linked into `sites-enabled`, and
 the live nginx process was not reloaded. Static systemd verification and both the live configuration
 test and a candidate-union nginx test pass. The existing nginx master and SRSZQ production/staging PM2
@@ -518,7 +520,7 @@ V3 flag-on: copied RAG Schema 10 -> 21; health/routes/auth/authorization/non-lea
 V3 external calls: model evidence rows=0; reservations=0; no live or paid provider call
 Proxy: rag/agent Host routing, streaming headers, auth and exact CORS origin PASS
 Monitor: status=ok; RAG 12 ms; Agent 2 ms; backup age 8,327 s; free space 33,468,669,952 bytes
-Cleanup: localhost ports 28000, 28001 and 29080 closed; candidate units inactive/disabled
+Cleanup: localhost ports 28000, 28001 and 29080 closed; all candidate units inactive
 Smoke evidence SHA-256: bde19f160d7957f63abf64154e54180c7a8d9b077ce9a200107c9431a338f4ba
 Final Python freeze SHA-256: 8ddb0b7c056f403b16a62b4da10561cb0e4de5e95edbb413d00606a3436b476e
 Production npm tree SHA-256: 6ff9dc368decc31e070d41a2bf5646a520f72a1f258fc6aa3af885c7da0b963c
@@ -603,8 +605,9 @@ the Owner decides whether staging must survive and its recovery path is tested o
   transient orphaned migration npm process was removed after exact PID/cwd verification; no SRSZQ
   process was signalled.
 - Secret configuration moved server-to-server through protected files and an allowlisted transform;
-  values were not printed. CourseMate systemd and nginx candidates were statically validated but left
-  inactive/disabled, and nginx was not reloaded. Transient private smoke services were stopped and all
+  values were not printed. CourseMate systemd and nginx candidates were statically validated but not
+  activated; RAG/Agent/timer remain disabled, monitor remains static, and nginx was not reloaded.
+  Transient private smoke services were stopped and all
   three localhost test ports were confirmed closed.
 - Schema 10 -> 21 ran only on fresh copied databases. The pristine restore and authoritative source
   hashes remained unchanged. Destination tests, typecheck and builds passed for exact release

@@ -271,7 +271,8 @@ CourseMate candidate root: /srv/coursemate — PREPARED, INACTIVE, NOT SERVING T
 Candidate release/runtime: exact 9806a55 under /srv/coursemate; independent Python 3.12.14 venv
 Final candidate data: DIRECTORY SKELETON ONLY — 0 files; RAG/Agent DB absent
 Initial recovery copies: PRESENT under /srv/coursemate-migration and /srv/coursemate/backups
-CourseMate units: INSTALLED/LOADED but inactive and disabled
+CourseMate RAG/Agent: INSTALLED/LOADED, inactive and disabled
+CourseMate monitor: service static/inactive; timer disabled/inactive
 CourseMate nginx site: sites-available only; not enabled; nginx not reloaded
 Pre-runtime system-disk snapshot: s-bp13r5gqocjif1jtieav (disk d-bp1f0vqhds2341pces7h)
 Exact validated release: 9806a553a30c0531f727ba1538543fe6225e4c44
@@ -484,7 +485,8 @@ created. File count is 0 and both final database files are absent.
 
 Source secrets moved directly through protected server files and an allowlisted transform; no value
 was printed. Candidate RAG/Agent/monitor environment files are root-owned and group-readable only.
-Four systemd unit files are loaded but inactive/disabled. The CourseMate nginx configuration is only
+Four systemd unit files are loaded and inactive: RAG/Agent/timer are disabled and monitor service is
+static. The CourseMate nginx configuration is only
 in `sites-available`; it is not enabled and nginx was not reloaded. The V3 branch was published by
 non-force push, so exact application commit `9806a55` is reachable from the remote branch history.
 
@@ -509,7 +511,7 @@ running `srszq-staging` process. Neither TLS activation nor reboot is authorized
 Production DB copy: YES — initial SQLite-online snapshots only
 Uploads transfer: YES — initial verified archive to isolated and candidate backup roots only
 Schema migration: COPIED-DATABASE REHEARSAL ONLY — PASS; SOURCE/LIVE NO
-Candidate release/runtime/env/units: PREPARED — INACTIVE/DISABLED; FINAL DATA FILES=0
+Candidate release/runtime/env/units: PREPARED — ALL INACTIVE; RAG/AGENT/TIMER DISABLED; MONITOR STATIC; DATA FILES=0
 Private smoke service starts: YES — TRANSIENT/LOCALHOST ONLY; STOPPED; PORTS CLOSED
 Existing service stop/restart/replacement: NO
 Nginx configuration: CANDIDATE FILE VALIDATED; NOT ENABLED; NO RELOAD
