@@ -1,25 +1,71 @@
 # CourseMate V3 — New Alibaba ECS Migration State
 
-Last updated: 2026-09-14 02:00 CST / 2026-09-13 18:00 UTC
+Last updated: 2026-09-14 04:18 CST / 2026-09-13 20:18 UTC
 
-Current phase: `TRUSTED TLS + RENEWAL + V3 PREVIEW + DESTINATION CONFIG READY; HARD BLOCKED BY SOURCE OUTAGE AND PROVIDER KEY REJECTION`
+Current phase: `FINAL DATA + SCHEMA 21 + PRIVATE V3 ACTIVE; PUBLIC CUTOVER BLOCKED BY HANGZHOU ICP ENFORCEMENT`
 
-Production data copied: `YES — INITIAL ONLINE BACKUP ONLY; FINAL DELTA NOT STARTED`
+Production data copied: `YES — FINAL DRAINED RECOVERY UNIT VERIFIED AND INSTALLED`
 
-Authoritative-source production writes changed: `NO — SOURCE BECAME UNREACHABLE BEFORE FINAL DRAIN`
+Authoritative source: `47.237.179.69 RESTORED, ACTIVE, HEALTHY AND STILL ROUTED`
 
-Destination candidate changed: `YES — TRUSTED CERTIFICATE/RENEWAL, INACTIVE MODEL ENV AND DISABLED TLS VHOST PREPARED; NO FINAL USER DATA OR TRAFFIC`
+Destination candidate: `cd8c121 ACTIVE ON LOOPBACK; SYSTEMD-DISABLED; V3 ENABLED; NON-AUTHORITATIVE`
 
 DNS changed: `NO`
 
-Rollback-ready application backup: `INITIAL RESTORE + LOCAL COPY VERIFIED; DESTINATION PRE-RUNTIME DISK SNAPSHOT AND ENV BACKUPS RECORDED; FINAL DRAIN/CUTOVER SNAPSHOTS NOT CREATED`
+Netlify production changed: `NO`
+
+Rollback-ready: `YES — SOURCE RESTORED; FINAL BACKUP/RESTORES, OLD RELEASE, ENV BACKUPS AND DISK SNAPSHOT PRESERVED`
 
 This is the non-secret migration control record. It separates live evidence, repository facts,
 Owner-designated roles, and unresolved production authority. It must never contain credentials,
 private key material, private course content, database rows, upload names, prompt bodies, or raw
 provider responses.
 
-## Executive gate
+## Current authoritative gate
+
+The final source drain and migration completed. The final recovery unit exists on both hosts, isolated
+restores pass, RAG migrated from Schema 10 to 21, Agent remains Schema 1, and all legacy fingerprints,
+Agent counts and upload digest match. Destination safe-stop evidence SHA-256 is
+`8e1508c960e6589535c851465eefc5ef941a3af97ac707759e9d64ba0bc1e4b9`.
+
+The source was restarted after the public ingress gate failed. Current public backend DNS still
+points to `47.237.179.69`; source RAG and Agent return HTTP 200. The source's post-rollback state
+matched the drained state at the collection time. Because it is serving writes again, a future
+cutover must create another final drain rather than assume the destination remains current.
+
+Destination status:
+
+```text
+Release: cd8c1218b56f04c3947abda33cf1b2638bafbf16
+RAG / Agent: active on 127.0.0.1:28000 / 127.0.0.1:28001
+Boot policy: disabled / disabled
+V3: enabled
+RAG schema / Agent schema: 21 / 1
+Uploads: 67 files / 124,209,790 bytes
+Trusted local-SNI HTTPS: 200 / 200
+nginx: active, public 80/443 listeners present
+SRSZQ: online; PIDs 1182 / 48185; nginx master 897
+```
+
+Public requests to the Hangzhou address with either CourseMate Host/SNI are blocked upstream of
+nginx: port 80 returns HTTP 403 with `Server: Beaver` and HTML title
+`Non-compliance ICP Filing`; port 443 resets during TLS handshake. This is consistent with Alibaba
+Cloud's documented mainland-China ICP/access-filing enforcement. DNS activation is therefore
+prohibited.
+
+The replacement Singapore key and exact workspace are valid. Real `qwen3.8-max` Planner structured
+outputs completed, but the full canary is not accepted: one Teacher request timed out at the former
+90-second limit and a later request reached the 4,000-token combined reasoning/answer cap. The
+Provider timeout is now bounded/configurable at 180 seconds with zero retries. No further paid
+tuning was attempted.
+
+See
+[`COURSEMATE_V3_FINAL_PRODUCTION_DEPLOYMENT_REPORT.md`](COURSEMATE_V3_FINAL_PRODUCTION_DEPLOYMENT_REPORT.md)
+for the complete evidence, model-cost ledger, rollback state and exact Owner action.
+
+## Historical migration record
+
+### Historical executive gate (superseded where time-sensitive)
 
 The destination and legacy aliases still pass strict public-key-only BatchMode authentication. The
 authoritative source alias was previously verified, but the entire source public address is now

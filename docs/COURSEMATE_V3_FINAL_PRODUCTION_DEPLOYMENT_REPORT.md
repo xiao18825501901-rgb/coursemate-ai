@@ -1,332 +1,262 @@
 # CourseMate V3 — Final Production Deployment Report
 
-Report time: 2026-09-14 02:05 CST / 2026-09-13 18:05 UTC
+Report time: 2026-09-14 04:18 CST / 2026-09-13 20:18 UTC
 
-Last resume verification: 2026-09-14 02:43 CST / 2026-09-13 18:43 UTC
+Outcome: `HARD EXTERNAL BLOCKER — PRODUCTION CUTOVER ROLLED BACK BEFORE DNS CHANGE`
 
-Outcome: `HARD EXTERNAL BLOCKER — PRODUCTION CUTOVER NOT PERFORMED`
-
-This report records the authorized unattended cutover attempt. It is deliberately not a success
-certificate. The attempt completed every independent safe preparation available with the configured
-accounts, then stopped because the authoritative source became unreachable and the installed
-Singapore Model Studio key was rejected. No stale backup was promoted as current production.
+This is not a production-acceptance certificate. The final source drain, verified transfer,
+Schema 10 to 21 migration, destination private activation and bounded live-model work were performed.
+The public cutover was then stopped because Alibaba Cloud blocks the two CourseMate hostnames at the
+Hangzhou public-IP boundary for non-compliant ICP filing. The source was restored before any DNS or
+Netlify production change.
 
 ## Release identity
 
 ```text
 Repository branch: feature/coursemate-v3-persistent-learning
-Validated application SHA: 9806a553a30c0531f727ba1538543fe6225e4c44
-Repository HEAD before this report: c85a1e9821f9c2fa52ab15d623866b964c031f0f
-Destination release: /srv/coursemate/releases/9806a55
-Destination current symlink: /srv/coursemate/current -> validated release
-Destination: 47.114.34.175 / iZbp1f0vqhds2341pdqqiyZ
+Destination application SHA: cd8c1218b56f04c3947abda33cf1b2638bafbf16
+Original fully validated V3 SHA: 9806a553a30c0531f727ba1538543fe6225e4c44
+Destination current: /srv/coursemate/current -> /srv/coursemate/releases/cd8c121
+Destination: 47.114.34.175 / iZbp1f0vqhds2341pdqqiyZ / cn-hangzhou-k
 Authoritative source: 47.237.179.69 / iZt4n0k005125h6vlxoiloZ
-Legacy preserved host: 8.210.58.22
+Legacy renewal egress: 8.210.58.22
+Documentation SHA: commit containing this report; see the final handoff or git log
 ```
 
-The Git commit containing this report is recorded in the final handoff response. A commit cannot
-truthfully embed its own not-yet-created hash in its contents.
+The only application change after `9806a55` is the bounded, configurable V3 Provider timeout and
+its regression test. Web and Agent source/dependency inputs are unchanged between those releases.
 
 ## Acceptance classification
 
 ### SOURCE IMPLEMENTED
 
-- V3 Shared Learning Orchestrator, Teaching/Problem workflows, LearningBridge, persistence,
-  assessment, knowledge-tree and private-resource controls are in the validated release.
-- Production provider variables independently select `qwen3.8-max` generation while retaining
-  `text-embedding-v4` for existing embeddings.
-- Database migrations 1 through 21, backup/restore safety, bounded live canary, monitoring and
-  rollback tooling exist in source.
+- V3 learning orchestration, Teaching/Problem workflows, LearningBridge, persistence, assessment,
+  official/private trees and private-resource authorization remain implemented.
+- Generation is pinned to `qwen3.8-max` at the exact Singapore workspace endpoint; embedding remains
+  independently pinned to `text-embedding-v4`.
+- V3 Provider timeout is now configurable as `V3_MODEL_TIMEOUT_SECONDS`, defaults to 180 seconds,
+  is constrained to 30–600 seconds and retains zero SDK retries.
+- Migrations 1–21, backup/restore, content-free evidence, monitoring and rollback tooling remain in
+  source.
 
 ### LOCAL VERIFIED
 
-- Historical exact-release gates: Python 328 passed locally; destination exact-release Python 322
-  passed with 6 opt-in corpus skips; Ruff, mypy, Web 49/49, Agent 66/66, typecheck and production
-  builds passed.
-- This attempt reran the affected focused gates: Python 27 passed; Agent configuration 20 passed;
-  Web typecheck and 49 tests passed.
-- Netlify production-flag build passed before the draft deploy.
-- Production-env rewriter tests, nginx static guardrails, shell syntax and Python compilation passed.
+- Current RAG code: 329 tests passed; no failures.
+- Provider-focused affected tests: 20 passed.
+- Ruff: passed.
+- mypy: passed for the RAG application and new provider regression test.
+- The new regression test first failed against the hard-coded 90-second timeout and passed after the
+  configurable timeout implementation.
+- Historical exact-release gates still apply to unchanged surfaces: Web 49/49, Agent 66/66,
+  typechecks and production builds passed for `9806a55`.
 
 ### DESTINATION PRIVATE VERIFIED
 
-- Initial recovery unit was previously checksum-verified, isolated-restored and migrated on copies
-  from RAG Schema 10 to 21. Migration versions are contiguous; integrity is `ok`; FK violations are
-  zero; old row fingerprints are preserved; V3 invariants pass.
-- Private deterministic RAG/Agent/proxy/monitor smoke and private TLS smoke passed and cleaned up.
-- Production-shaped env loads through the actual RAG and Agent configuration code. Safe values are:
-  `qwen3.8-max`, exact Singapore workspace endpoint, `text-embedding-v4`, loopback ports 28000/28001,
-  final data paths, production Clerk configuration present, and `V3_ENABLED=false`.
-- The final HTTPS nginx candidate passes `nginx -t` but remains disabled and has never been reloaded.
-- Trusted production certificate and automated renewal are verified as described below.
+- The final drained recovery unit was transferred and checksum-verified.
+- A pristine isolated restore passed before migration.
+- RAG migration 10 to 21 passed with contiguous versions, unchanged legacy row fingerprints,
+  integrity `ok`, zero foreign-key violations and V3 invariant checks.
+- Agent remains Schema 1 with integrity `ok` and zero foreign-key violations.
+- Final upload restore contains 67 files / 124,209,790 bytes with normalized digest
+  `c5fb27c39fd06ff48972d3df1bb495345adfffffb4324b7d4dc579ad454c0a2d`.
+- Destination RAG and Agent are active on loopback 28000/28001, but remain systemd-disabled and are
+  not authoritative.
+- Local trusted-SNI HTTPS health is 200/200; protected unauthenticated routes are 401/401.
+- `V3_ENABLED=true`, model, endpoint, embedding split, data paths and the 180-second timeout all
+  load through the real production Settings class.
+- Content-free safe-stop evidence:
+  `/srv/coursemate/cutover/20260913T193257Z/destination-safe-stop-after-icp-block.json`,
+  SHA-256 `8e1508c960e6589535c851465eefc5ef941a3af97ac707759e9d64ba0bc1e4b9`.
 
 ### REAL PROVIDER VERIFIED
 
-- Historical Owner evidence reported a successful Windows canary against the exact Singapore
-  workspace and `qwen3.8-max` (112 total tokens). That is historical provider evidence only.
-- The required destination-backend canary is **not verified**. Both the exact workspace endpoint and
-  shared Singapore endpoint returned `401 invalid_api_key` for the protected destination key.
-- The canary had a maximum of three calls and zero retries. It stopped on the first Planner request,
-  recorded zero input/output tokens and no provider response ID, and estimated CNY 0 cost.
+Verified facts:
+
+- the replacement root-only key reaches the exact Singapore workspace;
+- `qwen3.8-max` is visible on the authenticated model surface;
+- real Responses requests receive `qwen3.8-max` response IDs and token usage;
+- two Planner structured outputs passed SDK completion and Pydantic schema validation;
+- zero automatic retries were used.
+
+The full Teaching/Problem/image canary is **not accepted**:
+
+| Attempt | Bound | Result | Recorded cost estimate |
+|---|---|---|---:|
+| 1 | 3 calls, 1,200 output tokens/call | Planner reached 1,200 tokens; `MODEL_INCOMPLETE` | CNY 0.08917980 |
+| 2 | 3 calls, 4,000 output tokens/call, 90 s timeout | Planner completed; Teacher had unknown outcome at 90 s | CNY 0.16768869 plus unknown timed-out-call billing |
+| 3 | 3 calls, 4,000 output tokens/call, 180 s timeout | Planner completed; Teacher reached 4,000 tokens; `MODEL_INCOMPLETE` | CNY 0.42891786 |
+
+Visible usage-based estimates total CNY 0.68578635. The timed-out request may still be billable, so
+this is not asserted as the Alibaba invoice total. The sum of all three conservative preflight
+ceilings is CNY 3.21700695, below the Owner-authorized CNY 5.00 ceiling.
+
+Preserved evidence:
+
+```text
+Attempt 1 checkpoint SHA-256:
+36c98c836c7a47a0823e8a5beaf60516aef19d6b080dd322cc1b13d7775c7809
+
+Attempt 2 checkpoint SHA-256:
+9fbf59f6a559cf74cd4f2ced2706869fcd24e35ee964786e6d455cb9bb8cf737
+
+Attempt 3 checkpoint SHA-256:
+98e156f97429e99f0ed89c533285a0ea02f2bbf9e104c8cb5912dd85e98e9bf1
+```
+
+Alibaba documents that `max_output_tokens` for Qwen3.8 includes both answer and reasoning tokens,
+and recommends an explicit Responses `reasoning.effort` policy. Before another paid run, the project
+must deliberately choose a bounded reasoning/output policy, test it locally and run one new
+non-overwriting preflight. Do not reuse or resume these failed checkpoints.
 
 ### PRODUCTION VERIFIED
 
-Only these production-surface facts are verified:
+Only the following public-production facts are verified:
 
-- `https://qqttai.com` still returns HTTP 200 from the unchanged Netlify production deploy.
-- Cloudflare remains authoritative. Both backend A records remain DNS-only at `47.237.179.69` with
-  automatic TTL. API read and DNS-01 writes are accepted by the scoped token.
-- The destination certificate is publicly trusted and covers only the intended backend names.
-- Destination nginx and both existing SRSZQ PM2 applications stayed active with unchanged process
-  identities throughout the attempt.
+- `https://qqttai.com` returns HTTP 200 from unchanged Netlify production deploy
+  `6a83d079cd1da1000859b96c`.
+- `rag.qqttai.com` and `agent.qqttai.com` still resolve to `47.237.179.69`.
+- Source `coursemate-rag`, `coursemate-agent` and Caddy are active.
+- Public source RAG and Agent health are HTTP 200 with trusted TLS.
+- Source recovery-state fingerprints, Agent counts and upload digest matched the final drained state
+  at the safe-stop collection time.
+- No Cloudflare A record or Netlify production deploy was changed.
 
-This does not mean CourseMate V3 production is accepted. The currently routed backend address is
-unreachable, while the new backend was intentionally not activated from stale data.
+This is safe restored V2 production, not V3 production acceptance.
 
 ### NOT VERIFIED
 
-- final source drain and consistent final recovery unit;
-- final data transfer and live destination Schema 21 migration;
-- destination production RAG/Agent/V3 activation;
-- trusted pinned-IP authenticated application acceptance;
-- successful destination `qwen3.8-max` Teaching/Problem structured canary;
+- public reachability of CourseMate hostnames on the Hangzhou destination;
+- destination authenticated Clerk flow;
+- production authorization, admin boundaries and two-user private-resource isolation;
+- complete Teaching, Problem, structured, image, streaming and tool-call live acceptance;
 - Netlify V3 production promotion;
 - Cloudflare backend DNS cutover and convergence;
-- public V2/V3 smoke, streaming, citations and persistence;
-- production multi-user/private-resource isolation smoke;
-- production monitor activation and destination post-cutover backup;
+- public V3 persistence/citation/browser smoke;
+- production monitor activation;
+- destination post-cutover backup;
 - post-cutover observation window.
 
-## Trusted TLS and renewal
+## Final data and migration evidence
+
+```text
+Final drain operation: 20260913T193257Z
+Source backup:
+/home/admin/coursemate-migration-backups/coursemate-v2-20260913T193302.545460Z
+Source isolated restore:
+/home/admin/coursemate-migration-restores/final-20260913T193257Z
+Destination backup:
+/srv/coursemate/backups/coursemate-v2-20260913T193302.545460Z
+Destination pristine restore:
+/srv/coursemate/restores/final-20260913T193257Z
+RAG schema: 10 -> 21
+Agent schema: 1
+Courses / documents / chunks: 2 / 66 / 1,936
+Ingestion jobs: 69
+Conversations / messages: 39 / 86
+Agent tasks: 1
+Uploads: 67 / 124,209,790 bytes
+Upload digest:
+c5fb27c39fd06ff48972d3df1bb495345adfffffb4324b7d4dc579ad454c0a2d
+```
+
+After rollback, a fresh active-source snapshot compared equal to the drained source for legacy RAG
+fingerprints, Agent counts, upload count/bytes/digest and database integrity/FK checks. Because the
+source is serving writes again, a future cutover must nevertheless create a new final drained
+recovery unit; equality at one collection time is not a permanent synchronization guarantee.
+
+## Trusted TLS
 
 ```text
 Lineage: /etc/letsencrypt/live/coursemate-backend
 Issuer: Let's Encrypt YR2
-Subject: CN=rag.qqttai.com
-SANs: agent.qqttai.com, rag.qqttai.com
+SANs: rag.qqttai.com, agent.qqttai.com
 Valid from: 2026-09-13 16:17:47 UTC
 Expires: 2026-12-12 16:17:46 UTC
-SHA-256 fingerprint: 38:C6:92:08:8E:1C:7A:9B:59:B3:C0:F2:E3:88:85:F2:04:D0:2A:10:BA:D7:BD:85:CB:0C:C6:50:3D:AD:80:ED
 Chain verification: PASS
 Private-key permissions: 0600 root:root
 Renewal dry-run: PASS
 Custom renewal timer: enabled and active
-Default direct certbot timer: disabled
 ```
 
-The Hangzhou destination cannot directly reach Cloudflare API. Renewal therefore uses a dedicated
-destination-held SSH identity through the legacy Hong Kong host. The legacy account has no shell and
-permits forwarding only to `api.cloudflare.com:443`; neither the Cloudflare token nor TLS private key
-was copied there. This is a documented dependency: do not retire `8.210.58.22` until another renewal
-egress is installed and a dry-run passes.
+The Hangzhou host's Cloudflare API egress uses a destination-held SSH identity through the preserved
+Hong Kong legacy host. That account allows only forwarding to `api.cloudflare.com:443`; it has no
+shell and does not hold the Cloudflare token or TLS private key. Do not retire the legacy host until
+replacement renewal egress is installed and dry-run verified.
 
-The CourseMate nginx site redirects HTTP to HTTPS, terminates this certificate and proxies only
-`rag.qqttai.com` to 127.0.0.1:28000 and `agent.qqttai.com` to 127.0.0.1:28001. HSTS,
-`nosniff`, frame denial, referrer and permissions headers are configured. The site is not enabled;
-public port 443 is not listening on the destination.
+## Hard external blocker
 
-## Data and migration evidence
-
-The last verified initial online recovery unit remains:
+Direct requests to `47.114.34.175` with Host/SNI `rag.qqttai.com` or `agent.qqttai.com` do not
+reach nginx:
 
 ```text
-Source path: /home/admin/coursemate-migration-backups/initial-standalone-20260913T121500Z/
-Destination backup: /srv/coursemate/backups/coursemate-v2-20260913T121513.787049Z
-RAG source schema: 10
-Agent schema: 1
-Courses / documents / chunks: 2 / 66 / 1,936
-Conversations / messages: 39 / 86
-Agent tasks: 1
-Uploads: 67 files / 124,209,790 bytes
-Normalized upload digest: c5fb27c39fd06ff48972d3df1bb495345adfffffb432b7d4dc579ad454c0a2d
-Isolated RAG migration: Schema 10 -> 21 PASS
-Isolated migration evidence SHA-256: a9a7bb9b1751317be2ebae4fddb58bdb1470409875457e84275c18a7557f2a7f
+TCP 80: connection succeeds, then Alibaba edge returns HTTP 403
+Server header: Beaver
+HTML title: Non-compliance ICP Filing
+TCP 443: reset during TLS handshake
+Destination localhost trusted-SNI HTTPS: HTTP 200
+nginx: active, listening on 0.0.0.0:80 and 0.0.0.0:443
+UFW: inactive
+Security Group: public TCP 80/443 allowed
 ```
 
-These aggregates and hashes describe the initial recovery slice, not final current data. The
-destination final data root deliberately contains zero files and one empty uploads-directory
-skeleton. No live database migration was attempted.
+This isolates the failure to Alibaba's mainland public-access boundary rather than nginx, the
+certificate, systemd, host firewall or Security Group. Alibaba's official documentation states that
+websites hosted on mainland-China servers require valid ICP filing and that an unfiled or
+not-transferred domain can receive 403 responses or connection resets:
 
-## Netlify evidence
+- <https://www.alibabacloud.com/help/en/dws/getting-started/the-whole-process-of-website-building/>
+- <https://www.alibabacloud.com/help/en/slb/classic-load-balancer/support/faq-about-clb>
 
-```text
-Site: coursemate-ai-qqtt
-Site ID: 166afb5a-4103-4236-9f13-4be34dc68cd2
-Production domains: qqttai.com, www.qqttai.com
-Unchanged production deploy: 6a83d079cd1da1000859b96c
-V3 draft deploy: 6aa6dd8531deb2ee7072f3ec
-Configured backend origins: https://rag.qqttai.com, https://agent.qqttai.com
-V3 draft document status: 200
-Desktop Chromium: rendered
-Mobile Chromium: rendered; no horizontal overflow
-Page exceptions / failed requests: 0 / 0
-Production promotion: NOT PERFORMED
-```
-
-Clerk returned two expected 400 responses on each draft-page load because its production custom
-domain does not authorize the Netlify deploy-preview origin. This prevents the draft from being
-claimed as authenticated evidence. Production remains on the authorized `qqttai.com` origin.
-
-## Provider and cost evidence
-
-The official Singapore `qwen3.8-max` list price used for the preflight was CNY 14.988 per million
-input tokens and CNY 44.965 per million output tokens. Source:
-<https://help.aliyun.com/en/model-studio/qwen3-8-max>.
-
-Regional API-key handling and the provider error classification were checked against Alibaba Cloud's
-official API-key and error-code documentation:
-<https://help.aliyun.com/en/model-studio/get-api-key> and
-<https://help.aliyun.com/en/model-studio/error-code>.
-
-```text
-Provider: Alibaba Cloud Model Studio, OpenAI-compatible
-Region: Singapore / ap-southeast-1
-Model: qwen3.8-max
-Endpoint category: workspace
-Maximum provider calls: 3
-Maximum output per call: 1,200 tokens
-Authorized maximum: CNY 5.00
-Conservative preflight ceiling: CNY 0.79255405
-Calls reaching a model response: 0
-Input / output tokens: 0 / 0
-Actual estimated cost: CNY 0
-Failure: HTTP 401, invalid_api_key
-Automatic retry: 0
-```
-
-Preserved checkpoint:
-`/srv/coursemate/model-evidence/.qwen38-production-canary.json.checkpoint.json`, SHA-256
-`b9cb250633cd3763d37505d300e3c8292a2def40fe2b8a9aab4c1bd85765d68f`.
-
-The key file is a root-only regular file, uses the current long `sk-ws` format, has no embedded
-whitespace, and exactly matches the value loaded by the inactive application env. Neither key value
-nor partial key is recorded here.
-
-## Hard external blockers
-
-### 1. Authoritative source is unreachable
-
-`47.237.179.69` was healthy and trusted earlier in the migration. Before any final drain in this
-attempt, it stopped answering TCP 22, 80 and 443. The same timeout was reproduced from:
-
-- the Owner workstation;
-- destination ECS `47.114.34.175` in Hangzhou;
-- legacy ECS `8.210.58.22` in Hong Kong.
-
-ICMP also had 100% loss. DNS still points the public backends to this address, and direct public
-health requests time out. No Alibaba ECS control-plane credential is available in the execution
-environment, so the host cannot be safely started or repaired through an authenticated API. A final
-backup cannot be created from an unreachable source.
-
-### 2. Installed Singapore API key is rejected
-
-Network and TLS reachability to the exact workspace are good (`/models` without credentials returns
-401 in about 0.2 seconds). With the protected key, both the workspace and shared Singapore APIs
-return `401 invalid_api_key`. This rules out application env parsing, endpoint DNS and basic transport
-as causes. The remaining external causes include revoked/disabled key, wrong Singapore account or
-workspace assignment, or an IP/model access restriction in Model Studio.
-
-### Resume verification after Owner-reported remediation
-
-The Owner subsequently reported that the source had been restored and the Singapore key replaced.
-The workflow restarted from both non-mutating gates rather than trusting the prior result or
-advancing directly to production writes. The reported remediation was not visible at the required
-runtime surfaces:
-
-- strict SSH to `47.237.179.69` still timed out;
-- TCP 22, 80 and 443 still timed out from the Owner workstation, destination ECS and legacy ECS;
-- a second local check after a 30-second startup window still timed out on all three ports;
-- `/etc/coursemate/secrets/qwen-singapore.key` was still a 117-byte root-owned mode-0600 file with
-  modification time `2026-09-14 00:47:38 +0800`;
-- the actual destination RAG configuration loaded that file, but both the exact workspace and shared
-  Singapore `/models` probes still returned `401 invalid_api_key`.
-
-No inference request, token use, source mutation, service activation, DNS update or Netlify
-production promotion occurred during this resume verification. The two external blockers therefore
-remain active; the cutover must not resume until the source is reachable and the non-billable key
-probe passes from the destination.
-
-## Completed work before the stop
-
-- revalidated repository, destination release, inactive units, final-data emptiness and SRSZQ PIDs;
-- installed only the Ubuntu Certbot Cloudflare plugin dependencies; no running service restarted;
-- issued and verified the trusted two-name certificate;
-- built, failure-tested and activated restricted automatic renewal;
-- prepared and validated the disabled production HTTPS nginx site;
-- atomically updated inactive provider env with automatic rollback on validation failure;
-- preserved existing embedding configuration and validated both runtime loaders;
-- captured Cloudflare pre-cutover DNS state without changing either A record;
-- built and browser-tested a V3 Netlify draft without changing production;
-- ran the bounded provider preflight and one zero-token, zero-retry authentication attempt;
-- reran focused local regression tests;
-- preserved all backups, source/legacy hosts, Owner files and rollback artifacts.
+DNS cutover is prohibited until that external compliance gate is resolved.
 
 ## Current safe production state
 
 ```text
-Source mutation by this attempt: none
-Source services stopped by this attempt: none
+Public source: active and healthy at 47.237.179.69
 Backend DNS: unchanged at 47.237.179.69
-Netlify production: unchanged
-Destination final data files: 0
-Destination RAG: inactive / disabled
-Destination Agent: inactive / disabled
-Destination monitor: inactive / disabled
-Destination CourseMate nginx site: disabled
-Destination public 443: absent
-Destination V3 flag: false
+Netlify production: unchanged, deploy 6a83d079cd1da1000859b96c
+Destination release: cd8c1218b56f04c3947abda33cf1b2638bafbf16
+Destination data: restored final snapshot, Schema 21 / Schema 1
+Destination RAG / Agent: active on loopback, disabled at boot, non-authoritative
+Destination nginx: active; CourseMate vhost enabled; mainland edge blocks domain access
+Destination monitor: inactive
 Destination reboot: not performed
-SRSZQ nginx / production / staging PIDs: 897 / 1182 / 48185
+SRSZQ nginx master / backend / staging PIDs: 897 / 1182 / 48185
+SRSZQ PM2 status: both online
 ```
 
-This state is safe from split-brain and stale-data promotion, but the public CourseMate backend is
-not healthy because its unchanged authoritative source is externally unreachable.
+## Rollback
 
-## Rollback state
+- Source, its databases, uploads, release, Caddy and SSH remain preserved.
+- Backend DNS and Netlify production never changed, so no DNS or frontend rollback was required.
+- Source CourseMate services were restarted and public health returned 200/200.
+- Final drained backup and source/destination isolated restores remain preserved.
+- Destination previous release remains `/srv/coursemate/releases/9806a55`.
+- Timeout env rollback is
+  `/etc/coursemate/env-backups/20260913T201317Z-v3-timeout`.
+- Pre-runtime ECS snapshot `s-bp13r5gqocjif1jtieav` remains available.
+- No database, upload tree, source instance, legacy instance or rollback artifact was deleted.
 
-- Source, source databases and source uploads were not modified or deleted.
-- Legacy host was not decommissioned.
-- Initial recovery unit and isolated restore remain preserved.
-- Destination pre-runtime ECS snapshot `s-bp13r5gqocjif1jtieav` remains the machine-level rollback.
-- Provider env rollback is `/etc/coursemate/env-backups/20260913T174047Z`.
-- Prior HTTP-only nginx candidate backups remain beside `/etc/nginx/sites-available/coursemate`.
-- Backend DNS never changed, so no DNS rollback was required.
-- Netlify production never changed, so no frontend rollback was required.
+## Exact minimal human action required
 
-## Exact minimal human actions required
+To keep using the current Hangzhou ECS, the Owner must complete a valid ICP filing for
+`qqttai.com` and, when applicable, Alibaba Cloud access-filing transfer for this account/instance.
+This requires the Owner's legal identity/entity documents and Alibaba Cloud console workflow and
+cannot be automated from the scoped SSH, DNS and Netlify credentials.
 
-1. In Alibaba Cloud ECS Console, switch to the region/account containing public IP
-   `47.237.179.69` and locate hostname `iZt4n0k005125h6vlxoiloZ`. Preserve its system disk. If the
-   instance is stopped, **start it**; do not reinitialize, replace or reinstall it. If it is already
-   running, use ECS diagnostics/VNC to restore its public network and inbound TCP 22/80/443. Confirm
-   that the ED25519 host fingerprint is still
-   `SHA256:xrg8yao3PqVrTPP5Qx0st1pxeHt4jVR13L7CY38D8iw` before accepting SSH again.
-2. In Alibaba Cloud Model Studio, switch to **Singapore**, open API Key management for the business
-   workspace whose API host is
-   `ws-nfiuupw9zjickulc.ap-southeast-1.maas.aliyuncs.com`, and check the deployed key is enabled and
-   assigned to that workspace/model. If it has an IP allowlist, include destination egress
-   `47.114.34.175`. If the key is revoked or cannot be recovered, create/reset a pay-as-you-go
-   Singapore `sk-ws` key. Install the full value directly into
-   `/etc/coursemate/secrets/qwen-singapore.key` on the destination with owner `root:root` and mode
-   `0600`; never send it through chat or commit it.
+If ICP filing is not desired, the alternative is to provision the destination in a non-mainland
+region such as Hong Kong or Singapore, then repeat the final data migration and TLS/DNS acceptance
+against that host. Do not attempt to evade the filing block with alternate ports, forged Host
+headers, disabled TLS or an unreviewed proxy tunnel.
 
-After those two actions, resume this same cutover workflow. No design choice is needed. The next
-automation must first rerun source identity/health and the non-billable key probe, then execute:
+After the external gate is resolved:
 
-```text
-drain source writes
--> new final verified backup
--> transfer and isolated restore
--> live Schema 10 -> 21 migration
--> destination private start and pinned HTTPS acceptance
--> one new bounded qwen canary (do not reuse the failed checkpoint)
--> Netlify V3 production deploy
--> Cloudflare two-record cutover
--> public/auth/multi-user smoke
--> monitoring
--> post-cutover backup and restore verification
--> observation
-```
-
-Do not start from the initial backup merely to bypass the source outage, and do not rerun a billable
-canary until the non-billable credential probe passes.
+1. prove pinned public HTTPS reaches the intended destination;
+2. make an explicit bounded Qwen3.8 Responses reasoning/output policy and rerun local tests;
+3. run one new paid canary within the remaining approved budget, with no automatic retry;
+4. create a new final drain because the source resumed serving writes;
+5. re-transfer, restore, migrate and compare content-free state;
+6. complete authenticated/private-isolation acceptance;
+7. promote Netlify V3, update both Cloudflare A records and verify convergence;
+8. activate monitoring, create/restore-test a post-cutover backup and observe;
+9. keep the source as rollback until a separate decommission decision.

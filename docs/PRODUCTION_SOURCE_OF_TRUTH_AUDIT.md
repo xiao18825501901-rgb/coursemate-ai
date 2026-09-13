@@ -2,25 +2,56 @@
 
 Initial audit time: 2026-09-13 04:22 CST / 2026-09-12 20:22 UTC
 
-Last public-surface revalidation: 2026-09-13 18:02:25 CST / 2026-09-13 10:02:25 UTC
+Latest operational reconciliation: 2026-09-14 04:18 CST / 2026-09-13 20:18 UTC
 
-Last trusted current-host inventory: 2026-09-13 20:02:07 CST / 2026-09-13 12:02:07 UTC
+Status: `RESULT B REMAINS AUTHORITATIVE; SOURCE RESTORED; FINAL DATA MIGRATED PRIVATELY; HANGZHOU ICP PUBLIC-ACCESS BLOCK`
 
-Last destination runtime revalidation: 2026-09-13 20:29:16 CST / 2026-09-13 12:29:16 UTC
-
-Last destination candidate/private-TLS validation: 2026-09-13 23:13:06 CST / 2026-09-13 15:13:06 UTC
-
-Final cutover attempt: 2026-09-14 02:00 CST / 2026-09-13 18:00 UTC
-
-Status: `RESULT B REMAINS AUTHORITATIVE; TRUSTED TLS/RENEWAL/DEST CONFIG/V3 PREVIEW READY; SOURCE OUTAGE + INVALID PROVIDER KEY HARD BLOCK`
-
-Data migration authorized: `YES — FINAL DRAIN/CUTOVER AUTHORIZED BUT NOT STARTED BECAUSE SOURCE IS UNREACHABLE`
+Data migration: `FINAL DRAIN/BACKUP/TRANSFER/RESTORE/SCHEMA 21 PASS; DNS CUTOVER NOT PERFORMED`
 
 This audit records only non-secret infrastructure facts, aggregate database/upload evidence, and
 public HTTP behavior. It does not contain credentials, private key material, environment secrets,
 user IDs, conversation text, private filenames, course content, or database rows.
 
-## Executive conclusion
+## Current authoritative reconciliation
+
+This section supersedes all time-sensitive state statements later in this file. The later sections
+are retained as a chronological audit trail and must not be read as the current runtime state.
+
+| Surface | Current verified fact |
+|---|---|
+| Production authority | **Result B remains authoritative:** `47.237.179.69` |
+| Public health | Source RAG and Agent HTTP 200 with trusted TLS |
+| Source services | Caddy, RAG and Agent active/enabled |
+| Backend DNS | Both A records unchanged at `47.237.179.69` |
+| Netlify | Production unchanged at deploy `6a83d079cd1da1000859b96c` |
+| Final source recovery unit | Created after a real write drain and isolated-restore verified |
+| Destination data | Final copy installed; RAG Schema 21, Agent Schema 1, integrity/FK pass |
+| Destination release | `cd8c1218b56f04c3947abda33cf1b2638bafbf16` |
+| Destination services | RAG/Agent active on loopback but disabled at boot and non-authoritative |
+| Destination TLS | Trusted two-name certificate; local SNI health 200/200 |
+| Destination public edge | HTTP 403 `Server: Beaver`, title `Non-compliance ICP Filing`; HTTPS reset |
+| Live model | Key/model/endpoint and Planner structured output verified; full canary not accepted |
+| Cutover | Not performed; no Cloudflare or Netlify production change |
+
+After the source was restored and the Singapore key replaced, the workflow successfully completed a
+new final drain, backup, transfer, isolated restore and Schema 10 to 21 migration. The source was then
+restarted when the cutover gate failed. A post-rollback content-free comparison matched the drained
+state at collection time, but future writes mean another final drain is mandatory before any later
+cutover.
+
+The destination itself is healthy. It listens on 80/443, its local trusted-SNI HTTPS reaches both
+CourseMate services, UFW is inactive and the Security Group permits public 80/443. External requests
+with a CourseMate Host/SNI are intercepted before nginx: HTTP receives the explicit
+`Non-compliance ICP Filing` page and HTTPS is reset. The destination is in `cn-hangzhou-k`.
+Alibaba's documented mainland-China ICP/access-filing requirement is therefore the authoritative
+external blocker.
+
+The full current outcome, cost/evidence ledger, safe state and exact Owner action are in
+[`COURSEMATE_V3_FINAL_PRODUCTION_DEPLOYMENT_REPORT.md`](COURSEMATE_V3_FINAL_PRODUCTION_DEPLOYMENT_REPORT.md).
+
+## Historical audit trail
+
+### Historical executive conclusion (superseded where time-sensitive)
 
 `47.237.179.69` is the currently routed CourseMate public backend address and serves the 18-path RAG
 API plus the Agent health/auth surface. It is not a transparent pass-through to the currently running
