@@ -1,16 +1,16 @@
 # CourseMate V3 — New Alibaba ECS Migration State
 
-Last updated: 2026-09-13 20:02:56 CST / 2026-09-13 12:02:56 UTC
+Last updated: 2026-09-13 20:22:28 CST / 2026-09-13 12:22:28 UTC
 
-Current phase: `Source Result B proven; initial verified backup and isolated restore preparation`
+Current phase: `Initial backup/isolated restore PASS; destination runtime installation Owner gate`
 
-Production data copied: `NO`
+Production data copied: `YES — INITIAL ONLINE BACKUP ONLY; FINAL DELTA NOT STARTED`
 
 Production writes changed: `NO`
 
 DNS changed: `NO`
 
-Rollback-ready application backup: `NO`
+Rollback-ready application backup: `INITIAL RESTORE VERIFIED; FINAL CUTOVER SNAPSHOT NOT CREATED`
 
 This is the non-secret migration control record. It separates live evidence, repository facts,
 Owner-designated roles, and unresolved production authority. It must never contain credentials,
@@ -328,11 +328,11 @@ Discovery: COMPLETE for 8.210.58.22, 47.237.179.69 and 47.114.34.175
 Current public discovery: COMPLETE — host, runtime, proxy, release, DBs, uploads and safe provider config inventoried
 Current public SSH: READY — strict public-key BatchMode PASS
 Authoritative source selection: RESULT B — 47.237.179.69
-Preparation: IN PROGRESS — reviewed backup/restore contract and destination isolation preflight
-Initial sync: NOT STARTED
-Consistent backup: NOT STARTED
-Isolated restore: NOT STARTED
-Schema migration: NOT STARTED
+Preparation: COMPLETE for the initial recovery slice
+Initial sync: COMPLETE — verified recovery unit copied to destination isolation root
+Consistent backup: INITIAL ONLINE SNAPSHOT PASS; FINAL DRAINED/CUTOVER SNAPSHOT NOT STARTED
+Isolated restore: COMPLETE — checksums, DB binaries, integrity/FK/counts and uploads match
+Schema migration: BLOCKED BEFORE EXECUTION — destination has Python 3.10; project requires >=3.11
 Pre-cutover: NOT STARTED
 Cutover: NOT STARTED — OWNER GATE
 Post-cutover: NOT STARTED
@@ -340,29 +340,68 @@ Observation: NOT STARTED
 Completed: NO
 ```
 
+## Initial backup and isolated restore evidence
+
+The source backup contract first exposed a production-only WAL edge case: the original script left
+zero-byte `-wal` and `-shm` sidecars beside otherwise valid snapshots, outside `SHA256SUMS`. That first
+pack remains preserved and is not used for migration. Commit `105ccda` adds a failing-then-passing WAL
+regression test and converts only each destination snapshot to `journal_mode=DELETE`; the live source
+databases remain WAL. Focused verification: 9 backup/restore tests, Ruff and mypy all pass.
+
+The corrected initial recovery unit is:
+
+```text
+Source:
+/home/admin/coursemate-migration-backups/initial-standalone-20260913T121500Z/
+  coursemate-v2-20260913T121513.787049Z
+
+Destination copy:
+/srv/coursemate-migration/incoming/coursemate-v2-20260913T121513.787049Z
+
+Isolated restore:
+/srv/coursemate-migration/restores/initial-20260913T121513Z
+```
+
+The pack contains exactly six top-level files, has no SQLite sidecars, and all five manifest-covered
+artifact checksums pass. Restored RAG/Agent database SHA-256 values exactly match the backup files;
+both report integrity `ok` and FK 0. RAG remains migration 10 with 1,936 chunks, 66 documents,
+39 conversations and 86 messages. Agent remains migration 1 with one task. Restored uploads are
+67 files / 124,209,790 bytes with normalized manifest digest
+`c5fb27c39fd06ff48972d3df1bb495345adfffffb4324b7d4dc579ad454c0a2d`.
+
+Tracked source at `105ccdaeec3b45c208a8e039d7943a5e22e277ce` was packaged as a complete Git
+bundle, SHA-256 `93e00cd8e1230d45a3aeb6cbae72e817fc8985248082d7695c2d6c99b55315df`, then
+cloned to `/srv/coursemate-migration/releases/105ccda` and checked out detached. The clone has zero
+tracked or untracked changes. This is an isolated migration release, not a running deployment.
+
 ## Current blockers and risks
 
-1. **Destination service collision:** new ECS ports 80, 8080, and 8081 already support `srszq-api`.
+1. **Runtime-installation gate:** destination Python is 3.10.12 and lacks `pydantic`,
+   `pydantic-settings` and FastAPI, while the reviewed release requires Python >=3.11. Do not install
+   or alter system packages until the Owner verifies the Security Group and creates/approves a new-ECS
+   rollback snapshot; snapshot storage may incur cloud cost.
+2. **Destination service collision:** new ECS ports 80, 8080, and 8081 already support `srszq-api`.
    Replacing nginx or stopping PM2 could break an unrelated live service.
-2. **Destination hardening:** the machine requires a reboot, UFW is inactive, Caddy and SQLite CLI
+3. **Destination hardening:** the machine requires a reboot, UFW is inactive, Caddy and SQLite CLI
    are absent, and the Alibaba Security Group is unverified.
-3. **Release immutability:** the reviewed V3 branch is still absent on origin. Do not deploy by
-   copying an old working tree or by an unfrozen branch name.
-4. **Recovery gate:** no source-authoritative coordinated RAG DB + Agent DB + uploads backup,
-   off-host copy, ECS snapshot, isolated restore, write-drain plan, or rollback smoke proof exists.
-5. **Credential hygiene:** rotate previously exposed server passwords after a separate approved
+4. **Release publication:** exact tracked commit `105ccda` is frozen and cloned from a verified Git
+   bundle for isolated rehearsal, but the V3 branch is still absent on origin. Publish/review the exact
+   release before production service deployment; never copy a dirty working tree.
+5. **Final recovery gate:** the initial online recovery unit and isolated restore pass, but no new-ECS
+   snapshot, final source write drain/delta backup, rollback smoke, or cutover snapshot exists.
+6. **Credential hygiene:** rotate previously exposed server passwords after a separate approved
    maintenance window. Do not disable public-key access until replacement credentials are verified.
 
 ## First safe next actions
 
-1. Validate the reviewed online-backup/restore scripts against the authoritative source paths and
-   available disk; create an initial backup without stopping or reloading live services.
-2. Copy that verified backup to an isolated path on the destination, re-verify all checksums, restore
-   there, and prove aggregate DB/upload equivalence without exposing private filenames or rows.
-3. Rehearse the reviewed 10 -> 21 RAG migration twice only on the isolated restored copy; never point
-   migration or tests at either live source paths.
-4. In Alibaba Cloud, verify the new ECS Security Group and take a rollback snapshot before any
-   package installation, reboot, proxy change, or application write.
+1. Owner verifies the new ECS Security Group and explicitly approves/creates a rollback snapshot
+   before runtime installation. Record only snapshot ID/time/status and non-secret network facts.
+2. Install a project-isolated Python >=3.11 runtime and pinned RAG dependencies without replacing the
+   system Python or changing SRSZQ. Record package hashes/versions and recheck nginx/PM2 afterward.
+3. Rehearse the reviewed 10 -> 21 RAG migration twice only on a fresh copy under the cloned release's
+   ignored `work/`; never point migration or tests at either live source path or the pristine restore.
+4. Re-verify old-row fingerprints/counts, 1..21 continuity, 019/020/021 objects, integrity/FK and all
+   V3 invariants. Preserve only content-free evidence.
 5. Establish a coexistence plan for destination nginx/PM2 `srszq-api`. Preserve its files, process
    definitions, domains, ports, and rollback path; do not overwrite it with CourseMate config.
 6. Publish or otherwise freeze the exact reviewed V3 release SHA before deployment.
@@ -381,9 +420,13 @@ Completed: NO
   dedicated `coursemate-prod-current` alias and key were created, loaded and accepted in BatchMode.
 - Current/old runtime, proxy, release, safe environment names/allowlisted values, aggregate database
   health/counts and upload digests were read without exposing secrets, rows or private filenames.
-- The only remote writes were the explicitly requested SSH public-key append operations. Each
-  original `authorized_keys` file received a timestamped backup first.
-- No application backup/restore, schema migration, model call, restart, deployment or cutover has run
-  as of this source-decision checkpoint.
+- Before source selection, the only remote writes were the explicitly requested SSH public-key append
+  operations. Each original `authorized_keys` file received a timestamped backup first.
+- After Result B, migration writes were confined to dedicated source backup/tool directories and
+  `/srv/coursemate-migration` on the destination. A corrected initial backup was copied and restored
+  there; `/srv/coursemate`, `/etc/coursemate`, systemd, nginx, PM2 and all SRSZQ paths were untouched.
+- No Schema migration, package installation, model call, service reload/restart, running deployment,
+  DNS change or cutover has run. Source RAG/Agent/Caddy and destination nginx/PM2 remained active;
+  source health stayed HTTP 200 and destination ports 80/8080/8081 were unchanged.
 - Secret values and private keys were never printed, copied to the repository, or placed in command
   arguments. Owner passphrase entry occurred only in a local interactive PowerShell prompt.

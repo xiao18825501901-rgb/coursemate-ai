@@ -6,7 +6,7 @@ Last public-surface revalidation: 2026-09-13 18:02:25 CST / 2026-09-13 10:02:25 
 
 Last trusted current-host inventory: 2026-09-13 20:02:07 CST / 2026-09-13 12:02:07 UTC
 
-Status: `AUTHORITATIVE SOURCE PROVEN — RESULT B; INITIAL BACKUP/ISOLATED RESTORE PREPARATION`
+Status: `AUTHORITATIVE SOURCE PROVEN — RESULT B; INITIAL RESTORE VERIFIED; RUNTIME INSTALL GATED`
 
 Data migration authorized: `YES — INITIAL BACKUP/ISOLATED RESTORE ONLY; FINAL DRAIN/CUTOVER REMAINS GATED`
 
@@ -409,11 +409,30 @@ Caddy must not bind public ports 80/443 while nginx owns them. Replacing nginx i
 5. Prepare, but do not yet execute, destination systemd/nginx coexistence configuration and the final
    write-drain/delta plan. Final drain, DNS cutover, paid model calls and reboot remain Owner gates.
 
+### Initial recovery slice completed
+
+At 2026-09-13 20:15 CST, the corrected backup tool from commit `105ccda` created a standalone initial
+online recovery unit containing both SQLite databases and all uploads. The first pre-fix pack remains
+preserved but is superseded because WAL-mode source databases left unverified zero-byte sidecars in
+that directory. The corrected pack contains exactly the six expected files, no sidecars, verified
+checksums, integrity `ok`, FK 0, 67 uploads / 124,209,790 bytes and the source aggregate row counts.
+
+The corrected recovery unit was copied to `/srv/coursemate-migration/incoming/` on
+`47.114.34.175`, checksum-verified again and restored under `/srv/coursemate-migration/restores/`.
+Both restored database binaries match their backup SHA-256 values, and the restored upload manifest
+digest matches the source. Exact tracked commit `105ccdaeec3b45c208a8e039d7943a5e22e277ce` was cloned
+from a verified Git bundle into the same isolated migration root. No service was started and no live
+CourseMate destination path was created.
+
+Schema rehearsal is not yet executed: the destination currently has Python 3.10.12 and lacks the
+required Python packages, while the project declares Python >=3.11. Runtime installation must wait
+for the Owner's new-ECS Security Group verification and rollback-snapshot/cost gate.
+
 ## Safety ledger
 
 ```text
-Production DB copy: NO (initial backup is the next authorized slice)
-Uploads transfer: NO
+Production DB copy: YES — initial SQLite-online snapshots only
+Uploads transfer: YES — initial verified archive to isolated destination only
 Schema migration: NO
 Service stop/restart/replacement: NO
 DNS change: NO
