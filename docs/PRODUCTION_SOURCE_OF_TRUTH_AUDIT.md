@@ -8,6 +8,8 @@ Last trusted current-host inventory: 2026-09-13 20:02:07 CST / 2026-09-13 12:02:
 
 Last destination runtime revalidation: 2026-09-13 20:29:16 CST / 2026-09-13 12:29:16 UTC
 
+Last destination control-plane revalidation: 2026-09-13 20:48:27 CST / 2026-09-13 12:48:27 UTC
+
 Status: `AUTHORITATIVE SOURCE PROVEN — RESULT B; INITIAL RESTORE VERIFIED; RUNTIME INSTALL GATED`
 
 Data migration authorized: `YES — INITIAL BACKUP/ISOLATED RESTORE ONLY; FINAL DRAIN/CUTOVER REMAINS GATED`
@@ -256,12 +258,15 @@ Classification: `CURRENT PUBLIC COURSEMATE BACKEND / INTERNAL ROLE UNKNOWN`.
 ```text
 SSH alias: coursemate-prod-new — READY / BatchMode PASS
 Role: DESTINATION + EXISTING SRSZQ
+ECS instance ID: i-bp1f0vqhds2341pdqqiy
 Hostname: iZbp1f0vqhds2341pdqqiyZ
 Public / private IP: 47.114.34.175 / 172.20.170.40
 Region / zone: cn-hangzhou / cn-hangzhou-k
 OS: Ubuntu 22.04.5 LTS
+System disk: d-bp1f0vqhds2341pces7h; ESSD PL0; 40 GiB; unencrypted
 Restart required: YES
-CourseMate directories, units, DBs and uploads: ABSENT / NOT TRANSFERRED
+Live CourseMate directories and units: ABSENT / NOT DEPLOYED
+Isolated initial data/release copy: PRESENT under /srv/coursemate-migration only
 ```
 
 This is not an empty destination:
@@ -277,6 +282,9 @@ SQLite CLI: not installed
 ```
 
 No package, firewall, proxy, PM2, service or application change was made.
+
+Owner-console screenshots confirm the instance and its single attached system disk, but do not yet
+show Security Group rules or a completed rollback snapshot. Those remain Owner gates.
 
 ## 5. API surface comparison
 

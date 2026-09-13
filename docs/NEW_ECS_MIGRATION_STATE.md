@@ -1,6 +1,6 @@
 # CourseMate V3 — New Alibaba ECS Migration State
 
-Last updated: 2026-09-13 20:29:16 CST / 2026-09-13 12:29:16 UTC
+Last updated: 2026-09-13 20:48:27 CST / 2026-09-13 12:48:27 UTC
 
 Current phase: `Initial backup/isolated restore PASS; destination runtime installation Owner gate`
 
@@ -272,13 +272,15 @@ provider/model facts apply only to `8.210.58.22`, not to the inaccessible curren
 
 ```text
 SSH alias: coursemate-prod-new
+ECS instance ID: i-bp1f0vqhds2341pdqqiy
 Host: iZbp1f0vqhds2341pdqqiyZ
 Public IP: 47.114.34.175
 Private IP: 172.20.170.40
 Region / zone: cn-hangzhou / cn-hangzhou-k (ECS metadata)
 OS: Ubuntu 22.04.5 LTS
 Kernel: 5.15.0-187-generic
-Root disk: 40G total, 4.0G used, 34G available (11%)
+Root disk: d-bp1f0vqhds2341pces7h; system disk; ESSD PL0; 40 GiB; unencrypted
+Filesystem: 40G total, 4.0G used, 34G available (11%)
 Memory: 3.4GiB total; no swap
 Time zone / sync: Asia/Shanghai; NTP synchronized
 Restart required: YES
@@ -300,8 +302,8 @@ sqlite3 CLI: MISSING
 /home/admin/coursemate-ai: MISSING
 /root/coursemate-ai: MISSING
 /opt/coursemate: MISSING
-CourseMate RAG/Agent units: NOT INSTALLED
-RAG DB / Agent DB / uploads: NOT TRANSFERRED
+CourseMate RAG/Agent units and live paths: NOT INSTALLED
+Isolated initial RAG DB / Agent DB / uploads copy: PRESENT under /srv/coursemate-migration only
 ```
 
 The destination is **not an empty machine** and must not be repurposed destructively. Existing,
@@ -422,6 +424,9 @@ tracked or untracked changes. This is an isolated migration release, not a runni
   The local Alibaba CLI remains unavailable.
 - Owner-console evidence and strict known_hosts verification established current-host identity. The
   dedicated `coursemate-prod-current` alias and key were created, loaded and accepted in BatchMode.
+- Owner-console screenshots revalidated the destination as running instance
+  `i-bp1f0vqhds2341pdqqiy` in `cn-hangzhou-k` with one attached 40 GiB ESSD PL0 system disk,
+  `d-bp1f0vqhds2341pces7h`. They do not yet prove Security Group rules or a completed snapshot.
 - Current/old runtime, proxy, release, safe environment names/allowlisted values, aggregate database
   health/counts and upload digests were read without exposing secrets, rows or private filenames.
 - Before source selection, the only remote writes were the explicitly requested SSH public-key append
