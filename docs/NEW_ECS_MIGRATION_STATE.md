@@ -1,16 +1,18 @@
 # CourseMate V3 — New Alibaba ECS Migration State
 
-Last updated: 2026-09-13 23:13:06 CST / 2026-09-13 15:13:06 UTC
+Last updated: 2026-09-14 02:00 CST / 2026-09-13 18:00 UTC
 
-Current phase: `SECURITY GROUP VERIFIED + PRIVATE TLS PATH PASS; PRODUCTION CERT/REBOOT/FINAL-DRAIN/LIVE-MODEL/DNS OWNER GATES REMAIN`
+Current phase: `TRUSTED TLS + RENEWAL + V3 PREVIEW + DESTINATION CONFIG READY; HARD BLOCKED BY SOURCE OUTAGE AND PROVIDER KEY REJECTION`
 
 Production data copied: `YES — INITIAL ONLINE BACKUP ONLY; FINAL DELTA NOT STARTED`
 
-Production writes changed: `NO`
+Authoritative-source production writes changed: `NO — SOURCE BECAME UNREACHABLE BEFORE FINAL DRAIN`
+
+Destination candidate changed: `YES — TRUSTED CERTIFICATE/RENEWAL, INACTIVE MODEL ENV AND DISABLED TLS VHOST PREPARED; NO FINAL USER DATA OR TRAFFIC`
 
 DNS changed: `NO`
 
-Rollback-ready application backup: `INITIAL RESTORE + LOCAL COPY VERIFIED; DESTINATION PRE-RUNTIME DISK SNAPSHOT RECORDED; FINAL CUTOVER SNAPSHOT NOT CREATED`
+Rollback-ready application backup: `INITIAL RESTORE + LOCAL COPY VERIFIED; DESTINATION PRE-RUNTIME DISK SNAPSHOT AND ENV BACKUPS RECORDED; FINAL DRAIN/CUTOVER SNAPSHOTS NOT CREATED`
 
 This is the non-secret migration control record. It separates live evidence, repository facts,
 Owner-designated roles, and unresolved production authority. It must never contain credentials,
@@ -19,12 +21,14 @@ provider responses.
 
 ## Executive gate
 
-All three dedicated aliases pass strict, public-key-only BatchMode authentication:
+The destination and legacy aliases still pass strict public-key-only BatchMode authentication. The
+authoritative source alias was previously verified, but the entire source public address is now
+unreachable from independent networks:
 
 ```text
 coursemate-prod-old -> root@8.210.58.22     READY
 coursemate-prod-new -> root@47.114.34.175   READY
-coursemate-prod-current -> admin@47.237.179.69 READY
+coursemate-prod-current -> admin@47.237.179.69 UNREACHABLE — TCP 22/80/443 TIMEOUT
 ```
 
 Public DNS, pinned-IP HTTPS/TLS, Owner-console host identity and trusted SSH inventory identify
@@ -32,11 +36,22 @@ Public DNS, pinned-IP HTTPS/TLS, Owner-console host identity and trusted SSH inv
 **Result B**. The initial backup/off-host copy/isolated restore, destination rollback snapshot,
 isolated runtime installation, Schema 10 -> 21 rehearsal and destination source validation have
 completed. The exact release/runtime, non-started service files, disabled monitor timer and a
-non-enabled nginx candidate are now prepared; private V2/V3/proxy/monitor and synthetic-certificate TLS smoke
-tests pass. The destination Security Group permits public 80/443, but no public CourseMate listener
-or production certificate exists. Final drain, production activation/cutover, certificate issuance,
-DNS, paid model calls, destructive actions and destination reboot remain gated. The full
-three-host evidence ledger is in
+non-enabled nginx candidate are now prepared; private V2/V3/proxy/monitor and synthetic-certificate
+TLS smoke tests pass.
+
+A production Let's Encrypt certificate for both backend names now verifies, its DNS-01 renewal
+dry-run passed, and a dedicated renewal timer is active through a restricted legacy-host Cloudflare
+egress. The production TLS vhost is syntax-valid but disabled, so public port 443 and final
+CourseMate data remain untouched. The V3 frontend build passed and Netlify draft deploy
+`6aa6dd8531deb2ee7072f3ec` renders in desktop and mobile Chromium. Destination production env loading
+proves `qwen3.8-max` generation, `text-embedding-v4` embedding and `V3_ENABLED=false`, with rollback
+copy `/etc/coursemate/env-backups/20260913T174047Z`.
+
+The bounded three-call live canary stopped before token use when both the workspace and shared
+Singapore API surfaces returned `401 invalid_api_key`. No retry occurred and estimated cost is CNY
+0. Final drain and transfer cannot start while `47.237.179.69` is unreachable. Production activation,
+Netlify production promotion, DNS cutover, monitoring and post-cutover backup therefore remain
+unperformed. The full three-host evidence ledger is in
 [`PRODUCTION_SOURCE_OF_TRUTH_AUDIT.md`](PRODUCTION_SOURCE_OF_TRUTH_AUDIT.md).
 
 ## SSH access result
@@ -650,8 +665,78 @@ the Owner decides whether staging must survive and its recovery path is tested o
   hashes remained unchanged. Destination tests, typecheck and builds passed for exact release
   `9806a55`.
 - The V3 branch was published by non-force push; the two Owner untracked local files remain unstaged.
-- No live-source Schema migration, live/paid model call, public CourseMate activation, nginx reload,
-  DNS change, reboot or cutover has run. Source RAG/Agent/Caddy remain active with public health HTTP
-  200; destination nginx and SRSZQ PM2 processes remain active with the same PIDs (1182 and 48185).
+- No live-source Schema migration, successful paid model inference, public CourseMate activation,
+  nginx reload, DNS change, reboot or cutover has run. The source was healthy at this historical
+  checkpoint; the later outage below supersedes that observation. Destination nginx and SRSZQ PM2
+  processes remain active with the same PIDs (897, 1182 and 48185).
 - Secret values and private keys were never printed, copied to the repository, or placed in command
   arguments. Owner passphrase entry occurred only in a local interactive PowerShell prompt.
+
+## Final autonomous cutover attempt — 2026-09-14
+
+This section supersedes earlier current-state language while retaining prior evidence as history.
+
+### Completed independent gates
+
+- Issued Let's Encrypt lineage `coursemate-backend` using Cloudflare DNS-01. Issuer is YR2; SANs are
+  `rag.qqttai.com` and `agent.qqttai.com`; expiry is 2026-12-12 16:17:46 UTC; OpenSSL verification
+  passes. The private key is root-only mode 0600.
+- Installed a restricted renewal path. Destination Cloudflare API traffic uses a dedicated SSH key
+  through legacy host `8.210.58.22`; that legacy account permits only forwarding to
+  `api.cloudflare.com:443` and no shell. Renewal dry-run passed. Custom timer
+  `coursemate-certbot-renew.timer` is enabled/active and the direct default timer is disabled.
+- Replaced the disabled CourseMate nginx candidate with an HTTPS version that redirects HTTP and
+  proxies only the two CourseMate names to loopback 28000/28001. `nginx -t` passes. The site remains
+  absent from `sites-enabled`; nginx was not reloaded and no public 443 listener exists.
+- Installed production-shaped RAG/Agent env values while both units were inactive. Runtime loading
+  verifies generation `qwen3.8-max` on the exact Singapore workspace endpoint, independent existing
+  embedding `text-embedding-v4`, loopback service binds and `V3_ENABLED=false`. Existing
+  compatibility values were preserved. Rollback copy:
+  `/etc/coursemate/env-backups/20260913T174047Z`.
+- Cloudflare token/zone access was verified over the restricted egress. Both A records remain
+  `47.237.179.69`, DNS-only (`proxied=false`) with automatic TTL. Content-free record evidence is
+  `/srv/coursemate/dns-state/precutover-20260913T175430Z.json`, SHA-256
+  `8a71816ff1346da1c5185761a31461d627f8ecfabcbb25628a6129c3d39f7c1a`.
+- Built V3 locally with the production feature flag and created Netlify draft deploy
+  `6aa6dd8531deb2ee7072f3ec`. Desktop/mobile Chromium checks return 200, show no page exception or
+  request failure, and find no mobile horizontal overflow. Clerk correctly rejects the non-production
+  preview origin; this is not authenticated production evidence. Current production deploy and
+  `qqttai.com` were not promoted or changed.
+- Local targeted revalidation on the current code state: Python 27 passed; Agent config 20 passed;
+  Web typecheck passed and Web 49 passed. The previously recorded exact-release full suites remain
+  the broader source evidence.
+
+### Hard external blockers
+
+1. The authoritative source `47.237.179.69` became unreachable before the final drain. SSH and both
+   public backend ports time out from the Owner workstation, destination Hangzhou ECS and legacy Hong
+   Kong ECS; ICMP also has 100% loss. DNS still routes both backend names there, so the current public
+   backend is unavailable. No source service stop, final backup, transfer or live migration was
+   started. The initial backup is preserved but is not being substituted for the required final
+   drained recovery unit.
+2. The protected Singapore key is well-formed `sk-ws`, contains no whitespace, is loaded byte-for-byte
+   into the inactive RAG env, and reaches the endpoint. Nevertheless, both the exact workspace API
+   and shared Singapore API return `401 invalid_api_key`. The bounded canary performed no retry,
+   received no provider response ID or tokens, and has estimated cost CNY 0. Its preserved checkpoint
+   is `/srv/coursemate/model-evidence/.qwen38-production-canary.json.checkpoint.json`, SHA-256
+   `b9cb250633cd3763d37505d300e3c8292a2def40fe2b8a9aab4c1bd85765d68f`.
+
+### Safe stop state
+
+```text
+Authoritative source changed by this attempt: NO
+Final destination data files: 0 (empty uploads skeleton only)
+Destination RAG / Agent / monitor: inactive and disabled
+Destination CourseMate nginx site: disabled
+Destination public 443 listener: absent
+V3 flag: false
+Backend DNS: unchanged at 47.237.179.69
+Netlify production deploy: unchanged
+Initial backup: preserved
+Destination env rollback: preserved
+SRSZQ nginx / production / staging PIDs: 897 / 1182 / 48185, unchanged
+Destination reboot: not performed
+```
+
+The exact minimal external recovery actions are recorded in
+[`COURSEMATE_V3_FINAL_PRODUCTION_DEPLOYMENT_REPORT.md`](COURSEMATE_V3_FINAL_PRODUCTION_DEPLOYMENT_REPORT.md).

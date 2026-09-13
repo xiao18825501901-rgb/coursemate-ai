@@ -35,3 +35,6 @@ Thumbs.db
 
 # Project scratch
 work/
+
+# Local Netlify folder
+.netlify

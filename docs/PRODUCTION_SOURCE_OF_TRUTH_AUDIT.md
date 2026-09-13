@@ -10,9 +10,11 @@ Last destination runtime revalidation: 2026-09-13 20:29:16 CST / 2026-09-13 12:2
 
 Last destination candidate/private-TLS validation: 2026-09-13 23:13:06 CST / 2026-09-13 15:13:06 UTC
 
-Status: `RESULT B PROVEN; SECURITY GROUP VERIFIED + PRIVATE TLS PATH PASS; PRODUCTION CERT/REBOOT/FINAL-DRAIN/LIVE-MODEL/DNS GATED`
+Final cutover attempt: 2026-09-14 02:00 CST / 2026-09-13 18:00 UTC
 
-Data migration authorized: `YES — INITIAL BACKUP/ISOLATED RESTORE ONLY; FINAL DRAIN/CUTOVER REMAINS GATED`
+Status: `RESULT B REMAINS AUTHORITATIVE; TRUSTED TLS/RENEWAL/DEST CONFIG/V3 PREVIEW READY; SOURCE OUTAGE + INVALID PROVIDER KEY HARD BLOCK`
+
+Data migration authorized: `YES — FINAL DRAIN/CUTOVER AUTHORIZED BUT NOT STARTED BECAUSE SOURCE IS UNREACHABLE`
 
 This audit records only non-secret infrastructure facts, aggregate database/upload evidence, and
 public HTTP behavior. It does not contain credentials, private key material, environment secrets,
@@ -29,13 +31,21 @@ The dedicated `coursemate-prod-current` identity then passed strict public-key B
 inventory proves that the host runs Caddy plus local RAG and Agent services, stores both SQLite
 databases and the upload tree, and serves the same 18-path OpenAPI artifact observed publicly.
 
-This audit therefore issues **Result B**: `47.237.179.69` is the authoritative CourseMate application
+This audit therefore retains **Result B**: `47.237.179.69` is the authoritative CourseMate application
 and data source. `8.210.58.22` is a legacy/standby candidate and is not a source for migration. The
 initial backup/restore, exact-release validation, inactive production-shaped candidate preparation and
-private V2/V3/proxy/monitor and loopback TLS smoke phases have passed. The Security Group permits
-public 80/443, but the destination has no trusted production certificate or public CourseMate
-listener. Production write drain, final delta, certificate/service activation, DNS cutover,
-destructive operations, paid model calls and destination reboot remain separately gated.
+private V2/V3/proxy/monitor and loopback TLS smoke phases have passed. The destination now has a
+trusted two-name Let's Encrypt certificate, a verified restricted DNS-01 renewal path, validated
+inactive production env and a disabled HTTPS vhost. It still has no public CourseMate listener or
+final production data.
+
+During the authorized final cutover attempt, the authoritative source became unreachable from three
+independent networks before any drain or final backup. In parallel, the protected Singapore key was
+rejected by both the exact workspace and shared Singapore APIs with `401 invalid_api_key`; the
+bounded canary stopped at its first Planner call with zero tokens and estimated CNY 0. Backend DNS,
+Netlify production, source data, destination service activation and SRSZQ remain unchanged. The
+current incident evidence and safe stop state are detailed in the final section and the final
+deployment report.
 
 ## 1. DNS topology
 
@@ -540,10 +550,47 @@ Nginx configuration: CANDIDATE FILE VALIDATED; NOT ENABLED; NO RELOAD
 Security Group evidence: VERIFIED — PUBLIC TCP/80, TCP/443, TCP/22 AND ICMP ALLOWED; UNCHANGED
 DNS change: NO
 Package install: ISOLATED MIGRATION + COURSEMATE CANDIDATE ROOTS; APT/SYSTEM/GLOBAL NO
-Paid model call: NO
+Successful paid model inference: NO — later auth-rejected canary attempt used zero tokens and CNY 0
 Password collected/stored: NO
 Private key exposed: NO
 User/course content read: NO
 Reboot: NO
 Authorized remote writes: dedicated public key; initial backup/restore; isolated/candidate runtime and config; private smoke; non-force branch push
 ```
+
+## Final cutover revalidation and incident evidence
+
+The following evidence was collected after the earlier safety ledger and supersedes only its
+time-sensitive runtime statements:
+
+| Surface | Final observed fact |
+|---|---|
+| Authoritative source | `47.237.179.69`; previously proven complete source; now TCP 22/80/443 timeout and ICMP 100% loss from local, new ECS and legacy ECS |
+| Public backend DNS | `rag.qqttai.com` and `agent.qqttai.com` still resolve through DNS-only Cloudflare A records to `47.237.179.69`; automatic TTL |
+| Frontend | `https://qqttai.com` HTTP 200; production deploy unchanged |
+| Destination | `47.114.34.175`; SSH ready; final data has zero files and one empty uploads directory |
+| Destination CourseMate | RAG, Agent and monitor timer inactive/disabled; vhost disabled; no public 443 listener; `V3_ENABLED=false` |
+| Destination TLS | Let's Encrypt YR2; SANs `rag.qqttai.com`, `agent.qqttai.com`; expires 2026-12-12 16:17:46 UTC; chain and renewal dry-run pass |
+| Destination provider | Exact workspace reachable, but installed `sk-ws` key receives `401 invalid_api_key` from workspace and shared Singapore APIs |
+| SRSZQ | nginx/production/staging processes remain active with PIDs 897/1182/48185; no reboot, PM2 save, config edit or signal |
+
+The source failure was observed before any final-drain command. No attempt was made to treat the
+initial online backup as current or to start destination production from it. The source did not
+receive a service stop, migration, database write, DNS change or destructive action during this
+attempt.
+
+Cloudflare API access was separately proven through the restricted destination-to-legacy egress.
+The captured pre-cutover state is mode 0600 and has SHA-256
+`8a71816ff1346da1c5185761a31461d627f8ecfabcbb25628a6129c3d39f7c1a`. Certificate renewal uses the
+same destination-held Cloudflare token without copying it to the legacy server. Before retiring the
+legacy server, this egress dependency must be replaced and renewal dry-run repeated.
+
+The qwen failure checkpoint is content-free except for synthetic benchmark output metadata. It
+records a maximum of three authorized calls, CNY 0.79255405 conservative ceiling, one rejected
+Planner request, zero input/output tokens, no provider response ID, no retry and CNY 0 estimated
+cost. SHA-256:
+`b9cb250633cd3763d37505d300e3c8292a2def40fe2b8a9aab4c1bd85765d68f`.
+
+This is an external hard-block stop, not a production acceptance. Exact human recovery actions and
+the gates that must be rerun are in
+[`COURSEMATE_V3_FINAL_PRODUCTION_DEPLOYMENT_REPORT.md`](COURSEMATE_V3_FINAL_PRODUCTION_DEPLOYMENT_REPORT.md).
