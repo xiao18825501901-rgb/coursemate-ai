@@ -2,11 +2,11 @@
 
 Initial audit time: 2026-09-13 04:22 CST / 2026-09-12 20:22 UTC
 
-Latest operational reconciliation: 2026-09-14 04:18 CST / 2026-09-13 20:18 UTC
+Latest operational reconciliation: 2026-09-14 05:11 CST / 2026-09-13 21:11 UTC
 
-Status: `RESULT B REMAINS AUTHORITATIVE; SOURCE RESTORED; FINAL DATA MIGRATED PRIVATELY; HANGZHOU ICP PUBLIC-ACCESS BLOCK`
+Status: `RESULT B IS AUTHORITATIVE AND NOW RUNS V3 IN AP-SOUTHEAST-1`
 
-Data migration: `FINAL DRAIN/BACKUP/TRANSFER/RESTORE/SCHEMA 21 PASS; DNS CUTOVER NOT PERFORMED`
+Data migration: `LIVE SCHEMA 10 TO 21 PASS; DATA PRESERVED; OFF-HOST RECOVERY COPY VERIFIED`
 
 This audit records only non-secret infrastructure facts, aggregate database/upload evidence, and
 public HTTP behavior. It does not contain credentials, private key material, environment secrets,
@@ -19,34 +19,33 @@ are retained as a chronological audit trail and must not be read as the current 
 
 | Surface | Current verified fact |
 |---|---|
-| Production authority | **Result B remains authoritative:** `47.237.179.69` |
-| Public health | Source RAG and Agent HTTP 200 with trusted TLS |
-| Source services | Caddy, RAG and Agent active/enabled |
+| Production authority | **Result B:** `47.237.179.69`, Alibaba Cloud region `ap-southeast-1` |
+| Public application | `https://qqttai.com/learn/cs3481` HTTP 200; V3 protected route renders |
+| Public health | RAG and Agent HTTP 200 with trusted TLS |
+| Backend release | `cd8c1218b56f04c3947abda33cf1b2638bafbf16` |
+| Backend services | Caddy, V3 RAG and V3 Agent active/enabled; restart count 0/0 |
 | Backend DNS | Both A records unchanged at `47.237.179.69` |
-| Netlify | Production unchanged at deploy `6a83d079cd1da1000859b96c` |
+| Netlify | V3 production deploy `6aa70f2b5a330d5a8ae4be56` |
 | Final source recovery unit | Created after a real write drain and isolated-restore verified |
-| Destination data | Final copy installed; RAG Schema 21, Agent Schema 1, integrity/FK pass |
-| Destination release | `cd8c1218b56f04c3947abda33cf1b2638bafbf16` |
-| Destination services | RAG/Agent active on loopback but disabled at boot and non-authoritative |
-| Destination TLS | Trusted two-name certificate; local SNI health 200/200 |
-| Destination public edge | HTTP 403 `Server: Beaver`, title `Non-compliance ICP Filing`; HTTPS reset |
+| Live data | RAG Schema 21, Agent Schema 1, integrity/FK pass; legacy fingerprints preserved |
+| Off-host recovery | Final backup checksum-verified on the Hangzhou ECS |
+| Monitoring | Five-minute timer active/enabled; latest result `ok` |
+| Hangzhou ECS | Non-authoritative recovery candidate; mainland public edge remains ICP-blocked |
 | Live model | Key/model/endpoint and Planner structured output verified; full canary not accepted |
-| Cutover | Not performed; no Cloudflare or Netlify production change |
+| Cutover | Backend and frontend V3 activated; no DNS change was required |
 
-After the source was restored and the Singapore key replaced, the workflow successfully completed a
-new final drain, backup, transfer, isolated restore and Schema 10 to 21 migration. The source was then
-restarted when the cutover gate failed. A post-rollback content-free comparison matched the drained
-state at collection time, but future writes mean another final drain is mandatory before any later
-cutover.
+After the source was restored and the Singapore key replaced, the workflow completed a new final
+drain, backup and isolated restore, then deployed V3 directly on this already-authoritative
+non-mainland host. The live database migrated from Schema 10 to 21 without changing the verified
+legacy row fingerprints or upload manifest. Public health, authorization boundaries, CORS, browser
+rendering and monitoring passed after activation.
 
-The destination itself is healthy. It listens on 80/443, its local trusted-SNI HTTPS reaches both
-CourseMate services, UFW is inactive and the Security Group permits public 80/443. External requests
-with a CourseMate Host/SNI are intercepted before nginx: HTTP receives the explicit
-`Non-compliance ICP Filing` page and HTTPS is reset. The destination is in `cn-hangzhou-k`.
-Alibaba's documented mainland-China ICP/access-filing requirement is therefore the authoritative
-external blocker.
+The planned move to `47.114.34.175` in `cn-hangzhou-k` is deferred. Its final recovery copy and
+candidate artifacts remain useful rollback evidence, but no production DNS selects that host. The
+mainland ICP response therefore remains a property of the deferred destination, not a blocker in the
+active production path. No alternate-port, proxy-tunnel, Host-header or TLS workaround was used.
 
-The full current outcome, cost/evidence ledger, safe state and exact Owner action are in
+The full current outcome, cost/evidence ledger, browser evidence and rollback state are in
 [`COURSEMATE_V3_FINAL_PRODUCTION_DEPLOYMENT_REPORT.md`](COURSEMATE_V3_FINAL_PRODUCTION_DEPLOYMENT_REPORT.md).
 
 ## Historical audit trail

@@ -1,67 +1,61 @@
 # CourseMate V3 — New Alibaba ECS Migration State
 
-Last updated: 2026-09-14 04:18 CST / 2026-09-13 20:18 UTC
+Last updated: 2026-09-14 05:11 CST / 2026-09-13 21:11 UTC
 
-Current phase: `FINAL DATA + SCHEMA 21 + PRIVATE V3 ACTIVE; PUBLIC CUTOVER BLOCKED BY HANGZHOU ICP ENFORCEMENT`
+Current phase: `V3 ONLINE ON THE EXISTING AP-SOUTHEAST-1 PRODUCTION HOST; HANGZHOU MIGRATION DEFERRED`
 
-Production data copied: `YES — FINAL DRAINED RECOVERY UNIT VERIFIED AND INSTALLED`
+Production data migrated: `YES — LIVE RAG SCHEMA 21 / AGENT SCHEMA 1; LEGACY DATA PRESERVED`
 
-Authoritative source: `47.237.179.69 RESTORED, ACTIVE, HEALTHY AND STILL ROUTED`
+Authoritative production: `47.237.179.69 ACTIVE, HEALTHY, V3 RELEASE cd8c121`
 
-Destination candidate: `cd8c121 ACTIVE ON LOOPBACK; SYSTEMD-DISABLED; V3 ENABLED; NON-AUTHORITATIVE`
+Hangzhou candidate: `NON-AUTHORITATIVE; PRIVATE RECOVERY COPY PRESERVED`
 
-DNS changed: `NO`
+Backend DNS changed: `NO — BOTH RECORDS ALREADY SELECT THE ACTIVE HOST`
 
-Netlify production changed: `NO`
+Netlify production changed: `YES — V3 DEPLOY 6aa70f2b5a330d5a8ae4be56`
 
-Rollback-ready: `YES — SOURCE RESTORED; FINAL BACKUP/RESTORES, OLD RELEASE, ENV BACKUPS AND DISK SNAPSHOT PRESERVED`
+Rollback-ready: `YES — FINAL BACKUP, OFF-HOST COPY, OLD RELEASE, ENV BACKUPS AND PRIOR NETLIFY DEPLOY PRESERVED`
 
 This is the non-secret migration control record. It separates live evidence, repository facts,
 Owner-designated roles, and unresolved production authority. It must never contain credentials,
 private key material, private course content, database rows, upload names, prompt bodies, or raw
 provider responses.
 
-## Current authoritative gate
+## Current authoritative state
 
-The final source drain and migration completed. The final recovery unit exists on both hosts, isolated
-restores pass, RAG migrated from Schema 10 to 21, Agent remains Schema 1, and all legacy fingerprints,
-Agent counts and upload digest match. Destination safe-stop evidence SHA-256 is
-`8e1508c960e6589535c851465eefc5ef941a3af97ac707759e9d64ba0bc1e4b9`.
+The Hangzhou public-ingress failure is no longer the production deployment gate. CourseMate V3 was
+instead installed as a versioned release on the already-authoritative non-mainland host in Alibaba
+Cloud region `ap-southeast-1`. This preserved the current DNS and TLS path while avoiding any ICP
+bypass technique.
 
-The source was restarted after the public ingress gate failed. Current public backend DNS still
-points to `47.237.179.69`; source RAG and Agent return HTTP 200. The source's post-rollback state
-matched the drained state at the collection time. Because it is serving writes again, a future
-cutover must create another final drain rather than assume the destination remains current.
-
-Destination status:
+The source-region cutover completed after a fresh drain, final backup, isolated restore and migration
+rehearsal. The live RAG database migrated from Schema 10 to 21; Agent remains Schema 1. Legacy row
+fingerprints, aggregate counts and the upload manifest matched across the operation. Production now
+serves:
 
 ```text
+Backend host: 47.237.179.69 / iZt4n0k005125h6vlxoiloZ / ap-southeast-1
 Release: cd8c1218b56f04c3947abda33cf1b2638bafbf16
-RAG / Agent: active on 127.0.0.1:28000 / 127.0.0.1:28001
-Boot policy: disabled / disabled
-V3: enabled
+RAG / Agent: active and enabled on 127.0.0.1:8000 / 127.0.0.1:8001
+Public RAG / Agent health: HTTP 200 / 200
 RAG schema / Agent schema: 21 / 1
+Frontend: Netlify production deploy 6aa70f2b5a330d5a8ae4be56
 Uploads: 67 files / 124,209,790 bytes
-Trusted local-SNI HTTPS: 200 / 200
-nginx: active, public 80/443 listeners present
-SRSZQ: online; PIDs 1182 / 48185; nginx master 897
+Monitor: active, enabled, five-minute interval, latest status ok
 ```
 
-Public requests to the Hangzhou address with either CourseMate Host/SNI are blocked upstream of
-nginx: port 80 returns HTTP 403 with `Server: Beaver` and HTML title
-`Non-compliance ICP Filing`; port 443 resets during TLS handshake. This is consistent with Alibaba
-Cloud's documented mainland-China ICP/access-filing enforcement. DNS activation is therefore
-prohibited.
+The final recovery unit remains on the active host and has a checksum-verified off-host copy on the
+Hangzhou ECS. The Hangzhou CourseMate candidate is not selected by DNS and must not be confused with
+the current production runtime.
 
 The replacement Singapore key and exact workspace are valid. Real `qwen3.8-max` Planner structured
-outputs completed, but the full canary is not accepted: one Teacher request timed out at the former
-90-second limit and a later request reached the 4,000-token combined reasoning/answer cap. The
-Provider timeout is now bounded/configurable at 180 seconds with zero retries. No further paid
-tuning was attempted.
+outputs completed previously, but the full canary is not accepted: one Teacher request timed out at
+the former 90-second limit and a later request reached the 4,000-token combined reasoning/answer cap.
+No additional paid inference was performed during deployment.
 
 See
 [`COURSEMATE_V3_FINAL_PRODUCTION_DEPLOYMENT_REPORT.md`](COURSEMATE_V3_FINAL_PRODUCTION_DEPLOYMENT_REPORT.md)
-for the complete evidence, model-cost ledger, rollback state and exact Owner action.
+for the complete evidence, browser checks, model-cost ledger and rollback state.
 
 ## Historical migration record
 
