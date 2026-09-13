@@ -159,7 +159,7 @@ class LearningProvider:
                         api_key=settings.v3_model_api_key.get_secret_value(),
                         base_url=base_url,
                         max_retries=0,
-                        timeout=90,
+                        timeout=settings.v3_model_timeout_seconds,
                     )
                 provider_input: Any = serialized
                 if safe_images:

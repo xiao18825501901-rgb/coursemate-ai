@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     v3_model_api_key: SecretStr | None = None
     v3_model_base_url: str | None = None
     v3_max_output_tokens: int = Field(default=4000, ge=500, le=8000)
+    v3_model_timeout_seconds: int = Field(default=180, ge=30, le=600)
     v3_daily_operations: int = Field(default=30, ge=1, le=500)
     v3_daily_model_calls_per_user: int = Field(default=60, ge=1, le=1_000)
     v3_daily_model_calls_per_user_course: int = Field(default=60, ge=1, le=1_000)
