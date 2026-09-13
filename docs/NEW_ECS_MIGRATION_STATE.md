@@ -1,8 +1,8 @@
 # CourseMate V3 — New Alibaba ECS Migration State
 
-Last updated: 2026-09-13 04:22 CST / 2026-09-12 20:22 UTC
+Last updated: 2026-09-13 18:02:25 CST / 2026-09-13 10:02:25 UTC
 
-Current phase: `Current public production discovery; manual SSH access required`
+Current phase: `Phase A1 public revalidation complete; Alibaba resource ownership/manual access required`
 
 Production data copied: `NO`
 
@@ -28,9 +28,10 @@ coursemate-prod-new -> root@47.114.34.175   READY
 coursemate-prod-current -> 47.237.179.69     NOT CREATED / TRUST GATE OPEN
 ```
 
-Public DNS and HTTP evidence identify `47.237.179.69` as the current CourseMate backend address, but
-its release, databases, uploads and reverse-proxy upstreams remain unknown. This keeps the source
-authority and data-migration gates closed. The full three-host evidence ledger is in
+Public DNS plus pinned-IP HTTPS/TLS evidence identify `47.237.179.69` as the current CourseMate
+backend address, but its Alibaba resource type, release, databases, uploads and reverse-proxy
+upstreams remain unknown. This keeps the source authority and data-migration gates closed. The full
+three-host evidence ledger is in
 [`PRODUCTION_SOURCE_OF_TRUTH_AUDIT.md`](PRODUCTION_SOURCE_OF_TRUTH_AUDIT.md).
 
 ## SSH access result
@@ -66,10 +67,11 @@ NOT CREATED
 Public IP: 47.237.179.69
 Public role: CURRENT PUBLIC COURSEMATE BACKEND
 Internal role: UNKNOWN
+Alibaba resource type/ownership: UNKNOWN
 Authentication advertised: publickey,password
-Observed ED25519 fingerprint:
+Previously observed candidate ED25519 fingerprint:
 SHA256:xrg8yao3PqVrTPP5Qx0st1pxeHt4jVR13L7CY38D8iw
-Fingerprint verification: TOFU ONLY — Alibaba-console verification required
+Fingerprint verification: TOFU ONLY — not authoritative until Alibaba-console verification
 Existing-key non-interactive attempts: NO AUTHENTICATED USER/KEY PAIR
 
 Password included in scripts/files: NO
@@ -78,6 +80,11 @@ Ready for old/destination-host read-only preparation: YES
 Ready for current-host inventory: NO — TRUSTED LOGIN REQUIRED
 Ready for production data transfer/cutover: NO — SOURCE AUTHORITY UNRESOLVED
 ```
+
+The verified destination fingerprint
+`SHA256:TWqeYbYv83dw67sg6BWf3gv3C4LjRWeioaA5/qbq4k4` belongs only to `47.114.34.175`. It is not
+expected to equal the prior TOFU candidate for `47.237.179.69`; rechecking the destination does not
+verify the current public backend.
 
 ### Local SSH state and rollback
 
@@ -103,7 +110,7 @@ Ready for production data transfer/cutover: NO — SOURCE AUTHORITY UNRESOLVED
 
 ### Current public runtime evidence
 
-As rechecked after the alias repair, two independent public resolvers agree:
+As rechecked at 2026-09-13 18:02:25 CST, two independent public resolvers agree:
 
 ```text
 rag.qqttai.com   A 47.237.179.69
@@ -117,7 +124,13 @@ SHA-256:
 3c7c74ef0b98c114403c46f798d10720198a4452860e226df1530ae7a2b30572
 ```
 
-The previously observed SSH endpoint at `47.237.179.69:22` has ED25519 host-key fingerprint
+Pinned-IP HTTPS checks for RAG health, Agent health and RAG OpenAPI all connected to
+`47.237.179.69`, returned HTTP 200 and passed TLS verification. The two domain certificates are
+currently valid through 2026-11-10 UTC; TLS 1.3, Caddy, the exact production CORS origin, HSTS and
+restrictive security headers were observed. This proves only the current public routing/edge, not the
+Alibaba resource type or data location.
+
+The previously observed SSH endpoint at `47.237.179.69:22` presented candidate ED25519 fingerprint
 `SHA256:xrg8yao3PqVrTPP5Qx0st1pxeHt4jVR13L7CY38D8iw`, but that remains TOFU-only evidence and no
 trusted login identity is available. Its release, systemd configuration, databases, uploads,
 environment files, provider, and cloud region therefore remain:
@@ -152,8 +165,8 @@ Repository root:
 C:\Users\Hp\Documents\Codex\2026-08-11\files-mentioned-by-the-user-coursemate\outputs\coursemate-ai
 
 Branch: feature/coursemate-v3-persistent-learning
-Baseline HEAD before this state update: 15106b258d66a2bab04430c854f7ae687fe822e6
-Baseline subject: docs(ops): record SSH access and migration inventory
+Baseline HEAD before this state update: 0ef3653c775aa7d3d4d3f0f0c59208c74863544c
+Baseline subject: docs(ops): audit current production source
 Working tree at start: two preserved Owner untracked files; no tracked or staged changes
 Owner files preserved: ACTUAL_IMPLEMENTED_CHANGES_AUDIT.md, curl
 Origin main last observed: 73e7595dc8fc7179e4cd9693dd024e7a983792c2
@@ -296,8 +309,8 @@ binding Caddy or another proxy to ports 80/443.
 ```text
 SSH access: COMPLETE for Owner-designated old/new aliases
 Discovery: COMPLETE for 8.210.58.22 and 47.114.34.175
-Current public discovery: PARTIAL — DNS/HTTP complete, trusted SSH inventory blocked
-Current public SSH: BLOCKED — manual fingerprint/user verification required
+Current public discovery: PARTIAL — Phase A1 DNS/HTTPS/TLS/OpenAPI revalidated; resource ownership and internals unknown
+Current public SSH: BLOCKED — Alibaba resource discovery plus fingerprint/user verification required
 Authoritative source selection: NOT YET DETERMINED
 Preparation: NOT STARTED
 Initial sync: NOT STARTED
@@ -313,9 +326,10 @@ Completed: NO
 
 ## Current blockers and risks
 
-1. **Trusted current-backend access:** the live ED25519 fingerprint for `47.237.179.69` remains
-   TOFU-only, and no existing local user/key combination authenticates. The fingerprint and actual
-   login user must be verified through the Alibaba Cloud console before an alias is created.
+1. **Trusted current-backend access:** `47.237.179.69` may be ECS, EIP, a load balancer or NAT/proxy;
+   its Alibaba resource ownership is not yet known. The prior ED25519 value remains TOFU-only, and no
+   existing local user/key combination authenticates. Resource topology, fingerprint and actual login
+   user must be verified through the Alibaba Cloud console before an alias is created.
 2. **Source authority unresolved:** public DNS and health traffic use `47.237.179.69`, while
    `8.210.58.22` exposes a different, smaller RAG API and stale storage evidence. Migrating from the
    latter now can omit current production data; a split topology also remains possible.
@@ -332,30 +346,37 @@ Completed: NO
 
 ## First safe next actions
 
-1. In the Alibaba Cloud ECS console, locate the instance with public IP `47.237.179.69`. Through
-   Workbench/VNC or another trusted console channel, run
+1. In Alibaba Cloud, search `47.237.179.69` in order under ECS public IPv4, EIP associations, NAT
+   Gateway forwarding, SLB/ALB/NLB listeners and backend groups, then other resources/accounts/
+   regions under Owner control. Record the resource type and backend topology without modifying it;
+   do not assume the public IP is an ECS interface.
+2. If the result identifies a Linux ECS/backend, enter through Workbench/Session Manager/VNC and run
    `sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`, `whoami`, `hostname`, and `hostname -I`.
-   Confirm that the fingerprint is exactly
-   `SHA256:xrg8yao3PqVrTPP5Qx0st1pxeHt4jVR13L7CY38D8iw`, and report only match/no-match plus the
-   actual login user. Never send a password or private key.
-2. After that verification, authorize a dedicated public key, create a strict
+   Compare the result with the prior TOFU candidate
+   `SHA256:xrg8yao3PqVrTPP5Qx0st1pxeHt4jVR13L7CY38D8iw`. A mismatch requires reconciliation, not host-key
+   regeneration, verification bypass or blind acceptance. Report only resource type, match/no-match,
+   actual user, hostname and private IP; never send a password or private key.
+3. After resource and host identity are reconciled, authorize a dedicated public key, create a strict
    `coursemate-prod-current` alias, and perform the allowlisted read-only process/proxy/Git/database/
    upload inventory. Do not create a production backup from either candidate before this evidence
    resolves the source topology.
-3. In Alibaba Cloud, verify the new ECS Security Group and take a rollback snapshot before any
+4. In Alibaba Cloud, verify the new ECS Security Group and take a rollback snapshot before any
    package installation, reboot, proxy change, or application write.
-4. Establish a coexistence plan for destination nginx/PM2 `srszq-api`. Preserve its files, process
+5. Establish a coexistence plan for destination nginx/PM2 `srszq-api`. Preserve its files, process
    definitions, domains, ports, and rollback path; do not overwrite it with CourseMate config.
-5. Publish or otherwise freeze the exact reviewed V3 release SHA before deployment.
-6. Only after source authority is resolved: create a consistent two-database/uploads backup, copy it
+6. Publish or otherwise freeze the exact reviewed V3 release SHA before deployment.
+7. Only after source authority is resolved: create a consistent two-database/uploads backup, copy it
    off-host, verify checksums, restore to an isolated destination path, and rehearse migrations 1-21.
-7. Keep DNS unchanged until the restored release passes private/local smoke tests, authentication,
+8. Keep DNS unchanged until the restored release passes private/local smoke tests, authentication,
    data invariants, monitoring, and rollback rehearsal.
 
 ## Safety record for this run
 
 - No production database, upload, repository, environment file, systemd service, proxy, firewall,
   package set, provider configuration, or DNS record was modified.
+- The 2026-09-13 18:02 CST Phase A1 slice performed DNS and pinned-IP HTTPS/TLS/OpenAPI reads only.
+  The local Alibaba CLI is unavailable, and no Alibaba resource lookup or mutation was attempted.
+  `coursemate-prod-current` remains absent from the effective SSH configuration.
 - Public DNS, TLS/HTTP/OpenAPI, SSH handshake, current-host key authentication, and aggregate
   old/destination-host evidence were checked read-only. No `coursemate-prod-current` alias was
   created; the isolated TOFU-only known-host file used for safe probes was removed afterward.

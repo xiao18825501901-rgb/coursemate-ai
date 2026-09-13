@@ -1,8 +1,10 @@
 # CourseMate V3 — Production Source of Truth Audit
 
-Audit time: 2026-09-13 04:22 CST / 2026-09-12 20:22 UTC
+Initial audit time: 2026-09-13 04:22 CST / 2026-09-12 20:22 UTC
 
-Status: `BLOCKED ON TRUSTED SSH ACCESS TO CURRENT PUBLIC BACKEND`
+Last public-surface revalidation: 2026-09-13 18:02:25 CST / 2026-09-13 10:02:25 UTC
+
+Status: `BLOCKED ON ALIBABA RESOURCE OWNERSHIP AND TRUSTED ACCESS TO CURRENT PUBLIC BACKEND`
 
 Data migration authorized: `NO`
 
@@ -41,6 +43,40 @@ Both `1.1.1.1` and `8.8.8.8` returned the same backend address. Backend response
 Uvicorn and Clerk-related headers but no Cloudflare edge headers. Cloudflare is therefore verified as
 the DNS authority; “backend records are DNS-only rather than orange-cloud proxied” is a high-confidence
 inference from the visible Alibaba address and HTTP headers, not a Cloudflare-dashboard fact.
+
+### Phase A1 public revalidation — 2026-09-13 18:02:25 CST
+
+The public surface was rechecked without changing DNS, services or data:
+
+```text
+1.1.1.1 rag.qqttai.com   -> 47.237.179.69, TTL 300
+1.1.1.1 agent.qqttai.com -> 47.237.179.69, TTL 300
+8.8.8.8 rag.qqttai.com   -> 47.237.179.69, TTL 300
+8.8.8.8 agent.qqttai.com -> 47.237.179.69, TTL 300
+
+Pinned HTTPS rag /health:   HTTP 200, remote_ip=47.237.179.69, TLS verify=0
+Pinned HTTPS agent /health: HTTP 200, remote_ip=47.237.179.69, TLS verify=0
+Pinned HTTPS rag OpenAPI:   HTTP 200, remote_ip=47.237.179.69, TLS verify=0
+RAG OpenAPI paths:          18
+RAG OpenAPI bytes:          31,745
+RAG OpenAPI SHA-256:        3c7c74ef0b98c114403c46f798d10720198a4452860e226df1530ae7a2b30572
+```
+
+Both public services negotiated TLS 1.3. The RAG certificate is valid for `rag.qqttai.com` from
+2026-08-12 23:15:02 UTC through 2026-11-10 23:15:01 UTC; the Agent certificate is valid for
+`agent.qqttai.com` from 2026-08-12 23:17:04 UTC through 2026-11-10 23:17:03 UTC. Both chains were
+accepted by the local trust store. Allowlisted response headers still show Caddy, exact
+`Access-Control-Allow-Origin: https://qqttai.com`, HSTS and restrictive security headers.
+
+```text
+RAG certificate SHA-256:   3738e7792b7e5d7991defb40da214e1814d30b476ed500ee9a2cc9b5771f7b0f
+Agent certificate SHA-256: a35de5c00c1210d429cd92dd0f1ef876f40a7079428cc4ebcc929c4b2ff72c98
+Issuer: Let's Encrypt YE1
+```
+
+This proves that `47.237.179.69` still terminates or routes the live CourseMate HTTPS surface. It does
+not prove whether the address is an ECS interface, EIP, load balancer, NAT/proxy, or which backend
+stores the production data.
 
 ```text
 Browser -> qqttai.com / www.qqttai.com -> Netlify
@@ -125,13 +161,16 @@ CORS allows the exact origin `https://qqttai.com`. These are facts about this ho
 
 ```text
 Current DNS backend: YES
+Alibaba resource type/ownership: UNKNOWN — manual console discovery required
+Effective local coursemate-prod-current alias: ABSENT
+Local Alibaba CLI: UNAVAILABLE
 Reachable ports: 22, 80, 443
 Common alternative SSH ports checked and closed: 2022, 2200, 2222, 8022, 8822
 SSH banner: OpenSSH_9.6p1 Ubuntu-3ubuntu13.19
 SSH authentication advertised: publickey,password
-Observed ED25519 host fingerprint:
+Previously observed candidate ED25519 host fingerprint:
 SHA256:xrg8yao3PqVrTPP5Qx0st1pxeHt4jVR13L7CY38D8iw
-Host fingerprint trust: TOFU ONLY — not yet Alibaba-console verified
+Host fingerprint trust: TOFU ONLY — not authoritative until Alibaba-console verified
 ```
 
 Existing local keys were tried non-interactively against the plausible `root`, `admin`, `ubuntu`,
@@ -355,8 +394,20 @@ Caddy must not bind public ports 80/443 while nginx owns them. Replacing nginx i
 MANUAL ACTION REQUIRED: 需要为 47.237.179.69 建立 SSH public-key login。
 ```
 
-Use the Alibaba Cloud ECS console to identify the instance whose public IP is `47.237.179.69`. Through
-Workbench/VNC or another already trusted console channel, run:
+In the Alibaba Cloud console, search for `47.237.179.69` in this order without changing any resource:
+
+1. ECS public IPv4;
+2. EIP / Elastic IP and its associated resource;
+3. NAT Gateway forwarding/DNAT;
+4. SLB / ALB / NLB listeners and backend server groups;
+5. other network resources and, if absent, other Owner-controlled accounts/regions.
+
+Do not assume that a public address is attached directly to an ECS network interface. Record only the
+resource type, region, associated resource identifier/name and backend private IP/port topology; do
+not expose cloud credentials or unrelated resources.
+
+If the address resolves to a Linux ECS or an associated backend ECS, enter it through Workbench,
+Session Manager, VNC or another already trusted console channel and run:
 
 ```bash
 sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
@@ -365,16 +416,23 @@ hostname
 hostname -I
 ```
 
-The first command must return exactly:
+The prior network probe recorded this candidate fingerprint:
 
 ```text
 SHA256:xrg8yao3PqVrTPP5Qx0st1pxeHt4jVR13L7CY38D8iw
 ```
 
-Report only whether the fingerprint matches and the actual login user. Do not send a password,
-private key, token, `.env`, database, or screenshot containing secrets. After the fingerprint and user
-are confirmed, create/authorize a dedicated public key through a visible terminal password prompt or
-the trusted console, then add `coursemate-prod-current` with strict public-key BatchMode settings.
+If the console fingerprint matches, record `HOST_IDENTITY_VERIFIED`. If it differs, do not regenerate
+or change host keys, disable verification, or accept the network key blindly. Record
+`FINGERPRINT_RECONCILIATION_REQUIRED` and investigate IP/EIP reassociation, a changed system disk,
+load-balancer/proxy topology and the provenance of the old TOFU value. The identity observed inside the
+current Alibaba console instance has higher evidentiary priority than the prior unverified text.
+
+Report only the resource type, whether the fingerprint matches, the actual login user, hostname and
+private IP. Do not send a password, private key, token, `.env`, database, or screenshot containing
+secrets. After the resource and host identity are reconciled, create/authorize a dedicated public key
+through a visible terminal password prompt or the trusted console, then add `coursemate-prod-current`
+with strict public-key BatchMode settings.
 
 Only after that alias passes may the next automated phase read the current host's systemd/process,
 Git/artifact, proxy upstream, allowlisted path configuration, aggregate DB health, upload manifest and
