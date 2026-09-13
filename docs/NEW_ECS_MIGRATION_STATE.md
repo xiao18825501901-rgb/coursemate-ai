@@ -1,8 +1,8 @@
 # CourseMate V3 — New Alibaba ECS Migration State
 
-Last updated: 2026-09-13 21:50:34 CST / 2026-09-13 13:50:34 UTC
+Last updated: 2026-09-13 22:34:27 CST / 2026-09-13 14:34:27 UTC
 
-Current phase: `INITIAL RESTORE + ISOLATED RUNTIME + SCHEMA REHEARSAL + DESTINATION TEST/BUILD PASS; SERVICE CONFIG PREPARATION NEXT`
+Current phase: `PRE-CUTOVER CANDIDATE PREPARED AND PRIVATE SMOKE PASS; TLS/REBOOT/FINAL-DRAIN/LIVE-MODEL/DNS OWNER GATES REMAIN`
 
 Production data copied: `YES — INITIAL ONLINE BACKUP ONLY; FINAL DELTA NOT STARTED`
 
@@ -10,7 +10,7 @@ Production writes changed: `NO`
 
 DNS changed: `NO`
 
-Rollback-ready application backup: `INITIAL RESTORE VERIFIED; DESTINATION PRE-RUNTIME DISK SNAPSHOT RECORDED; FINAL CUTOVER SNAPSHOT NOT CREATED`
+Rollback-ready application backup: `INITIAL RESTORE + LOCAL COPY VERIFIED; DESTINATION PRE-RUNTIME DISK SNAPSHOT RECORDED; FINAL CUTOVER SNAPSHOT NOT CREATED`
 
 This is the non-secret migration control record. It separates live evidence, repository facts,
 Owner-designated roles, and unresolved production authority. It must never contain credentials,
@@ -31,8 +31,10 @@ Public DNS, pinned-IP HTTPS/TLS, Owner-console host identity and trusted SSH inv
 `47.237.179.69` as the complete current CourseMate application and data source. The source decision is
 **Result B**. The initial backup/off-host copy/isolated restore, destination rollback snapshot,
 isolated runtime installation, Schema 10 -> 21 rehearsal and destination source validation have
-completed. Final drain, production activation/cutover, DNS, paid model calls, destructive actions and
-destination reboot remain gated. The full
+completed. The exact release/runtime, disabled service files, disabled monitor and a non-enabled
+nginx candidate are now prepared; private V2/V3/proxy/monitor smoke tests pass. Final drain,
+production activation/cutover, TLS issuance/key handling, DNS, paid model calls, destructive actions
+and destination reboot remain gated. The full
 three-host evidence ledger is in
 [`PRODUCTION_SOURCE_OF_TRUTH_AUDIT.md`](PRODUCTION_SOURCE_OF_TRUTH_AUDIT.md).
 
@@ -184,18 +186,19 @@ Repository root:
 C:\Users\Hp\Documents\Codex\2026-08-11\files-mentioned-by-the-user-coursemate\outputs\coursemate-ai
 
 Branch: feature/coursemate-v3-persistent-learning
-Baseline HEAD before this state update: 6367f9f2e190834dba3a9ee1d59edb96df387415
-Baseline subject: docs(ops): record phase A1 production revalidation
-Working tree at start: two preserved Owner untracked files; no tracked or staged changes
+Validated application commit: 9806a553a30c0531f727ba1538543fe6225e4c44
+Documentation HEAD before this state update: cebe9b4 (docs(ops): record isolated runtime validation)
+Working tree at this state update: this tracked migration-state edit plus two preserved Owner untracked files; nothing staged
 Owner files preserved: ACTUAL_IMPLEMENTED_CHANGES_AUDIT.md, curl
 Origin main last observed: 73e7595dc8fc7179e4cd9693dd024e7a983792c2
-V3 branch on origin: absent at this check
+V3 branch on origin: PUBLISHED — non-force push; exact application commit 9806a55 is reachable
 Schema source: migrations 1-21
 ```
 
-The Stage 8 report records 327 Python, 49 Web, 66 Agent, 3 V3 Playwright, and 4 V2 Playwright tests
-passing at its recorded code state. They were not re-run for this SSH/inventory slice and are not
-live-model or production evidence.
+The Stage 8 report records 327 Python, 49 Web, 66 Agent, 3 V3 Playwright and 4 V2 Playwright tests at
+its recorded code state. Exact commit `9806a55` was subsequently revalidated locally and on the
+destination as recorded below. All such evidence remains local/fake-provider, not live-model or
+production acceptance.
 
 ## SOURCE SERVER — Owner-designated old server
 
@@ -294,25 +297,30 @@ Restart required: YES
 ```text
 git: 2.34.1
 system python3: 3.10.12 (unchanged)
-isolated Python: 3.12.14 at /srv/coursemate-migration/python/cpython-3.12.14-linux-x86_64-gnu/bin/python3.12
-isolated uv: 0.12.13 at /srv/coursemate-migration/tools/uv-0.12.13/uv
-production RAG venv: /srv/coursemate-migration/venvs/rag-105ccda-py312 (40 locked distributions)
-test venv: /srv/coursemate-migration/venvs/test-105ccda-py312 (51 locked distributions)
+isolated rehearsal Python: 3.12.14 under /srv/coursemate-migration
+final candidate Python: 3.12.14 at /srv/coursemate/runtime/cpython-3.12.14-linux-x86_64-gnu
+isolated uv: 0.12.13 under /srv/coursemate-migration/tools
+final candidate RAG venv: /srv/coursemate/runtime/rag (40 hash-locked distributions)
+isolated test venv: /srv/coursemate-migration/venvs/test-105ccda-py312 (51 locked distributions)
 node: 24.20.0
 npm: 11.19.0
-isolated Node dependencies: 252 packages under /srv/coursemate-migration/releases/9806a55/node_modules
+final candidate Node dependencies: lockfile-installed, build-verified and production-pruned under /srv/coursemate/releases/9806a55
 rsync: 3.2.7
 caddy: MISSING
 sqlite3 CLI: MISSING
 
-/srv/coursemate: MISSING
-/etc/coursemate: MISSING
+/srv/coursemate: PRESENT — independent candidate root, not serving production traffic
+/srv/coursemate/current: symlink to releases/9806a55
+/srv/coursemate/data: PRESENT AND EMPTY — final source snapshot not copied yet
+/srv/coursemate/backups: PRESENT — verified local copy of initial recovery unit
+/etc/coursemate: PRESENT — root-owned, group-readable candidate env files
 /home/admin/coursemate-ai: MISSING
 /root/coursemate-ai: MISSING
 /opt/coursemate: MISSING
-CourseMate RAG/Agent units and live paths: NOT INSTALLED
-Isolated initial RAG DB / Agent DB / uploads copy: PRESENT under /srv/coursemate-migration only
-Exact validated migration release: /srv/coursemate-migration/releases/9806a55
+CourseMate RAG/Agent/monitor units: INSTALLED AND LOADED; inactive and disabled
+CourseMate nginx site: INSTALLED in sites-available; not enabled; nginx not reloaded
+Isolated initial RAG DB / Agent DB / uploads copy: PRESENT under /srv/coursemate-migration
+Exact validated candidate release: /srv/coursemate/releases/9806a55
 ```
 
 The destination is **not an empty machine** and must not be repurposed destructively. Existing,
@@ -326,13 +334,14 @@ pm2-root.service: active/enabled; Node process owns 127.0.0.1:8080 and :8081
 UFW: inactive
 ```
 
-No Caddy installation, apt/system/global package change, firewall change, reboot, service stop, or
-live application file transfer was performed. Owner-console evidence shows one normal Security Group
-associated with the matching VPC and four rules, but the rule bodies were not visible and therefore
-remain unknown. External reachability checks found SSH/22 and HTTP/80 reachable, with no externally
-reachable service on 443/8080/8081; the 443 result cannot distinguish a Security Group rule from the
-confirmed absence of a listener. A coexistence/protection plan for the existing `srszq-api` service
-is mandatory before adding CourseMate virtual hosts.
+No Caddy installation, apt/system/global package replacement, firewall change, reboot, existing
+service stop, or public proxy reload was performed. The isolated CourseMate identity, paths,
+root-owned environment, systemd units and disabled nginx virtual hosts were prepared without touching
+the enabled SRSZQ site. Owner-console evidence shows one normal Security Group associated with the
+matching VPC and four rules, but the rule bodies were not visible and therefore remain unknown.
+External reachability checks found SSH/22 and HTTP/80 reachable, with no externally reachable service
+on 443/8080/8081; the 443 result cannot distinguish a Security Group rule from the confirmed absence
+of a listener.
 
 ### Destination rollback snapshot and isolated runtime evidence
 
@@ -341,9 +350,10 @@ Before installation, Owner-console evidence recorded standard snapshot
 availability enabled and the console rollback action present. The Owner then explicitly approved
 isolated runtime installation. No snapshot delete, rollback, disk replacement or reboot was run.
 
-The runtime is confined to `/srv/coursemate-migration`; system Python remains 3.10.12 and no
-system-visible `python3.12` shim remains. A shim created by `uv python install` was identified by its
-exact target and moved recoverably to
+The rehearsal runtime is confined to `/srv/coursemate-migration`; the final candidate runtime is
+confined to `/srv/coursemate/runtime`. System Python remains 3.10.12 and no system-visible
+`python3.12` shim remains. A shim created by `uv python install` was identified by its exact target and
+moved recoverably to
 `/srv/coursemate-migration/rollback/uv-python-shims-20260913T130418Z/python3.12`.
 
 Content-free runtime evidence:
@@ -383,7 +393,12 @@ Destination rollback snapshot: RECORDED — exact system disk, before runtime in
 Isolated runtime: COMPLETE — Python 3.12.14, locked production/test venvs and locked Node dependencies
 Schema migration: REHEARSAL PASS — 10 -> 21 twice on fresh copies; live source/pristine restore untouched
 Exact-release validation: PASS — Python, Web, Agent, typecheck and production build on 9806a55
-Pre-cutover: IN PROGRESS — service/config preparation not activated
+Final candidate: PREPARED — exact release, independent runtime/user/paths, secret-safe env and disabled units/site
+Private smoke: PASS — V2 compatibility, V3 migration/routes, auth/CORS, proxy and monitor; all transient services stopped
+Release publication: COMPLETE — branch pushed non-force; 9806a55 reachable from origin branch history
+TLS readiness: BLOCKED — no destination certificate or 443 listener; issuance/key method requires Owner decision
+Reboot readiness: BLOCKED — SRSZQ staging is running but absent from the saved PM2 resurrection dump
+Pre-cutover: COMPLETE FOR NON-ACTIVATING WORK — final data remains empty and candidate remains inactive
 Cutover: NOT STARTED — OWNER GATE
 Post-cutover: NOT STARTED
 Observation: NOT STARTED
@@ -410,6 +425,9 @@ Destination copy:
 
 Isolated restore:
 /srv/coursemate-migration/restores/initial-20260913T121513Z
+
+Destination-local recovery copy:
+/srv/coursemate/backups/coursemate-v2-20260913T121513.787049Z
 ```
 
 The pack contains exactly six top-level files, has no SQLite sidecars, and all five manifest-covered
@@ -417,7 +435,7 @@ artifact checksums pass. Restored RAG/Agent database SHA-256 values exactly matc
 both report integrity `ok` and FK 0. RAG remains migration 10 with 1,936 chunks, 66 documents,
 39 conversations and 86 messages. Agent remains migration 1 with one task. Restored uploads are
 67 files / 124,209,790 bytes with normalized manifest digest
-`c5fb27c39fd06ff48972d3df1bb495345adfffffb4324b7d4dc579ad454c0a2d`.
+`c5fb27c39fd06ff48972d3df1bb495345adfffffb432b7d4dc579ad454c0a2d`.
 
 Tracked source at `105ccdaeec3b45c208a8e039d7943a5e22e277ce` was packaged as a complete Git
 bundle, SHA-256 `93e00cd8e1230d45a3aeb6cbae72e817fc8985248082d7695c2d6c99b55315df`, then
@@ -468,49 +486,102 @@ its content-free evidence SHA-256 is
 All tests used fake/local providers and isolated data. No live model call, paid call, source write,
 production service start, or production migration was part of this validation.
 
+## Final candidate and private-smoke evidence
+
+The destination now has an inactive, production-shaped candidate owned by the unprivileged
+`coursemate` identity. The exact clean release is `/srv/coursemate/releases/9806a55`, selected by the
+`/srv/coursemate/current` symlink. Its dedicated Python runtime and RAG virtual environment are below
+`/srv/coursemate/runtime`; the Web/Agent dependencies were installed from the lockfile, the production
+build passed and development dependencies were pruned. File ownership and traversal were verified by
+executing the actual entry points as the service user, not merely by inspecting execute bits.
+
+Secret-bearing RAG and Agent configuration was copied directly from the authoritative source over the
+trusted server channel, transformed through an explicit safe-field policy, and installed as
+`/etc/coursemate/rag.env` and `/etc/coursemate/agent.env` with mode 0640 and `root:coursemate`
+ownership. Secret values were never printed. Compatibility remains on the currently verified
+DashScope/OpenAI-compatible configuration; `V3_MODEL=qwen3.8-max` is only an inactive intent and
+`V3_ENABLED=false` remains the initial activation policy.
+
+The loaded RAG, Agent, monitor service and monitor timer units are inactive and disabled. The
+CourseMate nginx file is present only in `sites-available`; it is not linked into `sites-enabled`, and
+the live nginx process was not reloaded. Static systemd verification and both the live configuration
+test and a candidate-union nginx test pass. The existing nginx master and SRSZQ production/staging PM2
+PIDs remained 897, 1182 and 48185 respectively.
+
+Private smoke used only disposable copies below `/srv/coursemate/smoke/9806a55`, transient systemd
+units, localhost ports 28000/28001 and a separate localhost-only nginx on 29080. The evidence is:
+
+```text
+V2 flag-off: health PASS; protected routes 401 without token; synthetic bearer compatibility PASS
+V2 data: Schema 1..10; base counts/integrity/FK/upload digest unchanged
+V3 flag-on: copied RAG Schema 10 -> 21; health/routes/auth/authorization/non-leak checks PASS
+V3 external calls: model evidence rows=0; reservations=0; no live or paid provider call
+Proxy: rag/agent Host routing, streaming headers, auth and exact CORS origin PASS
+Monitor: status=ok; RAG 12 ms; Agent 2 ms; backup age 8,327 s; free space 33,468,669,952 bytes
+Cleanup: localhost ports 28000, 28001 and 29080 closed; candidate units inactive/disabled
+Smoke evidence SHA-256: bde19f160d7957f63abf64154e54180c7a8d9b077ce9a200107c9431a338f4ba
+Final Python freeze SHA-256: 8ddb0b7c056f403b16a62b4da10561cb0e4de5e95edbb413d00606a3436b476e
+Production npm tree SHA-256: 6ff9dc368decc31e070d41a2bf5646a520f72a1f258fc6aa3af885c7da0b963c
+RAG unit SHA-256: 2e373d7ce68eef50dbe3cd51d6935c53f06cb956b5cc34ee9ad09907e78339a9
+Agent unit SHA-256: d5c5242ab38acd772c9c1ab56219a7329073736064c23aa5ca4b053df8f1fce8
+Monitor service SHA-256: df6626c0c5efdc100065ffa1e7a71ca37a3bce4edc1dcd1987a4e47201e4a7b9
+Monitor timer SHA-256: a04ca234f57608a099b95b8354b5bc1289f3b9963ef0dd4e1d662cfd0c921a42
+Nginx candidate SHA-256: 73cd11192649a5612cf9fa7a978b83f00f495fa97a0ffd73cf587fd34a65519e
+```
+
+A final read-only pre-activation check found the authoritative source still at RAG Schema 10 and
+Agent Schema 1, with the same aggregate row counts, database integrity/FK results, upload count/bytes
+and normalized upload digest as the initial recovery slice. Equal aggregates do not prove unchanged
+row content and do not replace the required final drained snapshot/delta.
+
+Destination TLS is not ready: nginx supports TLS and Certbot/timer exist, but the destination has no
+certificate material and no 443 listener. The current source uses separate valid Let's Encrypt
+certificates for the two CourseMate hostnames through 2026-11-10 UTC. The destination Certbot has no
+DNS plugin, so a zero-downtime certificate issuance or explicitly authorized secure certificate
+bootstrap method must be selected before activation.
+
+The destination also reports a pending `libc6` reboot. Production SRSZQ is present in the saved PM2
+resurrection dump, but running `srszq-staging` is not. The reboot therefore remains prohibited until
+the Owner decides whether staging must survive and its recovery path is tested or approved.
+
 ## Current blockers and risks
 
-1. **Destination service collision:** new ECS ports 80, 8080, and 8081 already support `srszq-api`.
-   Replacing nginx or stopping PM2 could break an unrelated live service.
-2. **Destination activation/configuration:** no CourseMate service user, live path, root-owned runtime
-   environment, systemd unit or nginx virtual host has been activated. Secrets must move without being
-   printed, logged, committed, or mixed with SRSZQ configuration.
-3. **Destination hardening:** the machine requires a reboot, UFW is inactive, Caddy and SQLite CLI
-   are absent, and exact Alibaba Security Group rule bodies are unverified. Reboot/firewall work needs
-   a separate coexistence maintenance window.
-4. **Release publication:** exact tracked commit `9806a55` is frozen and cloned from a verified Git
-   bundle for isolated rehearsal, but the V3 branch is still absent on origin. Publish/review the exact
-   release before production service deployment; never copy a dirty working tree.
-5. **Final recovery gate:** the initial online recovery unit and isolated restore pass, but no new-ECS
+1. **TLS and Security Group gate:** the destination has no certificate or 443 listener, and the four
+   Security Group rule bodies remain unseen. The Owner must verify ingress and choose the certificate
+   issuance/key path before public HTTPS activation.
+2. **Destination coexistence:** ports 80, 8080 and 8081 support `srszq-api`. The prepared CourseMate
+   ports and virtual hosts avoid collision, but enabling/reloading nginx or replacing/stopping PM2
+   remains prohibited until the cutover gate.
+3. **Reboot recovery:** `libc6` requires a reboot, while the running `srszq-staging` process is absent
+   from `/root/.pm2/dump.pm2`. Do not reboot or run an indiscriminate `pm2 save`; the Owner must decide
+   the intended staging persistence first.
+4. **Final recovery gate:** the initial online recovery unit, destination-local copy and isolated
+   restore pass, but no new-ECS
    application backup after activation, final source write drain/delta backup, rollback smoke, or
    cutover snapshot exists. The pre-runtime disk snapshot is not a substitute for the final data pack.
-6. **Credential hygiene:** rotate previously exposed server passwords after a separate approved
+5. **Credential hygiene:** rotate previously exposed server passwords after a separate approved
    maintenance window. Do not disable public-key access until replacement credentials are verified.
-7. **Live-provider acceptance:** all current V3 test evidence is local/fake-provider. A live
+6. **Live-provider acceptance:** all current V3 test evidence is local/fake-provider. A live
    `qwen3.8-max` capability check and benchmark remain unverified and potentially billable; do not run
    them without the applicable budget/credential gate.
 
 ## First safe next actions
 
-1. Prepare an unprivileged CourseMate service identity, independent candidate paths, root-owned
-   environment file, systemd units and nginx snippets without enabling or starting them. Validate all
-   configs offline and ensure localhost ports do not collide with SRSZQ.
-2. Transfer current source configuration through a secret-safe channel using an explicit allowlist;
-   do not print values or copy stale environment files from `8.210.58.22`.
-3. Establish a coexistence plan for destination nginx/PM2 `srszq-api`. Preserve its files, process
-   definitions, domains, ports, and rollback path; do not overwrite it with CourseMate config.
-4. Run private localhost smoke tests on disposable/copied databases first. Live-provider calls remain
-   disabled; authentication, CORS, health, migration compatibility and data isolation must pass.
-5. Publish or otherwise freeze exact reviewed release `9806a55` before production activation.
-6. Prepare a final maintenance/drain + delta backup plan now that restore rehearsal passes;
-   do not perform the final drain until its availability window and rollback conditions are approved.
-7. Keep DNS unchanged until the restored release passes private/local smoke tests, authentication,
-   data invariants, monitoring, and rollback rehearsal.
+1. Owner verifies the destination Security Group rule bodies—especially 443—and selects a
+   zero-downtime TLS method. No private certificate key is copied without explicit authorization.
+2. Owner states whether `srszq-staging` must survive a reboot; then prepare and test only the approved
+   persistence/recovery change before any maintenance reboot.
+3. Agree an exact paid-call ceiling and credential scope for the `qwen3.8-max` capability probe and
+   live benchmark. Until then the provider remains local/fake-only and V3 remains disabled.
+4. Freeze the final write window, revalidate authoritative source aggregates, drain writes, create and
+   verify the final standalone snapshot/delta, and copy it to the destination. This is an Owner gate.
+5. Only after TLS, rollback, final data, private acceptance and monitoring pass: enable CourseMate
+   units/site, execute pinned-IP HTTPS smoke, and request the separate DNS cutover approval.
 
 ## Safety record for this run
 
-- No production database, upload, repository, environment file, systemd service, proxy, firewall,
-  package set, provider configuration, or DNS record was modified.
+- No authoritative-source production database, upload, environment, service, proxy, firewall,
+  provider configuration or DNS record was modified.
 - The 2026-09-13 18:02 CST Phase A1 slice performed DNS and pinned-IP HTTPS/TLS/OpenAPI reads only.
   The local Alibaba CLI remains unavailable.
 - Owner-console evidence and strict known_hosts verification established current-host identity. The
@@ -523,18 +594,24 @@ production service start, or production migration was part of this validation.
   health/counts and upload digests were read without exposing secrets, rows or private filenames.
 - Before source selection, the only remote writes were the explicitly requested SSH public-key append
   operations. Each original `authorized_keys` file received a timestamped backup first.
-- After Result B, migration writes were confined to dedicated source backup/tool directories and
-  `/srv/coursemate-migration` on the destination. A corrected initial backup was copied and restored
-  there; `/srv/coursemate`, `/etc/coursemate`, systemd, nginx, PM2 and all SRSZQ paths were untouched.
+- After Result B, source-side writes were confined to dedicated backup/tool directories. Destination
+  writes were confined to `/srv/coursemate-migration`, the independent `/srv/coursemate` candidate,
+  `/etc/coursemate`, four CourseMate systemd unit files and a disabled nginx `sites-available` file.
+  No SRSZQ application, PM2 definition or enabled nginx site was modified.
 - Following explicit Owner approval, isolated Python/uv/venv and release-local Node dependencies were
-  installed only under `/srv/coursemate-migration`. System Python, global npm, nginx, PM2 and SRSZQ
-  paths were unchanged. A transient orphaned migration npm process was removed after exact PID/cwd
-  verification; no SRSZQ process was signalled.
+  installed under the migration and candidate roots. System Python and global npm were unchanged. A
+  transient orphaned migration npm process was removed after exact PID/cwd verification; no SRSZQ
+  process was signalled.
+- Secret configuration moved server-to-server through protected files and an allowlisted transform;
+  values were not printed. CourseMate systemd and nginx candidates were statically validated but left
+  inactive/disabled, and nginx was not reloaded. Transient private smoke services were stopped and all
+  three localhost test ports were confirmed closed.
 - Schema 10 -> 21 ran only on fresh copied databases. The pristine restore and authoritative source
   hashes remained unchanged. Destination tests, typecheck and builds passed for exact release
   `9806a55`.
-- No live-source Schema migration, model call, service reload/restart, running CourseMate deployment,
-  DNS change or cutover has run. Source RAG/Agent/Caddy remain active with public health HTTP 200;
-  destination nginx and SRSZQ PM2 processes remain active with the same PIDs (1182 and 48185).
+- The V3 branch was published by non-force push; the two Owner untracked local files remain unstaged.
+- No live-source Schema migration, live/paid model call, public CourseMate activation, nginx reload,
+  DNS change, reboot or cutover has run. Source RAG/Agent/Caddy remain active with public health HTTP
+  200; destination nginx and SRSZQ PM2 processes remain active with the same PIDs (1182 and 48185).
 - Secret values and private keys were never printed, copied to the repository, or placed in command
   arguments. Owner passphrase entry occurred only in a local interactive PowerShell prompt.

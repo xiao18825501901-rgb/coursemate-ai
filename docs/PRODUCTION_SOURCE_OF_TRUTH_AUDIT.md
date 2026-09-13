@@ -8,9 +8,9 @@ Last trusted current-host inventory: 2026-09-13 20:02:07 CST / 2026-09-13 12:02:
 
 Last destination runtime revalidation: 2026-09-13 20:29:16 CST / 2026-09-13 12:29:16 UTC
 
-Last destination control-plane/runtime validation: 2026-09-13 21:50:34 CST / 2026-09-13 13:50:34 UTC
+Last destination candidate/private-smoke validation: 2026-09-13 22:34:27 CST / 2026-09-13 14:34:27 UTC
 
-Status: `AUTHORITATIVE SOURCE PROVEN — RESULT B; ISOLATED RESTORE/RUNTIME/MIGRATION/TEST/BUILD PASS; CUTOVER GATED`
+Status: `RESULT B PROVEN; INACTIVE FINAL CANDIDATE + PRIVATE SMOKE PASS; TLS/REBOOT/FINAL-DRAIN/LIVE-MODEL/DNS GATED`
 
 Data migration authorized: `YES — INITIAL BACKUP/ISOLATED RESTORE ONLY; FINAL DRAIN/CUTOVER REMAINS GATED`
 
@@ -31,9 +31,10 @@ databases and the upload tree, and serves the same 18-path OpenAPI artifact obse
 
 This audit therefore issues **Result B**: `47.237.179.69` is the authoritative CourseMate application
 and data source. `8.210.58.22` is a legacy/standby candidate and is not a source for migration. The
-initial backup/restore and destination-isolated validation phases have passed; production write drain,
-final delta, service activation, DNS cutover, destructive operations, paid model calls and destination
-reboot remain separately gated.
+initial backup/restore, exact-release validation, inactive production-shaped candidate preparation and
+private V2/V3/proxy/monitor smoke phases have passed. Production write drain, final delta, TLS/service
+activation, DNS cutover, destructive operations, paid model calls and destination reboot remain
+separately gated.
 
 ## 1. DNS topology
 
@@ -266,13 +267,17 @@ Region / zone: cn-hangzhou / cn-hangzhou-k
 OS: Ubuntu 22.04.5 LTS
 System disk: d-bp1f0vqhds2341pces7h; ESSD PL0; 40 GiB; unencrypted
 Restart required: YES
-Live CourseMate directories and units: ABSENT / NOT DEPLOYED
-Isolated initial data/release copy: PRESENT under /srv/coursemate-migration only
+CourseMate candidate root: /srv/coursemate — PREPARED, INACTIVE, NOT SERVING TRAFFIC
+Candidate release/runtime: exact 9806a55 under /srv/coursemate; independent Python 3.12.14 venv
+Final candidate data: EMPTY — final source snapshot not copied
+Initial recovery copies: PRESENT under /srv/coursemate-migration and /srv/coursemate/backups
+CourseMate units: INSTALLED/LOADED but inactive and disabled
+CourseMate nginx site: sites-available only; not enabled; nginx not reloaded
 Pre-runtime system-disk snapshot: s-bp13r5gqocjif1jtieav (disk d-bp1f0vqhds2341pces7h)
-Isolated Python/runtime dependencies: INSTALLED AND VERIFIED under /srv/coursemate-migration only
 Exact validated release: 9806a553a30c0531f727ba1538543fe6225e4c44
 Schema 10 -> 21 rehearsal: PASS on copied databases only
-Destination source validation: PASS; no live provider calls
+Private V2/V3/proxy/monitor smoke: PASS on disposable copied data; all transient listeners stopped
+Destination source validation: PASS; no live or paid provider calls
 ```
 
 This is not an empty destination:
@@ -287,14 +292,18 @@ Caddy: not installed
 SQLite CLI: not installed
 ```
 
-No apt/system/global package, firewall, proxy, PM2, service or live-application change was made.
-Python 3.12.14, locked virtual environments and release-local Node dependencies were installed only
-inside the migration root after explicit Owner approval; system Python remains 3.10.12.
+No apt/system/global package replacement, firewall change, enabled proxy change, PM2 change, reboot or
+public service activation was made. Python 3.12.14, locked virtual environments and release-local Node
+dependencies were installed only inside the isolated migration and independent CourseMate candidate
+roots after explicit Owner approval; system Python remains 3.10.12. Root-owned candidate environment,
+systemd units and an unenabled nginx site were prepared and validated without reloading nginx.
 
 Owner-console screenshots confirm the instance, its single attached system disk, the pre-runtime
 snapshot above, and one associated normal Security Group with four rules. The rule bodies were not
 visible, so exact ingress policy remains unknown. External checks found 22 and 80 reachable and no
 external listener on 443/8080/8081; the absence on 443 is not evidence of a specific firewall rule.
+Nginx has TLS support and Certbot/timer exist, but the destination has no certificate material or 443
+listener. TLS issuance/key handling therefore remains an explicit Owner gate.
 
 ## 5. API surface comparison
 
@@ -321,29 +330,29 @@ local RAG process would return the same OpenAPI artifact; these artifacts differ
 |---|---|---|---|
 | Role | legacy/standby only | authoritative current application/data source | destination + existing SRSZQ |
 | Public DNS receives traffic | no | yes | no |
-| CourseMate RAG present | yes | yes | isolated release only; not active |
-| RAG API path count | 6 | 18 | validated from source; not routed |
-| RAG release SHA | `ef7795b1e41aefbfdf9738e88a7eca053ea621db` | `cb7d0633e5026d042014512b72273f4439c9cff4` detached release | isolated `9806a553a30c0531f727ba1538543fe6225e4c44` |
-| RAG DB | `/srv/coursemate/rag/rag.sqlite3` | `/srv/coursemate/rag/rag.sqlite3` | pristine restore + rehearsal copies only |
-| RAG schema | migration 1 | migration 10 | rehearsal copy at migration 21; no live DB |
+| CourseMate RAG present | yes | yes | final candidate installed; inactive |
+| RAG API path count | 6 | 18 | exact candidate validated privately; not routed |
+| RAG release SHA | `ef7795b1e41aefbfdf9738e88a7eca053ea621db` | `cb7d0633e5026d042014512b72273f4439c9cff4` detached release | candidate `9806a553a30c0531f727ba1538543fe6225e4c44` |
+| RAG DB | `/srv/coursemate/rag/rag.sqlite3` | `/srv/coursemate/rag/rag.sqlite3` | pristine restore + disposable smoke copies; final data empty |
+| RAG schema | migration 1 | migration 10 | V2 smoke 10; V3 disposable smoke 21; no final live DB |
 | RAG aggregate rows | 2 courses, 1 document, 0 chunks, 1 job, 0 conversations/messages | 2 courses, 66 documents, 1,936 chunks, 69 jobs, 39 conversations, 86 messages | restored aggregates match; not serving |
-| Agent present | active local service | active local service | isolated source/dependencies only; not active |
-| Agent DB | `/srv/coursemate/agent/agent.sqlite3` | `/srv/coursemate/agent/agent.sqlite3` | pristine restore only; no live DB |
-| Uploads | `/srv/coursemate/rag/uploads`; 1 file / 229 bytes | `/srv/coursemate/rag/uploads`; 67 files / 124,209,790 bytes | isolated verified restore only |
-| Reverse proxy | Caddy -> local 8000/8001 | Caddy -> local 8000/8001 | nginx -> SRSZQ 8080/8081 |
-| Auth config | Clerk-protected; exact production CORS | Clerk-protected; exact production CORS | source validated; runtime config not activated |
-| Model config | OpenAI-compatible; named models verified | Alibaba DashScope international OpenAI-compatible endpoint; `qwen3.7-plus` + `text-embedding-v4` | no live provider call/config activation |
-| Last activity | content/storage stale since 2026-08-13; no access log | messages through 2026-09-07; services restarted 2026-09-12; live HTTP verified 2026-09-13 | SRSZQ active; CourseMate absent |
+| Agent present | active local service | active local service | final candidate installed; inactive |
+| Agent DB | `/srv/coursemate/agent/agent.sqlite3` | `/srv/coursemate/agent/agent.sqlite3` | pristine restore + disposable smoke copy; final data empty |
+| Uploads | `/srv/coursemate/rag/uploads`; 1 file / 229 bytes | `/srv/coursemate/rag/uploads`; 67 files / 124,209,790 bytes | verified restore/smoke copies; final uploads empty |
+| Reverse proxy | Caddy -> local 8000/8001 | Caddy -> local 8000/8001 | live nginx -> SRSZQ; CourseMate site prepared but disabled |
+| Auth config | Clerk-protected; exact production CORS | Clerk-protected; exact production CORS | secret-safe candidate; private auth/CORS smoke pass; inactive |
+| Model config | OpenAI-compatible; named models verified | Alibaba DashScope international OpenAI-compatible endpoint; `qwen3.7-plus` + `text-embedding-v4` | compatibility config prepared; qwen3.8 intent inactive/unverified; no paid call |
+| Last activity | content/storage stale since 2026-08-13; no access log | messages through 2026-09-07; services restarted 2026-09-12; live HTTP verified 2026-09-13 | SRSZQ active; CourseMate private smoke completed then stopped |
 | Authoritative source | no | **yes — Result B** | no |
 
 ## 7. Database comparison
 
 | Fact | 8.210.58.22 | 47.237.179.69 | 47.114.34.175 |
 |---|---|---|---|
-| RAG DB | `/srv/coursemate/rag/rag.sqlite3` | `/srv/coursemate/rag/rag.sqlite3` | isolated restore/rehearsal copies only |
-| RAG schema | migration 1 | migration 10 | rehearsal migration 21; not live |
+| RAG DB | `/srv/coursemate/rag/rag.sqlite3` | `/srv/coursemate/rag/rag.sqlite3` | restore/rehearsal/smoke copies; final data empty |
+| RAG schema | migration 1 | migration 10 | V2 copied smoke 10; V3 copied smoke 21; not live |
 | RAG aggregate rows | 2 courses, 1 document, 0 chunks | 2 courses, 66 documents, 1,936 chunks | copied aggregates match |
-| Agent DB | `/srv/coursemate/agent/agent.sqlite3` | `/srv/coursemate/agent/agent.sqlite3` | isolated restore only |
+| Agent DB | `/srv/coursemate/agent/agent.sqlite3` | `/srv/coursemate/agent/agent.sqlite3` | restore/smoke copies; final data empty |
 | Agent schema | migration 1 | migration 1 | isolated migration 1 |
 | Agent aggregate rows | 0 tasks | 1 task | copied aggregate matches |
 | Integrity / FK | both OK / 0 violations | both OK / 0 violations | copied DBs OK / 0 violations |
@@ -354,7 +363,7 @@ Database size was not used as the production decision criterion.
 
 | Fact | 8.210.58.22 | 47.237.179.69 | 47.114.34.175 |
 |---|---|---|---|
-| Root | `/srv/coursemate/rag/uploads` | `/srv/coursemate/rag/uploads` | isolated restore only |
+| Root | `/srv/coursemate/rag/uploads` | `/srv/coursemate/rag/uploads` | verified restore/smoke copies; final uploads empty |
 | Files / bytes | 1 / 229 | 67 / 124,209,790 | copied 67 / 124,209,790 |
 | Fresh normalized manifest digest | `53e037ba...941e` | `c5fb27c3...0a2d` | copied digest matches source |
 | Latest content mtime | 2026-08-13 06:00:47 CST | 2026-08-11 15:15:45 CST | preserved in archive; private names not read |
@@ -377,6 +386,8 @@ Verified:
 
 47.114.34.175 nginx:
   default :80 -> SRSZQ 127.0.0.1:8080 / :8081
+  CourseMate candidate -> 127.0.0.1:28000 / :28001 (sites-available only; disabled)
+  private proxy smoke -> 127.0.0.1:29080 (completed and stopped)
 ```
 
 The trusted current-host inventory identifies both Caddy upstreams and both local services. Together
@@ -418,15 +429,16 @@ Caddy must not bind public ports 80/443 while nginx owns them. Replacing nginx i
 
 ## 12. Next migration action
 
-1. Prepare, but do not activate, an unprivileged CourseMate service identity, independent candidate
-   paths, root-owned environment, systemd units and nginx virtual-host snippets. Preserve SRSZQ.
-2. Transfer only the authoritative source configuration through a secret-safe allowlist and validate
-   it without printing values. Keep `V3_ENABLED=false` for the initial compatibility deployment.
-3. Run disposable localhost smoke tests against copied databases and fake/local providers; validate
-   auth, CORS, health, data invariants, monitoring and rollback without binding public ports.
-4. Publish or otherwise freeze exact reviewed commit `9806a55` before production activation.
-5. Prepare the final write-drain/delta plan and final recovery artifacts. Final drain, service
-   activation, DNS cutover, paid model calls and reboot remain Owner gates.
+1. Owner verifies the destination Security Group rule bodies, especially 443, and selects the TLS
+   issuance/key method. Do not copy private certificate keys without explicit authorization.
+2. Owner states whether running `srszq-staging` must survive a reboot; it is absent from the saved PM2
+   resurrection dump. Do not reboot or run an indiscriminate `pm2 save` before that decision.
+3. Agree an exact paid-call ceiling and credential scope for the `qwen3.8-max` capability probe and
+   benchmark. Current evidence remains local/fake-provider only.
+4. Approve a final source write window, create and verify the drained snapshot/delta, and copy it into
+   the still-empty final destination data paths. This is not covered by the initial online snapshot.
+5. After TLS, final data, rollback and private acceptance pass, separately gate service/site activation,
+   pinned-IP HTTPS smoke and DNS cutover.
 
 ### Initial recovery slice completed
 
@@ -460,18 +472,52 @@ typecheck pass and production build pass. All model behavior in these tests was 
 live-provider call occurred. Nginx and both SRSZQ PM2 applications remained healthy, with PIDs 1182
 and 48185 unchanged, and public source RAG/Agent health remained HTTP 200.
 
+### Inactive final candidate and private smoke completed
+
+The exact clean release was cloned into `/srv/coursemate/releases/9806a55`, with an independent
+Python 3.12.14 runtime/venv under `/srv/coursemate/runtime` and a `current` symlink. Locked Node
+dependencies passed build validation and were production-pruned. The candidate is owned for execution
+by the unprivileged `coursemate` account. The initial recovery unit was also copied into
+`/srv/coursemate/backups` and its five manifest-covered artifacts revalidated; final data paths remain
+empty because the drained source snapshot has not been authorized or created.
+
+Source secrets moved directly through protected server files and an allowlisted transform; no value
+was printed. Candidate RAG/Agent/monitor environment files are root-owned and group-readable only.
+Four systemd unit files are loaded but inactive/disabled. The CourseMate nginx configuration is only
+in `sites-available`; it is not enabled and nginx was not reloaded. The V3 branch was published by
+non-force push, so exact application commit `9806a55` is reachable from the remote branch history.
+
+Disposable V2 and V3 smoke runs exercised health, authentication, authorization, CORS, compatibility,
+Schema 10 -> 21, non-leaking workspace behavior and unchanged base data/upload invariants. A separate
+localhost-only nginx smoke verified both host routes, and the actual monitor probe returned status
+`ok` (RAG 12 ms, Agent 2 ms). No model evidence or reservation rows were created. All transient units
+were stopped and ports 28000, 28001 and 29080 were confirmed closed. Content-free smoke evidence:
+`bde19f160d7957f63abf64154e54180c7a8d9b077ce9a200107c9431a338f4ba`.
+
+A subsequent read-only source check still found Schema 10/1, the same aggregate row counts,
+integrity/FK results and upload count/bytes/digest as the initial slice. This is a drift signal only:
+equal aggregates do not prove unchanged row content and cannot replace the final drained snapshot.
+
+TLS and reboot are unresolved. The destination has no certificate material or 443 listener. It also
+reports a pending `libc6` reboot; the saved PM2 dump contains SRSZQ production but not the currently
+running `srszq-staging` process. Neither TLS activation nor reboot is authorized by this preparation.
+
 ## Safety ledger
 
 ```text
 Production DB copy: YES — initial SQLite-online snapshots only
-Uploads transfer: YES — initial verified archive to isolated destination only
+Uploads transfer: YES — initial verified archive to isolated and candidate backup roots only
 Schema migration: COPIED-DATABASE REHEARSAL ONLY — PASS; SOURCE/LIVE NO
-Service stop/restart/replacement: NO
+Candidate release/runtime/env/units: PREPARED — INACTIVE/DISABLED; FINAL DATA EMPTY
+Private smoke service starts: YES — TRANSIENT/LOCALHOST ONLY; STOPPED; PORTS CLOSED
+Existing service stop/restart/replacement: NO
+Nginx configuration: CANDIDATE FILE VALIDATED; NOT ENABLED; NO RELOAD
 DNS change: NO
-Package install: ISOLATED MIGRATION ROOT ONLY; APT/SYSTEM/GLOBAL NO
+Package install: ISOLATED MIGRATION + COURSEMATE CANDIDATE ROOTS; APT/SYSTEM/GLOBAL NO
 Paid model call: NO
 Password collected/stored: NO
 Private key exposed: NO
 User/course content read: NO
-Authorized remote writes: dedicated public key; initial backup/restore; destination-isolated runtime/rehearsal only
+Reboot: NO
+Authorized remote writes: dedicated public key; initial backup/restore; isolated/candidate runtime and config; private smoke; non-force branch push
 ```
