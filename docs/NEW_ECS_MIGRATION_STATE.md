@@ -1,8 +1,8 @@
 # CourseMate V3 — New Alibaba ECS Migration State
 
-Last updated: 2026-09-13 20:48:27 CST / 2026-09-13 12:48:27 UTC
+Last updated: 2026-09-13 21:50:34 CST / 2026-09-13 13:50:34 UTC
 
-Current phase: `Initial backup/isolated restore PASS; destination runtime installation Owner gate`
+Current phase: `INITIAL RESTORE + ISOLATED RUNTIME + SCHEMA REHEARSAL + DESTINATION TEST/BUILD PASS; SERVICE CONFIG PREPARATION NEXT`
 
 Production data copied: `YES — INITIAL ONLINE BACKUP ONLY; FINAL DELTA NOT STARTED`
 
@@ -10,7 +10,7 @@ Production writes changed: `NO`
 
 DNS changed: `NO`
 
-Rollback-ready application backup: `INITIAL RESTORE VERIFIED; FINAL CUTOVER SNAPSHOT NOT CREATED`
+Rollback-ready application backup: `INITIAL RESTORE VERIFIED; DESTINATION PRE-RUNTIME DISK SNAPSHOT RECORDED; FINAL CUTOVER SNAPSHOT NOT CREATED`
 
 This is the non-secret migration control record. It separates live evidence, repository facts,
 Owner-designated roles, and unresolved production authority. It must never contain credentials,
@@ -29,8 +29,10 @@ coursemate-prod-current -> admin@47.237.179.69 READY
 
 Public DNS, pinned-IP HTTPS/TLS, Owner-console host identity and trusted SSH inventory identify
 `47.237.179.69` as the complete current CourseMate application and data source. The source decision is
-**Result B**. Initial backup/off-host copy/isolated restore work is authorized; final drain, production
-cutover, DNS, paid model calls, destructive actions and destination reboot remain gated. The full
+**Result B**. The initial backup/off-host copy/isolated restore, destination rollback snapshot,
+isolated runtime installation, Schema 10 -> 21 rehearsal and destination source validation have
+completed. Final drain, production activation/cutover, DNS, paid model calls, destructive actions and
+destination reboot remain gated. The full
 three-host evidence ledger is in
 [`PRODUCTION_SOURCE_OF_TRUTH_AUDIT.md`](PRODUCTION_SOURCE_OF_TRUTH_AUDIT.md).
 
@@ -86,6 +88,7 @@ Private key exposed: NO
 Ready for old/destination-host read-only preparation: YES
 Ready for current-host inventory: YES — COMPLETED
 Ready for initial backup/off-host copy/isolated restore: YES
+Ready for isolated destination runtime/rehearsal: YES — COMPLETED
 Ready for final drain/cutover: NO — LATER OWNER GATES APPLY
 ```
 
@@ -280,7 +283,7 @@ Region / zone: cn-hangzhou / cn-hangzhou-k (ECS metadata)
 OS: Ubuntu 22.04.5 LTS
 Kernel: 5.15.0-187-generic
 Root disk: d-bp1f0vqhds2341pces7h; system disk; ESSD PL0; 40 GiB; unencrypted
-Filesystem: 40G total, 4.0G used, 34G available (11%)
+Filesystem after isolated runtime/dependency installation: 40G total, 5.4G used, 32G available (15%)
 Memory: 3.4GiB total; no swap
 Time zone / sync: Asia/Shanghai; NTP synchronized
 Restart required: YES
@@ -290,9 +293,14 @@ Restart required: YES
 
 ```text
 git: 2.34.1
-python3: 3.10.12
+system python3: 3.10.12 (unchanged)
+isolated Python: 3.12.14 at /srv/coursemate-migration/python/cpython-3.12.14-linux-x86_64-gnu/bin/python3.12
+isolated uv: 0.12.13 at /srv/coursemate-migration/tools/uv-0.12.13/uv
+production RAG venv: /srv/coursemate-migration/venvs/rag-105ccda-py312 (40 locked distributions)
+test venv: /srv/coursemate-migration/venvs/test-105ccda-py312 (51 locked distributions)
 node: 24.20.0
 npm: 11.19.0
+isolated Node dependencies: 252 packages under /srv/coursemate-migration/releases/9806a55/node_modules
 rsync: 3.2.7
 caddy: MISSING
 sqlite3 CLI: MISSING
@@ -304,6 +312,7 @@ sqlite3 CLI: MISSING
 /opt/coursemate: MISSING
 CourseMate RAG/Agent units and live paths: NOT INSTALLED
 Isolated initial RAG DB / Agent DB / uploads copy: PRESENT under /srv/coursemate-migration only
+Exact validated migration release: /srv/coursemate-migration/releases/9806a55
 ```
 
 The destination is **not an empty machine** and must not be repurposed destructively. Existing,
@@ -317,10 +326,46 @@ pm2-root.service: active/enabled; Node process owns 127.0.0.1:8080 and :8081
 UFW: inactive
 ```
 
-No Caddy installation, firewall change, package installation, reboot, service stop, or file transfer
-was performed. The Alibaba Security Group remains unknown from the guest OS and requires console
-verification. A coexistence/protection plan for the existing `srszq-api` service is mandatory before
-binding Caddy or another proxy to ports 80/443.
+No Caddy installation, apt/system/global package change, firewall change, reboot, service stop, or
+live application file transfer was performed. Owner-console evidence shows one normal Security Group
+associated with the matching VPC and four rules, but the rule bodies were not visible and therefore
+remain unknown. External reachability checks found SSH/22 and HTTP/80 reachable, with no externally
+reachable service on 443/8080/8081; the 443 result cannot distinguish a Security Group rule from the
+confirmed absence of a listener. A coexistence/protection plan for the existing `srszq-api` service
+is mandatory before adding CourseMate virtual hosts.
+
+### Destination rollback snapshot and isolated runtime evidence
+
+Before installation, Owner-console evidence recorded standard snapshot
+`s-bp13r5gqocjif1jtieav` for the exact system disk `d-bp1f0vqhds2341pces7h`, with instant
+availability enabled and the console rollback action present. The Owner then explicitly approved
+isolated runtime installation. No snapshot delete, rollback, disk replacement or reboot was run.
+
+The runtime is confined to `/srv/coursemate-migration`; system Python remains 3.10.12 and no
+system-visible `python3.12` shim remains. A shim created by `uv python install` was identified by its
+exact target and moved recoverably to
+`/srv/coursemate-migration/rollback/uv-python-shims-20260913T130418Z/python3.12`.
+
+Content-free runtime evidence:
+
+```text
+uv binary SHA-256: b59310db262709ee92baf7954ef30820f1442ffa48b263f7001a236fe9004047
+Python binary SHA-256: f7c6210eb40fadcd3c2889dddd24a15fc2c9f926aec5a03bf9da66e12d581526
+production lock SHA-256: f77ad759770ef3c933826025d7f6fc4dcdd6eb5faa2de82d09ae116d112218ac
+production freeze SHA-256: 4993b156fa204d7cc9ccceb4605c04d8f304bf7f703edc7bbf320782f6ecdf1f
+test lock SHA-256: 060e8248afae89a66362aefa0fb1453ed6e2e40d743505d6cec7d25a331204ac
+test freeze SHA-256: 0c85c2c48a69b90a7fa03f712ae7de8fe2d199024eae9c5a5517b712218e1f2a
+Python dependency compatibility: PASS
+```
+
+The official npm registry repeatedly reset/timed out from this ECS. The stalled install left an
+orphaned `npm ci` process after the SSH client was interrupted; its exact PID and migration-release
+working directory were verified, TERM was attempted, and only that unresponsive process was then
+killed. A clean reinstall used the same integrity-bearing `package-lock.json` through the fast
+`registry.npmmirror.com` transport with lifecycle scripts disabled. The cache verified, `npm ls`
+passed, and neither global npm state nor SRSZQ dependencies were changed. Cross-platform raw file
+hashes differed only because Git checked out different line endings; the verified lockfile Git blob
+is `d5db460680bde5542cdc80fead1e77e691dc0e6e5918d05f0c6dbc2722fca2af`.
 
 ## Migration state
 
@@ -334,8 +379,11 @@ Preparation: COMPLETE for the initial recovery slice
 Initial sync: COMPLETE — verified recovery unit copied to destination isolation root
 Consistent backup: INITIAL ONLINE SNAPSHOT PASS; FINAL DRAINED/CUTOVER SNAPSHOT NOT STARTED
 Isolated restore: COMPLETE — checksums, DB binaries, integrity/FK/counts and uploads match
-Schema migration: BLOCKED BEFORE EXECUTION — destination has Python 3.10; project requires >=3.11
-Pre-cutover: NOT STARTED
+Destination rollback snapshot: RECORDED — exact system disk, before runtime installation
+Isolated runtime: COMPLETE — Python 3.12.14, locked production/test venvs and locked Node dependencies
+Schema migration: REHEARSAL PASS — 10 -> 21 twice on fresh copies; live source/pristine restore untouched
+Exact-release validation: PASS — Python, Web, Agent, typecheck and production build on 9806a55
+Pre-cutover: IN PROGRESS — service/config preparation not activated
 Cutover: NOT STARTED — OWNER GATE
 Post-cutover: NOT STARTED
 Observation: NOT STARTED
@@ -373,47 +421,90 @@ both report integrity `ok` and FK 0. RAG remains migration 10 with 1,936 chunks,
 
 Tracked source at `105ccdaeec3b45c208a8e039d7943a5e22e277ce` was packaged as a complete Git
 bundle, SHA-256 `93e00cd8e1230d45a3aeb6cbae72e817fc8985248082d7695c2d6c99b55315df`, then
-cloned to `/srv/coursemate-migration/releases/105ccda` and checked out detached. The clone has zero
-tracked or untracked changes. This is an isolated migration release, not a running deployment.
+cloned to `/srv/coursemate-migration/releases/105ccda` and checked out detached for the first
+rehearsals. It remains preserved.
+
+Clean-clone validation exposed two benchmark safety tests that accidentally depended on an ignored
+local corpus database. Commit `9806a553a30c0531f727ba1538543fe6225e4c44` makes static provider URL
+and conservative query-cost gates run before corpus/database access, and makes the two tests prove
+that ordering with an explicitly missing database. Local evidence for the exact commit is 328 Python
+tests passed, Ruff passed, mypy passed for 62 source files, Web 49/49, Agent 66/66, typecheck passed,
+and the production build passed.
+
+The exact corrected release was transferred as a complete Git bundle with SHA-256
+`9c6437726341ff8008d859a93d96674b8e64a82ac1e546401e6ea4db4db10f34`, cloned detached to
+`/srv/coursemate-migration/releases/9806a55`, and verified with zero tracked changes. This is an
+isolated migration release, not a running deployment.
+
+## Schema rehearsal and exact-release validation evidence
+
+Two independent Schema 10 -> 21 rehearsals on fresh copies under release `105ccda` and one confirming
+rehearsal under exact release `9806a55` all passed. Each calls database initialization twice to test
+idempotency and produced the same content-free evidence digest:
+`a9a7bb9b1751317be2ebae4fddb58bdb1470409875457e84275c18a7557f2a7f`.
+
+```text
+Migration versions: 1..21 contiguous
+Pre-existing row fingerprints/counts unchanged: PASS
+SQLite integrity: ok
+Foreign-key violations: 0
+documents / chunks: 66 / 1,936
+conversations / messages: 39 / 86
+document_versions: 66
+unbound chunks: 0
+grade-policy seed: 1
+missing governance objects: 0
+all checked V3 invariants: PASS
+source restore hashes/sidecars changed: NO
+```
+
+On destination release `9806a55`, the full Python suite passed with 322 tests and 6 skips in 64.84s;
+the six skips are only opt-in local real-corpus/golden tests and are not failures. Ruff and mypy
+passed. After the isolated Node dependency race was corrected, destination typecheck passed, Web
+passed 49/49, Agent passed 66/66, and both workspace production builds completed. `npm ls` passed and
+its content-free evidence SHA-256 is
+`09940af3ad1abe327405c0c8f419c523a89a2f3804db9d7a6f5a05de57a99ed0`.
+
+All tests used fake/local providers and isolated data. No live model call, paid call, source write,
+production service start, or production migration was part of this validation.
 
 ## Current blockers and risks
 
-1. **Runtime-installation gate:** an exhaustive read-only scan found only Python 3.10.12. There is no
-   Python 3.11/3.12/3.13 executable, compatible virtual environment, `uv`, `pyenv`, Conda, Docker,
-   Podman or other ready runtime. The apt mirror exposes only a Python 3.11.0 release-candidate package,
-   which is not an acceptable production foundation. LXD is installed but has no instance, local image
-   or storage pool, so using it would require mutating host initialization. The release also lacks its
-   required `pydantic`, `pydantic-settings` and FastAPI dependencies. Do not install packages or
-   initialize a runtime until the Owner verifies the Security Group and creates/approves a new-ECS
-   rollback snapshot; snapshot storage may incur cloud cost.
-2. **Destination service collision:** new ECS ports 80, 8080, and 8081 already support `srszq-api`.
+1. **Destination service collision:** new ECS ports 80, 8080, and 8081 already support `srszq-api`.
    Replacing nginx or stopping PM2 could break an unrelated live service.
+2. **Destination activation/configuration:** no CourseMate service user, live path, root-owned runtime
+   environment, systemd unit or nginx virtual host has been activated. Secrets must move without being
+   printed, logged, committed, or mixed with SRSZQ configuration.
 3. **Destination hardening:** the machine requires a reboot, UFW is inactive, Caddy and SQLite CLI
-   are absent, and the Alibaba Security Group is unverified.
-4. **Release publication:** exact tracked commit `105ccda` is frozen and cloned from a verified Git
+   are absent, and exact Alibaba Security Group rule bodies are unverified. Reboot/firewall work needs
+   a separate coexistence maintenance window.
+4. **Release publication:** exact tracked commit `9806a55` is frozen and cloned from a verified Git
    bundle for isolated rehearsal, but the V3 branch is still absent on origin. Publish/review the exact
    release before production service deployment; never copy a dirty working tree.
 5. **Final recovery gate:** the initial online recovery unit and isolated restore pass, but no new-ECS
-   snapshot, final source write drain/delta backup, rollback smoke, or cutover snapshot exists.
+   application backup after activation, final source write drain/delta backup, rollback smoke, or
+   cutover snapshot exists. The pre-runtime disk snapshot is not a substitute for the final data pack.
 6. **Credential hygiene:** rotate previously exposed server passwords after a separate approved
    maintenance window. Do not disable public-key access until replacement credentials are verified.
+7. **Live-provider acceptance:** all current V3 test evidence is local/fake-provider. A live
+   `qwen3.8-max` capability check and benchmark remain unverified and potentially billable; do not run
+   them without the applicable budget/credential gate.
 
 ## First safe next actions
 
-1. Owner verifies the new ECS Security Group and explicitly approves/creates a rollback snapshot
-   before runtime installation. Record only snapshot ID/time/status and non-secret network facts.
-2. Install a project-isolated Python >=3.11 runtime and pinned RAG dependencies without replacing the
-   system Python or changing SRSZQ. Record package hashes/versions and recheck nginx/PM2 afterward.
-3. Rehearse the reviewed 10 -> 21 RAG migration twice only on a fresh copy under the cloned release's
-   ignored `work/`; never point migration or tests at either live source path or the pristine restore.
-4. Re-verify old-row fingerprints/counts, 1..21 continuity, 019/020/021 objects, integrity/FK and all
-   V3 invariants. Preserve only content-free evidence.
-5. Establish a coexistence plan for destination nginx/PM2 `srszq-api`. Preserve its files, process
+1. Prepare an unprivileged CourseMate service identity, independent candidate paths, root-owned
+   environment file, systemd units and nginx snippets without enabling or starting them. Validate all
+   configs offline and ensure localhost ports do not collide with SRSZQ.
+2. Transfer current source configuration through a secret-safe channel using an explicit allowlist;
+   do not print values or copy stale environment files from `8.210.58.22`.
+3. Establish a coexistence plan for destination nginx/PM2 `srszq-api`. Preserve its files, process
    definitions, domains, ports, and rollback path; do not overwrite it with CourseMate config.
-6. Publish or otherwise freeze the exact reviewed V3 release SHA before deployment.
-7. Prepare a final maintenance/drain + delta backup plan after the initial restore rehearsal passes;
+4. Run private localhost smoke tests on disposable/copied databases first. Live-provider calls remain
+   disabled; authentication, CORS, health, migration compatibility and data isolation must pass.
+5. Publish or otherwise freeze exact reviewed release `9806a55` before production activation.
+6. Prepare a final maintenance/drain + delta backup plan now that restore rehearsal passes;
    do not perform the final drain until its availability window and rollback conditions are approved.
-8. Keep DNS unchanged until the restored release passes private/local smoke tests, authentication,
+7. Keep DNS unchanged until the restored release passes private/local smoke tests, authentication,
    data invariants, monitoring, and rollback rehearsal.
 
 ## Safety record for this run
@@ -426,7 +517,8 @@ tracked or untracked changes. This is an isolated migration release, not a runni
   dedicated `coursemate-prod-current` alias and key were created, loaded and accepted in BatchMode.
 - Owner-console screenshots revalidated the destination as running instance
   `i-bp1f0vqhds2341pdqqiy` in `cn-hangzhou-k` with one attached 40 GiB ESSD PL0 system disk,
-  `d-bp1f0vqhds2341pces7h`. They do not yet prove Security Group rules or a completed snapshot.
+  `d-bp1f0vqhds2341pces7h`; later evidence recorded its pre-runtime snapshot
+  `s-bp13r5gqocjif1jtieav`. Security Group association/count are visible, but exact rules are not.
 - Current/old runtime, proxy, release, safe environment names/allowlisted values, aggregate database
   health/counts and upload digests were read without exposing secrets, rows or private filenames.
 - Before source selection, the only remote writes were the explicitly requested SSH public-key append
@@ -434,11 +526,15 @@ tracked or untracked changes. This is an isolated migration release, not a runni
 - After Result B, migration writes were confined to dedicated source backup/tool directories and
   `/srv/coursemate-migration` on the destination. A corrected initial backup was copied and restored
   there; `/srv/coursemate`, `/etc/coursemate`, systemd, nginx, PM2 and all SRSZQ paths were untouched.
-- A final read-only destination runtime scan found no ready Python >=3.11 or initialized container
-  alternative. Nginx remained active, both SRSZQ PM2 applications remained online, and listeners on
-  ports 80/8080/8081 remained unchanged after the checks.
-- No Schema migration, package installation, model call, service reload/restart, running deployment,
-  DNS change or cutover has run. Source RAG/Agent/Caddy and destination nginx/PM2 remained active;
-  source health stayed HTTP 200 and destination ports 80/8080/8081 were unchanged.
+- Following explicit Owner approval, isolated Python/uv/venv and release-local Node dependencies were
+  installed only under `/srv/coursemate-migration`. System Python, global npm, nginx, PM2 and SRSZQ
+  paths were unchanged. A transient orphaned migration npm process was removed after exact PID/cwd
+  verification; no SRSZQ process was signalled.
+- Schema 10 -> 21 ran only on fresh copied databases. The pristine restore and authoritative source
+  hashes remained unchanged. Destination tests, typecheck and builds passed for exact release
+  `9806a55`.
+- No live-source Schema migration, model call, service reload/restart, running CourseMate deployment,
+  DNS change or cutover has run. Source RAG/Agent/Caddy remain active with public health HTTP 200;
+  destination nginx and SRSZQ PM2 processes remain active with the same PIDs (1182 and 48185).
 - Secret values and private keys were never printed, copied to the repository, or placed in command
   arguments. Owner passphrase entry occurred only in a local interactive PowerShell prompt.

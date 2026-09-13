@@ -8,9 +8,9 @@ Last trusted current-host inventory: 2026-09-13 20:02:07 CST / 2026-09-13 12:02:
 
 Last destination runtime revalidation: 2026-09-13 20:29:16 CST / 2026-09-13 12:29:16 UTC
 
-Last destination control-plane revalidation: 2026-09-13 20:48:27 CST / 2026-09-13 12:48:27 UTC
+Last destination control-plane/runtime validation: 2026-09-13 21:50:34 CST / 2026-09-13 13:50:34 UTC
 
-Status: `AUTHORITATIVE SOURCE PROVEN — RESULT B; INITIAL RESTORE VERIFIED; RUNTIME INSTALL GATED`
+Status: `AUTHORITATIVE SOURCE PROVEN — RESULT B; ISOLATED RESTORE/RUNTIME/MIGRATION/TEST/BUILD PASS; CUTOVER GATED`
 
 Data migration authorized: `YES — INITIAL BACKUP/ISOLATED RESTORE ONLY; FINAL DRAIN/CUTOVER REMAINS GATED`
 
@@ -31,8 +31,9 @@ databases and the upload tree, and serves the same 18-path OpenAPI artifact obse
 
 This audit therefore issues **Result B**: `47.237.179.69` is the authoritative CourseMate application
 and data source. `8.210.58.22` is a legacy/standby candidate and is not a source for migration. The
-initial online-backup and isolated-restore phases may proceed; production write drain, final delta,
-DNS cutover, destructive operations, paid model calls and destination reboot remain separately gated.
+initial backup/restore and destination-isolated validation phases have passed; production write drain,
+final delta, service activation, DNS cutover, destructive operations, paid model calls and destination
+reboot remain separately gated.
 
 ## 1. DNS topology
 
@@ -267,6 +268,11 @@ System disk: d-bp1f0vqhds2341pces7h; ESSD PL0; 40 GiB; unencrypted
 Restart required: YES
 Live CourseMate directories and units: ABSENT / NOT DEPLOYED
 Isolated initial data/release copy: PRESENT under /srv/coursemate-migration only
+Pre-runtime system-disk snapshot: s-bp13r5gqocjif1jtieav (disk d-bp1f0vqhds2341pces7h)
+Isolated Python/runtime dependencies: INSTALLED AND VERIFIED under /srv/coursemate-migration only
+Exact validated release: 9806a553a30c0531f727ba1538543fe6225e4c44
+Schema 10 -> 21 rehearsal: PASS on copied databases only
+Destination source validation: PASS; no live provider calls
 ```
 
 This is not an empty destination:
@@ -281,10 +287,14 @@ Caddy: not installed
 SQLite CLI: not installed
 ```
 
-No package, firewall, proxy, PM2, service or application change was made.
+No apt/system/global package, firewall, proxy, PM2, service or live-application change was made.
+Python 3.12.14, locked virtual environments and release-local Node dependencies were installed only
+inside the migration root after explicit Owner approval; system Python remains 3.10.12.
 
-Owner-console screenshots confirm the instance and its single attached system disk, but do not yet
-show Security Group rules or a completed rollback snapshot. Those remain Owner gates.
+Owner-console screenshots confirm the instance, its single attached system disk, the pre-runtime
+snapshot above, and one associated normal Security Group with four rules. The rule bodies were not
+visible, so exact ingress policy remains unknown. External checks found 22 and 80 reachable and no
+external listener on 443/8080/8081; the absence on 443 is not evidence of a specific firewall rule.
 
 ## 5. API surface comparison
 
@@ -311,18 +321,18 @@ local RAG process would return the same OpenAPI artifact; these artifacts differ
 |---|---|---|---|
 | Role | legacy/standby only | authoritative current application/data source | destination + existing SRSZQ |
 | Public DNS receives traffic | no | yes | no |
-| CourseMate RAG present | yes | yes | no; deployment target only |
-| RAG API path count | 6 | 18 | not deployed |
-| RAG release SHA | `ef7795b1e41aefbfdf9738e88a7eca053ea621db` | `cb7d0633e5026d042014512b72273f4439c9cff4` detached release | not deployed |
-| RAG DB | `/srv/coursemate/rag/rag.sqlite3` | `/srv/coursemate/rag/rag.sqlite3` | absent |
-| RAG schema | migration 1 | migration 10 | not deployed |
-| RAG aggregate rows | 2 courses, 1 document, 0 chunks, 1 job, 0 conversations/messages | 2 courses, 66 documents, 1,936 chunks, 69 jobs, 39 conversations, 86 messages | none |
-| Agent present | active local service | active local service | no CourseMate Agent |
-| Agent DB | `/srv/coursemate/agent/agent.sqlite3` | `/srv/coursemate/agent/agent.sqlite3` | absent |
-| Uploads | `/srv/coursemate/rag/uploads`; 1 file / 229 bytes | `/srv/coursemate/rag/uploads`; 67 files / 124,209,790 bytes | absent |
+| CourseMate RAG present | yes | yes | isolated release only; not active |
+| RAG API path count | 6 | 18 | validated from source; not routed |
+| RAG release SHA | `ef7795b1e41aefbfdf9738e88a7eca053ea621db` | `cb7d0633e5026d042014512b72273f4439c9cff4` detached release | isolated `9806a553a30c0531f727ba1538543fe6225e4c44` |
+| RAG DB | `/srv/coursemate/rag/rag.sqlite3` | `/srv/coursemate/rag/rag.sqlite3` | pristine restore + rehearsal copies only |
+| RAG schema | migration 1 | migration 10 | rehearsal copy at migration 21; no live DB |
+| RAG aggregate rows | 2 courses, 1 document, 0 chunks, 1 job, 0 conversations/messages | 2 courses, 66 documents, 1,936 chunks, 69 jobs, 39 conversations, 86 messages | restored aggregates match; not serving |
+| Agent present | active local service | active local service | isolated source/dependencies only; not active |
+| Agent DB | `/srv/coursemate/agent/agent.sqlite3` | `/srv/coursemate/agent/agent.sqlite3` | pristine restore only; no live DB |
+| Uploads | `/srv/coursemate/rag/uploads`; 1 file / 229 bytes | `/srv/coursemate/rag/uploads`; 67 files / 124,209,790 bytes | isolated verified restore only |
 | Reverse proxy | Caddy -> local 8000/8001 | Caddy -> local 8000/8001 | nginx -> SRSZQ 8080/8081 |
-| Auth config | Clerk-protected; exact production CORS | Clerk-protected; exact production CORS | CourseMate absent |
-| Model config | OpenAI-compatible; named models verified | Alibaba DashScope international OpenAI-compatible endpoint; `qwen3.7-plus` + `text-embedding-v4` | CourseMate absent |
+| Auth config | Clerk-protected; exact production CORS | Clerk-protected; exact production CORS | source validated; runtime config not activated |
+| Model config | OpenAI-compatible; named models verified | Alibaba DashScope international OpenAI-compatible endpoint; `qwen3.7-plus` + `text-embedding-v4` | no live provider call/config activation |
 | Last activity | content/storage stale since 2026-08-13; no access log | messages through 2026-09-07; services restarted 2026-09-12; live HTTP verified 2026-09-13 | SRSZQ active; CourseMate absent |
 | Authoritative source | no | **yes — Result B** | no |
 
@@ -330,13 +340,13 @@ local RAG process would return the same OpenAPI artifact; these artifacts differ
 
 | Fact | 8.210.58.22 | 47.237.179.69 | 47.114.34.175 |
 |---|---|---|---|
-| RAG DB | `/srv/coursemate/rag/rag.sqlite3` | `/srv/coursemate/rag/rag.sqlite3` | absent |
-| RAG schema | migration 1 | migration 10 | not deployed |
-| RAG aggregate rows | 2 courses, 1 document, 0 chunks | 2 courses, 66 documents, 1,936 chunks | none |
-| Agent DB | `/srv/coursemate/agent/agent.sqlite3` | `/srv/coursemate/agent/agent.sqlite3` | absent |
-| Agent schema | migration 1 | migration 1 | not deployed |
-| Agent aggregate rows | 0 tasks | 1 task | none |
-| Integrity / FK | both OK / 0 violations | both OK / 0 violations | not applicable |
+| RAG DB | `/srv/coursemate/rag/rag.sqlite3` | `/srv/coursemate/rag/rag.sqlite3` | isolated restore/rehearsal copies only |
+| RAG schema | migration 1 | migration 10 | rehearsal migration 21; not live |
+| RAG aggregate rows | 2 courses, 1 document, 0 chunks | 2 courses, 66 documents, 1,936 chunks | copied aggregates match |
+| Agent DB | `/srv/coursemate/agent/agent.sqlite3` | `/srv/coursemate/agent/agent.sqlite3` | isolated restore only |
+| Agent schema | migration 1 | migration 1 | isolated migration 1 |
+| Agent aggregate rows | 0 tasks | 1 task | copied aggregate matches |
+| Integrity / FK | both OK / 0 violations | both OK / 0 violations | copied DBs OK / 0 violations |
 
 Database size was not used as the production decision criterion.
 
@@ -344,10 +354,10 @@ Database size was not used as the production decision criterion.
 
 | Fact | 8.210.58.22 | 47.237.179.69 | 47.114.34.175 |
 |---|---|---|---|
-| Root | `/srv/coursemate/rag/uploads` | `/srv/coursemate/rag/uploads` | absent |
-| Files / bytes | 1 / 229 | 67 / 124,209,790 | 0 / 0 for CourseMate |
-| Fresh normalized manifest digest | `53e037ba...941e` | `c5fb27c3...0a2d` | not applicable |
-| Latest content mtime | 2026-08-13 06:00:47 CST | 2026-08-11 15:15:45 CST | not applicable |
+| Root | `/srv/coursemate/rag/uploads` | `/srv/coursemate/rag/uploads` | isolated restore only |
+| Files / bytes | 1 / 229 | 67 / 124,209,790 | copied 67 / 124,209,790 |
+| Fresh normalized manifest digest | `53e037ba...941e` | `c5fb27c3...0a2d` | copied digest matches source |
+| Latest content mtime | 2026-08-13 06:00:47 CST | 2026-08-11 15:15:45 CST | preserved in archive; private names not read |
 
 No private filename or file content was printed.
 
@@ -408,16 +418,15 @@ Caddy must not bind public ports 80/443 while nginx owns them. Replacing nginx i
 
 ## 12. Next migration action
 
-1. Validate the reviewed `ops/backup_v2.py` and `ops/restore_v2.py` contracts against the authoritative
-   paths and available disk without changing live services.
-2. Create an **initial** SQLite-online backup plus upload archive on the source. This is bulk-migration
-   evidence, not the final cutover snapshot and does not claim cross-artifact point-in-time atomicity.
-3. Copy the verified backup to an isolated destination-owned path, verify checksums, and run the
-   restore script without touching SRSZQ, nginx, ports 80/8080/8081 or any live CourseMate path.
-4. Freeze an exact reviewed V3 release SHA and rehearse Schema 10 -> 21 twice against only the isolated
-   restored RAG database. Keep `V3_ENABLED=false` for the initial compatibility deployment.
-5. Prepare, but do not yet execute, destination systemd/nginx coexistence configuration and the final
-   write-drain/delta plan. Final drain, DNS cutover, paid model calls and reboot remain Owner gates.
+1. Prepare, but do not activate, an unprivileged CourseMate service identity, independent candidate
+   paths, root-owned environment, systemd units and nginx virtual-host snippets. Preserve SRSZQ.
+2. Transfer only the authoritative source configuration through a secret-safe allowlist and validate
+   it without printing values. Keep `V3_ENABLED=false` for the initial compatibility deployment.
+3. Run disposable localhost smoke tests against copied databases and fake/local providers; validate
+   auth, CORS, health, data invariants, monitoring and rollback without binding public ports.
+4. Publish or otherwise freeze exact reviewed commit `9806a55` before production activation.
+5. Prepare the final write-drain/delta plan and final recovery artifacts. Final drain, service
+   activation, DNS cutover, paid model calls and reboot remain Owner gates.
 
 ### Initial recovery slice completed
 
@@ -430,31 +439,39 @@ checksums, integrity `ok`, FK 0, 67 uploads / 124,209,790 bytes and the source a
 The corrected recovery unit was copied to `/srv/coursemate-migration/incoming/` on
 `47.114.34.175`, checksum-verified again and restored under `/srv/coursemate-migration/restores/`.
 Both restored database binaries match their backup SHA-256 values, and the restored upload manifest
-digest matches the source. Exact tracked commit `105ccdaeec3b45c208a8e039d7943a5e22e277ce` was cloned
-from a verified Git bundle into the same isolated migration root. No service was started and no live
-CourseMate destination path was created.
+digest matches the source. Commit `105ccda` was cloned from a verified Git bundle into the isolated
+migration root for the first migration rehearsals. It remains preserved.
 
-Schema rehearsal is not yet executed. An exhaustive read-only destination scan found only Python
-3.10.12: no Python 3.11/3.12/3.13 executable, compatible virtual environment, ready alternate runtime
-manager, or initialized container environment exists. The apt mirror exposes only a Python 3.11.0
-release-candidate package, which is unsuitable as the production runtime. LXD is installed but has no
-instance, local image or storage pool and would require mutating initialization. The project declares
-Python >=3.11 and its required Python packages are absent. Runtime installation or initialization must
-wait for the Owner's new-ECS Security Group verification and rollback-snapshot/cost gate. Nginx and
-both SRSZQ PM2 applications remained healthy after these read-only checks.
+Owner-console evidence then recorded destination system-disk snapshot
+`s-bp13r5gqocjif1jtieav`; after explicit approval, Python 3.12.14, uv 0.12.13, hash-locked production
+and test virtual environments, and release-local Node dependencies were installed only below
+`/srv/coursemate-migration`. System Python and global Node/npm were not replaced.
+
+Schema 10 -> 21 passed twice on independent fresh copies and again on exact release `9806a55`, with
+old-row fingerprints unchanged, migration continuity 1..21, integrity `ok`, FK 0 and all V3
+invariants true. Evidence JSON is content-free and reproducibly hashes to
+`a9a7bb9b1751317be2ebae4fddb58bdb1470409875457e84275c18a7557f2a7f`.
+
+A clean-clone-only benchmark safety issue was fixed in commit
+`9806a553a30c0531f727ba1538543fe6225e4c44`: static URL validation and conservative query-cost refusal
+now occur before corpus/database/client access. Exact release validation on the destination reports
+322 Python tests passed / 6 corpus-only skips, Ruff pass, mypy pass, Web 49/49, Agent 66/66,
+typecheck pass and production build pass. All model behavior in these tests was fake/local; no paid or
+live-provider call occurred. Nginx and both SRSZQ PM2 applications remained healthy, with PIDs 1182
+and 48185 unchanged, and public source RAG/Agent health remained HTTP 200.
 
 ## Safety ledger
 
 ```text
 Production DB copy: YES — initial SQLite-online snapshots only
 Uploads transfer: YES — initial verified archive to isolated destination only
-Schema migration: NO
+Schema migration: COPIED-DATABASE REHEARSAL ONLY — PASS; SOURCE/LIVE NO
 Service stop/restart/replacement: NO
 DNS change: NO
-Package install: NO
+Package install: ISOLATED MIGRATION ROOT ONLY; APT/SYSTEM/GLOBAL NO
 Paid model call: NO
 Password collected/stored: NO
 Private key exposed: NO
 User/course content read: NO
-Authorized remote write: dedicated public key only; prior authorized_keys backed up first
+Authorized remote writes: dedicated public key; initial backup/restore; destination-isolated runtime/rehearsal only
 ```
