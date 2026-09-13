@@ -1,6 +1,6 @@
 # CourseMate V3 — New Alibaba ECS Migration State
 
-Last updated: 2026-09-13 20:22:28 CST / 2026-09-13 12:22:28 UTC
+Last updated: 2026-09-13 20:29:16 CST / 2026-09-13 12:29:16 UTC
 
 Current phase: `Initial backup/isolated restore PASS; destination runtime installation Owner gate`
 
@@ -376,9 +376,13 @@ tracked or untracked changes. This is an isolated migration release, not a runni
 
 ## Current blockers and risks
 
-1. **Runtime-installation gate:** destination Python is 3.10.12 and lacks `pydantic`,
-   `pydantic-settings` and FastAPI, while the reviewed release requires Python >=3.11. Do not install
-   or alter system packages until the Owner verifies the Security Group and creates/approves a new-ECS
+1. **Runtime-installation gate:** an exhaustive read-only scan found only Python 3.10.12. There is no
+   Python 3.11/3.12/3.13 executable, compatible virtual environment, `uv`, `pyenv`, Conda, Docker,
+   Podman or other ready runtime. The apt mirror exposes only a Python 3.11.0 release-candidate package,
+   which is not an acceptable production foundation. LXD is installed but has no instance, local image
+   or storage pool, so using it would require mutating host initialization. The release also lacks its
+   required `pydantic`, `pydantic-settings` and FastAPI dependencies. Do not install packages or
+   initialize a runtime until the Owner verifies the Security Group and creates/approves a new-ECS
    rollback snapshot; snapshot storage may incur cloud cost.
 2. **Destination service collision:** new ECS ports 80, 8080, and 8081 already support `srszq-api`.
    Replacing nginx or stopping PM2 could break an unrelated live service.
@@ -425,6 +429,9 @@ tracked or untracked changes. This is an isolated migration release, not a runni
 - After Result B, migration writes were confined to dedicated source backup/tool directories and
   `/srv/coursemate-migration` on the destination. A corrected initial backup was copied and restored
   there; `/srv/coursemate`, `/etc/coursemate`, systemd, nginx, PM2 and all SRSZQ paths were untouched.
+- A final read-only destination runtime scan found no ready Python >=3.11 or initialized container
+  alternative. Nginx remained active, both SRSZQ PM2 applications remained online, and listeners on
+  ports 80/8080/8081 remained unchanged after the checks.
 - No Schema migration, package installation, model call, service reload/restart, running deployment,
   DNS change or cutover has run. Source RAG/Agent/Caddy and destination nginx/PM2 remained active;
   source health stayed HTTP 200 and destination ports 80/8080/8081 were unchanged.

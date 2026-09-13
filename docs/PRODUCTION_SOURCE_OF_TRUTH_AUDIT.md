@@ -6,6 +6,8 @@ Last public-surface revalidation: 2026-09-13 18:02:25 CST / 2026-09-13 10:02:25 
 
 Last trusted current-host inventory: 2026-09-13 20:02:07 CST / 2026-09-13 12:02:07 UTC
 
+Last destination runtime revalidation: 2026-09-13 20:29:16 CST / 2026-09-13 12:29:16 UTC
+
 Status: `AUTHORITATIVE SOURCE PROVEN — RESULT B; INITIAL RESTORE VERIFIED; RUNTIME INSTALL GATED`
 
 Data migration authorized: `YES — INITIAL BACKUP/ISOLATED RESTORE ONLY; FINAL DRAIN/CUTOVER REMAINS GATED`
@@ -424,9 +426,14 @@ digest matches the source. Exact tracked commit `105ccdaeec3b45c208a8e039d7943a5
 from a verified Git bundle into the same isolated migration root. No service was started and no live
 CourseMate destination path was created.
 
-Schema rehearsal is not yet executed: the destination currently has Python 3.10.12 and lacks the
-required Python packages, while the project declares Python >=3.11. Runtime installation must wait
-for the Owner's new-ECS Security Group verification and rollback-snapshot/cost gate.
+Schema rehearsal is not yet executed. An exhaustive read-only destination scan found only Python
+3.10.12: no Python 3.11/3.12/3.13 executable, compatible virtual environment, ready alternate runtime
+manager, or initialized container environment exists. The apt mirror exposes only a Python 3.11.0
+release-candidate package, which is unsuitable as the production runtime. LXD is installed but has no
+instance, local image or storage pool and would require mutating initialization. The project declares
+Python >=3.11 and its required Python packages are absent. Runtime installation or initialization must
+wait for the Owner's new-ECS Security Group verification and rollback-snapshot/cost gate. Nginx and
+both SRSZQ PM2 applications remained healthy after these read-only checks.
 
 ## Safety ledger
 
