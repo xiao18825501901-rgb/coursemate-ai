@@ -39,6 +39,13 @@ def _sqlite_backup(source: Path, destination: Path) -> None:
     destination_connection = sqlite3.connect(destination)
     try:
         source_connection.backup(destination_connection)
+        journal_mode = destination_connection.execute(
+            "PRAGMA journal_mode=DELETE"
+        ).fetchone()
+        if journal_mode != ("delete",):
+            raise RuntimeError(
+                f"Could not make {destination.name} a standalone SQLite snapshot."
+            )
     finally:
         destination_connection.close()
         source_connection.close()

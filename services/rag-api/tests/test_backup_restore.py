@@ -102,6 +102,47 @@ def test_backup_and_restore_preserve_both_databases_and_uploads(tmp_path: Path) 
     ) == "private course evidence"
 
 
+def test_backup_from_wal_databases_has_no_unverified_sidecars(tmp_path: Path) -> None:
+    rag_database = tmp_path / "rag.sqlite3"
+    agent_database = tmp_path / "agent.sqlite3"
+    uploads = tmp_path / "uploads"
+    backup_root = tmp_path / "backups"
+    uploads.mkdir()
+    _database(rag_database, "courses", "cs3481")
+    _database(agent_database, "tasks", "review clustering")
+    for database in (rag_database, agent_database):
+        connection = sqlite3.connect(database)
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone() == ("wal",)
+        connection.close()
+
+    backup = _run(
+        BACKUP_SCRIPT,
+        {
+            "RAG_DATABASE_PATH": str(rag_database),
+            "RAG_UPLOAD_DIR": str(uploads),
+            "AGENT_DATABASE_PATH": str(agent_database),
+            "BACKUP_ROOT": str(backup_root),
+        },
+    )
+
+    assert backup.returncode == 0, backup.stderr
+    backup_directory = Path(backup.stdout.strip().splitlines()[-1])
+    assert not list(backup_directory.glob("*.sqlite3-wal"))
+    assert not list(backup_directory.glob("*.sqlite3-shm"))
+    for name, table in (("rag.sqlite3", "courses"), ("agent.sqlite3", "tasks")):
+        snapshot = backup_directory / name
+        connection = sqlite3.connect(
+            f"file:{snapshot.as_posix()}?mode=ro&immutable=1", uri=True
+        )
+        try:
+            assert connection.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone() == (
+                1,
+            )
+            assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        finally:
+            connection.close()
+
+
 def test_restore_rejects_tampered_agent_snapshot_before_creating_target(
     tmp_path: Path,
 ) -> None:
