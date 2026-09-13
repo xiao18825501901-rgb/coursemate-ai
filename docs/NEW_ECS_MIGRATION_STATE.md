@@ -1,8 +1,8 @@
 # CourseMate V3 — New Alibaba ECS Migration State
 
-Last updated: 2026-09-13 22:34:27 CST / 2026-09-13 14:34:27 UTC
+Last updated: 2026-09-13 23:13:06 CST / 2026-09-13 15:13:06 UTC
 
-Current phase: `PRE-CUTOVER CANDIDATE PREPARED AND PRIVATE SMOKE PASS; TLS/REBOOT/FINAL-DRAIN/LIVE-MODEL/DNS OWNER GATES REMAIN`
+Current phase: `SECURITY GROUP VERIFIED + PRIVATE TLS PATH PASS; PRODUCTION CERT/REBOOT/FINAL-DRAIN/LIVE-MODEL/DNS OWNER GATES REMAIN`
 
 Production data copied: `YES — INITIAL ONLINE BACKUP ONLY; FINAL DELTA NOT STARTED`
 
@@ -31,10 +31,11 @@ Public DNS, pinned-IP HTTPS/TLS, Owner-console host identity and trusted SSH inv
 `47.237.179.69` as the complete current CourseMate application and data source. The source decision is
 **Result B**. The initial backup/off-host copy/isolated restore, destination rollback snapshot,
 isolated runtime installation, Schema 10 -> 21 rehearsal and destination source validation have
-completed. The exact release/runtime, disabled service files, disabled monitor and a non-enabled
-nginx candidate are now prepared; private V2/V3/proxy/monitor smoke tests pass. Final drain,
-production activation/cutover, TLS issuance/key handling, DNS, paid model calls, destructive actions
-and destination reboot remain gated. The full
+completed. The exact release/runtime, non-started service files, disabled monitor timer and a
+non-enabled nginx candidate are now prepared; private V2/V3/proxy/monitor and synthetic-certificate TLS smoke
+tests pass. The destination Security Group permits public 80/443, but no public CourseMate listener
+or production certificate exists. Final drain, production activation/cutover, certificate issuance,
+DNS, paid model calls, destructive actions and destination reboot remain gated. The full
 three-host evidence ledger is in
 [`PRODUCTION_SOURCE_OF_TRUTH_AUDIT.md`](PRODUCTION_SOURCE_OF_TRUTH_AUDIT.md).
 
@@ -338,11 +339,12 @@ UFW: inactive
 No Caddy installation, apt/system/global package replacement, firewall change, reboot, existing
 service stop, or public proxy reload was performed. The isolated CourseMate identity, paths,
 root-owned environment, systemd units and disabled nginx virtual hosts were prepared without touching
-the enabled SRSZQ site. Owner-console evidence shows one normal Security Group associated with the
-matching VPC and four rules, but the rule bodies were not visible and therefore remain unknown.
-External reachability checks found SSH/22 and HTTP/80 reachable, with no externally reachable service
-on 443/8080/8081; the 443 result cannot distinguish a Security Group rule from the confirmed absence
-of a listener.
+the enabled SRSZQ site. Owner-console evidence now shows all four inbound rules for the matching
+Security Group: allow IPv4 TCP/80 and TCP/443 from `0.0.0.0/0` at priority 1, plus allow all ICMP-IPv4
+and TCP/22 from `0.0.0.0/0` at priority 100. This proves the Security Group permits 443; the external
+443 check still fails because the destination has no listener. No Security Group rule was changed.
+The globally exposed SSH rule is a later hardening risk and must not be narrowed until the Owner's
+stable management source and a tested fallback are known.
 
 ### Destination rollback snapshot and isolated runtime evidence
 
@@ -397,7 +399,9 @@ Exact-release validation: PASS — Python, Web, Agent, typecheck and production 
 Final candidate: PREPARED — exact release, independent runtime/user/paths, secret-safe env and non-started units/site
 Private smoke: PASS — V2 compatibility, V3 migration/routes, auth/CORS, proxy and monitor; all transient services stopped
 Release publication: COMPLETE — branch pushed non-force; 9806a55 reachable from origin branch history
-TLS readiness: BLOCKED — no destination certificate or 443 listener; issuance/key method requires Owner decision
+Security Group inbound: VERIFIED — public TCP/80, TCP/443, TCP/22 and ICMP allowed from 0.0.0.0/0
+Private TLS path: PASS — loopback-only synthetic certificate/SNI/proxy/security-header smoke; key removed
+Production TLS readiness: BLOCKED — no trusted destination certificate or 443 listener; issuance method requires Owner decision
 Reboot readiness: BLOCKED — SRSZQ staging is running but absent from the saved PM2 resurrection dump
 Pre-cutover: COMPLETE FOR NON-ACTIVATING WORK — final data has 0 files and candidate remains inactive
 Cutover: NOT STARTED — OWNER GATE
@@ -536,11 +540,37 @@ Agent Schema 1, with the same aggregate row counts, database integrity/FK result
 and normalized upload digest as the initial recovery slice. Equal aggregates do not prove unchanged
 row content and do not replace the required final drained snapshot/delta.
 
-Destination TLS is not ready: nginx supports TLS and Certbot/timer exist, but the destination has no
-certificate material and no 443 listener. The current source uses separate valid Let's Encrypt
-certificates for the two CourseMate hostnames through 2026-11-10 UTC. The destination Certbot has no
-DNS plugin, so a zero-downtime certificate issuance or explicitly authorized secure certificate
-bootstrap method must be selected before activation.
+The candidate TLS path was then tested with a one-day synthetic certificate containing only the two
+CourseMate SANs. A separate nginx bound only to `127.0.0.1:29443` and proxied to transient RAG/Agent
+units. Both HTTPS health checks returned 200; both unauthenticated protected routes returned 401;
+certificate verification, SNI hostname rejection, configured TLS 1.2/1.3 policy, HSTS, security
+headers and exact CORS passed. Cleanup removed the temporary private key and closed
+28000/28001/29443. Final data files remained 0, both model-run evidence and call-reservation counts
+remained 0, live nginx PID remained 897, and SRSZQ PIDs remained 1182/48185.
+
+```text
+TLS smoke script SHA-256: 59497976d1b295f1afbeea3e359e33d78b0abeef9a4b519261d62a4e4c6a0edd
+TLS nginx config SHA-256: a4991f0829965c64c7271b4616ac1008895c0fe035274b1e9780e801b438277f
+TLS smoke evidence SHA-256: f1b0fd8e63c33b9a02768ad6f080a5cf01fc907cfbc3d982ddbb84db77429ffe
+Synthetic private key after cleanup: ABSENT
+```
+
+The cleanup path was separately failure-injected immediately after the private nginx became ready.
+The expected exit code was 97; independent post-failure checks found zero test listeners, no test key,
+all persistent CourseMate units inactive, final data files still 0, live nginx PID still 897, and both
+existing nginx/PM2 services active. The repaired script then passed the normal path above.
+
+Production TLS is not ready: nginx supports TLS and Certbot/timer exist, but the destination has no
+trusted certificate material and no public 443 listener. The current source uses separate valid Let's
+Encrypt certificates for the two CourseMate hostnames through 2026-11-10 UTC. The destination Certbot
+has no DNS plugin, so a zero-downtime certificate issuance or explicitly authorized secure certificate
+bootstrap method must be selected before activation. The synthetic smoke certificate is not a
+production credential and cannot be used for public traffic.
+
+Public DNS checks found no CAA record at `qqttai.com` and no current TXT record at either
+`_acme-challenge.rag.qqttai.com` or `_acme-challenge.agent.qqttai.com`. That removes an observed DNS
+conflict for a manual DNS-01 bootstrap, but does not authorize creating records or requesting a
+certificate.
 
 The destination also reports a pending `libc6` reboot. Production SRSZQ is present in the saved PM2
 resurrection dump, but running `srszq-staging` is not. The reboot therefore remains prohibited until
@@ -548,9 +578,9 @@ the Owner decides whether staging must survive and its recovery path is tested o
 
 ## Current blockers and risks
 
-1. **TLS and Security Group gate:** the destination has no certificate or 443 listener, and the four
-   Security Group rule bodies remain unseen. The Owner must verify ingress and choose the certificate
-   issuance/key path before public HTTPS activation.
+1. **Production certificate gate:** the Security Group permits TCP/443 and the loopback TLS path
+   passes, but the destination has no publicly trusted certificate or 443 listener. The Owner must
+   choose the issuance/key path before public HTTPS activation.
 2. **Destination coexistence:** ports 80, 8080 and 8081 support `srszq-api`. The prepared CourseMate
    ports and virtual hosts avoid collision, but enabling/reloading nginx or replacing/stopping PM2
    remains prohibited until the cutover gate.
@@ -566,11 +596,15 @@ the Owner decides whether staging must survive and its recovery path is tested o
 6. **Live-provider acceptance:** all current V3 test evidence is local/fake-provider. A live
    `qwen3.8-max` capability check and benchmark remain unverified and potentially billable; do not run
    them without the applicable budget/credential gate.
+7. **Public SSH exposure:** TCP/22 currently allows `0.0.0.0/0`. Narrowing it can improve security but
+   can also lock out administration; do not change it until a stable Owner source range and fallback
+   access path are verified.
 
 ## First safe next actions
 
-1. Owner verifies the destination Security Group rule bodies—especially 443—and selects a
-   zero-downtime TLS method. No private certificate key is copied without explicit authorization.
+1. Owner selects a zero-downtime production certificate method. The preferred path is a fresh
+   Let's Encrypt DNS-01 bootstrap certificate; no existing private key is copied without explicit
+   authorization.
 2. Owner states whether `srszq-staging` must survive a reboot; then prepare and test only the approved
    persistence/recovery change before any maintenance reboot.
 3. Agree an exact paid-call ceiling and credential scope for the `qwen3.8-max` capability probe and
@@ -591,7 +625,8 @@ the Owner decides whether staging must survive and its recovery path is tested o
 - Owner-console screenshots revalidated the destination as running instance
   `i-bp1f0vqhds2341pdqqiy` in `cn-hangzhou-k` with one attached 40 GiB ESSD PL0 system disk,
   `d-bp1f0vqhds2341pces7h`; later evidence recorded its pre-runtime snapshot
-  `s-bp13r5gqocjif1jtieav`. Security Group association/count are visible, but exact rules are not.
+  `s-bp13r5gqocjif1jtieav`. A later Owner screenshot verified all four inbound allow rules: public
+  IPv4 TCP/80, TCP/443, TCP/22 and all ICMP-IPv4. No rule was modified.
 - Current/old runtime, proxy, release, safe environment names/allowlisted values, aggregate database
   health/counts and upload digests were read without exposing secrets, rows or private filenames.
 - Before source selection, the only remote writes were the explicitly requested SSH public-key append
@@ -607,8 +642,10 @@ the Owner decides whether staging must survive and its recovery path is tested o
 - Secret configuration moved server-to-server through protected files and an allowlisted transform;
   values were not printed. CourseMate systemd and nginx candidates were statically validated but not
   activated; RAG/Agent/timer remain disabled, monitor remains static, and nginx was not reloaded.
-  Transient private smoke services were stopped and all
-  three localhost test ports were confirmed closed.
+  Transient private smoke services were stopped and their localhost test ports were confirmed closed.
+- A separate TLS smoke used a generated one-day synthetic certificate on loopback 29443. It verified
+  HTTPS/SNI/auth/CORS/security headers, then stopped both transient apps and nginx, removed the private
+  key and independently confirmed all listeners closed. It did not bind public 443 or reload nginx.
 - Schema 10 -> 21 ran only on fresh copied databases. The pristine restore and authoritative source
   hashes remained unchanged. Destination tests, typecheck and builds passed for exact release
   `9806a55`.

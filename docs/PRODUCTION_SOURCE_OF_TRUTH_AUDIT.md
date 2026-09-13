@@ -8,9 +8,9 @@ Last trusted current-host inventory: 2026-09-13 20:02:07 CST / 2026-09-13 12:02:
 
 Last destination runtime revalidation: 2026-09-13 20:29:16 CST / 2026-09-13 12:29:16 UTC
 
-Last destination candidate/private-smoke validation: 2026-09-13 22:34:27 CST / 2026-09-13 14:34:27 UTC
+Last destination candidate/private-TLS validation: 2026-09-13 23:13:06 CST / 2026-09-13 15:13:06 UTC
 
-Status: `RESULT B PROVEN; INACTIVE FINAL CANDIDATE + PRIVATE SMOKE PASS; TLS/REBOOT/FINAL-DRAIN/LIVE-MODEL/DNS GATED`
+Status: `RESULT B PROVEN; SECURITY GROUP VERIFIED + PRIVATE TLS PATH PASS; PRODUCTION CERT/REBOOT/FINAL-DRAIN/LIVE-MODEL/DNS GATED`
 
 Data migration authorized: `YES — INITIAL BACKUP/ISOLATED RESTORE ONLY; FINAL DRAIN/CUTOVER REMAINS GATED`
 
@@ -32,9 +32,10 @@ databases and the upload tree, and serves the same 18-path OpenAPI artifact obse
 This audit therefore issues **Result B**: `47.237.179.69` is the authoritative CourseMate application
 and data source. `8.210.58.22` is a legacy/standby candidate and is not a source for migration. The
 initial backup/restore, exact-release validation, inactive production-shaped candidate preparation and
-private V2/V3/proxy/monitor smoke phases have passed. Production write drain, final delta, TLS/service
-activation, DNS cutover, destructive operations, paid model calls and destination reboot remain
-separately gated.
+private V2/V3/proxy/monitor and loopback TLS smoke phases have passed. The Security Group permits
+public 80/443, but the destination has no trusted production certificate or public CourseMate
+listener. Production write drain, final delta, certificate/service activation, DNS cutover,
+destructive operations, paid model calls and destination reboot remain separately gated.
 
 ## 1. DNS topology
 
@@ -300,11 +301,15 @@ roots after explicit Owner approval; system Python remains 3.10.12. Root-owned c
 systemd units and an unenabled nginx site were prepared and validated without reloading nginx.
 
 Owner-console screenshots confirm the instance, its single attached system disk, the pre-runtime
-snapshot above, and one associated normal Security Group with four rules. The rule bodies were not
-visible, so exact ingress policy remains unknown. External checks found 22 and 80 reachable and no
-external listener on 443/8080/8081; the absence on 443 is not evidence of a specific firewall rule.
-Nginx has TLS support and Certbot/timer exist, but the destination has no certificate material or 443
-listener. TLS issuance/key handling therefore remains an explicit Owner gate.
+snapshot above, and one associated normal Security Group. The full inbound table shows four allow
+rules from IPv4 `0.0.0.0/0`: TCP/80 and TCP/443 at priority 1, all ICMP-IPv4 and TCP/22 at priority
+100. This proves 443 is permitted at the Security Group; the failed external 443 check is explained by
+the confirmed absence of a listener. No rule was changed. Public SSH exposure remains a hardening risk
+that must not be narrowed without a stable Owner source range and tested fallback access.
+
+Nginx has TLS support and Certbot/timer exist, but the destination has no trusted production
+certificate or public 443 listener. TLS issuance/key handling therefore remains an explicit Owner
+gate.
 
 ## 5. API surface comparison
 
@@ -430,8 +435,9 @@ Caddy must not bind public ports 80/443 while nginx owns them. Replacing nginx i
 
 ## 12. Next migration action
 
-1. Owner verifies the destination Security Group rule bodies, especially 443, and selects the TLS
-   issuance/key method. Do not copy private certificate keys without explicit authorization.
+1. Owner selects the production certificate issuance/key method now that TCP/443 ingress is verified.
+   Prefer a fresh Let's Encrypt DNS-01 bootstrap certificate; do not copy an existing private key
+   without explicit authorization.
 2. Owner states whether running `srszq-staging` must survive a reboot; it is absent from the saved PM2
    resurrection dump. Do not reboot or run an indiscriminate `pm2 save` before that decision.
 3. Agree an exact paid-call ceiling and credential scope for the `qwen3.8-max` capability probe and
@@ -501,9 +507,24 @@ A subsequent read-only source check still found Schema 10/1, the same aggregate 
 integrity/FK results and upload count/bytes/digest as the initial slice. This is a drift signal only:
 equal aggregates do not prove unchanged row content and cannot replace the final drained snapshot.
 
-TLS and reboot are unresolved. The destination has no certificate material or 443 listener. It also
-reports a pending `libc6` reboot; the saved PM2 dump contains SRSZQ production but not the currently
-running `srszq-staging` process. Neither TLS activation nor reboot is authorized by this preparation.
+A second, independent TLS smoke used a generated one-day synthetic certificate with SANs for only the
+two CourseMate domains. A separate nginx bound to `127.0.0.1:29443` and proxied to transient RAG/Agent
+units. HTTPS health returned 200/200; protected routes returned 401/401; SNI mismatch rejection,
+certificate verification, configured TLS protocol policy, HSTS, security headers and exact CORS all
+passed. The temporary key was removed, all test listeners closed, final data files remained 0, and
+both model-run evidence and call-reservation counts remained 0. Live nginx/SRSZQ PIDs stayed
+897/1182/48185. Failure injection immediately after nginx readiness returned the expected 97 and
+independently left no listener or key. The repaired normal-path evidence SHA-256 is
+`f1b0fd8e63c33b9a02768ad6f080a5cf01fc907cfbc3d982ddbb84db77429ffe`.
+
+Public DNS showed no CAA record and no existing `_acme-challenge` TXT record for either CourseMate
+hostname. A manual DNS-01 bootstrap therefore has no observed record conflict, but no DNS write or
+certificate request is authorized yet.
+
+Production certificate issuance and reboot are unresolved. The destination still has no trusted
+certificate or public 443 listener. It also reports a pending `libc6` reboot; the saved PM2 dump
+contains SRSZQ production but not the currently running `srszq-staging` process. Neither production
+TLS activation nor reboot is authorized by this preparation.
 
 ## Safety ledger
 
@@ -513,8 +534,10 @@ Uploads transfer: YES — initial verified archive to isolated and candidate bac
 Schema migration: COPIED-DATABASE REHEARSAL ONLY — PASS; SOURCE/LIVE NO
 Candidate release/runtime/env/units: PREPARED — ALL INACTIVE; RAG/AGENT/TIMER DISABLED; MONITOR STATIC; DATA FILES=0
 Private smoke service starts: YES — TRANSIENT/LOCALHOST ONLY; STOPPED; PORTS CLOSED
+Private TLS smoke: PASS — LOOPBACK/SYNTHETIC CERT ONLY; KEY REMOVED; NO PUBLIC 443
 Existing service stop/restart/replacement: NO
 Nginx configuration: CANDIDATE FILE VALIDATED; NOT ENABLED; NO RELOAD
+Security Group evidence: VERIFIED — PUBLIC TCP/80, TCP/443, TCP/22 AND ICMP ALLOWED; UNCHANGED
 DNS change: NO
 Package install: ISOLATED MIGRATION + COURSEMATE CANDIDATE ROOTS; APT/SYSTEM/GLOBAL NO
 Paid model call: NO
