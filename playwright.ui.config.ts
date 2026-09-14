@@ -59,6 +59,9 @@ export default defineConfig({
     baseURL: "http://127.0.0.1:5273",
     browserName: "chromium",
     launchOptions: { executablePath: chromeExecutable },
+    // The tree-acceptance journey taps node rows at 390px, so contexts must
+    // support touch events in addition to mouse/keyboard.
+    hasTouch: true,
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
   },

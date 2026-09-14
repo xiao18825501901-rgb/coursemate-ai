@@ -62,12 +62,17 @@ describe("production Clerk auth bridge", () => {
     expect(() => unsubscribe?.()).not.toThrow();
   });
 
-  it("routes sign-in through Clerk's own modal", async () => {
+  it("routes sign-in through Clerk's own modal and returns to the new dashboard", async () => {
     render(<CourseMateUi />);
     await waitFor(() => expect(window.CourseMateAuth).toBeDefined());
 
     window.CourseMateAuth?.signIn();
     expect(openSignIn).toHaveBeenCalledTimes(1);
+    // The default entry is `/`; after sign-in Clerk must land on the new
+    // dashboard, not on a legacy route.
+    expect(openSignIn).toHaveBeenCalledWith({
+      fallbackRedirectUrl: `${window.location.origin}/`,
+    });
   });
 
   it("routes sign-out through Clerk and resolves", async () => {

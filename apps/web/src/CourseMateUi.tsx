@@ -71,7 +71,12 @@ function AuthBridge() {
       getToken: () => getToken(),
       subscribe: () => () => undefined,
       signIn: () => {
-        void clerk.openSignIn();
+        // The signed-out login card only exists inside the new shell document,
+        // and the shell is the default entry at `/`, so after sign-in Clerk must
+        // land back on the new dashboard rather than any legacy route.
+        void clerk.openSignIn({
+          fallbackRedirectUrl: `${window.location.origin}/`,
+        });
       },
       signOut: async () => {
         await clerk.signOut();

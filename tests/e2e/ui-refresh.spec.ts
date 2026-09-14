@@ -611,6 +611,62 @@ test("a problem's steps bridge into teaching and return to the same step", async
   expect((await closedLayout.json()).bridge).toBeNull();
 });
 
+test("the knowledge tree is reachable by keyboard and by touch", async ({ page }) => {
+  await page.goto("/app#/course/cs3481/learn");
+  await expect(page.locator(".workspace-columns")).toBeVisible();
+
+  // Keyboard: the strip is a real button (Enter expands), node rows are
+  // focusable and reveal their two status entries on focus, and Enter on a
+  // popover action starts teaching from that node.
+  const strip = page.locator("button.knowledge-strip");
+  await strip.focus();
+  await page.keyboard.press("Enter");
+  const tree = page.locator(".tree-expanded");
+  await expect(tree).toBeVisible();
+
+  const kmeans = tree.locator(".tree-node-new").filter({ hasText: "K-means 聚类" });
+  await kmeans.focus();
+  await expect(kmeans.locator(".node-popover")).toBeVisible();
+  await expect(
+    kmeans.locator(".node-popover").getByRole("button", { name: /测评结果/ }),
+  ).toContainText("未测评");
+  const learnFromKeyboard = kmeans
+    .locator(".node-popover")
+    .getByRole("button", { name: /学习进度/ });
+  await learnFromKeyboard.focus();
+  await page.keyboard.press("Enter");
+  // The node jump collapses the tree overlay itself.
+  await expect(tree).toHaveCount(0);
+
+  // The node jump lands in the teach lane and the labelled local test provider
+  // completes the run with a real teaching message.
+  const teachPane = page.locator(".learning-pane.pane-teach");
+  await expect(teachPane).toContainText("请用中文从零教我理解 K-means 聚类", {
+    timeout: 30_000,
+  });
+  await expect(teachPane).toContainText("从定义出发", { timeout: 30_000 });
+
+  // Touch: at 390px the panes are tabs; a tap opens the same popover and a tap
+  // on 学习进度 switches to the teach tab for that node.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator("button.knowledge-strip").tap();
+  await expect(tree).toBeVisible();
+  const clustering = tree.locator(".tree-node-new").filter({ hasText: "聚类分析" });
+  await clustering.tap();
+  const touchPopover = clustering.locator(".node-popover");
+  await expect(touchPopover).toBeVisible();
+  await expect(
+    touchPopover.getByRole("button", { name: /学习进度/ }),
+  ).toContainText("学习中");
+  await touchPopover.getByRole("button", { name: /学习进度/ }).tap();
+
+  await expect(page.locator(".mobile-pane-tabs button.active")).toHaveText("知识学习");
+  await expect(page.locator(".learning-pane.pane-teach.mobile-active")).toBeVisible();
+  await expect(teachPane).toContainText("请用中文从零教我理解 聚类分析", {
+    timeout: 30_000,
+  });
+});
+
 test("help covers the new surfaces and no horizontal overflow at 390px", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/app");
