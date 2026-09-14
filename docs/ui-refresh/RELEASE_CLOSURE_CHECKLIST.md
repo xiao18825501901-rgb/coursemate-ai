@@ -1,7 +1,7 @@
 # RELEASE CLOSURE CHECKLIST — 本地收尾与真实发布准备
 
 **更新日期**：2026-09-15（Asia/Hong_Kong）
-**HEAD**：`ca34549`（写于该提交；最新以 `git rev-parse HEAD` 为准）
+**HEAD**：`9863b78`（写作时；最新以 `git rev-parse HEAD` 为准）
 **模型**：开发执行 `deepseek-v4-pro`（`C:\Users\Hp\.dsh\settings.yaml` 已切，本会话一致）；网站教学 `qwen3.8-max`（未变）。
 **权限**：本会话 `approval_policy: never`（批准提示禁用，需批准的动作自动拒绝）；文件 sandbox `danger-full-access`。**没有任何动作被"当作已批准"。**
 
