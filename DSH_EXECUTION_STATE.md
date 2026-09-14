@@ -75,6 +75,32 @@ Netlify 发布。
 > 注意：本会话的批准提示被禁用（`approval_policy=never`），因此**不存在**"已获批准但未执行"
 > 的待办授权项。
 
+## 5.1 阻塞条件（连续 3 轮相同，已据此上报 blocked）
+
+**阻塞项**：目标中最后两件事——真实千问两阶段 canary、生产部署 + 双用户验收——
+都要求在动作**之前**取得原生授权确认。
+
+**阻塞原因**：本会话的批准通道被禁用（会话策略 `approval_policy: never`），
+任何需要批准的动作会被自动拒绝。模型**无法自行**弹出该提示框，
+因此不存在可执行的取得授权路径。
+
+**三轮记录**（同一条件，未变化）：
+
+| 轮次 | 日期 | 证据 | 结果 |
+|---|---|---|---|
+| 1 | 2026-09-14 | 会话策略 `approval_policy: never`；本会话原生提示框弹出 0 次 | 未执行，改为推进非授权项（旧版问答历史只读入口） |
+| 2 | 2026-09-14 | 同上，未变化 | 未执行，改为推进非授权项（真实 Clerk 桥测试、课程生命周期测试、多 worker 精确复核） |
+| 3 | 2026-09-14 | 同上，未变化；非授权项已无剩余高价值工作 | 上报 blocked |
+
+**不构成 blocked 的事项**（已全部完成，不是阻塞）：
+DomainPort 22 个 operation 全部接线、Clerk 注入式身份桥、检索/Task Agent/知识树/Bridge 接线、
+旧 V3 历史只读入口、原 React 工具链正式构建、本包 71 项 + 原仓库 458 项回归、
+9 项原生浏览器验收、五份 `docs/ui-refresh/*` 报告与最终报告。
+
+**解除阻塞所需的最小动作**（用户侧，二者之一即可）：
+1. 重新启用 DSH 批准提示（或把本会话策略改为可批准）；或
+2. 用户自行运行本包 `scripts/Request-DeploymentApproval.ps1` 完成确认。
+
 ## 6. 部署 / 回滚状态
 
 * 生产：**未触碰**。生产仍是 `qqttai.com` + `cd8c121` + Netlify `6aa70f2b5a330d5a8ae4be56`。
@@ -84,11 +110,14 @@ Netlify 发布。
 ## 7. 恢复步骤
 
 1. 读本文件与 `docs/ui-refresh/HANDOVER_BASELINE.md`。
-2. `git log --oneline -3` 确认 HEAD 在 `c87eb23` 或其后。
-3. 全量回归：见 §4 命令。
+2. `git rev-parse HEAD` 确认 HEAD 为 `6072588` 或其后；工作树应为空改动。
+3. 全量回归：见 §4 命令（每次均应得到 458 / 55 / 9 这三个数字）。
 4. 原生浏览器验收前，先按 `playwright.ui.config.ts` 前缀用部署形态构建前端：
    设置 `VITE_AUTH_TEST_TOKEN=test-session-token` 与
    `VITE_UI_API_BASE=http://127.0.0.1:8100/ui-extension/api/ui/v1` 后 `vite build`。
-   **发布前必须用 Clerk 形态（不设 test token）重新构建。**
-5. 需要真实千问验证时：先按 `scripts/Request-DeploymentApproval.ps1` 或宿主原生提示框
-   申请预算，再设置 `CMUI_PROVIDER_MODE=qwen` 与 `CMUI_ALLOW_BILLABLE=true`。
+   **发布前必须用 Clerk 形态（不设 test token）重新构建**，并确认产物中
+   不含 `test-session-token`、含 Clerk 客户端。
+5. 需要真实千问验证时：先取得授权（见 §5.1），再设置
+   `CMUI_PROVIDER_MODE=qwen` 与 `CMUI_ALLOW_BILLABLE=true`，
+   并按下述顺序部署：先发后端但保持 `UI_EXTENSION_ENABLED=false` 验证无回归，
+   再开开关并设置 `CMUI_DATA_DIR` / `UI_TASK_AGENT_URL`，最后发前端。
