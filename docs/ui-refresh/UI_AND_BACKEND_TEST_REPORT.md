@@ -141,11 +141,11 @@ allow-credentials；扩展响应强制 `private, no-store`。
 dist/index.html                  0.67 kB │ gzip:  0.39 kB
 dist/ui.html                     0.68 kB │ gzip:  0.44 kB
 dist/assets/main-jxvg7O-T.css   31.36 kB │ gzip:  6.48 kB
-dist/assets/ui-ra_uQrdw.css     53.05 kB │ gzip: 11.81 kB
+dist/assets/ui-2w_08ciX.css     53.84 kB │ gzip: 11.97 kB
 dist/assets/main-sCqwwDOm.js     0.59 kB │ gzip:  0.41 kB
-dist/assets/ui-BvjeJCl0.js     264.25 kB │ gzip: 77.75 kB
+dist/assets/ui-D3eWUBpF.js     264.26 kB │ gzip: 77.75 kB
 dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
-✓ built in 272ms
+✓ built in 243ms
 ```
 
 * 使用**原仓库的** React 19.2.8 + Vite 8.2.1 + TypeScript 5.9.3 工具链，未新增框架。

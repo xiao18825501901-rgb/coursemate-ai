@@ -19,6 +19,9 @@
 ```
 359da39  feat(ui-extension): mount delivered new UI on real V3 domain
 c87eb23  feat(ui-extension): real React shell, agent task bridge, wider recovery unit
+e8e4e58  fix(ui-extension): browser-verified CORS, caching and agent task contract
+7804608  docs(ui-refresh): handover baseline, integration map, migration, test and Qwen reports
+a5d5f1b  feat(ui-extension): keep the original V3 question history readable in the shell
 ```
 
 ## 2. 已合入模块
@@ -35,23 +38,23 @@ c87eb23  feat(ui-extension): real React shell, agent task bridge, wider recovery
 
 ## 3. 剩余 DomainPort 映射缺口
 
-**无未实现的 operation**。但以下是已知的语义限制：
+**无未实现的 operation（22 个全部实现）**。但以下是已知的语义限制：
 
 1. `knowledge.tree` 依赖 `learning_workspaces`：用户首次进入课程时自动创建 workspace。
    真实 corpus 若没有已发布的 `knowledge_tree_versions`，返回空数组（已实测）。
 2. `task.*` 的 `version` 由 Agent 的 `updatedAt` 派生（Agent Schema 1 没有 version 列）。
 3. `context.retrieve` 只返回 `top_k` 条，与 V3 学习链路的 `evidence()` 上限一致。
 4. 生成 run 是单进程内存任务表，多 worker 部署必须改造。
-5. 新壳未提供旧 V3 会话历史的只读入口。
+5. ~~新壳未提供旧 V3 会话历史的只读入口~~ → 已在 `a5d5f1b` 实现：`legacy.conversations` / `legacy.conversation` 两个 operation + 宿主两条只读路由 + 历史弹窗"旧版问答记录"分组。
 
 ## 4. 最新测试结果（本会话实测）
 
 | 套件 | 命令 | 结果 |
 |---|---|---|
-| rag-api 全量 | `.venv\Scripts\python.exe -m pytest -q` | 见 `UI_AND_BACKEND_TEST_REPORT.md` |
+| rag-api 全量 | `.venv\Scripts\python.exe -m pytest -q` | **455 passed** |
 | web 单测 | `vitest run`（`apps/web`） | 49 passed |
 | 正式构建 | `tsc -b && vite build` | 通过，双文档产物 |
-| 原生浏览器验收 | `playwright test --config playwright.ui.config.ts` | **7 passed**（真实 Chromium + 真三服务） |
+| 原生浏览器验收 | `playwright test --config playwright.ui.config.ts` | **9 passed**（真实 Chromium + 真三服务） |
 
 ## 5. 授权记录
 
