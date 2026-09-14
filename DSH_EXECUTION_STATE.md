@@ -57,10 +57,14 @@ a5d5f1b  feat(ui-extension): keep the original V3 question history readable in t
 
 | 套件 | 命令 | 结果 |
 |---|---|---|
-| rag-api 全量 | `.venv\Scripts\python.exe -m pytest -q` | **458 passed** |
+| rag-api 全量 | `.venv\Scripts\python.exe -m pytest -q` | **463 passed** |
 | web 单测 | `vitest run`（`apps/web`） | **55 passed**（含真实 Clerk 桥 6 项） |
 | 正式构建 | `tsc -b && vite build` | 通过，双文档产物 |
-| 原生浏览器验收 | `playwright test --config playwright.ui.config.ts` | **9 passed**（真实 Chromium + 真三服务） |
+| 原生浏览器验收（新壳） | playwright test --config playwright.ui.config.ts | **13 passed** |
+| 旧站 E2E | 
+px playwright test | **4 passed** |
+| V3 学习 E2E | 
+px playwright test --config playwright.v3.config.ts | **3 passed** |
 | 真实 Clerk 桥单测 | `vitest run src/CourseMateUi.test.tsx` | **6 passed** |
 
 ## 5. 授权记录

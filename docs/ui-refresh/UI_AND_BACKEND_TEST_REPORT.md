@@ -10,7 +10,7 @@
 
 | 套件 | 命令 | 结果 | 证据 |
 |---|---|---|---|
-| rag-api 全量回归（含原 329 项 + 新增） | `services/rag-api/.venv/Scripts/python.exe -m pytest -q` | **448 passed**, 357.39s | 本次运行 |
+| rag-api 全量回归（含原 329 项 + 新增） | `services/rag-api/.venv/Scripts/python.exe -m pytest -q` | **463 passed**, 399.94s | 本次运行 |
 | 交付包契约测试（迁入后） | `pytest tests/ui_extension -q` | **71 passed** | 本次运行 |
 | 新增 V3 DomainPort 集成测试 | `pytest tests/test_ui_extension_integration.py -q` | **16 passed** | 本次运行 |
 | 新增任务 Agent 桥测试 | `pytest tests/test_ui_extension_task_agent.py -q` | **15 passed** | 本次运行 |
@@ -18,15 +18,22 @@
 | 新增恢复单元测试（含新增 UI 库） | `pytest tests/test_backup_ui_extension.py -q` | **4 passed** | 本次运行 |
 | 新增旧版问答历史测试 | `pytest tests/test_ui_extension_legacy_history.py -q` | **7 passed** | 本次运行 |
 | 新增课程生命周期测试 | `pytest tests/test_ui_extension_course_lifecycle.py -q` | **3 passed** | 本次运行 |
+| 新增学习状态闭环测试（journey 写入 + 完整测评） | `pytest tests/test_ui_extension_learning_closure.py -q` | **5 passed** | 本次运行 |
 | 原备份/恢复测试（回归） | `pytest tests/test_backup_restore.py -q` | **9 passed** | 本次运行 |
-| web 单元测试（含真实 Clerk 桥） | `vitest run`（`apps/web`） | **55 passed**（连续 2 次） | 本次运行 |
+| web 单元测试（含真实 Clerk 桥） | `vitest run`（`apps/web`） | **55 passed** | 本次运行 |
+| Node Agent 单元测试 | `npm test`（`services/agent-api`） | **66 passed** | 本次运行 |
+| Node Agent 类型检查 + 正式构建 | `npm run typecheck` + `npm run build` | **通过** | 本次运行 |
 | 正式 React 生产构建 | `npm run build --workspace @coursemate/web`（`tsc -b && vite build`） | **通过** | 本次运行 |
-| 原生 Chromium 端到端验收 | `playwright test --config playwright.ui.config.ts` | **9 passed** | 本次运行 |
-| 原仓库既有 E2E（`coursemate.spec.ts`） | `npx playwright test` | **未运行**（见 §7 原因） | — |
+| 原生 Chromium 端到端验收（新壳） | `playwright test --config playwright.ui.config.ts` | **13 passed** | 本次运行 |
+| 原仓库既有 E2E（`coursemate.spec.ts`） | `npx playwright test` | **4 passed** | 本次运行（此前未跑过） |
+| 原 V3 学习 E2E（`learning.spec.ts`） | `npx playwright test --config playwright.v3.config.ts` | **3 passed** | 本次运行 |
 | 真实千问两阶段 | — | **NOT RUN** | 无预算授权 |
 
-**接手前基线对照**：rag-api 原为 329 passed；本次改动新增 119 个测试（71 + 16 + 15 + 13 + 4），
-并使原 329 项全部保持通过。
+**接手前基线对照**：rag-api 原为 329 passed；当前新增 134 个测试
+（71 + 16 + 15 + 13 + 4 + 7 + 3 + 5），且原 329 项全部保持通过。
+
+> 注：本表为**当前总表**。历史轮次的 448/455/458 等数字不再作为当前结论，
+> 只作为当时的阶段记录保留在旧提交历史里。
 
 ## 2. 新增测试覆盖了什么（真实行为，不是 mock 断言）
 
@@ -87,6 +94,31 @@ allow-credentials；扩展响应强制 `private, no-store`。
 * 未设置时产物与原恢复单元**逐项一致**（原 9 项备份测试仍通过）。
 * 声明了扩展目录但缺少 `ui.sqlite3` → 备份**失败**，不产出"看起来完整"的备份。
 * 只声明一半扩展产物 → 恢复拒绝，且不创建目标目录。
+
+### 2.8 `test_ui_extension_learning_closure.py` — 新 UI 到 V3 学习状态的写入闭环
+
+这 5 项测试用真实数据库断言回答"新教学是否进入 V3 状态"：
+
+* 带 `node_id` 的教学 run 先创建 V3 `learning_journeys` 行（与 V3 `teach()` 同一张表、
+  同一幂等键），再落 UI 行；`cmui_run_v3` 记录 run→journey 交叉引用。
+* **不伪造覆盖**：run 完成后 `teaching_delivery_evidence` 仍为 0 行，节点进度保持
+  `NOT_STARTED`（V3 状态推导只认 delivery evidence）。同一节点第二次教学复用同一
+  journey（幂等），不会多建行。
+* 未知节点 → 404，且**在写任何 UI 行之前**拒绝，不留下 queued 脏行。
+* 完整测评往返：start → 5 题 view（题目可见、答案键在提交前**不可见**）→ 提交 5 个
+  答案 → `GRADED` + `grade_snapshots` 1 行 + `assessment_sessions.status='GRADED'` →
+  节点测评状态更新为 GRADED，而学习进度保持不变（两个状态独立）。
+* 弃考后可重新开局；他人对该会话 404（跨用户隔离）。
+
+浏览器侧第 12 号用例把同一流程走了一遍：树中节点 → 测评结果 → 开始测评 → 5 题作答
+→ 提交 → "已评阅" + 每题反馈，随后 API 复查节点状态 GRADED 且进度 NOT_STARTED。
+
+### 2.9 默认入口与旧站兼容的浏览器证据
+
+13 号套件前 4 个用例断言：`/` 服务新壳文档并渲染新控制面板；`/app` 兼容别名；
+`/qa`、`/courses`、`/admin` 等旧深链仍服务旧文档且可渲染；哈希深链刷新后视图不变、
+后退回到控制面板。旧套件 `coursemate.spec.ts`（4/4）与 `learning.spec.ts`（3/3）
+验证旧站业务与 V3 学习链路不受影响。
 
 ## 3. 原生 Chromium 端到端验收（本次实测，替换交付包的 in-memory harness）
 
@@ -220,15 +252,26 @@ Playwright 的 Chromium 与两个 Node 服务在跑，最可能的原因是资�
 **结论**：该套件在本次改动下稳定通过（连续 3 次 49/49），但存在低频不稳定，
 不应当作"绝对零 flake"。若在生产前置流程中使用，建议对失败用例做一次重跑确认。
 
-## 8. 为什么原仓库既有 E2E 未运行
+## 8. 原仓库既有 E2E（此前遗漏，本轮已运行）
 
-`playwright.config.ts` 的 `testMatch` 只匹配 `coursemate.spec.ts`，它为 RAG API 设置了
-`V3_ENABLED=true` 但**没有**设置 `UI_EXTENSION_ENABLED`，因此只覆盖既有站点。
-本次没有改动该配置，以免把新壳的验收混进既有回归。既有站点本身通过 448 项
-rag-api 测试与 49 项 web 测试回归覆盖；其浏览器链路未在本次重新执行，
-这一点如实保留为未验证。
+`coursemate.spec.ts` 此前一直标为"未运行"。本轮补齐并**4/4 通过**；`learning.spec.ts`
+（V3 学习/公开审核链路）也以 `playwright.v3.config.ts` 运行，**3/3 通过**。
 
-## 8. 如何复现
+运行时修的两处环境问题：
+
+1. 旧套件的 vite 环境没有 `VITE_UI_API_BASE`，新壳在根地址引导时会打到 dev server
+   （HTML 当 JSON 解析报错）。现在 `playwright.config.ts` 的三个 webServer 环境
+   与 `playwright.ui.config.ts` 一致：RAG API 挂载扩展、vite 指向
+   `http://127.0.0.1:8000/ui-extension/api/ui/v1`。
+2. 根地址语义变了（新壳是默认入口），旧的"390px 移动端"用例原先断言旧落地页；
+   已更新为：根地址断言新壳六入口 + 无横向溢出，旧站移动流程改在 `/tasks` 深链上断言。
+
+另外修了一个由本套件暴露的 dev 服务器缺陷：开发路由中间件曾经把
+`/node_modules/.vite/...` 的预打包模块请求也回成 HTML，导致旧应用在 dev 模式整页崩溃
+（正是旧套件此前 3 个用例失败的根因——不是用例本身过期）。修复后 dev 与 Netlify 路由
+表一致：只有干净的文档路径才重写，任何真实资源直接放行。
+
+## 9. 如何复现
 
 ```powershell
 $repo = "C:\Users\Hp\Documents\Codex\2026-08-11\files-mentioned-by-the-user-coursemate\outputs\coursemate-ai"

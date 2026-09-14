@@ -57,8 +57,21 @@ app/main.py:create_app()
 | `task.plan` | HTTP 转发到 `POST /api/agent/chat` —— **原 Node Function Calling Agent**，不做正则、不做假成功 | `message`、`toolResults` |
 | `knowledge.tree` | `LearningOrchestrator.knowledge_state(workspace_id, subject)` → 取 `personalized_tree`（存在时）否则 `official_tree` 的 `members`，与 `registry` 合并 | `id/parent/title/position/progress/grade` |
 | `knowledge.assessment` | 同一份 snapshot 的 `state.assessment`；缺失时 404，**不伪造 GPA** | 原样 |
+| `knowledge.begin_learning` | `orchestrator.node()` 校验节点与 Spec 版本后，用 `LearningOrchestrator.journey()` 创建/复用 V3 `learning_journeys` 行（幂等）；run 侧把 run→journey 交叉引用写入 `cmui_run_v3` | `journey_id/node_id/spec_version/workspace_id/status` |
+| `knowledge.assessment.start` | `orchestrator.start_assessment(workspace, subject, AssessmentStartInput(...))` | V3 会话 dict |
+| `knowledge.assessment.view` | `orchestrator.assessment(workspace, subject, session_id)`（提交前答案键不可见，由 V3 view 契约保证） | 会话 + 5 题 |
+| `knowledge.assessment.submit` | `orchestrator.submit_assessment(...)`，workspace revision 现读现用，`REVISION_CONFLICT` 重试一次 | 评分结果 |
+| `knowledge.assessment.abandon` | `orchestrator.abandon_assessment(...)` | 会话 dict |
 | `legacy.conversations` | 直接读原 `conversations` 表，按 `owner_user_id` + `course_id` 过滤 | 宿主新增路由使用 |
 | `legacy.conversation` | 直接读原 `conversations` / `messages`，返回真实正文与引用 | 宿主新增路由使用 |
+
+**覆盖记录的权威归属（本轮审计结论，有代码证据）**：
+`app/learning/knowledge.py:_atomic_learning` 只用 `teaching_delivery_evidence` 计算
+`covered_required` 与 `NOT_STARTED/LEARNING/LEARNED` 状态。新壳的自由文本两阶段教学
+**只写** journey 起步与 `cmui_run_v3` 交叉引用，**从不**写 delivery evidence，
+因此节点进度如实停留在 `NOT_STARTED`，直到通过 V3 `teach()` 产生真实覆盖。
+这满足"不重复生成一套答案、不伪造 LEARNED"的硬约束；REQUIRED 覆盖的唯一权威来源
+仍是 V3 `teach()`（`teaching_delivery_evidence` + `learning_coverage`）。
 
 ### 关键约束（来自逐行读包，非猜测）
 
@@ -105,11 +118,11 @@ app/main.py:create_app()
 | 项 | 值 |
 |---|---|
 | 新壳入口 | `apps/web/ui.html` → `src/main.ui.tsx` → `src/CourseMateUi.tsx` |
-| 交付 UI 源码 | `apps/web/src/ui/*.jsx`、`*.js`、`*.css`（原样） |
+| 交付 UI 源码 | `apps/web/src/ui/*.jsx`、`*.js`、`*.css`（`pages.jsx` 与 `styles-extra.css` 有**纯新增**的测评流程/旧记录分组，其余原样） |
 | API base | `window.COURSEMATE_CONFIG.apiBase`；构建期由 `VITE_UI_API_BASE` 决定，默认 `/ui-extension/api/ui/v1` |
 | 数学渲染 | `window.CourseMateMath = katex`（npm `katex@0.16.22`），只生成 MathML |
-| 路由 | Netlify：`/app` 与 `/app/*` → `ui.html`，其余 → `index.html`（SPA 回退） |
-| 双文档理由 | 新壳自带 53 KB 全局 CSS（`*`、`html/body/#root` 重置），若与现有站点同文档会互相污染 |
+| 路由（**本轮改为新壳默认**） | `netlify.toml` 与 `scripts/serve_web_dist.mjs` 及 Vite dev 插件共用同一决策表：`/` 与未知路径 → `ui.html`（打开站点/登录完成即进入新控制面板）；`/app`、`/app/*` → `ui.html`（兼容别名）；`/qa`、`/learn`、`/courses`、`/tasks`、`/documents`、`/admin`、`/about` 及其子路径 → `index.html`（旧深链、历史阅读与管理入口继续可达）；已部署的 `/assets/*` 等真实文件永远优先于重写 |
+| 双文档理由 | 新壳自带 53 KB 全局 CSS（`*`、`html/body/#root` 重置），若与现有站点同文档会互相污染；双文档保留 |
 
 交付 UI 的 `App.jsx`、`pages.jsx`、`richtext.jsx` 未做任何视觉或交互改动。
 
@@ -140,7 +153,8 @@ app/main.py:create_app()
 
 ## 7. 新增数据与备份
 
-* 新表全部在独立文件 `CMUI_DATA_DIR/ui.sqlite3`（Schema 2，21 张 `cmui_*` 表），
+* 新表全部在独立文件 `CMUI_DATA_DIR/ui.sqlite3`（**Schema 3**，22 张 `cmui_*` 表，
+  其中 `cmui_run_v3` 是 Schema 2→3 新增的 run→V3 journey 交叉引用），
   与 `rag.sqlite3`、`agent.sqlite3` 物理分离；`Database.initialize()` 检测到
   `courses`/`chunks`/`tasks`/`schema_migrations` 会拒绝初始化，**不可能覆盖原库**。
 * 附件在 `CMUI_DATA_DIR/uploads/`。
