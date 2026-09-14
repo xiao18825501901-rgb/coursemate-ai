@@ -99,10 +99,20 @@ test("agent-created tasks remain editable and can be completed", async ({ page }
 
 test("mobile navigation and core actions remain usable at 390 pixels", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
+
+  // The refreshed shell is the default entry now, so "/" must serve it on mobile
+  // too, with its six-entry navigation and no horizontal overflow.
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1, name: /Study from evidence/i })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Ask CourseMate" })).toBeVisible();
-  await page.getByRole("link", { name: "Study plan", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "控制面板" })).toBeVisible();
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(1);
+
+  // The previous site remains reachable at its legacy deep links and its own
+  // mobile task flow still works.
+  await page.goto("/tasks");
   await expect(page.getByLabel("Message the study agent")).toBeVisible();
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
   await page.screenshot({ path: "work/tasks-mobile.png", fullPage: true });

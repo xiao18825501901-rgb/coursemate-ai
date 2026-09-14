@@ -2,10 +2,14 @@
 /**
  * Serve the production web build with the same routing Netlify applies.
  *
- * `netlify.toml` rewrites `/app` and `/app/*` to `ui.html` and everything else to
- * `index.html`. This static server reproduces exactly that so the browser
- * acceptance suite exercises the real build output and the real URL shapes rather
- * than the Vite development server.
+ * The document decision mirrors `netlify.toml` exactly:
+ *   "/" and unknown paths → ui.html (the refreshed shell is the default entry)
+ *   "/app", "/app/*"      → ui.html (compatibility alias)
+ *   legacy deep links    → index.html (previous site stays reachable)
+ *
+ * Deployed asset files are served directly and never rewritten, matching Netlify.
+ * This server exists so the browser acceptance suite exercises the real build
+ * output and the real URL shapes rather than the Vite development server.
  */
 
 import { createReadStream, existsSync, statSync } from "node:fs";
@@ -26,9 +30,24 @@ const TYPES = {
   ".woff2": "font/woff2",
 };
 
-function documentFor(pathname) {
+const LEGACY_PREFIXES = ["qa", "learn", "courses", "tasks", "documents", "admin", "about"];
+
+/**
+ * First path segment of a URL. "/qa/cs3481" → "qa", "/app" → "app", "/" → "".
+ */
+function firstSegment(pathname) {
+  const parts = pathname.split("/").filter(Boolean);
+  return parts[0] ?? "";
+}
+
+/**
+ * Same decision table as `netlify.toml`; keep them in sync.
+ */
+export function documentFor(pathname) {
+  if (pathname === "/" || pathname === "") return "ui.html";
   if (pathname === "/app" || pathname.startsWith("/app/")) return "ui.html";
-  return "index.html";
+  if (LEGACY_PREFIXES.includes(firstSegment(pathname))) return "index.html";
+  return "ui.html";
 }
 
 const server = createServer((request, response) => {

@@ -9,9 +9,26 @@
 # VITE_UI_API_BASE and VITE_V3_ENABLED in the Netlify UI. Keep V3 false until the
 # gated canary. Never place Clerk secret keys here.
 
-# The refreshed CourseMate shell is a second document in the same build and is
-# served at /app. It gets its own document so its global stylesheet cannot fight
-# the existing site's stylesheet; the shell itself routes on the URL hash.
+# ─────────────────────────────────────────────────────────────────────────────
+# Document routing (first match wins, top to bottom).
+#
+#   / and unknown paths  → ui.html   (the refreshed shell is the DEFAULT entry;
+#                                     sign-in returns to its dashboard)
+#   /app, /app/*         → ui.html   (compatibility alias)
+#   legacy deep links    → index.html (the previous V3 site keeps its paths so
+#                                     history reading and the admin/publication
+#                                     surfaces stay reachable)
+#
+# Deployed asset files always win over these rewrite rules, so the hashed
+# /assets/* bundles are never rewritten. Keep this list in sync with
+# `scripts/serve_web_dist.mjs` and the Vite dev plugin in `apps/web/vite.config.ts`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[redirects]]
+  from = "/"
+  to = "/ui.html"
+  status = 200
+
 [[redirects]]
   from = "/app"
   to = "/ui.html"
@@ -23,8 +40,78 @@
   status = 200
 
 [[redirects]]
-  from = "/*"
+  from = "/qa"
   to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/qa/*"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/learn"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/learn/*"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/courses"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/courses/*"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/tasks"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/tasks/*"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/documents"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/documents/*"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/admin"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/admin/*"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/about"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/about/*"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/*"
+  to = "/ui.html"
   status = 200
 
 [[headers]]

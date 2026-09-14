@@ -13,6 +13,44 @@ const NAV = ["账户", "控制面板", "课程", "日历", "收件箱", "帮助"
 
 test.describe.configure({ mode: "serial" });
 
+/** The refreshed shell's document must contain its own bundle, never the legacy one. */
+async function assertShellDocument(page: import("@playwright/test").Page) {
+  const entry = await page.evaluate(() => ({
+    scripts: Array.from(document.querySelectorAll("script[src]")).map((node) =>
+      (node as HTMLScriptElement).getAttribute("src"),
+    ),
+  }));
+  expect(entry.scripts.join(" ")).toMatch(/\/assets\/ui-[\w-]+\.js/);
+  expect(entry.scripts.join(" ")).not.toMatch(/\/assets\/main-[\w-]+\.js/);
+}
+
+/** The previous site's document must contain its own bundle, never the shell's. */
+async function assertLegacyDocument(page: import("@playwright/test").Page) {
+  const entry = await page.evaluate(() => ({
+    scripts: Array.from(document.querySelectorAll("script[src]")).map((node) =>
+      (node as HTMLScriptElement).getAttribute("src"),
+    ),
+  }));
+  expect(entry.scripts.join(" ")).toMatch(/\/assets\/main-[\w-]+\.js/);
+  expect(entry.scripts.join(" ")).not.toMatch(/\/assets\/ui-[\w-]+\.js/);
+}
+
+test("the refreshed shell is the default entry at the root", async ({ page }) => {
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+
+  await page.goto("/");
+  await assertShellDocument(page);
+
+  // After sign-in the default entry is the new dashboard, not the old landing.
+  const nav = page.getByRole("navigation", { name: "主导航" });
+  await expect(nav).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "控制面板" })).toBeVisible();
+  expect(consoleErrors).toEqual([]);
+});
+
 test("boots against the real API and exposes exactly six global entries", async ({ page }) => {
   const consoleErrors: string[] = [];
   const failedRequests: string[] = [];
@@ -25,17 +63,7 @@ test("boots against the real API and exposes exactly six global entries", async 
   });
 
   await page.goto("/app");
-  const entry = await page.evaluate(() => ({
-    scripts: Array.from(document.querySelectorAll("script[src]")).map((node) =>
-      (node as HTMLScriptElement).getAttribute("src"),
-    ),
-    legacyEntry: Array.from(document.querySelectorAll("script[src]")).some((node) =>
-      (node as HTMLScriptElement).getAttribute("src")?.includes("main-"),
-    ),
-  }));
-  // `/app` must serve the refreshed shell's document, not the legacy one.
-  expect(entry.scripts.join(" ")).toMatch(/\/assets\/ui-[\w-]+\.js/);
-  expect(entry.legacyEntry).toBe(false);
+  await assertShellDocument(page);
 
   const nav = page.getByRole("navigation", { name: "主导航" });
   await expect(nav).toBeVisible();
@@ -52,6 +80,42 @@ test("boots against the real API and exposes exactly six global entries", async 
 
   expect(failedRequests).toEqual([]);
   expect(consoleErrors).toEqual([]);
+});
+
+test("legacy deep links keep the previous site reachable", async ({ page }) => {
+  await page.goto("/qa/cs3481");
+  await assertLegacyDocument(page);
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+
+  await page.goto("/courses");
+  await assertLegacyDocument(page);
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+
+  await page.goto("/admin/publications");
+  await assertLegacyDocument(page);
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+});
+
+test("refreshing a deep shell route keeps the same view, and back returns home", async ({
+  page,
+}) => {
+  // Build history entries inside the shell first: dashboard → course files.
+  await page.goto("/app");
+  await assertShellDocument(page);
+  await expect(page.getByRole("heading", { level: 1, name: "控制面板" })).toBeVisible();
+  await page.evaluate(() => {
+    window.location.hash = "#/course/cs3481/files";
+  });
+  await expect(page.getByRole("heading", { level: 1, name: "文件" })).toBeVisible();
+
+  // A full refresh on the deep route keeps the same document and the same view.
+  await page.reload();
+  await assertShellDocument(page);
+  await expect(page.getByRole("heading", { level: 1, name: "文件" })).toBeVisible();
+
+  // Backward navigation inside the hash router returns to the dashboard.
+  await page.goBack();
+  await expect(page.getByRole("heading", { level: 1, name: "控制面板" })).toBeVisible();
 });
 
 test("shows an empty dashboard on first sign-in and adds courses from All Courses", async ({

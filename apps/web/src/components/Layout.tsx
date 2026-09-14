@@ -54,7 +54,10 @@ export function Layout() {
           ))}
         </nav>
         <div className="header-auth">
-          <a className="nav-link" href="/app">
+          {/* The refreshed shell is now the default entry at "/". This is a full
+              document link, not a client route, because the two apps keep
+              separate documents. */}
+          <a className="nav-link" href="/">
             学习空间
           </a>
           {auth.isSignedIn ? <SignedInAccount /> : <SignedOutActions />}

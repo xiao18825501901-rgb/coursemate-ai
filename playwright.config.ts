@@ -40,6 +40,10 @@ export default defineConfig({
         RAG_PROVIDER_MODE: "deterministic",
         APP_ENV: "test",
         V3_ENABLED: "true",
+        UI_EXTENSION_ENABLED: "true",
+        CMUI_DATA_DIR: path.join(e2eData, "ui-extension"),
+        CMUI_ALLOWED_ORIGINS: "http://127.0.0.1:5173",
+        UI_TASK_AGENT_URL: "http://127.0.0.1:8001",
         AUTH_TEST_USER_ID: e2eUserId,
         ADMIN_USER_IDS: "",
         WEB_ORIGIN: "http://127.0.0.1:5173",
@@ -79,6 +83,9 @@ export default defineConfig({
         VITE_AGENT_API_URL: "http://127.0.0.1:8001",
         VITE_AUTH_TEST_TOKEN: "test-session-token",
         VITE_V3_ENABLED: "true",
+        // The refreshed shell is the default document now; give it the mounted
+        // extension's origin so "/" boots into the new dashboard.
+        VITE_UI_API_BASE: "http://127.0.0.1:8000/ui-extension/api/ui/v1",
       },
       url: "http://127.0.0.1:5173",
       reuseExistingServer: false,
