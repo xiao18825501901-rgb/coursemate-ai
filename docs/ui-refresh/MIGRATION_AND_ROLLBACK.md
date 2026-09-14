@@ -185,6 +185,7 @@ python3 ops/restore_v2.py
 | `CMUI_PROVIDER_MODE` | `qwen` 或 `disabled`（`test` 仅限本地/浏览器验收，生产被 `validate()` 拒绝） | 未获付费授权时保持 `disabled` |
 | `CMUI_ALLOW_BILLABLE` | `false`（未授权时） | `true` 才会真正发出千问请求 |
 | `VITE_UI_API_BASE` | `https://rag.qqttai.com/ui-extension/api/ui/v1`（Netlify 构建期） | 前端 API 前缀 |
+| `VITE_CLERK_PUBLISHABLE_KEY` | 真实 publishable key（**Netlify 构建期必填**） | 构建期变量：不给 key 时壳的 Clerk 分支被 tree-shake，产物只渲染"认证未配置"（fail-closed，不破坏数据但不可登录）。假 key 只用于本地产物扫描验证 |
 
 千问凭据**不需要新增**：`mount.py` 直接复用 `V3_MODEL_API_KEY` / `V3_MODEL_BASE_URL`，
 所以站点仍然只有一份模型密钥。

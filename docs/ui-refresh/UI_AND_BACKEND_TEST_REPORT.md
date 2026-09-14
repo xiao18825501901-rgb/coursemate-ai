@@ -27,7 +27,7 @@
 | Node Agent 单元测试 | `npm test`（`services/agent-api`） | **66 passed** | 本次运行（复跑） |
 | Node Agent 类型检查 + 正式构建 | `npm run typecheck` + `npm run build` | **通过** | 本次运行（复跑） |
 | 正式 React 生产构建 | `tsc -b && vite build`（Clerk 形态） | **通过**；产物无测试令牌、含 Clerk | 本次运行（重建后重新扫描） |
-| 原生 Chromium 端到端验收（新壳） | `playwright test --config playwright.ui.config.ts` | **15 passed**, 53.0s | 本次运行（两跑：首跑暴露桥接横幅缺陷 → 修复 → 全绿） |
+| 原生 Chromium 端到端验收（新壳） | `playwright test --config playwright.ui.config.ts` | **16 passed**, 1.1m | 本次运行（含键盘/触屏用例） |
 | 原仓库既有 E2E（`coursemate.spec.ts`） | `npx playwright test` | **4 passed** | 本次运行（复跑） |
 | 原 V3 学习 E2E（`learning.spec.ts`） | `npx playwright test --config playwright.v3.config.ts` | **3 passed** | 本次运行（复跑） |
 | 真实千问两阶段 | — | **NOT RUN** | 无预算授权 |
@@ -119,7 +119,7 @@ allow-credentials；扩展响应强制 `private, no-store`。
 
 ### 2.9 默认入口与旧站兼容的浏览器证据
 
-15 号套件前 4 个用例断言：`/` 服务新壳文档并渲染新控制面板；`/app` 兼容别名；
+16 号套件前 4 个用例断言：`/` 服务新壳文档并渲染新控制面板；`/app` 兼容别名；
 `/qa`、`/courses`、`/admin` 等旧深链仍服务旧文档且可渲染；哈希深链刷新后视图不变、
 后退回到控制面板。旧套件 `coursemate.spec.ts`（4/4）与 `learning.spec.ts`（3/3）
 验证旧站业务与 V3 学习链路不受影响。
@@ -171,7 +171,8 @@ fixture（`seed_legacy_conversation.py` / `seed_tree_fixture.py`，只写 `work/
 | 12 | 测评全流程：开始 → 5 题 → 提交 → 已评阅 + 每题反馈；评分后进度仍 NOT_STARTED | PASS |
 | 13 | **层级知识树**：根组"数据科学基础"+ 子节点"聚类分析/学习中"、"K-means 聚类/教学已完成"、测评入口"未测评"；API 复读同一批 DB 事实 | PASS |
 | 14 | **双模式流程**：题目生成 2 个步骤按钮 → 点第 1 步 → 教学 Pane 出现"返回原题 · 第 1 步"横幅并完成教学 → 返回后横幅消失、回到 step 锚点、服务端 bridge 置 returned | PASS |
-| 15 | 390px 视口下无横向溢出 | PASS |
+| 15 | **知识树键盘与触屏可达**：Enter 展开树 → Tab/焦点揭示节点两个状态入口 → Enter 学习进度开始教学并收拢树；390px 下 tap 节点 → tap 学习进度 → 切到知识学习 tab 并生成教学（`hasTouch` 上下文） | PASS |
+| 16 | 390px 视口下无横向溢出 | PASS |
 
 ### 2.5 `test_ui_extension_legacy_history.py` — 旧记录不丢失
 新壳的历史在 `cmui_conversations`/`cmui_messages`，旧 V3 历史在
@@ -236,28 +237,33 @@ fixture（`seed_legacy_conversation.py` / `seed_tree_fixture.py`，只写 `work/
    横幅一直留在教学 Pane。修复：返回时同时清空本地 bridge 状态。
    用例 14 断言返回后横幅数 0 + 服务端 `layout.bridge` 为 null。
 
-## 4. 正式 React 生产构建
+## 4. 正式 React 生产构建（三种形态如实区分，本轮更正）
 
-```
-> tsc -b && vite build（Clerk 形态）
-dist/index.html                  0.67 kB │ gzip:  0.39 kB
-dist/ui.html                     0.68 kB │ gzip:  0.44 kB
-dist/assets/main-jxvg7O-T.css   31.36 kB │ gzip:  6.48 kB
-dist/assets/ui-CZNEynfi.css     54.70 kB │ gzip: 12.11 kB
-dist/assets/main-sCqwwDOm.js     0.59 kB │ gzip:  0.41 kB
-dist/assets/ui-C60rpF3L.js     264.26 kB │ gzip: 77.75 kB
-dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
-✓ built in 239ms
-```
+`VITE_CLERK_PUBLISHABLE_KEY` 是**构建期**变量：不给 key 时 `CourseMateUi` 的 Clerk
+分支被 tree-shake，产物只渲染"认证未配置"（fail-closed）。因此产物分三种形态：
+
+| 形态 | 构建变量 | 产物 | 实测内容 |
+|---|---|---|---|
+| E2E 形态 | `VITE_AUTH_TEST_TOKEN` + `VITE_UI_API_BASE` | `ui-rTcXnucO.js`（348.42 kB） | 含 TestAuthBridge；只服务浏览器验收，**绝不可发布** |
+| Clerk 验证形态 | 无 test token + 假 `pk_test_...` key（仅本地扫描） | `ui-Bckh22_y.js`（348.59 kB，SHA 前 16 位 `B4BA950D3047F0A6`） | 含 `window.CourseMateAuth` 桥、`openSignIn({fallbackRedirectUrl: origin+'/'})`；**不含** `test-session-token`/`TestAuthBridge`——证明真实 Clerk 分支完整进入生产形态产物 |
+| fail-closed 形态 | 无任何 key/token | `ui-C60rpF3L.js`（264.26 kB，SHA 前 16 位 `9C9214A661399002`） | 渲染"认证未配置" |
+
+**更正**：此前报告"正式产物不含 test-session-token 且包含 Clerk 客户端"不准确——
+当时的产物是 fail-closed 形态（shell 内无 Clerk 分支），"包含 Clerk"测得的是共享
+chunk 里的 Clerk 库。生产 Netlify 构建必须设置真实的 `VITE_CLERK_PUBLISHABLE_KEY`，
+否则发布的就是 fail-closed 形态（壳只显示"认证未配置"，不破坏数据但不可登录）。
 
 * 使用**原仓库的** React 19.2.8 + Vite 8.2.1 + TypeScript 5.9.3 工具链，未新增框架。
 * 新增唯一运行时依赖：`katex@0.16.22`（替代交付包 265 KB 的离线 vendor 副本）。
 * 双文档产物：`index.html`（旧站深链）+ `ui.html`（新壳，`/` 默认入口与 `/app` 别名）。
 * **交付包的离线 React16 `web/dist` 未被使用、未被复制、未被发布**；
   `app/cm_update/config.py` 的生产门仍然会在检测到 `not_for_production` 时拒绝启动。
-* 该正式产物中**不含** `test-session-token`/`TestAuthBridge`，且包含 Clerk 客户端
-  （E2E 构建与正式构建严格隔离，两者都经扫描）。
 * 依赖审计：`npm install` 报告 `found 0 vulnerabilities`。
+* **全资源扫描**（closure §六.5）：`test-session-token` 在源码/配置中只出现在 6 个
+  预期位置（`AuthProvider.tsx`、`CourseMateUi.tsx`、两个 playwright config、
+  agent `auth.ts`、rag `auth.py`），全部由 `AUTH_TEST_USER_ID`/测试构建显式启用；
+  发布形态产物（fail-closed 与 Clerk 验证形态）均不含该标记；agent 产物中的
+  测试策略只在操作员设置 `AUTH_TEST_USER_ID` 时启用，不是生产旁路。
 
 ## 5. 未验证项（明确保留）
 

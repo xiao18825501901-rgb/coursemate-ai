@@ -13,7 +13,7 @@
 
 | 项 | 证据 |
 |---|---|
-| `/` 服务新壳文档并进入新控制面板；登录返回目标即新控制面板 | `netlify.toml` / `scripts/serve_web_dist.mjs` / `apps/web/vite.config.ts` 三处共享同一决策表；`tests/e2e/ui-refresh.spec.ts` 用例 1（根地址断言 ui bundle + 控制面板标题） |
+| `/` 服务新壳文档并进入新控制面板；**登录完成后也回到新控制面板** | `netlify.toml` / `scripts/serve_web_dist.mjs` / `apps/web/vite.config.ts` 三处共享同一决策表；`tests/e2e/ui-refresh.spec.ts` 用例 1；`CourseMateUi.tsx` 的 `openSignIn({fallbackRedirectUrl: origin+'/'})` + 单测断言（6 项之一）；Clerk 验证形态产物实测含该调用（§一.6） |
 | `/app` 兼容别名保留 | 同上，用例 2 |
 | 旧深链（/qa /learn /courses /tasks /documents /admin /about）仍服务旧文档且可渲染 | 用例 3；旧套件 `coursemate.spec.ts` 4/4、`learning.spec.ts` 3/3 |
 | 哈希深链刷新/后退 | 用例 4 |
@@ -40,6 +40,7 @@
 | 双模式完整流程（DB 事实） | 同套件：Problem 生成编号步骤 → Bridge 绑定真实步骤 → Teach 带 bridge 上下文进 Provider + journey 链接 → Return 关闭 bridge、layout 不再暴露；伪造步骤 422 |
 | 浏览器树层级与双状态入口 | `ui-refresh.spec.ts` 用例 13：树展开显示根组 + 两子节点，悬停弹层"学习中/教学已完成/未测评"，并用 API 复读同一批 DB 事实 |
 | 浏览器双模式点击路径 | 用例 14：题目 → 2 个 step 按钮 → 点第 1 步 → 教学 Pane 出现"返回原题 · 第 1 步"横幅并生成教学 → 返回后横幅消失、回到 step 锚点、服务端 bridge 置 returned |
+| 知识树键盘/触屏可达（closure §五.2） | 用例 15：Enter 展开树、焦点揭示两个状态入口、Enter 学习进度开始教学并自动收拢；390px 下 tap 节点 → tap 学习进度 → 切到知识学习 tab 并生成教学（`hasTouch` 上下文） |
 | 为此新增的确定性 Provider | `provider_mode='test'` 现在选择 `TestProvider`（`app/cm_update/provider.py`），生产被 `validate()` 拒绝；`tests/test_ui_extension_test_provider.py`（3 项）锁住选择路径 |
 | 顺手修复的真实缺陷 | "返回原题"后桥接横幅不消失（`pages.jsx:backToProblem` 未清本地 bridge 状态）——浏览器用例 14 首跑发现，修复后全绿 |
 
@@ -69,13 +70,13 @@
 | 套件 | 结果 |
 |---|---|
 | rag-api 全量 | **473 passed**（455.28s；新增 `test_ui_extension_test_provider.py` 3 项、`test_ui_extension_tree_and_dual_mode.py` 3 项已并入） |
-| 新壳浏览器验收（含树层级 + 双模式 2 项新用例） | **15 passed**（53.0s，本轮两跑：首跑暴露横幅缺陷 → 修复 → 二跑全绿） |
+| 新壳浏览器验收（含树层级、双模式、键盘/触屏 3 项新用例） | **16 passed**（1.1m；本会话多跑：首跑暴露横幅缺陷与 tap 上下文缺失 → 修复 → 全绿） |
 | 旧站 E2E `coursemate.spec.ts` | **4 passed**（本轮复跑） |
 | V3 学习 E2E `learning.spec.ts` | **3 passed**（本轮复跑） |
 | Node Agent 单测 / typecheck / build | **66 passed** / 通过 / 通过（本轮复跑） |
 | web 单测（含真实 Clerk 桥 6 项） | **55 passed**（本轮复跑，13 文件） |
-| 正式 React 构建（Clerk 形态） | 通过；产物无 `test-session-token`/`TestAuthBridge`、含 Clerk（本轮重建后重新扫描） |
-| E2E 产物与正式产物隔离 | E2E 用 `VITE_AUTH_TEST_TOKEN`+`VITE_UI_API_BASE` 构建运行（348 KB），随后 Clerk 形态重建正式 `dist`（264 KB），两者都经扫描 |
+| 正式 React 构建 | 三种形态如实区分（本轮**更正**此前"正式产物含 Clerk"的不准确说法）：E2E 形态（test token）`ui-rTcXnucO.js`；**Clerk 验证形态**（假 `pk_test_...` key 构建，实测含 AuthBridge + `openSignIn({fallbackRedirectUrl: origin+'/'})`、无测试令牌）`ui-Bckh22_y.js`=B4BA950D3047F0A6；fail-closed 形态（无 key）`ui-C60rpF3L.js`=9C9214A661399002 只渲染"认证未配置"。生产 Netlify 构建必须设置真实 `VITE_CLERK_PUBLISHABLE_KEY` |
+| E2E 产物与正式产物隔离 + 全资源扫描 | 源码中 `test-session-token` 只出现在 6 个预期位置（全部由测试环境显式启用）；发布形态产物均无该标记；agent 产物中的测试策略仅当操作员设置 `AUTH_TEST_USER_ID` 时启用 |
 
 ### 7. flaky 状态
 

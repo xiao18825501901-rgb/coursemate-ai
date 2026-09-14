@@ -70,8 +70,8 @@ dd710b3  feat(ui-extension): enforce single-worker safety for generation runs
 |---|---|---|
 | rag-api 全量 | `.venv\Scripts\python.exe -m pytest -q` | **473 passed**（455.28s；含新增 `test_ui_extension_test_provider.py` 3 项、`test_ui_extension_tree_and_dual_mode.py` 3 项、`test_ui_extension_single_worker.py` 4 项） |
 | web 单测 | `vitest run`（`apps/web`） | **55 passed**（含真实 Clerk 桥 6 项） |
-| 正式构建 | `tsc -b && vite build`（Clerk 形态） | 通过；产物无测试令牌、含 Clerk；`ui-C60rpF3L.js`=9C9214A661399002 |
-| 原生浏览器验收（新壳） | `playwright test --config playwright.ui.config.ts` | **15 passed**（53.0s，含树层级 + 双模式 2 项新用例） |
+| 正式构建 | `tsc -b && vite build`（三种形态） | 通过：E2E 形态（test token）`ui-rTcXnucO.js`；Clerk 验证形态（假 key）`ui-Bckh22_y.js`=B4BA950D3047F0A6 含 AuthBridge+fallbackRedirectUrl、无测试令牌；fail-closed 形态（无 key）`ui-C60rpF3L.js`=9C9214A661399002。**生产构建必须给真实 `VITE_CLERK_PUBLISHABLE_KEY`** |
+| 原生浏览器验收（新壳） | `playwright test --config playwright.ui.config.ts` | **16 passed**（1.1m，含树层级、双模式、键盘/触屏用例） |
 | 旧站 E2E `coursemate.spec.ts` | `playwright test`（默认 config） | **4 passed**（本轮复跑） |
 | V3 学习 E2E `learning.spec.ts` | `playwright test --config playwright.v3.config.ts` | **3 passed**（本轮复跑） |
 | Node Agent 单测/typecheck/build | `vitest run` / `tsc --noEmit` / `tsc` | **66 passed** / 通过 / 通过（本轮复跑） |
@@ -112,13 +112,14 @@ Netlify 发布。
 1. 读本文件与 `docs/ui-refresh/HANDOVER_BASELINE.md`、`docs/ui-refresh/RELEASE_CLOSURE_CHECKLIST.md`。
 2. `git rev-parse HEAD` 确认 HEAD；工作树应为空改动（未提交项已入库）。
 3. 全量回归：见 §4 命令；关键数字 rag-api 全量、web 55、agent 66、
-   新壳浏览器 15、旧站 4、V3 学习 3。
+   新壳浏览器 16、旧站 4、V3 学习 3。
 4. 原生浏览器验收前，先按 `playwright.ui.config.ts` 前缀用部署形态构建前端：
    设置 `VITE_AUTH_TEST_TOKEN=test-session-token` 与
    `VITE_UI_API_BASE=http://127.0.0.1:8100/ui-extension/api/ui/v1` 后 `vite build`
-   （config 自带 `CMUI_PROVIDER_MODE=test` + 树 fixture 注入）。
-   **发布前必须用 Clerk 形态（不设 test token）重新构建**，并扫描产物：
-   不含 `test-session-token`/`TestAuthBridge`、含 Clerk 客户端。
+   （config 自带 `CMUI_PROVIDER_MODE=test` + 树 fixture 注入 + `hasTouch`）。
+   **产物形态扫描**：E2E 产物含测试令牌（预期）；Clerk 验证形态用假
+   `VITE_CLERK_PUBLISHABLE_KEY=pk_test_...` 构建并扫描（含 AuthBridge、
+   无测试令牌）；生产 Netlify 构建必须设置真实 key，否则发布 fail-closed 形态。
 5. 需要真实千问验证时：先取得授权（见 §5.1），再设置
    `CMUI_PROVIDER_MODE=qwen` 与 `CMUI_ALLOW_BILLABLE=true`，
    并按下述顺序部署：先发后端但保持 `UI_EXTENSION_ENABLED=false` 验证无回归，

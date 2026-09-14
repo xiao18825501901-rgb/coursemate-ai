@@ -133,17 +133,26 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 * 依赖审计：`npm install` 输出 `found 0 vulnerabilities`。
 * **交付包 `web/dist` 从未被使用、复制或发布**；`app/cm_update/config.py` 的
   production 门会拒绝带 `not_for_production` 标识的产物，该门**未被删除或绕过**。
-* 正式产物中**不含** `test-session-token` / `TestAuthBridge`，且包含 Clerk 客户端（本轮重建后重新扫描确认）。
-* E2E 构建与正式构建**严格隔离**：E2E 用 `VITE_AUTH_TEST_TOKEN` + `VITE_UI_API_BASE`
-  构建并运行（产物 348 KB，含测试桥），随后以 Clerk 形态重建正式 `dist`（264 KB），
-  两者都经扫描确认——E2E 令牌绝不进入正式产物。
+* **构建形态如实区分三种（本轮更正了此前"正式产物包含 Clerk"的不准确说法）**。
+  `VITE_CLERK_PUBLISHABLE_KEY` 是**构建期**变量：没给 key 时 `CourseMateUi` 的 Clerk
+  分支被 tree-shake，产物只会渲染"认证未配置"（fail-closed）。因此：
+  * **E2E 形态**（`VITE_AUTH_TEST_TOKEN` + `VITE_UI_API_BASE`）：`ui-rTcXnucO.js`
+    （348.42 kB）——含 TestAuthBridge，只服务浏览器验收，绝不可发布；
+  * **Clerk 验证形态**（无 test token，构建期给一个假 `pk_test_...` key，
+    仅本地扫描用）：`ui-Bckh22_y.js`（348.59 kB，SHA 前 16 位 `B4BA950D3047F0A6`）
+    ——实测含 `window.CourseMateAuth` 桥、`openSignIn({fallbackRedirectUrl: origin+'/'})`
+    （登录后落回新控制面板）、**不含** `test-session-token`/`TestAuthBridge`，
+    证明真实 Clerk 分支能完整进入生产形态产物；
+  * **fail-closed 形态**（无任何 key/token）：`ui-C60rpF3L.js`（264.26 kB，
+    SHA 前 16 位 `9C9214A661399002`）——渲染"认证未配置"。**此前报告的"正式产物含
+    Clerk"实际指的是这一形态 + 共享 chunk 里的 Clerk 库**；特此更正：真实 Clerk
+    分支只存在于带 key 的构建里，生产 Netlify 构建必须设置真实的
+    `VITE_CLERK_PUBLISHABLE_KEY`（见 `MIGRATION_AND_ROLLBACK.md` 环境变量表）。
 * 双文档 + 路由决策表（`netlify.toml` / `scripts/serve_web_dist.mjs` /
   `apps/web/vite.config.ts` 三处共享同一张表）：
   `/` → `ui.html`（新壳，**默认入口**）；`/app` → `ui.html`（兼容别名）；
   旧深链前缀（`qa,learn,courses,tasks,documents,admin,about`）→ `index.html`（旧站）；
   真实静态资源永远优先于任何重写。
-* 产物 SHA-256（前 16 位）：`ui-C60rpF3L.js` = `9C9214A661399002`，
-  `ui-CZNEynfi.css` = `4B68E8A48AA50437`，`dist-YiqoSCPN.js` = `456CB1E39F7CD904`。
 
 ---
 
@@ -166,7 +175,7 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 | 原备份/恢复测试（回归） | **9 passed** |
 | web 单元测试（含真实 Clerk 桥 6 项） | **55 passed** |
 | Node Agent 单测 / typecheck / build | **66 passed** / 通过 / 通过 |
-| 原生 Chromium 端到端（新壳） | **15 passed**（53.0s） |
+| 原生 Chromium 端到端（新壳） | **16 passed**（1.1m） |
 | 原仓库既有 E2E `coursemate.spec.ts` | **4 passed** |
 | 原 V3 学习 E2E `learning.spec.ts` | **3 passed** |
 
@@ -225,7 +234,8 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 ### 5.2 未验证
 
 * **真实 Clerk 登录/登出/刷新/恢复（NOT VERIFIED）**：需要真实 Clerk 应用与账号。
-  provider 侧的注入 resolver 与宿主 `ClerkAuthVerifier` 走通，但浏览器侧真实 Clerk 流程未跑。
+  代码层证据已齐（桥 6 项单测 + 登录返回目标 `fallbackRedirectUrl: '/'` +
+  生产形态产物扫描，§2）；浏览器侧真实 Clerk 会话流程仍未跑。
 * 生产双用户隔离、管理员边界（NOT VERIFIED）。
 
 ---
@@ -348,13 +358,17 @@ DSH 安装版本：`@deepseek-ai/dsh 0.1.1-rc.2`（`C:\Users\Hp\AppData\Roaming\
 学习页历史弹窗新增"旧版问答记录"分组与只读阅读器。**没有把旧记录复制进新表**。
 证据：7 项 Python 测试 + 浏览器用例 10。
 
-**（2）生产 Clerk 桥从零覆盖变为已覆盖**（goal round 2）：
+**（2）生产 Clerk 桥从零覆盖变为已覆盖**（goal round 2 + 本轮补强）：
 之前所有浏览器用例都用后端测试验证器，走的是 `TestAuthBridge` 分支，
 **生产分支 `AuthBridge` 从未被执行**——这是一个真实的上线风险。
 现由 `apps/web/src/CourseMateUi.test.tsx` 6 项覆盖：token 委托给 Clerk、
-退订函数、`signIn` 走 Clerk 弹窗、`signOut` 走 Clerk、卸载清理桥、
+退订函数、`signIn` 走 Clerk 弹窗且带 `fallbackRedirectUrl: origin+'/'`
+（登录后落回新控制面板）、`signOut` 走 Clerk、卸载清理桥、
 **无 publishable key 时失败关闭且不安装桥**。
 （该项第一次运行失败，正是因为它正确地走了失败关闭分支。）
+本轮进一步做实到**产物层**：用假 `pk_test_...` key 构建的生产形态产物
+`ui-Bckh22_y.js` 实测包含 AuthBridge + `openSignIn({fallbackRedirectUrl})`、
+不含任何测试令牌（§2），并更正了此前"正式产物含 Clerk"的不准确表述。
 
 同时把课程删除的生命周期用 3 项测试固定下来：无 workspace 正常删除、
 确认名称不符 422、**有 workspace 时 409 且课程与私有语料都不受影响**。
