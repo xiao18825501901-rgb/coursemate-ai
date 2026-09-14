@@ -8,6 +8,8 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
+    "allowJs": true,
+    "checkJs": false,
     "jsx": "react-jsx",
     "strict": true,
     "noUncheckedIndexedAccess": true,

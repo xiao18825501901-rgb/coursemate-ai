@@ -21,6 +21,38 @@ REQUIRED_ARTIFACTS = {
     "sqlite-check.txt",
 }
 
+# Data artifacts a backup always carries, independent of what the manifest lists.
+BASE_DATA_ARTIFACTS = {"rag.sqlite3", "agent.sqlite3", "uploads.tar.gz"}
+METADATA_ARTIFACTS = {"manifest.json", "sqlite-check.txt"}
+
+# Present only when the refreshed learning shell is part of the deployment.
+OPTIONAL_ARTIFACTS = {"ui.sqlite3", "ui-uploads.tar.gz"}
+
+
+def _data_artifacts(manifest: dict[str, object]) -> set[str]:
+    """Return the data artifacts this backup carries.
+
+    The `artifacts` map is derived state: older backups may omit it or list only
+    some entries, so it is never trusted as the source of truth. It can only add
+    the refreshed-shell database and attachment archive, which are recognised
+    explicitly; anything else it names is a corrupt or forged backup.
+    """
+
+    declared = BASE_DATA_ARTIFACTS
+    artifacts = manifest.get("artifacts")
+    if artifacts is None:
+        return declared
+    if not isinstance(artifacts, dict):
+        raise ValueError("Backup manifest artifacts must be an object.")
+    named = {value for value in artifacts.values() if isinstance(value, str)}
+    unexpected = named - BASE_DATA_ARTIFACTS - OPTIONAL_ARTIFACTS - METADATA_ARTIFACTS
+    if unexpected:
+        raise ValueError(f"Backup manifest declares unknown artifacts: {sorted(unexpected)}")
+    optional_declared = named & OPTIONAL_ARTIFACTS
+    if optional_declared and optional_declared != OPTIONAL_ARTIFACTS:
+        raise ValueError("Backup declares only part of the refreshed-shell artifacts.")
+    return declared | optional_declared
+
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -30,20 +62,21 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _verify_checksums(source: Path) -> None:
+def _verify_checksums(source: Path, data_artifacts: set[str]) -> None:
+    covered = data_artifacts | METADATA_ARTIFACTS
     checksum_path = source / "SHA256SUMS"
     if not checksum_path.is_file():
         raise ValueError("Backup checksum manifest is missing.")
     verified: set[str] = set()
     for line in checksum_path.read_text(encoding="ascii").splitlines():
         digest, separator, filename = line.partition("  ")
-        if not separator or filename not in REQUIRED_ARTIFACTS:
+        if not separator or filename not in covered:
             raise ValueError("Backup checksum manifest is invalid.")
         artifact = source / filename
         if not artifact.is_file() or _sha256(artifact) != digest:
             raise ValueError(f"Backup checksum mismatch: {filename}")
         verified.add(filename)
-    if verified != REQUIRED_ARTIFACTS:
+    if verified != covered:
         raise ValueError("Backup checksum manifest does not cover every required artifact.")
 
 
@@ -132,10 +165,11 @@ def restore_backup() -> Path:
     if target == source or source in target.parents:
         raise ValueError("RESTORE_TARGET must be outside the verified backup source.")
 
-    _verify_checksums(source)
     manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
     if manifest.get("formatVersion") != 1:
         raise ValueError("Unsupported backup manifest version.")
+    data_artifacts = _data_artifacts(manifest)
+    _verify_checksums(source, data_artifacts)
     expected_file_count = manifest.get("uploadFileCount")
     expected_total_bytes = manifest.get("uploadTotalBytes")
     if (
@@ -147,6 +181,18 @@ def restore_backup() -> Path:
         or expected_total_bytes < 0
     ):
         raise ValueError("Backup upload manifest is invalid.")
+    includes_ui = "ui.sqlite3" in data_artifacts
+    ui_expected_file_count = manifest.get("uiUploadFileCount")
+    ui_expected_total_bytes = manifest.get("uiUploadTotalBytes")
+    if includes_ui and (
+        not isinstance(ui_expected_file_count, int)
+        or isinstance(ui_expected_file_count, bool)
+        or ui_expected_file_count < 0
+        or not isinstance(ui_expected_total_bytes, int)
+        or isinstance(ui_expected_total_bytes, bool)
+        or ui_expected_total_bytes < 0
+    ):
+        raise ValueError("Backup refreshed-shell upload manifest is invalid.")
 
     partial_target = target.with_name(f".{target.name}.{uuid4().hex}.partial")
     if partial_target.exists():
@@ -154,7 +200,10 @@ def restore_backup() -> Path:
     partial_target.mkdir(mode=0o700, parents=True)
     uploads_target = partial_target / "uploads"
     uploads_target.mkdir(mode=0o700)
-    for name in ("rag.sqlite3", "agent.sqlite3"):
+    databases = ["rag.sqlite3", "agent.sqlite3"]
+    if includes_ui:
+        databases.append("ui.sqlite3")
+    for name in databases:
         destination = partial_target / name
         shutil.copyfile(source / name, destination)
         _verify_sqlite(destination)
@@ -164,6 +213,15 @@ def restore_backup() -> Path:
         expected_file_count=expected_file_count,
         expected_total_bytes=expected_total_bytes,
     )
+    if includes_ui:
+        ui_uploads_target = partial_target / "ui-uploads"
+        ui_uploads_target.mkdir(mode=0o700)
+        _extract_uploads(
+            source / "ui-uploads.tar.gz",
+            ui_uploads_target,
+            expected_file_count=ui_expected_file_count,
+            expected_total_bytes=ui_expected_total_bytes,
+        )
     # Errors leave only a hidden `.partial` directory, never a complete-looking restore.
     partial_target.replace(target)
     return target

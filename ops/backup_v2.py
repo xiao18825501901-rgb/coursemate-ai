@@ -21,6 +21,20 @@ ARTIFACTS = (
     "sqlite-check.txt",
 )
 
+# The refreshed learning shell keeps its own database and its own attachment
+# directory. When the extension is deployed, both belong to the same recovery
+# unit as the RAG and Agent stores; `CMUI_DATA_DIR` is what marks it deployed.
+UI_DATABASE_NAME = "ui.sqlite3"
+UI_UPLOADS_NAME = "ui-uploads.tar.gz"
+UI_ARTIFACTS = (UI_DATABASE_NAME, UI_UPLOADS_NAME)
+
+
+def _ui_data_dir() -> Path | None:
+    raw_value = os.environ.get("CMUI_DATA_DIR", "").strip()
+    if not raw_value:
+        return None
+    return _required_path("CMUI_DATA_DIR", directory=True)
+
 
 def _required_path(name: str, *, directory: bool = False) -> Path:
     raw_value = os.environ.get(name, "").strip()
@@ -112,8 +126,35 @@ def create_backup() -> Path:
     upload_file_count, upload_total_bytes = _archive_uploads(
         upload_root, partial_destination / "uploads.tar.gz"
     )
+    checked = ["rag.sqlite3", "agent.sqlite3"]
+    artifacts: dict[str, str] = {
+        "ragDatabase": "rag.sqlite3",
+        "agentDatabase": "agent.sqlite3",
+        "uploads": "uploads.tar.gz",
+    }
+
+    ui_root = _ui_data_dir()
+    ui_counts: dict[str, int] = {}
+    if ui_root is not None:
+        # The UI database is a separate SQLite file with its own attachment tree.
+        # Two independent `backup` calls cannot be atomic with respect to each
+        # other; the operator must take this unit inside one maintenance window.
+        ui_database = ui_root / UI_DATABASE_NAME
+        if not ui_database.is_file():
+            raise ValueError(f"CMUI_DATA_DIR does not contain {UI_DATABASE_NAME}: {ui_root}")
+        _sqlite_backup(ui_database, partial_destination / UI_DATABASE_NAME)
+        checked.append(UI_DATABASE_NAME)
+        ui_upload_root = ui_root / "uploads"
+        ui_upload_root.mkdir(parents=True, exist_ok=True)
+        ui_file_count, ui_total_bytes = _archive_uploads(
+            ui_upload_root, partial_destination / UI_UPLOADS_NAME
+        )
+        ui_counts = {"fileCount": ui_file_count, "totalBytes": ui_total_bytes}
+        artifacts["uiDatabase"] = UI_DATABASE_NAME
+        artifacts["uiUploads"] = UI_UPLOADS_NAME
+
     check_lines: list[str] = []
-    for name in ("rag.sqlite3", "agent.sqlite3"):
+    for name in checked:
         integrity, foreign_keys = _sqlite_check(partial_destination / name)
         check_lines.extend(
             (
@@ -127,11 +168,7 @@ def create_backup() -> Path:
     manifest = {
         "formatVersion": 1,
         "createdAt": created_at.isoformat(),
-        "artifacts": {
-            "ragDatabase": "rag.sqlite3",
-            "agentDatabase": "agent.sqlite3",
-            "uploads": "uploads.tar.gz",
-        },
+        "artifacts": artifacts,
         "uploadFileCount": upload_file_count,
         "uploadTotalBytes": upload_total_bytes,
         "verification": {
@@ -139,11 +176,17 @@ def create_backup() -> Path:
             "foreignKeyViolations": 0,
         },
     }
+    if ui_counts:
+        manifest["uiUploadFileCount"] = ui_counts["fileCount"]
+        manifest["uiUploadTotalBytes"] = ui_counts["totalBytes"]
     (partial_destination / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
+    checksum_artifacts = (
+        ARTIFACTS + UI_ARTIFACTS if ui_root is not None else ARTIFACTS
+    )
     checksum_lines = [
-        f"{_sha256(partial_destination / name)}  {name}" for name in ARTIFACTS
+        f"{_sha256(partial_destination / name)}  {name}" for name in checksum_artifacts
     ]
     (partial_destination / "SHA256SUMS").write_text(
         "\n".join(checksum_lines) + "\n", encoding="ascii"

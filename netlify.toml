@@ -6,8 +6,20 @@
   NODE_VERSION = "24.14.0"
 
 # Configure VITE_CLERK_PUBLISHABLE_KEY, VITE_RAG_API_URL, VITE_AGENT_API_URL,
-# and VITE_V3_ENABLED in the Netlify UI. Keep V3 false until the gated canary.
-# Never place Clerk secret keys here.
+# VITE_UI_API_BASE and VITE_V3_ENABLED in the Netlify UI. Keep V3 false until the
+# gated canary. Never place Clerk secret keys here.
+
+# The refreshed CourseMate shell is a second document in the same build. It is
+# served under /app so it cannot fight the existing site over global styles.
+[[redirects]]
+  from = "/app"
+  to = "/ui.html"
+  status = 200
+
+[[redirects]]
+  from = "/app/*"
+  to = "/ui.html"
+  status = 200
 
 [[redirects]]
   from = "/*"
