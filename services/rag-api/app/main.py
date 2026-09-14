@@ -207,4 +207,8 @@ def create_app(
     application.include_router(publication_router)
     if resolved_settings.v3_enabled:
         application.include_router(learning_router)
+    if resolved_settings.ui_extension_enabled:
+        from app.ui_extension.mount import mount_ui_extension
+
+        mount_ui_extension(application)
     return application

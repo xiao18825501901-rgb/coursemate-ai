@@ -79,6 +79,10 @@ class Settings(BaseSettings):
         le=100 * 1024 * 1024 * 1024,
     )
     max_context_chars: int = Field(default=18_000, ge=1_000, le=100_000)
+    ui_extension_enabled: bool = False
+    ui_task_agent_url: str = ""
+    ui_task_agent_timeout_seconds: float = Field(default=60.0, ge=1.0, le=300.0)
+    ui_web_dir: Path = Field(default=Path("../../apps/web/dist"))
 
     @model_validator(mode="after")
     def validate_chunk_window(self) -> "Settings":

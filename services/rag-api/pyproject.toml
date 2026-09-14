@@ -8,7 +8,11 @@ requires-python = ">=3.11"
 addopts = "-ra --strict-markers"
 pythonpath = ["."]
 testpaths = ["tests"]
-markers = ["golden: tests against the local read-only real CourseMate corpus"]
+asyncio_mode = "auto"
+markers = [
+    "golden: tests against the local read-only real CourseMate corpus",
+    "asyncio: asynchronous UI-extension contract tests",
+]
 
 [tool.ruff]
 line-length = 100
