@@ -3,6 +3,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import os
 import secrets
 import sqlite3
 import time
@@ -42,11 +43,27 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
     (cfg.data_dir/'uploads').mkdir(exist_ok=True)
     model=provider or (QwenProvider(cfg) if cfg.provider_mode=='qwen' else DisabledProvider())
     jobs: dict[str,asyncio.Task]={}
+    # This instance's identity for run leases. Two processes get two ids.
+    worker_id=uid('worker-')
+    # A run whose heartbeat is older than this has lost its owner (process died
+    # without cancellation). Bounded: startup recovery and a background reaper
+    # both use it, and it must be longer than the heartbeat interval below.
+    lease_grace_seconds=float(os.getenv('CMUI_RUN_LEASE_GRACE','120') or 120)
+
+    def heartbeat(run_id):
+        db.execute("UPDATE cmui_runs SET lease_heartbeat=? WHERE id=? AND status IN ('queued','planning','generating')",(str(time.time()),run_id))
+
+    def reclaim_orphaned_runs():
+        cutoff=str(time.time()-lease_grace_seconds)
+        db.execute("UPDATE cmui_runs SET status='failed',error='SERVER_RESTARTED',updated_at=? WHERE status IN ('queued','planning','generating') AND (lease_heartbeat IS NULL OR CAST(lease_heartbeat AS REAL)<?)",(now(),cutoff))
 
     @asynccontextmanager
     async def lifespan(app):
-        # The reference launcher is single-process. Deployment must use existing durable V3 worker if multi-worker.
-        db.execute("UPDATE cmui_runs SET status='failed',error='SERVER_RESTARTED',updated_at=? WHERE status IN ('queued','planning','generating')",(now(),))
+        # Only runs with provably dead owners are reclaimed. A sibling process
+        # that heartbeats normally is left untouched - starting a second worker
+        # must never kill the first worker's in-flight run (its model cost has
+        # already been spent, so killing it would waste money AND lose the answer).
+        reclaim_orphaned_runs()
         yield
         for task in list(jobs.values()): task.cancel()
         if jobs: await asyncio.gather(*jobs.values(),return_exceptions=True)
@@ -642,9 +659,18 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         return db.one('SELECT * FROM cmui_bridges WHERE id=?',(bid,))
 
     async def generate_run(run_id,user,course_data,conv,sources,history,data,bridge_data,images=None):
-        output=''; usages=[]
+        output=''; usages=[]; last_beat=0.0
         try:
+            heartbeat(run_id)
             async for item in model.generate(course_data,data.text,{k:user[k] for k in ['language','timezone','bio']},sources,history,conv['lane'],bridge_data,**({'attachments':images} if images else {})):
+                # A cancel from ANOTHER process cannot reach this loop through the
+                # local job map; the database is the coordination point. The row's
+                # status is re-read so a cancelled run stops promptly instead of
+                # streaming to completion and charging more.
+                state=db.one('SELECT status FROM cmui_runs WHERE id=?',(run_id,))
+                if state and state['status'] in TERMINAL: raise asyncio.CancelledError()
+                if time.time()-last_beat>5:
+                    heartbeat(run_id); last_beat=time.time()
                 kind=item['kind']
                 if kind=='status':
                     db.execute('UPDATE cmui_runs SET status=?,updated_at=? WHERE id=?',(item['status'],now(),run_id))
@@ -665,18 +691,25 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             import re
             mentioned=set(re.findall(r'\[(S\d+)\]',output))
             citations=[{k:v for k,v in s.items() if k!='text'} for s in sources if s['id'] in mentioned]
+            message_id=uid('message_')
             with db.connect(True) as c:
-                message_id=uid('message_')
-                c.execute('INSERT INTO cmui_messages VALUES (?,?,?,?,?,?,?)',(message_id,conv['id'],'assistant',output,json.dumps(citations,ensure_ascii=False),run_id,now()))
-                c.execute("UPDATE cmui_runs SET status='completed',partial_text=?,citations=?,usage=?,updated_at=? WHERE id=?",(output,json.dumps(citations,ensure_ascii=False),json.dumps(usages),now(),run_id))
-                c.execute('UPDATE cmui_conversations SET updated_at=? WHERE id=?',(now(),conv['id']))
+                # The final write is a conditional transition: if a cancel won the
+                # race (same or another process), the message is NOT inserted and
+                # the row keeps its cancelled/failed state.
+                claimed=c.execute("UPDATE cmui_runs SET status='completed',partial_text=?,citations=?,usage=?,updated_at=? WHERE id=? AND status IN ('queued','planning','generating')",(output,json.dumps(citations,ensure_ascii=False),json.dumps(usages),now(),run_id)).rowcount
+                if claimed==1:
+                    c.execute('INSERT INTO cmui_messages VALUES (?,?,?,?,?,?,?)',(message_id,conv['id'],'assistant',output,json.dumps(citations,ensure_ascii=False),run_id,now()))
+                    c.execute('UPDATE cmui_conversations SET updated_at=? WHERE id=?',(now(),conv['id']))
+                else:
+                    raise asyncio.CancelledError()
             event(run_id,'done',{'message_id':message_id,'citations':citations,'provider_mode':cfg.provider_mode})
         except asyncio.CancelledError:
-            db.execute("UPDATE cmui_runs SET status='cancelled',error='CANCELLED',updated_at=? WHERE id=?",(now(),run_id))
+            # Terminal already? Keep whatever state won; otherwise mark cancelled.
+            db.execute("UPDATE cmui_runs SET status='cancelled',error=CASE WHEN status IN ('queued','planning','generating') THEN 'CANCELLED' ELSE error END,updated_at=? WHERE id=? AND status NOT IN ('completed','failed')",(now(),run_id))
             event(run_id,'error',{'code':'CANCELLED','message':'已停止，已生成的部分仍可查看'})
         except Exception as error:
             code=str(error) if isinstance(error,ProviderError) else 'GENERATION_FAILED'
-            db.execute("UPDATE cmui_runs SET status='failed',error=?,usage=?,updated_at=? WHERE id=?",(code,json.dumps(usages),now(),run_id))
+            db.execute("UPDATE cmui_runs SET status='failed',error=?,usage=?,updated_at=? WHERE id=? AND status NOT IN ('completed','cancelled')",(code,json.dumps(usages),now(),run_id))
             event(run_id,'error',{'code':code,'message':'生成未完成；不会自动重试或重复扣费。请检查模型配置或已批准的预算。'})
         finally: jobs.pop(run_id,None)
 
@@ -745,7 +778,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         rid=uid('run_')
         try:
             with db.connect(True) as c:
-                c.execute('INSERT INTO cmui_runs(id,owner,conversation,request_id,status,user_text,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)',(rid,user['id'],conv_id,data.request_id,'queued',data.text,now(),now()))
+                c.execute('INSERT INTO cmui_runs(id,owner,conversation,request_id,status,user_text,lease_worker,lease_heartbeat,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)',(rid,user['id'],conv_id,data.request_id,'queued',data.text,worker_id,str(time.time()),now(),now()))
                 c.execute('INSERT INTO cmui_run_inputs VALUES (?,?,?)',(rid,digest,json.dumps(attachment_meta,ensure_ascii=False)))
                 c.execute('INSERT INTO cmui_messages VALUES (?,?,?,?,?,?,?)',(uid('message_'),conv_id,'user',data.text,'[]',rid,now()))
                 c.execute("UPDATE cmui_conversations SET title=CASE WHEN title='新对话' THEN ? ELSE title END,updated_at=? WHERE id=?",(data.text[:40],now(),conv_id))
@@ -791,9 +824,13 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         row=owned_run(user,rid)
         conv=conversation(user,row['conversation']); await course(user,conv['course'],request)
         if row['status'] in TERMINAL: return {'status':row['status']}
+        # The database is the coordination point for cross-process cancel: write
+        # the terminal state FIRST, so the generating process's next heartbeat
+        # check stops it even when the job map is on another worker. The local
+        # task cancellation only shortens the wait for same-process runs.
+        db.execute("UPDATE cmui_runs SET status='cancelled',error='CANCELLED',updated_at=? WHERE id=? AND status IN ('queued','planning','generating')",(now(),rid))
         task=jobs.get(rid)
         if task: task.cancel()
-        else: db.execute("UPDATE cmui_runs SET status='cancelled',error='CANCELLED' WHERE id=?",(rid,))
         return {'status':'cancelled'}
 
     app.include_router(r)

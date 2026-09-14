@@ -92,7 +92,8 @@ CREATE TABLE IF NOT EXISTS cmui_runs (
  id TEXT PRIMARY KEY, owner TEXT NOT NULL REFERENCES cmui_users(id), conversation TEXT NOT NULL REFERENCES cmui_conversations(id) ON DELETE CASCADE,
  request_id TEXT NOT NULL, status TEXT NOT NULL, user_text TEXT NOT NULL, generated_prompt TEXT,
  partial_text TEXT NOT NULL DEFAULT '', citations TEXT NOT NULL DEFAULT '[]', usage TEXT NOT NULL DEFAULT '[]',
- error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(owner,request_id)
+ error TEXT, lease_worker TEXT, lease_heartbeat TEXT,
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(owner,request_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS cmui_one_active_run ON cmui_runs(conversation) WHERE status IN ('queued','planning','generating');
 CREATE TABLE IF NOT EXISTS cmui_run_events (
@@ -167,6 +168,14 @@ class Database:
                 if current and int(current[0])>SCHEMA_VERSION: raise ValueError('Newer UI database schema detected; do not downgrade')
             c.execute('PRAGMA journal_mode=WAL')
             c.executescript(SCHEMA)
+            # Schema 3 amendment: run leases for cross-process ownership. Older
+            # Schema-3 databases get the columns added in place; fresh ones get
+            # them from SCHEMA above. Idempotent by inspection.
+            run_columns = {r[1] for r in c.execute("PRAGMA table_info(cmui_runs)")}
+            if 'lease_worker' not in run_columns:
+                c.execute("ALTER TABLE cmui_runs ADD COLUMN lease_worker TEXT")
+            if 'lease_heartbeat' not in run_columns:
+                c.execute("ALTER TABLE cmui_runs ADD COLUMN lease_heartbeat TEXT")
             c.execute("INSERT INTO cmui_meta VALUES ('schema_version',?) ON CONFLICT(key) DO UPDATE SET value=?",(str(SCHEMA_VERSION),str(SCHEMA_VERSION)))
 
     def all(self, sql, args=()):

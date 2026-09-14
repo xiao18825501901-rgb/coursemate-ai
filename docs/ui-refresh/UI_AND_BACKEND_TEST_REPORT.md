@@ -10,7 +10,7 @@
 
 | 套件 | 命令 | 结果 | 证据 |
 |---|---|---|---|
-| rag-api 全量回归（含原 329 项 + 新增） | `services/rag-api/.venv/Scripts/python.exe -m pytest -q` | **463 passed**, 399.94s | 本次运行 |
+| rag-api 全量回归（含原 329 项 + 新增） | `services/rag-api/.venv/Scripts/python.exe -m pytest -q` | **467 passed**, 408.09s | 本次运行 |
 | 交付包契约测试（迁入后） | `pytest tests/ui_extension -q` | **71 passed** | 本次运行 |
 | 新增 V3 DomainPort 集成测试 | `pytest tests/test_ui_extension_integration.py -q` | **16 passed** | 本次运行 |
 | 新增任务 Agent 桥测试 | `pytest tests/test_ui_extension_task_agent.py -q` | **15 passed** | 本次运行 |
@@ -18,7 +18,8 @@
 | 新增恢复单元测试（含新增 UI 库） | `pytest tests/test_backup_ui_extension.py -q` | **4 passed** | 本次运行 |
 | 新增旧版问答历史测试 | `pytest tests/test_ui_extension_legacy_history.py -q` | **7 passed** | 本次运行 |
 | 新增课程生命周期测试 | `pytest tests/test_ui_extension_course_lifecycle.py -q` | **3 passed** | 本次运行 |
-| 新增学习状态闭环测试（journey 写入 + 完整测评） | `pytest tests/test_ui_extension_learning_closure.py -q` | **5 passed** | 本次运行 |
+| 新增学习状态闭环测试（journey 写入 + 完整测评） | pytest tests/test_ui_extension_learning_closure.py -q | **5 passed** | 本次运行 |
+| 新增单 worker 生成安全测试（租约回收/取消竞争/不重试） | pytest tests/test_ui_extension_single_worker.py -q | **4 passed** | 本次运行 |
 | 原备份/恢复测试（回归） | `pytest tests/test_backup_restore.py -q` | **9 passed** | 本次运行 |
 | web 单元测试（含真实 Clerk 桥） | `vitest run`（`apps/web`） | **55 passed** | 本次运行 |
 | Node Agent 单元测试 | `npm test`（`services/agent-api`） | **66 passed** | 本次运行 |
