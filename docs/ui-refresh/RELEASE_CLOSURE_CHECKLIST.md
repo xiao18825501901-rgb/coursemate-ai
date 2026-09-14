@@ -1,7 +1,7 @@
 # RELEASE CLOSURE CHECKLIST — 本地收尾与真实发布准备
 
 **更新日期**：2026-09-15（Asia/Hong_Kong）
-**HEAD**：`9863b78`（写作时；最新以 `git rev-parse HEAD` 为准）
+**HEAD**：以 `git rev-parse HEAD` 为准（本文件随提交更新，不写自引用 SHA）
 **模型**：开发执行 `deepseek-v4-pro`（`C:\Users\Hp\.dsh\settings.yaml` 已切，本会话一致）；网站教学 `qwen3.8-max`（未变）。
 **权限**：本会话 `approval_policy: never`（批准提示禁用，需批准的动作自动拒绝）；文件 sandbox `danger-full-access`。**没有任何动作被"当作已批准"。**
 
@@ -80,9 +80,11 @@
 
 ### 7. flaky 状态
 
-`apps/web` vitest 此前出现 1 次 1/49 失败（未定位到用例名），随后连续 4+ 次全绿
-（本轮 55/55 一次）。本轮没有复现；保留"未定位低频风险"，未写"已彻底解决"。
-本轮 Playwright 各套件（15 + 4 + 3）全部一次或修复后通过，无 flaky。
+`apps/web` vitest 此前出现 1 次 1/49 失败（未定位到用例名），随后连续 5+ 次全绿
+（本轮会话 55/55 连续 4 次）。本轮没有复现；保留"未定位低频风险"并落成**捕捉机制**
+（`UI_AND_BACKEND_TEST_REPORT.md` §7：`vitest run --reporter=verbose` + `Tee-Object`
+落盘 + 关并发单独重跑 + 复现则修复/不复现则如实保留），未写"已彻底解决"。
+本轮 Playwright 各套件（16 + 4 + 3）全部一次或修复后通过，无 flaky。
 
 ---
 

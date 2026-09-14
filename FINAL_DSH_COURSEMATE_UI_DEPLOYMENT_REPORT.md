@@ -342,7 +342,7 @@ DSH 安装版本：`@deepseek-ai/dsh 0.1.1-rc.2`（`C:\Users\Hp\AppData\Roaming\
 4. **真实 Node 工具调用的模型侧选择** — `NOT VERIFIED`。
 5. **多 worker 生成支持** — **仍未实现，且如实保留为明确限制**。单 worker 约束已从
    口头约定升级为可执行防护（worker 租约 + 心跳 + 只回收过期租约 + 跨进程取消 +
-   条件式最终写入，UI Schema 3；4 项双进程测试 + 浏览器 15 项回归），但内存任务表意味着
+   条件式最终写入，UI Schema 3；4 项双进程测试 + 浏览器 16 项回归），但内存任务表意味着
    这**不是**多 worker 支持：生产部署检查必须是 rag-api 单进程、单一 `CMUI_DATA_DIR`
    只挂一个实例。要扩容必须把生成搬到 V3 侧尚不存在的持久化 worker。
    详见 `MIGRATION_AND_ROLLBACK.md` §8。

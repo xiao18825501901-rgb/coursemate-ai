@@ -48,9 +48,9 @@ qwen3.8-max 第二次调用：以生成 Prompt 为主要教学指令，生成可
 | `CMUI_ANSWER_TOKENS` | 6500 | 第二阶段输出上限（256–16000） |
 | `CMUI_MODEL_TIMEOUT` | 180 | 秒（10–300） |
 
-**开发执行模型与网站教学模型没有混淆**：DSH 本会话实际运行在
-`deepseek-v4-flash`（`C:\Users\Hp\.dsh\settings.yaml`），它只用于读写代码与运行测试，
-从未作为网站教学内容来源；网站教学链路的模型常量是 `qwen3.8-max`。
+**开发执行模型与网站教学模型没有混淆**：DSH 本会话运行在
+`deepseek-v4-pro`（`C:\Users\Hp\.dsh\settings.yaml`，用户已切换），它只用于读写代码与
+运行测试，从未作为网站教学内容来源；网站教学链路的模型常量是 `qwen3.8-max`。
 
 ## 4. 为什么本会话没有跑真实调用
 

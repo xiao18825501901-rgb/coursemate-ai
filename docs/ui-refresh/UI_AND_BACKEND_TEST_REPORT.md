@@ -290,13 +290,24 @@ chunk 里的 Clerk 库。生产 Netlify 构建必须设置真实的 `VITE_CLERK_
 
 ## 7. 已知的测试不稳定（如实记录）
 
-`apps/web` 的 vitest 套件在本次会话中出现过 **1 次** `1 failed | 48 passed`，
-随后立即重跑及连续 3 次均为 `49 passed`。失败出现时 vitest 未打印用例名，
+`apps/web` 的 vitest 套件在本次会话中出现过 **1 次** `1 failed | 48 passed`（早期
+49 项时代），随后立即重跑及连续多次均为全绿。失败出现时 vitest 未打印用例名，
 且没有留下可复现的断言信息，因此**无法确认**具体用例。同一时间内本机还有
 Playwright 的 Chromium 与两个 Node 服务在跑，最可能的原因是资源争用导致的超时。
 
-**结论**：该套件在本次改动下稳定通过（连续 3 次 49/49），但存在低频不稳定，
-不应当作"绝对零 flake"。若在生产前置流程中使用，建议对失败用例做一次重跑确认。
+**当前状态**：套件为 55 项，本轮会话连续 4 次全绿（55/55），未再复现。
+**保留的捕捉机制**（closure §六.4，未定位风险不回写为"已解决"）：
+
+```powershell
+# 出现失败时，用详细 reporter 复现 5 次并保留完整输出与用例名：
+cd apps/web
+& ..\node_modules\.bin\vitest.cmd run --reporter=verbose 2>&1 | Tee-Object ..\work\vitest-capture.log
+# 若仅资源争用，关闭并发的 Playwright/Node 服务后单独重跑：
+& ..\node_modules\.bin\vitest.cmd run
+```
+
+任何复现都必须记录：失败用例名、完整断言输出、当时并发负载；复现后修复并补回归，
+未复现则保持"未定位低频风险 + 上述捕捉机制"的如实状态。
 
 ## 8. 原仓库既有 E2E（此前遗漏，本轮已运行）
 
