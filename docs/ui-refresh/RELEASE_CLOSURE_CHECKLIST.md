@@ -43,6 +43,7 @@
 | 知识树键盘/触屏可达（closure §五.2） | 用例 15：Enter 展开树、焦点揭示两个状态入口、Enter 学习进度开始教学并自动收拢；390px 下 tap 节点 → tap 学习进度 → 切到知识学习 tab 并生成教学（`hasTouch` 上下文） |
 | 为此新增的确定性 Provider | `provider_mode='test'` 现在选择 `TestProvider`（`app/cm_update/provider.py`），生产被 `validate()` 拒绝；`tests/test_ui_extension_test_provider.py`（3 项）锁住选择路径 |
 | 顺手修复的真实缺陷 | "返回原题"后桥接横幅不消失（`pages.jsx:backToProblem` 未清本地 bridge 状态）——浏览器用例 14 首跑发现，修复后全绿 |
+| 生产树的真实发布路径（空态如实） | 无 PUBLISHED 官方树时新壳如实空态；管理员用真实资料生成/检查/发布的最小路径已写入 `INTEGRATION_MAP.md` §3（V3 管理面 7 步：生成草案 → 组装 DRAFT 官方树 → 提交申请 → 快照检查 → 审核 approve 留痕 → 生效 → 撤回/supersede）。**测试 fixture 不得冒充发布**；真实模型生成与公开审核分别需要预算与用户动作 |
 
 ### 4. 单 worker 生成约束（P1-7：实际防护，不是文档提醒）
 

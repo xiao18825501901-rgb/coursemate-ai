@@ -75,6 +75,32 @@ app/main.py:create_app()
 这满足"不重复生成一套答案、不伪造 LEARNED"的硬约束；REQUIRED 覆盖的唯一权威来源
 仍是 V3 `teach()`（`teaching_delivery_evidence` + `learning_coverage`）。
 
+### 管理员用真实资料生成、检查、发布官方知识树的最小路径（closure §五）
+
+生产树尚未发布时新壳如实显示空态（已测：`knowledge.tree` 返回 `[]`，前端显示
+"还没有课程知识树"）。**不得**用 `scripts/seed_tree_fixture.py` 之类的测试夹具冒充
+发布（该脚本只写 `work/e2e-*` 副本且拒绝生产路径）。真实发布走 V3 既有的管理面
+（`app/api/publication.py` + `app/services/knowledge_publication.py`）：
+
+1. **生成**：在 V3 学习工作台用真实课程资料生成知识节点草案与教学规格
+   （`LearningOrchestrator.create_node` / `create_spec`；模型生成步骤需要相应预算）；
+2. **组装官方树草稿**：`knowledge_tree_versions`（`tree_kind='OFFICIAL'`，`DRAFT`）+
+   memberships 指向原子节点与 spec 版本；
+3. **提交发布申请**：`POST /api/admin/knowledge-publication-requests`
+   （`OfficialKnowledgePublicationSubmit`，管理员）；
+4. **检查快照**：`GET /api/admin/knowledge-publication-requests/{id}/snapshot`
+   逐节点/逐 spec 核对内容，`GET /api/admin/knowledge-publication-drafts` 列草稿；
+5. **审核**：`POST /api/admin/knowledge-publication-requests/{id}/review`
+   （`PublicationReview`）。approve 会：旧 PUBLISHED 官方树转 `RETIRED`、
+   快照内节点转 `PUBLISHED`、`teaching_spec_metadata` 转 `PUBLISHED`、
+   树版本 DRAFT→PUBLISHED 并写 `reviewed_by_user_id`/`reviewed_at`（公开审核留痕）；
+6. **生效**：新壳 `knowledge.tree` 立即读到新 PUBLISHED 官方树，无需任何 UI 库迁移；
+7. 撤回/下线：`DELETE /api/admin/knowledge-publication-requests/{id}`（申请撤回）与
+   新 approve 的自动 supersede。
+
+该路径的每步都是 V3 现有真实接口（管理员角色 + 审核留痕），本接线**没有**为此新增
+任何发布旁路；fixture 走的是同一套表与触发器，只用于隔离测试。
+
 ### 关键约束（来自逐行读包，非猜测）
 
 1. **异常类型**：`cm_update` 对 DomainPort 抛出的异常**不做 try/except**，
