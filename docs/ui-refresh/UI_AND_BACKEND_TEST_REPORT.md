@@ -17,8 +17,9 @@
 | 新增 CORS / 凭证契约测试 | `pytest tests/test_ui_extension_cors.py -q` | **13 passed** | 本次运行 |
 | 新增恢复单元测试（含新增 UI 库） | `pytest tests/test_backup_ui_extension.py -q` | **4 passed** | 本次运行 |
 | 新增旧版问答历史测试 | `pytest tests/test_ui_extension_legacy_history.py -q` | **7 passed** | 本次运行 |
+| 新增课程生命周期测试 | `pytest tests/test_ui_extension_course_lifecycle.py -q` | **3 passed** | 本次运行 |
 | 原备份/恢复测试（回归） | `pytest tests/test_backup_restore.py -q` | **9 passed** | 本次运行 |
-| web 单元测试 | `vitest run`（`apps/web`） | **49 passed**（连续 3 次） | 本次运行 |
+| web 单元测试（含真实 Clerk 桥） | `vitest run`（`apps/web`） | **55 passed**（连续 2 次） | 本次运行 |
 | 正式 React 生产构建 | `npm run build --workspace @coursemate/web`（`tsc -b && vite build`） | **通过** | 本次运行 |
 | 原生 Chromium 端到端验收 | `playwright test --config playwright.ui.config.ts` | **9 passed** | 本次运行 |
 | 原仓库既有 E2E（`coursemate.spec.ts`） | `npx playwright test` | **未运行**（见 §7 原因） | — |
@@ -106,7 +107,6 @@ allow-credentials；扩展响应强制 `private, no-store`。
 | 9 | 390px 视口下无横向溢出 | PASS |
 
 ### 2.5 `test_ui_extension_legacy_history.py` — 旧记录不丢失
-
 新壳的历史在 `cmui_conversations`/`cmui_messages`，旧 V3 历史在
 `conversations`/`messages`。**没有**做任何把旧记录复制进新表的迁移（复制会产生两份会
 各自漂移的历史）。改为在原表上做只读投影：
@@ -115,6 +115,37 @@ allow-credentials；扩展响应强制 `private, no-store`。
 * 另一用户得到空列表；私人课程对他人 404；
 * 详情返回真实消息（role 顺序、正文、引用 JSON）；
 * 他人不可读；不存在的 id → 404；未登录 → 401。
+
+### 2.6 `CourseMateUi.test.tsx` — 真实 Clerk 桥（此前零覆盖）
+
+所有浏览器用例都用后端的测试验证器，走的是 `TestAuthBridge` 分支。
+**生产分支 `AuthBridge`（真实 Clerk）此前从未被执行过**，包括一个真实的上线风险。
+本组测试用 mock 的 `@clerk/react` 直接驱动它：
+
+* `getToken()` 真的委托给 Clerk 的 `useAuth().getToken()`，返回会话 token；
+* `subscribe()` 返回可安全调用的退订函数；
+* `signIn()` 调到 Clerk 自己的 `openSignIn()`（不是自己造登录界面）；
+* `signOut()` 调到 Clerk 的 `signOut()` 且 resolve；
+* 卸载时 `window.CourseMateAuth` 被移除，不留悬空桥；
+* **没有 publishable key 时失败关闭**：显示"认证未配置"，且**不安装** `window.CourseMateAuth`、
+  不渲染壳。
+
+> 第 6 项的第一次运行是失败的：测试环境没有 `VITE_CLERK_PUBLISHABLE_KEY`，
+> 组件正确地走了失败关闭分支。这既证明该分支生效，也说明**不能**在没有该变量的构建里
+> 悄悄渲染出未认证的壳。
+
+### 2.7 `test_ui_extension_course_lifecycle.py` — 课程不会被删一半
+
+进入课程的文件/学习视图会按设计创建调用者的 `learning_workspaces` 行
+（及其私有语料课程）；原 V3 ingestion 服务在 workspace 存在时拒绝删除该课程。
+
+* 没有 workspace 的私人课程：正常删除，之后 404；
+* 确认名称不匹配：422，课程保持不变；
+* **有 workspace 的课程：409 + 明确说明，且课程与私有语料都原样保留**——
+  不是 500，也不是删一半。
+
+（本轮先怀疑这里会抛未处理的上游错误，实测确认适配器已正确翻译为 409；
+记录为"已实测的正确行为"而非缺陷。）
 
 ### 浏览器测试发现并修复的真实缺陷（4 项）
 
@@ -160,14 +191,14 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| 真实 Clerk 登录 / 登出 / 刷新 / 恢复 | **NOT VERIFIED** | 需要真实 Clerk 应用与真实账号。注入式 resolver 与宿主 `ClerkAuthVerifier` 已在测试中走通，但浏览器侧真实 Clerk 流程未跑 |
+| 真实 Clerk 登录 / 登出 / 刷新 / 恢复 | **NOT VERIFIED** | 需要真实 Clerk 应用与真实账号。桥的**代码路径**已由 `CourseMateUi.test.tsx` 6 项覆盖（token 委托、订阅、登录、登出、卸载、失败关闭），但浏览器侧的完整 Clerk 会话流程（真实域名、Clerk 脚本、CORS、cookie）仍未跑 |
 | 真实千问两阶段教学 | **NOT RUN** | 无付费授权，见 `QWEN_LIVE_TWO_STAGE_REPORT.md` |
 | 图片题视觉正确率 | **NOT VERIFIED** | 传输契约已测，模型是否"看对题"未测 |
 | Node 工具调用的真实模型选择 | **NOT VERIFIED** | Agent 侧桩与确定性客户端已测，真实模型多轮工具调用未测 |
 | 生产双用户隔离 | **NOT VERIFIED** | 本地真实库双用户已测，生产未测 |
 | 生产 PDF 内置查看器（CSP/插件） | NOT VERIFIED | 本地 Chromium iframe 预览通过 |
-| 多 worker 生成 runner | **未实现** | `app.py` 生成表是单进程内存结构 |
-| 旧 V3 会话在新壳内的只读入口 | **未实现** | 旧入口在旧文档中仍可用 |
+| 多 worker 生成 runner | **未接线** | 见 §9 |
+| 旧 V3 会话在新壳内的只读入口 | **已实现** | 见 §2.5 |
 
 ## 6. 环境
 

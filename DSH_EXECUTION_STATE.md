@@ -22,7 +22,11 @@ c87eb23  feat(ui-extension): real React shell, agent task bridge, wider recovery
 e8e4e58  fix(ui-extension): browser-verified CORS, caching and agent task contract
 7804608  docs(ui-refresh): handover baseline, integration map, migration, test and Qwen reports
 a5d5f1b  feat(ui-extension): keep the original V3 question history readable in the shell
+72619f2  docs: refresh report hashes, counts and execution state after the legacy-history round
+8e16fbf  docs: record the final SHA and change size in the deployment report
+0e94fd6  docs: point the report at git rev-parse HEAD instead of a self-referential SHA
 ```
+
 
 ## 2. 已合入模块
 
@@ -46,15 +50,18 @@ a5d5f1b  feat(ui-extension): keep the original V3 question history readable in t
 3. `context.retrieve` 只返回 `top_k` 条，与 V3 学习链路的 `evidence()` 上限一致。
 4. 生成 run 是单进程内存任务表，多 worker 部署必须改造。
 5. ~~新壳未提供旧 V3 会话历史的只读入口~~ → 已在 `a5d5f1b` 实现：`legacy.conversations` / `legacy.conversation` 两个 operation + 宿主两条只读路由 + 历史弹窗"旧版问答记录"分组。
+6. **生产 Clerk 桥**（`AuthBridge`）此前零覆盖，现由 `apps/web/src/CourseMateUi.test.tsx` 6 项覆盖；浏览器侧真实 Clerk 会话流程仍未跑。
+7. **多 worker 生成**仍未接线：`app.py:49` 无条件启动清理会杀掉其他 worker 的 run；`app.py:757` 取消是进程内语义。已核实 V3 当前单 worker，故不会触发；最小修法见 `MIGRATION_AND_ROLLBACK.md` §7。
 
 ## 4. 最新测试结果（本会话实测）
 
 | 套件 | 命令 | 结果 |
 |---|---|---|
-| rag-api 全量 | `.venv\Scripts\python.exe -m pytest -q` | **455 passed** |
-| web 单测 | `vitest run`（`apps/web`） | 49 passed |
+| rag-api 全量 | `.venv\Scripts\python.exe -m pytest -q` | **458 passed** |
+| web 单测 | `vitest run`（`apps/web`） | **55 passed**（含真实 Clerk 桥 6 项） |
 | 正式构建 | `tsc -b && vite build` | 通过，双文档产物 |
 | 原生浏览器验收 | `playwright test --config playwright.ui.config.ts` | **9 passed**（真实 Chromium + 真三服务） |
+| 真实 Clerk 桥单测 | `vitest run src/CourseMateUi.test.tsx` | **6 passed** |
 
 ## 5. 授权记录
 

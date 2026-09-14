@@ -182,3 +182,40 @@ systemctl restart coursemate-rag        # 实际 unit 名以生产控制台为�
 * `app.py` 的生成 runner 是**单进程**内存任务表（`app.state.jobs`），
   启动时把残留的 `queued/planning/generating` 标记为 `failed/SERVER_RESTARTED`。
   多 worker 部署必须把生成搬到既有持久化 worker，这一步**尚未完成**。
+
+  **本轮对该限制做了精确复核，结论如下（不是猜测）：**
+
+  已核实的两个具体失效模式（多 worker 下真实存在）：
+
+  1. `app.py:49` 的启动清理是**无条件**的：
+     `UPDATE cmui_runs SET status='failed',error='SERVER_RESTARTED' WHERE status IN
+     ('queued','planning','generating')`。第二个 worker 启动会**杀掉第一个 worker 正在进行的
+     run**，并把它标成 `SERVER_RESTARTED`——用户看到"服务器重启"，模型费用却已经花掉。
+  2. `app.py:757-759` 的取消是**进程内**语义：
+     `task=jobs.get(rid)` 只在当前进程查；取不到才写 cancelled。
+     当 run 由另一个 worker 执行时，写库**不会停止**那个生成，它会继续跑到完成，
+     然后写入 assistant 消息——**取消之后仍然产出一条消息**。
+
+  已核实**没有**可比问题的地方：SSE 事件流（`/runs/{rid}/events`）读的是
+  `cmui_run_events` 表，**本来就是跨进程安全**的；任务幂等键、版本冲突、
+  每日配额都走 SQLite 条件写，也是跨进程安全的。
+
+  已核实 V3 生产形态：生产报告只记录 systemd 单元与 loopback 端口，
+  仓库内**没有任何** durable worker 或队列实现，`docs/DEPLOYMENT.md`、
+  `render.yaml`、`ops/` 里都没有 `--workers` / worker 进程。
+  因此现状是**单 worker**，上述两个失效模式**在当前部署上不会触发**；
+  它们是"一旦扩容就会触发"的隐患，而不是正在发生的故障。
+
+  因此本次**没有**改动交付包的 `app.py`：交付包自己在 `app.py:48` 注明了这一限制，
+  且正确的修法（把生成搬到持久化 worker）依赖 V3 侧的 worker 形态，在它不存在时
+  凭空造一个多进程 runner 只会新增未经生产验证的代码路径。
+
+  若将来需要安全扩容，最小且可验证的修法是：
+  * 给 `cmui_runs` 增加租约列（`lease_owner`、`lease_expires_at`）与 heartbeat；
+  * 启动清理改为"只回收**租约已过期**或**属于本进程上一次化身**的 run"，
+    而不是无差别清理；
+  * 生成循环内周期性**复读数据库状态**，若已被置为 cancelled/failed 就停止，
+    并把最终写入改成条件更新
+    （`... WHERE id=? AND status NOT IN ('cancelled','failed')`），
+    这样跨进程取消与最终写入冲突都由数据库裁决，而不是靠进程内事件。
+  这三条都需要一个 UI Schema 版本递增（当前为 2）。

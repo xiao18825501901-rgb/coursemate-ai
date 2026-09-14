@@ -9,7 +9,7 @@
 
 ```text
 SOURCE INTEGRATION:               PASS
-LOCAL TEST SUITE:                 PASS  (455 rag-api + 49 web)
+LOCAL TEST SUITE:                 PASS  (458 rag-api + 55 web)
 MODERN REACT PRODUCTION BUILD:    PASS  (React 19.2.8 + Vite 8.2.1 + tsc 5.9.3)
 NATIVE BROWSER ACCEPTANCE:        PASS  (9/9 real Chromium journeys)
 LIVE QWEN TWO-STAGE:              NOT RUN   (no paid authorization available)
@@ -143,15 +143,16 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 
 | 套件 | 结果 |
 |---|---|
-| rag-api 全量回归 | **455 passed**（接手前基线 329，新增 126） |
+| rag-api 全量回归 | **458 passed**（接手前基线 329，新增 129） |
 | 交付包契约测试（迁入后） | **71 passed** |
 | 新增 V3 DomainPort 集成测试 | **16 passed** |
 | 新增任务 Agent 桥测试 | **15 passed** |
 | 新增 CORS/凭证契约测试 | **13 passed** |
 | 新增恢复单元测试 | **4 passed** |
 | 新增旧版问答历史测试 | **7 passed** |
+| 新增课程生命周期测试 | **3 passed** |
 | 原备份/恢复测试（回归） | **9 passed** |
-| web 单元测试 | **49 passed** |
+| web 单元测试（含真实 Clerk 桥 6 项） | **55 passed** |
 | 原生 Chromium 端到端 | **9 passed** |
 
 细节、命令与逐项覆盖见 `docs/ui-refresh/UI_AND_BACKEND_TEST_REPORT.md`。
@@ -278,23 +279,37 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 5. **生成 runner 多 worker 支持** — **未实现**。`cm_update` 的生成任务表是单进程内存结构
    （启动时把残留 run 标记为 `failed/SERVER_RESTARTED`）。多 worker 生产必须把生成搬到
    既有持久化 worker。
-6. **多 worker 生成支持** — **未实现**。`cm_update` 的生成任务表是单进程内存结构
-   （启动时把残留 run 标记为 `failed/SERVER_RESTARTED`）。多 worker 生产必须把生成搬到
-   既有持久化 worker。
+6. **多 worker 生成支持** — **未接线**。本轮做了精确复核而非猜测：
+   `app.py:49` 的启动清理是**无条件**的（第二个 worker 会杀掉第一个正在进行的 run
+   并标成 `SERVER_RESTARTED`，费用却已花掉）；`app.py:757` 的取消是**进程内**语义
+   （跨 worker 取消不会停止生成，之后仍会写入一条 assistant 消息）。
+   SSE 事件流、幂等键、配额都走数据库，**本来就是跨进程安全**的。
+   已核实 V3 当前是**单 worker**（仓库内无 durable worker/队列，部署文档无 `--workers`），
+   所以这两个失效模式**在当前部署上不会触发**。最小修法与所需 Schema 递增已写入
+   `MIGRATION_AND_ROLLBACK.md` §7。**本次刻意没有改交付包的 `app.py`**：
+   在 V3 侧 worker 形态不存在时凭空造一个多进程 runner 只会新增未经验证的代码路径。
 7. **原仓库既有浏览器 E2E（`coursemate.spec.ts`）** — 本次**未运行**；
-   既有站点由 455 项后端测试与 49 项前端测试回归覆盖。
+   既有站点由 458 项后端测试与 55 项前端测试回归覆盖。
 8. **生产多用户隔离、管理员边界、公开审核线上验收** — `NOT VERIFIED`。
 9. **开发执行模型仍为 `deepseek-v4-flash`**，与用户要求的 `deepseek-v4-pro` 不一致（§0.1）。
 
-### 8.1 本轮（goal round 1）新闭环的一项
+### 8.1 本会话新闭环的两项
 
-**旧 V3 问答历史在新壳内可读**：上一轮列为"未实现"，本轮已实现并验证。
-`app/ui_extension/mount.py:_prepend_legacy_history` 新增两条只读路由，
-`domain.py` 新增 `legacy.conversations` / `legacy.conversation` 两个 operation，
-学习页历史弹窗底部新增"旧版问答记录"分组与只读阅读器。
-**没有把旧记录复制进新表**——仍是原 `conversations`/`messages` 上的投影。
-证据：7 项 Python 测试（含跨用户隔离、私人课程 404、未登录 401）+
-浏览器用例 7（断言无重命名/删除按钮、无输入框）。
+**（1）旧 V3 问答历史在新壳内可读**（goal round 1）：`mount.py:_prepend_legacy_history`
+新增两条只读路由，`domain.py` 新增 `legacy.conversations` / `legacy.conversation`，
+学习页历史弹窗新增"旧版问答记录"分组与只读阅读器。**没有把旧记录复制进新表**。
+证据：7 项 Python 测试 + 浏览器用例 7。
+
+**（2）生产 Clerk 桥从零覆盖变为已覆盖**（goal round 2）：
+之前所有浏览器用例都用后端测试验证器，走的是 `TestAuthBridge` 分支，
+**生产分支 `AuthBridge` 从未被执行**——这是一个真实的上线风险。
+现由 `apps/web/src/CourseMateUi.test.tsx` 6 项覆盖：token 委托给 Clerk、
+退订函数、`signIn` 走 Clerk 弹窗、`signOut` 走 Clerk、卸载清理桥、
+**无 publishable key 时失败关闭且不安装桥**。
+（该项第一次运行失败，正是因为它正确地走了失败关闭分支。）
+
+同时把课程删除的生命周期用 3 项测试固定下来：无 workspace 正常删除、
+确认名称不符 422、**有 workspace 时 409 且课程与私有语料都不受影响**。
 
 ## 9. 关键产物
 
