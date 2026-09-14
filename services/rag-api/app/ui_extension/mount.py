@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 
 from app.config import Settings
 from app.db import Database
@@ -128,10 +128,61 @@ def mount_ui_extension(host_app: FastAPI, *, mount_path: str = MOUNT_PATH) -> ob
         mount_path=mount_path,
     )
     _allow_browser_credentials(host_app, mount_path, ui_settings.allowed_origins)
+    _prepend_legacy_history(ui, adapter)
     # Exposed for tests and operational diagnostics; the adapter holds no secrets.
     host_app.state.ui_extension_adapter = adapter
     host_app.state.ui_extension_app = ui
     return ui
+
+
+def _prepend_legacy_history(ui: object, adapter: V3DomainAdapter) -> None:
+    """Add read-only routes for the pre-existing V3 conversations.
+
+    The delivered module has no route for them, and copying the old rows into the
+    refreshed shell's history would create two histories that drift apart. These
+    routes therefore project the original `conversations`/`messages` tables through
+    the same adapter, so the caller's verified identity and course authorization
+    still apply and nothing becomes unreachable when the new navigation replaces
+    the old one.
+
+    The routes are inserted ahead of the sub-application's existing routes: when a
+    built frontend is present, `cm_update` registers a catch-all static mount that
+    would otherwise answer every unmatched path, including these.
+    """
+
+    from fastapi import APIRouter, HTTPException
+    from fastapi.responses import JSONResponse
+
+    from app.cm_update.auth import current_user
+
+    router = APIRouter()
+
+    async def _call(operation: str, payload: dict[str, object], request: Request) -> object:
+        user = await current_user(request)
+        try:
+            return await adapter.call(
+                operation, user["id"], payload, request.headers.get("authorization", "")
+            )
+        except HTTPException:
+            raise
+
+    @router.get("/api/ui/v1/courses/{course_id}/legacy-conversations")
+    async def legacy_conversations(course_id: str, request: Request) -> JSONResponse:
+        rows = await _call("legacy.conversations", {"course": course_id}, request)
+        return JSONResponse(content=rows)
+
+    @router.get("/api/ui/v1/courses/{course_id}/legacy-conversations/{conversation_id}")
+    async def legacy_conversation(
+        course_id: str, conversation_id: str, request: Request
+    ) -> JSONResponse:
+        body = await _call(
+            "legacy.conversation",
+            {"course": course_id, "id": conversation_id},
+            request,
+        )
+        return JSONResponse(content=body)
+
+    ui.routes[:0] = router.routes  # type: ignore[attr-defined]
 
 
 def _allow_browser_credentials(

@@ -5,13 +5,13 @@
 **仓库**：`C:\Users\Hp\Documents\Codex\2026-08-11\files-mentioned-by-the-user-coursemate\outputs\coursemate-ai`
 **分支**：`feature/dsh-ui-refresh-integration`
 **接手前基线**：`64e57501b380ffaefb55db92ef0fc328c39b0928`
-**本次最终 SHA**：`e8e4e58d20fd2d2b4deb9457e6c6d3c79270abd3`
+**本次最终 SHA**：见 §10（本文件随最终提交一并入库）
 
 ```text
 SOURCE INTEGRATION:               PASS
-LOCAL TEST SUITE:                 PASS  (448 rag-api + 49 web)
+LOCAL TEST SUITE:                 PASS  (455 rag-api + 49 web)
 MODERN REACT PRODUCTION BUILD:    PASS  (React 19.2.8 + Vite 8.2.1 + tsc 5.9.3)
-NATIVE BROWSER ACCEPTANCE:        PASS  (7/7 real Chromium journeys)
+NATIVE BROWSER ACCEPTANCE:        PASS  (9/9 real Chromium journeys)
 LIVE QWEN TWO-STAGE:              NOT RUN   (no paid authorization available)
 REAL CLERK SIGN-IN:               NOT VERIFIED
 PRODUCTION DEPLOYMENT:            NOT PERFORMED
@@ -66,24 +66,29 @@ Harness 配置文件为准。本会话**没有修改**该设置——改模型�
 |---|---|
 | 交付包后端模块 | `services/rag-api/app/cm_update/`（15 个文件） |
 | 与包 `FILE_MANIFEST.json` 的 hash 比对 | **13 个逐字节一致**，2 个有意修改（见 §1.1），0 个缺失 |
-| 真实 `DomainPort` 适配器 | `services/rag-api/app/ui_extension/domain.py`，实现全部 20 个 operation |
+| 交付包前端模块 | `apps/web/src/ui/`（8 个文件） |
+| 与包 `web/src` 的 hash 比对 | **6 个逐字节一致**（`App.jsx`、`api.js`、`icons.jsx`、`utils.js`、`richtext.jsx`、`styles.css`），2 个**纯新增式**修改（`pages.jsx`、`styles-extra.css`，见 §1.1） |
+| 真实 `DomainPort` 适配器 | `services/rag-api/app/ui_extension/domain.py`，实现全部 **22** 个 operation |
 | 注入式身份桥 | `app/ui_extension/identity.py`，绑定宿主 Clerk 验证器 |
 | 宿主挂载 | `app/ui_extension/mount.py` + `app/main.py`（默认关闭） |
-| 新 React 壳 | `apps/web/src/ui/*`（原样）、`src/CourseMateUi.tsx`、`src/main.ui.tsx`、`ui.html` |
+| 新 React 壳 | `apps/web/src/ui/*`、`src/CourseMateUi.tsx`、`src/main.ui.tsx`、`ui.html` |
 | Node 任务桥 | `domain.py` 的 `task.list/create/update/delete/plan` |
+| 旧 V3 问答历史只读入口 | `mount.py:_prepend_legacy_history` + `domain.py:legacy.*` |
 | 恢复单元扩展 | `ops/backup_v2.py`、`ops/restore_v2.py` |
-| 变更规模 | 60 个文件，+8352 / −18 行 |
+| 变更规模 | 63 个文件，+8612 / −20 行 |
 
-### 1.1 对交付包源码的三处修改（全部为可移植性/正确性，无功能删减）
+### 1.1 对交付包源码的六处修改（全部为可移植性/正确性/纯新增，无功能删减）
 
 | 文件 | 修改 | 为什么必须改 |
 |---|---|---|
 | `app/cm_update/provider.py:20` | `read_text()` → `read_text(encoding='utf-8')` | Windows 中文 locale 是 GBK，会在**真实付费调用**路径上抛 `UnicodeDecodeError`；Linux 上看不到 |
 | `app/cm_update/config.py:48` | 同上，读 build 标记 | 同一类缺陷，且位于 production 启动门 |
 | `app/cm_update/seed.py` | 新增可选 `documents` 参数 | 原实现从包根 `sample-documents/` 读示例 PDF；本仓库不发布示例课程资料 |
+| `apps/web/src/ui/pages.jsx` | 历史弹窗**新增**"旧版问答记录"分组；**新增** `Assessment` 组件 | 原 V3 问答历史要在新壳内可读；节点测评原本是 `JSON.stringify` 原始 JSON。纯新增，未改动既有页面布局、类名或交互 |
+| `apps/web/src/ui/styles-extra.css` | **追加** `.legacy-*` / `.assessment-grid` 规则 | 只追加，未修改既有规则 |
 
-**未改动**交付包的 `App.jsx` / `pages.jsx` / `styles.css` / `richtext.jsx` / `provider.py`
-两阶段逻辑 / `sse.py` / `steps.py`。
+**未改动**交付包的 `App.jsx` / `api.js` / `icons.jsx` / `utils.js` / `richtext.jsx` /
+`styles.css` / `provider.py` 两阶段逻辑 / `sse.py` / `steps.py`。
 
 ### 1.2 用户确认的产品方向全部保留
 
@@ -138,15 +143,16 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 
 | 套件 | 结果 |
 |---|---|
-| rag-api 全量回归 | **448 passed**（接手前基线 329，新增 119） |
+| rag-api 全量回归 | **455 passed**（接手前基线 329，新增 126） |
 | 交付包契约测试（迁入后） | **71 passed** |
 | 新增 V3 DomainPort 集成测试 | **16 passed** |
 | 新增任务 Agent 桥测试 | **15 passed** |
 | 新增 CORS/凭证契约测试 | **13 passed** |
 | 新增恢复单元测试 | **4 passed** |
+| 新增旧版问答历史测试 | **7 passed** |
 | 原备份/恢复测试（回归） | **9 passed** |
 | web 单元测试 | **49 passed** |
-| 原生 Chromium 端到端 | **7 passed** |
+| 原生 Chromium 端到端 | **9 passed** |
 
 细节、命令与逐项覆盖见 `docs/ui-refresh/UI_AND_BACKEND_TEST_REPORT.md`。
 
@@ -272,12 +278,23 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 5. **生成 runner 多 worker 支持** — **未实现**。`cm_update` 的生成任务表是单进程内存结构
    （启动时把残留 run 标记为 `failed/SERVER_RESTARTED`）。多 worker 生产必须把生成搬到
    既有持久化 worker。
-6. **旧 V3 会话在新壳内的只读入口** — **未实现**。旧路由 `/api/conversations*`、
-   `QaPage` 与旧表**全部保留未改**，但新壳里没有列出它们的入口。
+6. **多 worker 生成支持** — **未实现**。`cm_update` 的生成任务表是单进程内存结构
+   （启动时把残留 run 标记为 `failed/SERVER_RESTARTED`）。多 worker 生产必须把生成搬到
+   既有持久化 worker。
 7. **原仓库既有浏览器 E2E（`coursemate.spec.ts`）** — 本次**未运行**；
-   既有站点由 448 项后端测试与 49 项前端测试回归覆盖。
+   既有站点由 455 项后端测试与 49 项前端测试回归覆盖。
 8. **生产多用户隔离、管理员边界、公开审核线上验收** — `NOT VERIFIED`。
 9. **开发执行模型仍为 `deepseek-v4-flash`**，与用户要求的 `deepseek-v4-pro` 不一致（§0.1）。
+
+### 8.1 本轮（goal round 1）新闭环的一项
+
+**旧 V3 问答历史在新壳内可读**：上一轮列为"未实现"，本轮已实现并验证。
+`app/ui_extension/mount.py:_prepend_legacy_history` 新增两条只读路由，
+`domain.py` 新增 `legacy.conversations` / `legacy.conversation` 两个 operation，
+学习页历史弹窗底部新增"旧版问答记录"分组与只读阅读器。
+**没有把旧记录复制进新表**——仍是原 `conversations`/`messages` 上的投影。
+证据：7 项 Python 测试（含跨用户隔离、私人课程 404、未登录 401）+
+浏览器用例 7（断言无重命名/删除按钮、无输入框）。
 
 ## 9. 关键产物
 
@@ -294,3 +311,4 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 | `apps/web/src/ui/`、`ui.html`、`src/CourseMateUi.tsx` | 新壳源码与真实构建入口 |
 | `tests/e2e/ui-refresh.spec.ts`、`playwright.ui.config.ts` | 原生浏览器验收 |
 | `scripts/serve_web_dist.mjs` | 按 Netlify 规则服务正式产物的验收用静态服务器 |
+| `scripts/seed_legacy_conversation.py` | 只向 `work/e2e-*` 副本注入一条旧 V3 会话，供浏览器验收 |

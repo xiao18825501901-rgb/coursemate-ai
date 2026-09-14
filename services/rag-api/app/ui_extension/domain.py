@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import sqlite3
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -872,6 +873,78 @@ class V3DomainAdapter:
                 }
         raise ApiError(404, "NODE_NOT_FOUND", "The knowledge node was not found.")
 
+    # ------------------------------------------------------- legacy V3 history
+
+    def _legacy_conversations(self, subject: str, course_id: str) -> list[dict[str, Any]]:
+        """List the caller's pre-existing V3 conversations for one course.
+
+        These rows live in the original `conversations` table and are never copied
+        into the refreshed shell's history, so this is a read-only projection over
+        the same records the existing Q&A surface uses.
+        """
+
+        self._course_row(course_id, subject)
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                "SELECT conversation.id, conversation.title, conversation.updated_at,"
+                "(SELECT COUNT(*) FROM messages WHERE messages.conversation_id=conversation.id)"
+                " AS message_count "
+                "FROM conversations AS conversation "
+                "WHERE conversation.owner_user_id=? AND conversation.course_id=? "
+                "ORDER BY conversation.updated_at DESC, conversation.id LIMIT 200",
+                (subject, course_id),
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "updated_at": row["updated_at"],
+                "message_count": row["message_count"],
+                "legacy": True,
+            }
+            for row in rows
+        ]
+
+    def _legacy_conversation(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        course_id = str(payload["course"])
+        conversation_id = str(payload["id"])
+        self._course_row(course_id, subject)
+        with self.database.connect() as connection:
+            conversation = connection.execute(
+                "SELECT id, title, created_at, updated_at FROM conversations "
+                "WHERE id=? AND owner_user_id=? AND course_id=?",
+                (conversation_id, subject, course_id),
+            ).fetchone()
+            if conversation is None:
+                raise ApiError(404, "CONVERSATION_NOT_FOUND", "The conversation was not found.")
+            rows = connection.execute(
+                "SELECT role, content, citations_json, created_at FROM messages "
+                "WHERE conversation_id=? ORDER BY created_at, rowid",
+                (conversation_id,),
+            ).fetchall()
+        messages: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                citations = json.loads(row["citations_json"])
+            except (TypeError, ValueError):
+                citations = []
+            messages.append(
+                {
+                    "role": row["role"],
+                    "text": row["content"],
+                    "citations": citations if isinstance(citations, list) else [],
+                    "created_at": row["created_at"],
+                }
+            )
+        return {
+            "id": conversation["id"],
+            "title": conversation["title"],
+            "created_at": conversation["created_at"],
+            "updated_at": conversation["updated_at"],
+            "messages": messages,
+            "legacy": True,
+        }
+
     # ------------------------------------------------------------------ dispatch
 
     async def call(
@@ -905,6 +978,10 @@ class V3DomainAdapter:
             "knowledge.tree",
             "knowledge.assessment",
         }
+        # The legacy history routes pass `course` (never `id`), so they need their
+        # own boundary check rather than the `id`-shaped one below.
+        if operation in {"legacy.conversations", "legacy.conversation"}:
+            self._course_row(str(payload["course"]), subject)
         if operation in course_operations:
             course_id = str(payload.get("course") or payload.get("id") or "")
             if course_id and operation not in {"course.list", "course.create"}:
@@ -955,6 +1032,10 @@ class V3DomainAdapter:
             return self._knowledge_tree(subject, payload)
         if operation == "knowledge.assessment":
             return self._knowledge_assessment(subject, payload)
+        if operation == "legacy.conversations":
+            return self._legacy_conversations(subject, str(payload["course"]))
+        if operation == "legacy.conversation":
+            return self._legacy_conversation(subject, payload)
         raise ApiError(
             501,
             "DOMAIN_OPERATION_UNSUPPORTED",

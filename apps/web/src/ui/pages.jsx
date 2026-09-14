@@ -394,7 +394,7 @@ export class Learn extends React.Component {
     learnNode(node) { this.setState({ activeNode: node.id, expanded: false, hover: null, mobile: 'teach' }, () => { this.saveLayout(); this.ask('teach', `请用中文从零教我理解 ${node.title}，保留英文术语，结合课程资料和例题。`); }); }
     async assess(node) { try {
         const result = await request(`/courses/${this.props.course.id}/knowledge/${node.id}/assessment`);
-        this.props.modal(node.title + ' · 测评', <div><p>测评服务已连接。</p><pre>{JSON.stringify(result, null, 2)}</pre></div>);
+        this.props.modal(node.title + ' · 测评', <Assessment result={result}/>);
     }
     catch (e) {
         this.props.modal(node.title + ' · 测评', <div><p>{e.message}</p><p className="helper-note" style={{ marginTop: 12 }}>学习进度和测评结果是两个独立状态。没有真实测评时不显示虚构分数。</p></div>);
@@ -420,15 +420,30 @@ export class Learn extends React.Component {
         this.setState({ ratio: Math.max(.25, Math.min(.75, this.state.ratio + (e.key === 'ArrowLeft' ? -.025 : .025))) }, () => this.saveLayout());
     } }}><span /></div>{this.renderPane('problem')}</div></div>{this.state.expanded && this.renderTree()}</div>; }
 }
+class Assessment extends React.Component {
+    render() { const r = this.props.result || {}; const status = r.status || 'NOT_ASSESSED'; const scored = status === 'GRADED' || typeof r.score === 'number'; return <div><dl className="assessment-grid"><dt>状态</dt><dd>{status === 'GRADED' ? '已评阅' : status === 'PARTIALLY_ASSESSED' ? '部分评阅' : status === 'NOT_ASSESSED' ? '未测评' : status}</dd><dt>成绩</dt><dd>{r.grade || '未出具'}</dd><dt>原始分</dt><dd>{typeof r.score === 'number' ? r.score : '—'}</dd>{r.session && <><dt>测评场次</dt><dd className="mono">{r.session}</dd></>}{r.mode && <><dt>模式</dt><dd>{r.mode === 'INDEPENDENT' ? '独立完成' : r.mode === 'PRACTICE' ? '练习' : r.mode}</dd></>}{r.assistance && <><dt>协助状态</dt><dd>{r.assistance === 'UNASSISTED' ? '无协助' : r.assistance === 'ASSISTED' ? '有提示' : r.assistance === 'ANSWER_EXPOSED' ? '已看过答案' : r.assistance}</dd></>}</dl>{r.source && <p className="helper-note" style={{ marginTop: 12 }}>来源：{r.source}</p>}{!scored && <p className="helper-note" style={{ marginTop: 12 }}>还没有真实测评成绩。学习进度和测评结果是两个独立状态，这里不显示虚构分数。</p>}</div>; }
+}
 class History extends React.Component {
-    state = { rows: [], error: '' };
+    state = { rows: [], legacy: [], open: null, error: '' };
     componentDidMount() { this.load(); }
     async load() { try {
-        this.setState({ rows: await request(`/conversations?course_id=${this.props.course}&lane=${this.props.lane}`) });
+        const [rows, legacy] = await Promise.all([
+            request(`/conversations?course_id=${this.props.course}&lane=${this.props.lane}`),
+            request(`/courses/${this.props.course}/legacy-conversations`).catch(() => []),
+        ]);
+        this.setState({ rows, legacy });
     }
     catch (e) {
         this.setState({ error: e.message });
     } }
+    async openLegacy(id) { try {
+        this.setState({ open: await request(`/courses/${this.props.course}/legacy-conversations/${id}`) });
+    }
+    catch (e) {
+        this.setState({ error: e.message });
+    } }
+    renderLegacy() { const { legacy, open } = this.state; if (!legacy.length)
+        return null; return <div className="legacy-history"><div className="divider"/><h3>旧版问答记录</h3><p className="helper-note" style={{ marginTop: 6 }}>这些是原问答页面的历史对话，保存在原记录里，只读，不会被复制到本页历史。</p>{legacy.map(c => <div key={c.id} className="history-line"><button className="history-item" onClick={() => this.openLegacy(c.id)}><Icon name="history"/><span>{c.title}</span><small>{formatTime(c.updated_at)} · {c.message_count} 条</small></button></div>)}{open && <div className="legacy-reader"><div className="row between"><strong>{open.title}</strong><IconButton name="close" title="关闭旧版对话" onClick={() => this.setState({ open: null })}/></div><div className="legacy-messages">{open.messages.map((m, i) => <article key={i} className={m.role === 'user' ? 'legacy-message mine' : 'legacy-message'}><small>{m.role === 'user' ? '你' : 'CourseMate'}</small><RichText text={m.text}/>{m.citations && m.citations.length > 0 && <ul className="legacy-citations">{m.citations.map((c, j) => <li key={j}>{c.filename || c.document_id || '课程资料'}</li>)}</ul>}</article>)}</div></div>}</div>; }
     render() { return <div>{this.state.error && <p className="error-text">{this.state.error}</p>}{this.state.rows.map(c => <div key={c.id} className="history-line"><button className="history-item" onClick={() => this.props.onSelect(c.id)}><Icon name="history"/><span>{c.title}</span><small>{formatTime(c.updated_at)}</small></button><IconButton name="edit" title={'重命名 ' + c.title} onClick={async () => { const title = window.prompt('对话名称', c.title); if (title) {
         await send('/conversations/' + c.id, { title }, 'PATCH');
         this.load();
@@ -441,5 +456,5 @@ class History extends React.Component {
         catch (e) {
             this.setState({ error: e.message });
         }
-    } }}/></div>)}{!this.state.rows.length && <p className="helper-note">还没有历史对话。发送第一个问题后，会保存在这里。</p>}</div>; }
+    } }}/></div>)}{!this.state.rows.length && <p className="helper-note">还没有历史对话。发送第一个问题后，会保存在这里。</p>}{this.renderLegacy()}</div>; }
 }

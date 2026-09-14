@@ -28,9 +28,11 @@ app/main.py:create_app()
 | `encoding='utf-8'` 读 Word 模板 | `app/cm_update/provider.py:20` | Windows 中文区域 locale 是 GBK，`read_text()` 无参会在**真实付费调用**上抛 `UnicodeDecodeError`（Linux 上不可见） |
 | `encoding='utf-8'` 读 build 标记 | `app/cm_update/config.py:48` | 同一类 locale 缺陷，出现在 production 启动门路径上 |
 | `seed(cfg, documents=None)` | `app/cm_update/seed.py` | 原本从包根 `sample-documents/` 读示例 PDF。本仓库不发布示例课程资料，因此改为显式传入目录；`production` / `integrated` 仍然直接拒绝 |
+| 历史弹窗新增"旧版问答记录"分组 + 新增 `Assessment` 组件 | `apps/web/src/ui/pages.jsx` | 让原 V3 问答历史在新壳内可读，并把节点测评从 `JSON.stringify` 原始 JSON 改成真实结果面板。**纯新增，未改动既有页面布局、样式类或交互** |
+| 追加 `.legacy-*` / `.assessment-grid` 样式 | `apps/web/src/ui/styles-extra.css` | 只追加，未修改既有规则 |
 | `provider_mode` / `allowed_origins` 等以宿主配置为准 | `app/ui_extension/mount.py:_ui_settings` | 复用已部署的**同一个**千问凭据（`V3_MODEL_API_KEY` / `V3_MODEL_BASE_URL`），不产生第二份密钥 |
 
-交付包其余源码**逐字节未改**（`FILE_MANIFEST.json` 中的 sha256 仍匹配，见 §5 校验）。
+交付包其余源码逐字节未改（下节校验）。
 
 ## 3. DomainPort 契约 → 真实 V3 实现
 
@@ -55,6 +57,8 @@ app/main.py:create_app()
 | `task.plan` | HTTP 转发到 `POST /api/agent/chat` —— **原 Node Function Calling Agent**，不做正则、不做假成功 | `message`、`toolResults` |
 | `knowledge.tree` | `LearningOrchestrator.knowledge_state(workspace_id, subject)` → 取 `personalized_tree`（存在时）否则 `official_tree` 的 `members`，与 `registry` 合并 | `id/parent/title/position/progress/grade` |
 | `knowledge.assessment` | 同一份 snapshot 的 `state.assessment`；缺失时 404，**不伪造 GPA** | 原样 |
+| `legacy.conversations` | 直接读原 `conversations` 表，按 `owner_user_id` + `course_id` 过滤 | 宿主新增路由使用 |
+| `legacy.conversation` | 直接读原 `conversations` / `messages`，返回真实正文与引用 | 宿主新增路由使用 |
 
 ### 关键约束（来自逐行读包，非猜测）
 
@@ -120,7 +124,19 @@ app/main.py:create_app()
   理由：复制会制造两份会各自漂移的副本，且 `cmui_*` 的 lane（`teach`/`problem`）
   与 V3 会话（问答流）语义并不一一对应。旧记录通过旧入口访问，新记录通过新入口访问，
   两者都保留、都不丢。
-* **未完成**：在新壳里直接列出旧 V3 会话的只读入口尚未实现。
+* 新壳内提供**只读**的旧记录入口（`app/ui_extension/mount.py:_prepend_legacy_history`）：
+
+  | 路由 | 行为 |
+  |---|---|
+  | `GET /ui-extension/api/ui/v1/courses/{cid}/legacy-conversations` | 列出该课程下**本人**的 V3 会话，含真实 `title` / `message_count` / `updated_at` |
+  | `GET /ui-extension/api/ui/v1/courses/{cid}/legacy-conversations/{id}` | 返回该会话的真实消息与引用 |
+
+  这两条路由由宿主新增（交付包本身没有旧历史路由），但**所有授权仍走原有代码**：
+  身份来自宿主 `auth_verifier`，课程访问走 `require_course_access`，
+  会话按 `owner_user_id` 过滤。它们被插入在子应用既有路由**之前**，
+  否则 `cm_update` 的静态兜底挂载会吞掉它们。
+  学习页的历史弹窗底部新增"旧版问答记录"分组，打开后是只读阅读器
+  （无重命名、无删除、无输入框）。
 
 ## 7. 新增数据与备份
 

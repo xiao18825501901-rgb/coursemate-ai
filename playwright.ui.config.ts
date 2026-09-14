@@ -26,6 +26,15 @@ execFileSync(
   [path.join(repositoryRoot, "scripts", "prepare_full_e2e.py"), e2eData, e2eUserId],
   { stdio: "inherit" },
 );
+execFileSync(
+  pythonExecutable,
+  [
+    path.join(repositoryRoot, "scripts", "seed_legacy_conversation.py"),
+    path.join(e2eData, "rag.sqlite3"),
+    e2eUserId,
+  ],
+  { stdio: "inherit" },
+);
 
 export default defineConfig({
   testDir: "./tests/e2e",

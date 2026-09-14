@@ -16,10 +16,11 @@
 | 新增任务 Agent 桥测试 | `pytest tests/test_ui_extension_task_agent.py -q` | **15 passed** | 本次运行 |
 | 新增 CORS / 凭证契约测试 | `pytest tests/test_ui_extension_cors.py -q` | **13 passed** | 本次运行 |
 | 新增恢复单元测试（含新增 UI 库） | `pytest tests/test_backup_ui_extension.py -q` | **4 passed** | 本次运行 |
+| 新增旧版问答历史测试 | `pytest tests/test_ui_extension_legacy_history.py -q` | **7 passed** | 本次运行 |
 | 原备份/恢复测试（回归） | `pytest tests/test_backup_restore.py -q` | **9 passed** | 本次运行 |
 | web 单元测试 | `vitest run`（`apps/web`） | **49 passed**（连续 3 次） | 本次运行 |
 | 正式 React 生产构建 | `npm run build --workspace @coursemate/web`（`tsc -b && vite build`） | **通过** | 本次运行 |
-| 原生 Chromium 端到端验收 | `playwright test --config playwright.ui.config.ts` | **7 passed** | 本次运行 |
+| 原生 Chromium 端到端验收 | `playwright test --config playwright.ui.config.ts` | **9 passed** | 本次运行 |
 | 原仓库既有 E2E（`coursemate.spec.ts`） | `npx playwright test` | **未运行**（见 §7 原因） | — |
 | 真实千问两阶段 | — | **NOT RUN** | 无预算授权 |
 
@@ -100,7 +101,20 @@ allow-credentials；扩展响应强制 `private, no-store`。
 | 4 | 真实发帖入库、其他账号可见、无 console 错误 | PASS |
 | 5 | 学习页保留全局与课程两条左导航；知识树默认折叠、展开后覆盖内容区而导航保留、显示"还没有课程知识树"（不伪造）；双 Pane 同时可见；拖动分隔条改变 `aria-valuenow`；全屏保留左右两栏、Esc 恢复；两条历史入口存在 | PASS |
 | 6 | 手动新增计划 → 201；**同一记录出现在 Node Agent 自己的 REST 列表**；刷新后仍显示；在壳内完成后 Agent 记录变为 `completed` | PASS |
-| 7 | 390px 视口下无横向溢出 | PASS |
+| 7 | **原 V3 问答历史在新壳内可读且只读**：历史弹窗出现"旧版问答记录"分组，能打开原对话、看到原提问、回答与引用文件名；该阅读器内**没有**重命名、删除按钮，也没有输入框 | PASS |
+| 8 | 节点测评入口返回真实 V3 结果（不存在节点 → 404），空知识树下不伪造节点与成绩 | PASS |
+| 9 | 390px 视口下无横向溢出 | PASS |
+
+### 2.5 `test_ui_extension_legacy_history.py` — 旧记录不丢失
+
+新壳的历史在 `cmui_conversations`/`cmui_messages`，旧 V3 历史在
+`conversations`/`messages`。**没有**做任何把旧记录复制进新表的迁移（复制会产生两份会
+各自漂移的历史）。改为在原表上做只读投影：
+
+* 列出一个课程下**本人**的旧对话，带真实 `title`、`message_count`、`updated_at`；
+* 另一用户得到空列表；私人课程对他人 404；
+* 详情返回真实消息（role 顺序、正文、引用 JSON）；
+* 他人不可读；不存在的 id → 404；未登录 → 401。
 
 ### 浏览器测试发现并修复的真实缺陷（4 项）
 

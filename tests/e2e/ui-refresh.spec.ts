@@ -321,6 +321,53 @@ test("calendar plans are created in the same task store the Node agent serves", 
     .toBe("completed");
 });
 
+test("the original V3 question history stays readable and read-only", async ({ page }) => {
+  await page.goto("/app#/course/cs3481/learn");
+  await expect(page.locator(".workspace-columns")).toBeVisible();
+
+  await page.getByRole("button", { name: "知识历史" }).click();
+  const modal = page.locator(".modal");
+  await expect(modal).toBeVisible();
+  await expect(modal.getByRole("heading", { name: "旧版问答记录" })).toBeVisible();
+
+  // Opened from the pre-existing `conversations` table, not copied anywhere.
+  const entry = modal.locator(".history-item").filter({ hasText: "旧版问答：DBSCAN 核心点" });
+  await expect(entry).toBeVisible();
+  await entry.click();
+
+  const reader = modal.locator(".legacy-reader");
+  await expect(reader).toBeVisible();
+  await expect(reader).toContainText("旧版提问：DBSCAN 怎么判断核心点？");
+  await expect(reader).toContainText("MinPts");
+  await expect(reader).toContainText("lecture_04_clustering.md");
+
+  // Read-only: the legacy reader offers no rename, delete or continue actions.
+  await expect(reader.locator('button[title^="重命名"]')).toHaveCount(0);
+  await expect(reader.locator('button[title^="删除对话"]')).toHaveCount(0);
+  await expect(reader.getByRole("textbox")).toHaveCount(0);
+});
+
+test("a node assessment renders the real V3 result instead of raw JSON", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/app#/course/cs3481/learn");
+  await expect(page.locator("button.knowledge-strip")).toBeVisible();
+
+  // This corpus has no reviewed knowledge tree, so the shell must state that
+  // rather than fabricate nodes; the assessment surface is still reachable.
+  await page.locator("button.knowledge-strip").click();
+  await expect(page.locator(".tree-expanded")).toContainText("还没有课程知识树");
+
+  const response = await request.get(
+    "http://127.0.0.1:8100/ui-extension/api/ui/v1/courses/cs3481/knowledge/does-not-exist/assessment",
+    { headers: { Authorization: "Bearer test-session-token" } },
+  );
+  expect(response.status()).toBe(404);
+  const body = await response.json();
+  expect(String(body.detail)).toContain("not found");
+});
+
 test("help covers the new surfaces and no horizontal overflow at 390px", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/app");
