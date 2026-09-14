@@ -22,8 +22,6 @@ class ContractProvider:
         for part in [answer[:35],answer[35:]]:yield {'kind':'delta','text':part}
         yield {'kind':'usage','stage':'answer','value':{'input_tokens':1,'output_tokens':1}}
 
-pytest_plugins = ("pytest_asyncio",)
-
 _SAMPLE_TEXT = (
     "Lecture 04 Clustering\n\nK-means partitions points into k clusters by minimising "
     "the within-cluster sum of squares. DBSCAN groups density-reachable points and "

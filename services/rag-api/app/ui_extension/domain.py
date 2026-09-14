@@ -711,14 +711,17 @@ class V3DomainAdapter:
         return items
 
     def _task_create(self, credential: str, payload: dict[str, Any]) -> dict[str, Any]:
-        body = {
-            "title": payload.get("title"),
-            "notes": None,
-            "courseId": payload.get("course"),
-            "priority": None,
-            "dueDate": _date_only(payload.get("due_at")),
-            "sourceCitation": None,
-        }
+        body: dict[str, Any] = {"title": payload.get("title")}
+        # The agent's `validateCreateTask` schema is narrower than its TypeScript
+        # type: `priority` is an enum with no null member, and every other optional
+        # field accepts null. Only fields this UI actually sets are sent, so an
+        # unset value is omitted rather than sent as an invalid one.
+        course = _optional_id(payload.get("course"))
+        if course is not None:
+            body["courseId"] = course
+        due = _date_only(payload.get("due_at"))
+        if due is not None:
+            body["dueDate"] = due
         return self._task_dto(
             self._agent_request("POST", "/api/tasks", credential, json_body=body)
         )
@@ -1036,6 +1039,20 @@ def _date_only(value: Any) -> str | None:
     if parsed.tzinfo is not None:
         parsed = parsed.astimezone(UTC)
     return parsed.date().isoformat()
+
+
+def _optional_id(value: Any) -> str | None:
+    """Normalise an unselected optional identifier to null.
+
+    The calendar's course picker offers "个人学习" with an empty value, and the
+    agent's schema accepts either an id matching `^[a-z0-9][a-z0-9-]{1,49}$` or
+    null - never an empty string.
+    """
+
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
 
 
 def _task_version(task: dict[str, Any]) -> int:

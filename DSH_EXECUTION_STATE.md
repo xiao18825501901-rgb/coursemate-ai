@@ -1,0 +1,84 @@
+# DSH 执行状态（会话交接与恢复用）
+
+**最后更新**：2026-09-14（会话内）
+**本文件是跨上下文压缩 / 换会话的唯一恢复依据。**
+
+## 1. 真实工作区
+
+| 项 | 值 |
+|---|---|
+| 仓库 | `C:\Users\Hp\Documents\Codex\2026-08-11\files-mentioned-by-the-user-coursemate\outputs\coursemate-ai` |
+| 分支 | `feature/dsh-ui-refresh-integration` |
+| 接手前基线 SHA | `64e57501b380ffaefb55db92ef0fc328c39b0928` |
+| 交付包位置 | `D:\UserData\Downloads\CourseMate_DSH_Implementation\CourseMate_DSH_Implementation` |
+| 开发执行模型 | `deepseek-v4-flash`（`C:\Users\Hp\.dsh\settings.yaml` 的 `agent-default-model`）。**用户要求的是 `deepseek-v4-pro`，当前 Harness 实际设置不是它**，本会话未改动该设置 |
+| 网站教学模型 | `qwen3.8-max`（`services/rag-api/app/config.py:v3_model` / `app/cm_update` 复用同一凭据） |
+
+实际提交：
+
+```
+359da39  feat(ui-extension): mount delivered new UI on real V3 domain
+c87eb23  feat(ui-extension): real React shell, agent task bridge, wider recovery unit
+```
+
+## 2. 已合入模块
+
+| 模块 | 位置 | 状态 |
+|---|---|---|
+| 交付包后端（逐字节除 3 处修正） | `services/rag-api/app/cm_update/` | 已合入，13/15 文件 hash 与包 manifest 一致 |
+| 真实 DomainPort 适配器 | `services/rag-api/app/ui_extension/domain.py` | 已实现 20 个 operation |
+| 注入式身份桥 | `services/rag-api/app/ui_extension/identity.py` | 已实现，绑定宿主 Clerk 验证器 |
+| 宿主挂载 | `services/rag-api/app/ui_extension/mount.py` + `app/main.py` | 已实现，默认关闭 |
+| 新 React 壳 | `apps/web/src/ui/*`、`src/CourseMateUi.tsx`、`src/main.ui.tsx`、`ui.html` | 已合入真实 Vite 构建 |
+| Node 任务桥 | `domain.py` 的 `task.*` | 已实现并测试 |
+| 恢复单元扩展 | `ops/backup_v2.py`、`ops/restore_v2.py` | 已实现并测试 |
+
+## 3. 剩余 DomainPort 映射缺口
+
+**无未实现的 operation**。但以下是已知的语义限制：
+
+1. `knowledge.tree` 依赖 `learning_workspaces`：用户首次进入课程时自动创建 workspace。
+   真实 corpus 若没有已发布的 `knowledge_tree_versions`，返回空数组（已实测）。
+2. `task.*` 的 `version` 由 Agent 的 `updatedAt` 派生（Agent Schema 1 没有 version 列）。
+3. `context.retrieve` 只返回 `top_k` 条，与 V3 学习链路的 `evidence()` 上限一致。
+4. 生成 run 是单进程内存任务表，多 worker 部署必须改造。
+5. 新壳未提供旧 V3 会话历史的只读入口。
+
+## 4. 最新测试结果（本会话实测）
+
+| 套件 | 命令 | 结果 |
+|---|---|---|
+| rag-api 全量 | `.venv\Scripts\python.exe -m pytest -q` | 见 `UI_AND_BACKEND_TEST_REPORT.md` |
+| web 单测 | `vitest run`（`apps/web`） | 49 passed |
+| 正式构建 | `tsc -b && vite build` | 通过，双文档产物 |
+| 原生浏览器验收 | `playwright test --config playwright.ui.config.ts` | **7 passed**（真实 Chromium + 真三服务） |
+
+## 5. 授权记录
+
+**本会话未弹出任何权限提示框，也未执行任何需要授权的动作。**
+
+未执行：真实千问付费调用、生产访问、数据库迁移、重启服务、修改真实凭证、Git push、
+Netlify 发布。
+
+已执行且不需要授权：本地读文件、本地改代码、本地非计费测试、本地构建、本地浏览器测试。
+
+> 注意：本会话的批准提示被禁用（`approval_policy=never`），因此**不存在**"已获批准但未执行"
+> 的待办授权项。
+
+## 6. 部署 / 回滚状态
+
+* 生产：**未触碰**。生产仍是 `qqttai.com` + `cd8c121` + Netlify `6aa70f2b5a330d5a8ae4be56`。
+* 回滚：无需回滚，因为未发布。
+* `UI_EXTENSION_ENABLED` 在新 release 部署前保持 `false`，新入口在生产上不存在。
+
+## 7. 恢复步骤
+
+1. 读本文件与 `docs/ui-refresh/HANDOVER_BASELINE.md`。
+2. `git log --oneline -3` 确认 HEAD 在 `c87eb23` 或其后。
+3. 全量回归：见 §4 命令。
+4. 原生浏览器验收前，先按 `playwright.ui.config.ts` 前缀用部署形态构建前端：
+   设置 `VITE_AUTH_TEST_TOKEN=test-session-token` 与
+   `VITE_UI_API_BASE=http://127.0.0.1:8100/ui-extension/api/ui/v1` 后 `vite build`。
+   **发布前必须用 Clerk 形态（不设 test token）重新构建。**
+5. 需要真实千问验证时：先按 `scripts/Request-DeploymentApproval.ps1` 或宿主原生提示框
+   申请预算，再设置 `CMUI_PROVIDER_MODE=qwen` 与 `CMUI_ALLOW_BILLABLE=true`。

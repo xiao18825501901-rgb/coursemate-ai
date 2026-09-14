@@ -54,6 +54,9 @@ export function Layout() {
           ))}
         </nav>
         <div className="header-auth">
+          <a className="nav-link" href="/app">
+            学习空间
+          </a>
           {auth.isSignedIn ? <SignedInAccount /> : <SignedOutActions />}
         </div>
       </header>

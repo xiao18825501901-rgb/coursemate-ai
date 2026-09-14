@@ -1,0 +1,336 @@
+import { expect, test } from "@playwright/test";
+
+/**
+ * Native-browser acceptance for the refreshed CourseMate shell.
+ *
+ * Everything here runs against the real services: the RAG API with the UI
+ * extension mounted on the live V3 database, the existing Node task agent, and a
+ * real Chromium. It replaces the delivered package's in-memory harness, which
+ * loaded the shell with `page.set_content` and an explicit HTTP bridge.
+ */
+
+const NAV = ["账户", "控制面板", "课程", "日历", "收件箱", "帮助"];
+
+test.describe.configure({ mode: "serial" });
+
+test("boots against the real API and exposes exactly six global entries", async ({ page }) => {
+  const consoleErrors: string[] = [];
+  const failedRequests: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("requestfailed", (request) => failedRequests.push(request.url()));
+  page.on("response", (response) => {
+    if (response.status() >= 500) failedRequests.push(`${response.status()} ${response.url()}`);
+  });
+
+  await page.goto("/app");
+  const entry = await page.evaluate(() => ({
+    scripts: Array.from(document.querySelectorAll("script[src]")).map((node) =>
+      (node as HTMLScriptElement).getAttribute("src"),
+    ),
+    legacyEntry: Array.from(document.querySelectorAll("script[src]")).some((node) =>
+      (node as HTMLScriptElement).getAttribute("src")?.includes("main-"),
+    ),
+  }));
+  // `/app` must serve the refreshed shell's document, not the legacy one.
+  expect(entry.scripts.join(" ")).toMatch(/\/assets\/ui-[\w-]+\.js/);
+  expect(entry.legacyEntry).toBe(false);
+
+  const nav = page.getByRole("navigation", { name: "主导航" });
+  await expect(nav).toBeVisible();
+  for (const label of NAV) {
+    await expect(nav.getByRole("button", { name: label, exact: true })).toBeVisible();
+  }
+  // The user excluded todo lists, recent feedback and a "new dashboard" toggle.
+  await expect(nav.getByRole("button")).toHaveCount(NAV.length + 1 /* brand */);
+
+  // Reachability of the mounted extension, not just the shell rendering.
+  const health = await page.request.get("http://127.0.0.1:8100/ui-extension/health");
+  expect(health.status()).toBe(200);
+  expect(await health.json()).toMatchObject({ mode: "integrated" });
+
+  expect(failedRequests).toEqual([]);
+  expect(consoleErrors).toEqual([]);
+});
+
+test("shows an empty dashboard on first sign-in and adds courses from All Courses", async ({
+  page,
+}) => {
+  await page.goto("/app");
+  const nav = page.getByRole("navigation", { name: "主导航" });
+
+  await nav.getByRole("button", { name: "控制面板", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "控制面板" })).toBeVisible();
+  await expect(page.locator(".course-card")).toHaveCount(0);
+  await expect(page.locator(".add-course-card")).toBeVisible();
+
+  await nav.getByRole("button", { name: "课程", exact: true }).click();
+  const drawer = page.getByRole("dialog", { name: "课程面板" });
+  await expect(drawer).toBeVisible();
+  await drawer.getByRole("button", { name: /所有课程/ }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "所有课程" })).toBeVisible();
+
+  const row = page.getByRole("row", { name: /CS3481/ });
+  await expect(row).toBeVisible();
+  await row.getByRole("button", { name: /添加 CS3481/ }).click();
+
+  await nav.getByRole("button", { name: "控制面板", exact: true }).click();
+  await expect(page.locator(".course-card")).toHaveCount(1);
+  await expect(page.locator(".course-card")).toContainText("CS3481");
+
+  // The three card tools must land on the same destinations as the course nav.
+  const card = page.locator(".course-card").first();
+  await expect(card.getByRole("button", { name: /评论/ })).toBeVisible();
+  await expect(card.getByRole("button", { name: /文件/ })).toBeVisible();
+  await expect(card.getByRole("button", { name: /学习/ })).toBeVisible();
+  await card.getByRole("button", { name: /文件/ }).click();
+  await expect(page).toHaveURL(/#\/course\/cs3481\/files$/);
+  await expect(page.getByRole("button", { name: "文件", exact: true })).toHaveClass(/active/);
+
+  // Persistence is server-side: a full reload on the same route must keep the
+  // course readable and its pin visible in the drawer listing.
+  await page.reload();
+  await expect(page).toHaveURL(/#\/course\/cs3481\/files$/);
+  await expect(page.getByRole("button", { name: "文件", exact: true })).toHaveClass(/active/);
+  await nav.getByRole("button", { name: "课程", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "课程面板" })).toContainText("CS3481");
+  await nav.getByRole("button", { name: "控制面板", exact: true }).click();
+  await expect(page.locator(".course-card")).toHaveCount(1);
+});
+
+test("lists real course files, uploads a private one, previews it, and offers download", async ({
+  page,
+  request,
+}) => {
+  const sourceRequests: string[] = [];
+  page.on("response", (response) => {
+    if (
+      response.url().includes("/files/") &&
+      (response.url().includes("/content") || response.url().includes("/text"))
+    ) {
+      sourceRequests.push(`${response.status()} ${response.url()}`);
+    }
+  });
+
+  await page.goto("/app#/course/cs3481/files");
+  await expect(page.getByRole("heading", { level: 1, name: "文件" })).toBeVisible();
+
+  // The corpus listing is real V3 data, grouped into folders.
+  const rows = page.locator(".file-table tbody tr");
+  await expect(rows.first()).toBeVisible();
+  await expect(page.getByText("Lecture Slides").first()).toBeVisible();
+
+  // Uploading through the shell stores a genuine file in the caller's own corpus.
+  const unique = `端到端验收资料 ${Date.now()}.md`;
+  const uploadResponse = page.waitForResponse(
+    (response) => response.url().endsWith("/files") && response.request().method() === "POST",
+  );
+  await page.locator('input[type="file"]').setInputFiles({
+    name: unique,
+    mimeType: "text/markdown",
+    buffer: Buffer.from("# 端到端验收\n\nDBSCAN 的核心点由邻域与 MinPts 决定。\n", "utf-8"),
+  });
+  const uploaded = await uploadResponse;
+  const uploadedBody = await uploaded.json();
+  expect(uploaded.status()).toBe(201);
+  expect(uploadedBody).toMatchObject({ name: unique, scope: "private", status: "indexed" });
+
+  // The authorised original itself is reachable through the mounted API, with the
+  // real bytes and the V3 download disposition.
+  const inline = await request.get(
+    `http://127.0.0.1:8100/ui-extension/api/ui/v1/courses/cs3481/files/${uploadedBody.id}/content`,
+    { headers: { Authorization: "Bearer test-session-token" } },
+  );
+  expect(inline.status()).toBe(200);
+  expect(inline.headers()["content-disposition"]).toContain("inline");
+  expect(await inline.text()).toContain("DBSCAN");
+
+  const ranged = await request.get(
+    `http://127.0.0.1:8100/ui-extension/api/ui/v1/courses/cs3481/files/${uploadedBody.id}/content`,
+    {
+      headers: { Authorization: "Bearer test-session-token", Range: "bytes=0-9" },
+    },
+  );
+  expect(ranged.status()).toBe(206);
+  expect((await ranged.body()).length).toBe(10);
+
+  // The private supplement is written to the caller's own corpus and is visible
+  // only there, so reach it through the "我的上传" folder the adapter assigns.
+  await page.getByRole("button", { name: /我的上传/ }).click();
+  const privateRow = page
+    .locator("button.file-name-btn")
+    .filter({ hasText: unique });
+  await expect(privateRow).toBeVisible();
+  await expect(privateRow).toContainText("仅自己");
+
+  // Opening a name previews the authorised original through /content.
+  await privateRow.click();
+  const preview = page.locator(".modal .real-preview");
+  await expect(preview).toBeVisible();
+  await expect(preview.locator(".text-preview, iframe.pdf-frame, .image-preview")).toBeVisible();
+  expect(sourceRequests.length).toBeGreaterThan(0);
+  expect(sourceRequests.every((entry) => entry.startsWith("200"))).toBe(true);
+  await page.locator(".modal-header").getByRole("button").click();
+  await expect(preview).toHaveCount(0);
+
+  // The row menu is where download lives, as the confirmed design requires.
+  await page.getByRole("button", { name: `文件操作 ${unique}` }).click();
+  const download = page.locator(".dropdown").getByRole("button", { name: /下载/ });
+  await expect(download).toBeVisible();
+  const downloadResponse = page.waitForResponse(
+    (response) => response.url().includes("download=true") && response.status() === 200,
+  );
+  await download.click();
+  expect((await downloadResponse).headers()["content-disposition"]).toContain("attachment");
+});
+
+test("comments are real, and a reply notifies the other account", async ({ page, request }) => {
+  await page.goto("/app#/course/cs3481/comments");
+  await expect(page.getByRole("heading", { name: /评论/ })).toBeVisible();
+
+  const text = `端到端验收评论 ${Date.now()}`;
+  const box = page.getByRole("textbox").first();
+  await box.fill(text);
+  await page.getByRole("button", { name: /发布|发送|发表/ }).first().click();
+  await expect(page.getByText(text)).toBeVisible();
+
+  // The comment is stored in the UI database behind the mounted API.
+  const listed = await request.get(
+    "http://127.0.0.1:8100/ui-extension/api/ui/v1/courses/cs3481/comments",
+    { headers: { Authorization: "Bearer test-session-token" } },
+  );
+  expect(listed.status()).toBe(200);
+  const body = await listed.json();
+  expect(JSON.stringify(body)).toContain(text);
+});
+
+test("the learning workspace keeps two panes, a collapsed tree, and a draggable split", async ({
+  page,
+}) => {
+  await page.goto("/app#/course/cs3481/learn");
+  const columns = page.locator(".workspace-columns");
+  await expect(columns).toBeVisible();
+
+  // Two left navigations remain: the global one and the course one.
+  await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "学习", exact: true })).toHaveClass(/active/);
+  await expect(page.locator(".learning-pane.pane-teach")).toBeVisible();
+  await expect(page.locator(".learning-pane.pane-problem")).toBeVisible();
+
+  // The knowledge tree is collapsed above the workbench by default, and expanding
+  // it covers the workbench while both left navigations stay in place.
+  const strip = page.locator("button.knowledge-strip");
+  await expect(strip).toBeVisible();
+  await expect(strip).toContainText("课程知识点树");
+  await expect(page.locator(".tree-expanded")).toHaveCount(0);
+  await strip.click();
+  const tree = page.locator(".tree-expanded");
+  await expect(tree).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "学习", exact: true })).toBeVisible();
+  // This corpus has no reviewed knowledge tree yet, and the shell must say so
+  // instead of inventing nodes or progress.
+  await expect(tree).toContainText("还没有课程知识树");
+  await tree.getByRole("button", { name: "收起知识树" }).click();
+  await expect(tree).toHaveCount(0);
+
+  // Dragging the divider changes only the widths and persists to the server.
+  const divider = page.locator('.pane-divider[role="separator"]');
+  await expect(divider).toBeVisible();
+  const before = await divider.boundingBox();
+  expect(before).not.toBeNull();
+  if (before) {
+    const ratioBefore = await divider.getAttribute("aria-valuenow");
+    await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(before.x + before.width / 2 + 120, before.y + before.height / 2, {
+      steps: 10,
+    });
+    await page.mouse.up();
+    await expect(divider).not.toHaveAttribute("aria-valuenow", ratioBefore ?? "");
+  }
+
+  // Full screen expands both panes together, and Escape restores the layout.
+  await page.getByRole("button", { name: "全屏学习" }).click();
+  await expect(page.locator(".learn-new.focus-mode")).toBeVisible();
+  await expect(page.locator(".learning-pane.pane-teach")).toBeVisible();
+  await expect(page.locator(".learning-pane.pane-problem")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".learn-new.focus-mode")).toHaveCount(0);
+
+  // Both conversation lanes have their own server-backed history entry.
+  await expect(page.getByRole("button", { name: "知识历史" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "题目历史" })).toBeVisible();
+});
+
+test("calendar plans are created in the same task store the Node agent serves", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/app#/calendar");
+  await expect(page.getByRole("heading", { name: /日历/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "制定学习计划" })).toBeVisible();
+
+  const title = `端到端复习 ${Date.now()}`;
+  await page.getByRole("button", { name: /新建安排/ }).click();
+  const form = page.locator(".modal");
+  await expect(form).toBeVisible();
+  await form.locator('input[name="title"]').fill(title);
+  await form.locator('input[name="date"]').fill("2026-10-01");
+
+  const created = page.waitForResponse(
+    (response) => response.url().endsWith("/tasks") && response.request().method() === "POST",
+  );
+  await form.getByRole("button", { name: /保存安排/ }).click();
+  const createdResponse = await created;
+  if (createdResponse.status() !== 201) {
+    throw new Error(`task create failed: ${createdResponse.status()} ${await createdResponse.text()}`);
+  }
+  const created_task = await createdResponse.json();
+
+  // The same record must be visible in the shell after a reload: the list is
+  // rebuilt from the agent, which is the single task fact source.
+  await page.reload();
+  const taskCard = page.locator(".task-card").filter({ hasText: title });
+  await expect(taskCard).toHaveCount(1);
+  await expect(taskCard.locator("h3")).toHaveText(title);
+
+  // And on the Node agent's own REST surface.
+  const agentTasks = await request.get("http://127.0.0.1:8101/api/tasks?page=1&pageSize=100", {
+    headers: { Authorization: "Bearer test-session-token" },
+  });
+  expect(agentTasks.status()).toBe(200);
+  const payload = await agentTasks.json();
+  expect(JSON.stringify(payload)).toContain(title);
+
+  // Completing it in the shell must change that same record.
+  await page.getByRole("button", { name: `完成 ${title}` }).click();
+  await expect
+    .poll(async () => {
+      const listed = await request.get(
+        "http://127.0.0.1:8101/api/tasks?page=1&pageSize=100",
+        { headers: { Authorization: "Bearer test-session-token" } },
+      );
+      const body = await listed.json();
+      const task = (body.items as { id: string; status: string }[]).find(
+        (item) => item.id === created_task.id,
+      );
+      return task?.status ?? "missing";
+    })
+    .toBe("completed");
+});
+
+test("help covers the new surfaces and no horizontal overflow at 390px", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/app");
+  const nav = page.getByRole("navigation", { name: "主导航" });
+  await nav.getByRole("button", { name: "帮助", exact: true }).click();
+  const drawer = page.getByRole("dialog", { name: "帮助面板" });
+  await expect(drawer).toBeVisible();
+
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(1);
+});

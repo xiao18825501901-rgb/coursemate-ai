@@ -24,6 +24,22 @@ from app.ui_extension.identity import clerk_subject_resolver
 MOUNT_PATH = "/ui-extension"
 
 
+def ui_allowed_origins(settings: Settings) -> tuple[str, ...]:
+    """The browser origins the mounted shell may be called from.
+
+    Exposed so the host can build its own CORS middleware with these origins when
+    the extension is enabled. The host's policy otherwise allows only
+    `WEB_ORIGIN`, and a browser preflight from any other allowed site origin would
+    be rejected with an opaque "Disallowed CORS origin" before the extension ever
+    sees the request.
+    """
+
+    raw = os.getenv("CMUI_ALLOWED_ORIGINS", "")
+    if raw:
+        return tuple(item.strip() for item in raw.split(",") if item.strip())
+    return (settings.web_origin,)
+
+
 def _ui_settings(settings: Settings) -> object:
     """Build the `cm_update` settings from the host configuration.
 
@@ -43,12 +59,7 @@ def _ui_settings(settings: Settings) -> object:
     )
     ui.integration_mode = "integrated"
     ui.auth_mode = "injected"
-    origins = os.getenv("CMUI_ALLOWED_ORIGINS")
-    ui.allowed_origins = (
-        tuple(item.strip() for item in origins.split(",") if item.strip())
-        if origins
-        else (settings.web_origin,)
-    )
+    ui.allowed_origins = ui_allowed_origins(settings)
     ui.clerk_issuer = os.getenv("CLERK_ISSUER", "")
     ui.clerk_jwt_key = os.getenv("CLERK_JWT_KEY", "").replace("\\n", "\n")
     ui.clerk_audience = os.getenv("CLERK_AUDIENCE", "")
@@ -106,16 +117,62 @@ def mount_ui_extension(host_app: FastAPI, *, mount_path: str = MOUNT_PATH) -> ob
         retriever=retriever,
         task_agent_url=os.getenv("UI_TASK_AGENT_URL", settings.ui_task_agent_url),
     )
+    ui_settings = _ui_settings(settings)
     from app.cm_update.integration import install_ui_extension
 
     ui = install_ui_extension(
         host_app,
-        _ui_settings(settings),
+        ui_settings,
         adapter,
         clerk_subject_resolver(host_app),
         mount_path=mount_path,
     )
+    _allow_browser_credentials(host_app, mount_path, ui_settings.allowed_origins)
     # Exposed for tests and operational diagnostics; the adapter holds no secrets.
     host_app.state.ui_extension_adapter = adapter
     host_app.state.ui_extension_app = ui
     return ui
+
+
+def _allow_browser_credentials(
+    host_app: FastAPI, mount_path: str, allowed_origins: tuple[str, ...]
+) -> None:
+    """Complete the CORS and caching contract the delivered browser client requires.
+
+    Two gaps appear only once the UI is *mounted* rather than run standalone:
+
+    * `apps/web/src/ui/api.js` always sends `credentials: 'include'`, so a browser
+      demands `Access-Control-Allow-Credentials: true` on the preflight *and* on the
+      response. Starlette's middleware answers the preflight for the mounted
+      sub-application without that header.
+    * the delivered no-store middleware keys off a literal `/api/` path prefix,
+      which the mounted path `/ui-extension/api/...` does not match.
+
+    Both are fixed here, scoped strictly to the extension's own paths. Only a
+    response header is added - never a cookie, token or secret - and an origin the
+    extension does not already allow still receives no allow-origin header.
+    """
+
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.requests import Request as StarletteRequest
+
+    prefix = mount_path.rstrip("/") + "/"
+
+    class ExtensionResponseHeaders(BaseHTTPMiddleware):
+        async def dispatch(self, request: StarletteRequest, call_next: object) -> object:
+            response = await call_next(request)  # type: ignore[operator]
+            if not request.url.path.startswith(prefix):
+                return response
+            # Every extension response is per-user data and must never be stored.
+            response.headers["Cache-Control"] = "private, no-store"
+            origin = request.headers.get("origin", "")
+            if origin in allowed_origins and "access-control-allow-origin" in response.headers:
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+            else:
+                try:
+                    del response.headers["Access-Control-Allow-Credentials"]
+                except KeyError:
+                    pass
+            return response
+
+    host_app.add_middleware(ExtensionResponseHeaders)

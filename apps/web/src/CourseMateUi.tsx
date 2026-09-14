@@ -28,6 +28,33 @@ declare global {
 }
 
 /**
+ * Development and E2E identity, mirroring the existing `VITE_AUTH_TEST_TOKEN`
+ * convention in `main.tsx`.
+ *
+ * The project's E2E runs authenticate with the backend's test verifier, which
+ * accepts `Bearer test-session-token`. Vite inlines this value only when the build
+ * was given it; a production build without the variable leaves it undefined and
+ * falls through to Clerk, so this cannot silently bypass production sign-in.
+ */
+const testToken = import.meta.env.VITE_AUTH_TEST_TOKEN;
+
+function TestAuthBridge({ token }: { token: string }) {
+  useEffect(() => {
+    window.CourseMateAuth = {
+      getToken: async () => token,
+      subscribe: () => () => undefined,
+      signIn: () => undefined,
+      signOut: async () => undefined,
+    };
+    return () => {
+      delete window.CourseMateAuth;
+    };
+  }, [token]);
+
+  return <CourseMateApp />;
+}
+
+/**
  * Publish the already-verified Clerk session to the new shell.
  *
  * The delivered `api.js` reads a token getter and an auth subscription from
@@ -60,6 +87,9 @@ function AuthBridge() {
 
 export function CourseMateUi() {
   const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
+  if (testToken) {
+    return <TestAuthBridge token={testToken} />;
+  }
   if (!publishableKey) {
     return (
       <div className="login-page">

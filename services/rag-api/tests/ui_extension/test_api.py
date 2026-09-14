@@ -7,7 +7,7 @@ from app.cm_update.app import create_app
 from app.cm_update.config import Settings
 from app.cm_update.db import Database
 from app.cm_update.seed import seed
-from tests.ui_extension.conftest import P,login,ContractProvider
+from conftest import P,login,ContractProvider
 
 def k():return uuid4().hex
 def create(c,name='私人机器学习'):

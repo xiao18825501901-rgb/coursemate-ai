@@ -9,8 +9,9 @@
 # VITE_UI_API_BASE and VITE_V3_ENABLED in the Netlify UI. Keep V3 false until the
 # gated canary. Never place Clerk secret keys here.
 
-# The refreshed CourseMate shell is a second document in the same build. It is
-# served under /app so it cannot fight the existing site over global styles.
+# The refreshed CourseMate shell is a second document in the same build and is
+# served at /app. It gets its own document so its global stylesheet cannot fight
+# the existing site's stylesheet; the shell itself routes on the URL hash.
 [[redirects]]
   from = "/app"
   to = "/ui.html"

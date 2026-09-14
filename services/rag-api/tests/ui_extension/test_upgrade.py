@@ -12,8 +12,8 @@ from app.cm_update.db import Database
 from app.cm_update.steps import solution_steps
 from app.cm_update.provider import QwenProvider, ProviderError
 from app.cm_update.sse import events
-from tests.ui_extension.conftest import P, login
-from tests.ui_extension.test_provider import cfg, chat
+from conftest import P, login
+from test_provider import cfg, chat
 
 
 def finish(client,run_id):

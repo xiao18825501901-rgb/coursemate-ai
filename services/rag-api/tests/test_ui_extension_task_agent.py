@@ -10,6 +10,7 @@ overwrite a task changed elsewhere.
 from __future__ import annotations
 
 import json
+import re
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -50,8 +51,10 @@ class _TaskStore:
         self.counter = 0
         self.seen_credentials: list[str] = []
         self.chat_calls: list[dict[str, object]] = []
+        self.create_bodies: list[dict[str, object]] = []
 
     def create(self, owner: str, body: dict[str, object]) -> dict[str, object]:
+        self.create_bodies.append(dict(body))
         self.counter += 1
         task_id = f"task_{self.counter:04d}"
         task = {
@@ -113,6 +116,33 @@ def _handler(store: _TaskStore):
                 )
             return owner
 
+        @staticmethod
+        def _valid_create(body: dict[str, object]) -> bool:
+            """Mirror the real service's strict `validateCreateTask` schema.
+
+            Note `priority`: the service's JSON schema is a plain enum with no null
+            member, so sending `priority: null` is rejected even though the
+            TypeScript type suggests it is optional.
+            """
+
+            allowed = {"title", "notes", "courseId", "priority", "dueDate", "sourceCitation"}
+            if set(body) - allowed:
+                return False
+            title = body.get("title")
+            if not isinstance(title, str) or not 1 <= len(title) <= 200:
+                return False
+            if "priority" in body and body["priority"] not in {"low", "medium", "high"}:
+                return False
+            course = body.get("courseId")
+            if course is not None and (
+                not isinstance(course, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,49}", course)
+            ):
+                return False
+            due = body.get("dueDate")
+            return due is None or (
+                isinstance(due, str) and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", due) is not None
+            )
+
         def do_GET(self) -> None:  # noqa: N802 - http.server contract
             if not self._require_owner():
                 return
@@ -129,6 +159,18 @@ def _handler(store: _TaskStore):
                 return
             body = self._body()
             if self.path == "/api/tasks":
+                if not self._valid_create(body):
+                    self._send(
+                        400,
+                        {
+                            "error": {
+                                "code": "VALIDATION_ERROR",
+                                "message": "The request did not pass validation.",
+                                "details": {},
+                            }
+                        },
+                    )
+                    return
                 self._send(201, store.create(owner, body))
                 return
             if self.path == "/api/agent/chat":
@@ -260,6 +302,72 @@ def test_task_list_is_scoped_to_the_callers_own_credential(
     assert client.get(f"{UI}/tasks", headers=auth("Bearer token-b")).json() == []
     assert "Bearer token-a" in store.seen_credentials
     assert all(value != "" for value in store.seen_credentials)
+
+
+@pytest.mark.parametrize("course", ["", None, "   "])
+def test_an_unselected_course_is_sent_as_null(
+    client: TestClient, agent: tuple[str, _TaskStore], course: object
+) -> None:
+    """The calendar's "个人学习" option must not become an empty `courseId`.
+
+    The agent's schema accepts an id matching `^[a-z0-9][a-z0-9-]{1,49}$` or null,
+    so forwarding an empty string is a 400 the user cannot act on.
+    """
+
+    _url, store = agent
+    task = _create(client, "Bearer token-a", course=course)
+    assert task["course"] is None
+    assert next(iter(store.tasks.values()))["courseId"] is None
+
+
+def test_optional_fields_are_omitted_rather_than_sent_as_invalid_nulls(
+    client: TestClient, agent: tuple[str, _TaskStore]
+) -> None:
+    """`priority: null` is a documented 400 on the real agent, so it is not sent."""
+
+    _url, store = agent
+    _create(client, "Bearer token-a")
+    task = next(iter(store.tasks.values()))
+    assert task["priority"] is None
+    assert "priority" not in store.create_bodies[0]
+    assert set(store.create_bodies[0]) <= {"title", "courseId", "dueDate"}
+    assert "notes" not in store.create_bodies[0]
+
+
+def test_a_selected_course_is_forwarded_as_its_real_id(
+    client: TestClient, agent: tuple[str, _TaskStore]
+) -> None:
+    _url, store = agent
+    created = client.post(
+        "/api/courses",
+        headers=auth("Bearer admin-token"),
+        json={"id": "cs3481", "name": "Fundamentals of Data Science", "description": "Notes"},
+    )
+    assert created.status_code == 201, created.text
+    task = _create(client, "Bearer token-a", course="cs3481")
+    assert task["course"] == "cs3481"
+    assert next(iter(store.tasks.values()))["courseId"] == "cs3481"
+
+
+def test_a_task_referencing_an_unknown_course_is_rejected(
+    client: TestClient, agent: tuple[str, _TaskStore]
+) -> None:
+    """The adapter must not invent a course reference the caller cannot reach."""
+
+    _url, store = agent
+    response = client.post(
+        f"{UI}/tasks",
+        headers=auth("Bearer token-a"),
+        json={
+            "title": "复习",
+            "due_at": "2026-09-16T14:00:00+08:00",
+            "timezone": "Asia/Hong_Kong",
+            "course": "not-a-real-course",
+            "request_id": "task-request-000009",
+        },
+    )
+    assert response.status_code == 404
+    assert store.tasks == {}
 
 
 def test_task_update_and_complete_use_the_agent_version(

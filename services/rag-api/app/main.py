@@ -125,11 +125,22 @@ def create_app(
         max_context_chars=resolved_settings.max_context_chars,
         teaching_profiles=teaching_profile_service,
     )
+    cors_origins = [resolved_settings.web_origin]
+    cors_methods = ["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"]
+    if resolved_settings.ui_extension_enabled:
+        from app.ui_extension.mount import ui_allowed_origins
+
+        for origin in ui_allowed_origins(resolved_settings):
+            if origin not in cors_origins:
+                cors_origins.append(origin)
+        # The refreshed shell pins courses with PUT, which the host policy did not
+        # previously need. Only added when the extension is actually mounted.
+        cors_methods.insert(2, "PUT")
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=[resolved_settings.web_origin],
+        allow_origins=cors_origins,
         allow_credentials=False,
-        allow_methods=["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_methods=cors_methods,
         allow_headers=["Authorization", "Content-Type"],
     )
 
