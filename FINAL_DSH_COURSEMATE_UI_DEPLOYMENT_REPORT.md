@@ -5,7 +5,7 @@
 **仓库**：`C:\Users\Hp\Documents\Codex\2026-08-11\files-mentioned-by-the-user-coursemate\outputs\coursemate-ai`
 **分支**：`feature/dsh-ui-refresh-integration`
 **接手前基线**：`64e57501b380ffaefb55db92ef0fc328c39b0928`
-**本次最终 SHA**：见 §10（本文件随最终提交一并入库）
+**本次最终 SHA**：`72619f2d5c702870b197317089d1b4fd8c98e8fe`
 
 ```text
 SOURCE INTEGRATION:               PASS
@@ -75,7 +75,7 @@ Harness 配置文件为准。本会话**没有修改**该设置——改模型�
 | Node 任务桥 | `domain.py` 的 `task.list/create/update/delete/plan` |
 | 旧 V3 问答历史只读入口 | `mount.py:_prepend_legacy_history` + `domain.py:legacy.*` |
 | 恢复单元扩展 | `ops/backup_v2.py`、`ops/restore_v2.py` |
-| 变更规模 | 63 个文件，+8612 / −20 行 |
+| 变更规模 | 65 个文件，+9536 / −18 行 |
 
 ### 1.1 对交付包源码的六处修改（全部为可移植性/正确性/纯新增，无功能删减）
 
