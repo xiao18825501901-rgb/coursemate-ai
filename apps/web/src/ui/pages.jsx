@@ -390,7 +390,7 @@ export class Learn extends React.Component {
         this.props.toast(e.message);
     } }
     async backToProblem() { const b = this.state.bridge; if (!b)
-        return; await send(`/bridges/${b.id}/return`, {}, 'PATCH'); this.setState({ mobile: 'problem' }, () => document.getElementById(`step-${b.problem_message}-${b.step}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })); }
+        return; await send(`/bridges/${b.id}/return`, {}, 'PATCH'); this.setState({ bridge: null, mobile: 'problem' }, () => document.getElementById(`step-${b.problem_message}-${b.step}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })); }
     learnNode(node) { this.setState({ activeNode: node.id, expanded: false, hover: null, mobile: 'teach' }, () => { this.saveLayout(); this.ask('teach', `请用中文从零教我理解 ${node.title}，保留英文术语，结合课程资料和例题。`); }); }
     async assess(node) { try {
         const result = await request(`/courses/${this.props.course.id}/knowledge/${node.id}/assessment`);

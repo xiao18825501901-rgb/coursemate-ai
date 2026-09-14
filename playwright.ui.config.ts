@@ -35,6 +35,17 @@ execFileSync(
   ],
   { stdio: "inherit" },
 );
+// Publish a real V3 knowledge tree (root composite + learning/learned children)
+// through the genuine triggers, so browser tests can assert the hierarchy.
+execFileSync(
+  pythonExecutable,
+  [
+    path.join(repositoryRoot, "scripts", "seed_tree_fixture.py"),
+    path.join(e2eData, "rag.sqlite3"),
+    e2eUserId,
+  ],
+  { stdio: "inherit" },
+);
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -62,6 +73,10 @@ export default defineConfig({
         V3_ENABLED: "true",
         UI_EXTENSION_ENABLED: "true",
         CMUI_DATA_DIR: uiData,
+        // The labelled local test provider lets the browser acceptance exercise
+        // the full run/SSE/step/bridge path without a billable model. Production
+        // forbids this mode in settings validation.
+        CMUI_PROVIDER_MODE: "test",
         UI_TASK_AGENT_URL: "http://127.0.0.1:8101",
         // The mounted extension allows this origin, and its injected resolver uses
         // the project's own verified-session path rather than a browser stub.

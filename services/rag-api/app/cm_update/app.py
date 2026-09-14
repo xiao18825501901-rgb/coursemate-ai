@@ -25,7 +25,7 @@ from .models import Profile, CourseCreate, CommentCreate, MessageCreate, TaskCre
 from .filesystem import parse_document, valid_filename, valid_folder, file_hash
 from .retrieval import get_course, file_rows, context_for
 from .steps import solution_steps
-from .provider import QwenProvider, DisabledProvider, ProviderError
+from .provider import QwenProvider, DisabledProvider, TestProvider, ProviderError
 
 User=Annotated[dict,Depends(current_user)]
 TERMINAL={'completed','failed','cancelled'}
@@ -41,7 +41,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
     db=Database(cfg.data_dir/'ui.sqlite3')
     db.initialize()
     (cfg.data_dir/'uploads').mkdir(exist_ok=True)
-    model=provider or (QwenProvider(cfg) if cfg.provider_mode=='qwen' else DisabledProvider())
+    model=provider or (QwenProvider(cfg) if cfg.provider_mode=='qwen' else TestProvider() if cfg.provider_mode=='test' else DisabledProvider())
     jobs: dict[str,asyncio.Task]={}
     # This instance's identity for run leases. Two processes get two ids.
     worker_id=uid('worker-')

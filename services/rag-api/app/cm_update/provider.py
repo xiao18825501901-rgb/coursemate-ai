@@ -131,3 +131,27 @@ class DisabledProvider:
     async def generate(self,*args,**kwargs):
         raise ProviderError('MODEL_NOT_CONFIGURED')
         yield
+
+class TestProvider:
+    """Deterministic, clearly-labelled generator for local and browser acceptance tests.
+
+    Selected only by `provider_mode='test'`, which the settings validator forbids
+    in production. The problem lane answers with numbered step headings so the
+    server-derived step parsing, bridge and return flow exercise exactly the same
+    code path a live model's output would; the teach lane echoes the carried
+    bridge context. It never writes learning state and never pretends to be Qwen.
+    """
+
+    async def generate(self, course, text, profile, sources, history, lane, bridge=None, *, attachments=None):
+        yield {'kind': 'status', 'status': 'planning', 'label': '本地测试 Provider：撰写教学 Prompt'}
+        yield {'kind': 'prompt', 'text': '本地测试教学 Prompt（非千问实测）：逐步讲解，保留英文术语，引用材料标记。'}
+        yield {'kind': 'status', 'status': 'generating', 'label': '本地测试 Provider：生成讲解'}
+        if lane == 'problem':
+            answer = ('## Step 1 审题与条件整理\n先把题目条件整理成输入参数。\n\n'
+                      '## Step 2 计算核心点\n对每个点统计其 eps 邻域内的样本数，达到 MinPts 即为核心点。')
+        elif bridge and bridge.get('step'):
+            answer = f"这是围绕原题第 {bridge['step']} 步的教学输出，携带桥接上下文。"
+        else:
+            answer = '从定义出发：核心点是邻域内样本数不少于 MinPts 的点。'
+        yield {'kind': 'delta', 'text': answer}
+        yield {'kind': 'usage', 'stage': 'answer', 'value': {'output_tokens': 24}}

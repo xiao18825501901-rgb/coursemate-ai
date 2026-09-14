@@ -493,6 +493,124 @@ test("a node assessment runs the real V3 flow: start, answer, submit, grade", as
   expect(node?.progress).toBe("NOT_STARTED");
 });
 
+test("the knowledge tree renders the seeded hierarchy with real V3 statuses", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/app#/course/cs3481/learn");
+  await expect(page.locator("button.knowledge-strip")).toBeVisible();
+  await page.locator("button.knowledge-strip").click();
+  const tree = page.locator(".tree-expanded");
+  await expect(tree).toBeVisible();
+
+  // The composite root becomes the group title; its two atomic children are
+  // rows inside it. Neither title nor hierarchy is fabricated by the shell.
+  await expect(tree.locator(".tree-group-title")).toHaveText("数据科学基础");
+  const clustering = tree.locator(".tree-node-new").filter({ hasText: "聚类分析" });
+  const kmeans = tree.locator(".tree-node-new").filter({ hasText: "K-means 聚类" });
+  await expect(clustering).toBeVisible();
+  await expect(kmeans).toBeVisible();
+
+  // Both status entries come from V3 state: LEARNING is derived from real
+  // delivery evidence (1 of 2 REQUIRED items), LEARNED from the single covered
+  // item, and assessment is independent and honestly empty.
+  await clustering.hover();
+  await expect(clustering.locator(".node-popover")).toBeVisible();
+  await expect(
+    clustering.locator(".node-popover").getByRole("button", { name: /学习进度/ }),
+  ).toContainText("学习中");
+  await expect(
+    clustering.locator(".node-popover").getByRole("button", { name: /测评结果/ }),
+  ).toContainText("未测评");
+
+  // Move off the node first: its popover overlays the next row.
+  await tree.getByRole("heading", { name: "课程知识点树" }).hover();
+  await kmeans.hover();
+  await expect(kmeans.locator(".node-popover")).toBeVisible();
+  await expect(
+    kmeans.locator(".node-popover").getByRole("button", { name: /学习进度/ }),
+  ).toContainText("教学已完成");
+
+  // The same rendering's database facts through the mounted API.
+  const listed = await request.get(
+    "http://127.0.0.1:8100/ui-extension/api/ui/v1/courses/cs3481/knowledge",
+    { headers: { Authorization: "Bearer test-session-token" } },
+  );
+  expect(listed.status()).toBe(200);
+  const nodes = (await listed.json()) as {
+    id: string;
+    parent: string | null;
+    kind: string;
+    progress: string;
+  }[];
+  const byId = Object.fromEntries(nodes.map((node) => [node.id, node]));
+  expect(byId["e2e-tree-root"]?.parent).toBeNull();
+  expect(byId["e2e-tree-root"]?.kind).toBe("COMPOSITE");
+  expect(byId["e2e-tree-clustering"]?.parent).toBe("e2e-tree-root");
+  expect(byId["e2e-tree-clustering"]?.progress).toBe("LEARNING");
+  expect(byId["e2e-tree-kmeans"]?.parent).toBe("e2e-tree-root");
+  expect(byId["e2e-tree-kmeans"]?.progress).toBe("LEARNED");
+});
+
+test("a problem's steps bridge into teaching and return to the same step", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/app#/course/cs3481/learn");
+  await expect(page.locator(".workspace-columns")).toBeVisible();
+  const problemPane = page.locator(".learning-pane.pane-problem");
+  const teachPane = page.locator(".learning-pane.pane-teach");
+
+  // The labelled local test provider answers the problem with numbered steps;
+  // the shell derives the step anchors server-side from the same code path a
+  // live model's output would take.
+  await problemPane.locator("textarea").fill(`判断核心点 ${Date.now()}`);
+  await problemPane.getByRole("button", { name: "发送题目" }).click();
+  const stepLinks = problemPane.locator(".step-link");
+  await expect(stepLinks).toHaveCount(2, { timeout: 30_000 });
+  await expect(stepLinks.first()).toContainText("审题与条件整理");
+
+  // Clicking a step opens a bridge bound to that server-derived step and asks
+  // the teach lane with the carried problem context.
+  await stepLinks.first().click();
+  const banner = teachPane.locator(".bridge-banner");
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText("返回原题 · 第 1 步");
+  await expect(teachPane).toContainText("这是围绕原题第 1 步的教学输出", {
+    timeout: 30_000,
+  });
+
+  // Database fact: one open bridge, bound to step 1 of the assistant message.
+  const layoutUrl =
+    "http://127.0.0.1:8100/ui-extension/api/ui/v1/courses/cs3481/layout";
+  const openLayout = await request.get(layoutUrl, {
+    headers: { Authorization: "Bearer test-session-token" },
+  });
+  expect(openLayout.status()).toBe(200);
+  const openBridge = (await openLayout.json()).bridge as {
+    id: string;
+    step: number;
+    status: string;
+    question: string;
+  };
+  expect(openBridge.step).toBe(1);
+  expect(openBridge.status).toBe("open");
+  expect(openBridge.question).toContain("第 1 步");
+
+  // Returning closes the bridge server-side, hides the banner, and anchors the
+  // problem pane back at the same step section.
+  await banner.click();
+  await expect(banner).toHaveCount(0);
+  await expect(
+    problemPane.locator("section[id^='step-']").first(),
+  ).toBeVisible();
+  const closedLayout = await request.get(layoutUrl, {
+    headers: { Authorization: "Bearer test-session-token" },
+  });
+  expect(closedLayout.status()).toBe(200);
+  expect((await closedLayout.json()).bridge).toBeNull();
+});
+
 test("help covers the new surfaces and no horizontal overflow at 390px", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/app");
