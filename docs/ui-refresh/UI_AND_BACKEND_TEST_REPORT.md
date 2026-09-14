@@ -1,0 +1,212 @@
+# UI AND BACKEND TEST REPORT — 整合后的真实测试
+
+**测试日期**：2026-09-14
+**被测对象**：`feature/dsh-ui-refresh-integration` 上的整合结果（不是交付包的独立实现）
+**结论口径**：只有本文件列出的、本次真实运行过的结果才算通过；交付包原有结论一律不继承。
+
+---
+
+## 1. 结果总表
+
+| 套件 | 命令 | 结果 | 证据 |
+|---|---|---|---|
+| rag-api 全量回归（含原 329 项 + 新增） | `services/rag-api/.venv/Scripts/python.exe -m pytest -q` | **448 passed**, 357.39s | 本次运行 |
+| 交付包契约测试（迁入后） | `pytest tests/ui_extension -q` | **71 passed** | 本次运行 |
+| 新增 V3 DomainPort 集成测试 | `pytest tests/test_ui_extension_integration.py -q` | **16 passed** | 本次运行 |
+| 新增任务 Agent 桥测试 | `pytest tests/test_ui_extension_task_agent.py -q` | **15 passed** | 本次运行 |
+| 新增 CORS / 凭证契约测试 | `pytest tests/test_ui_extension_cors.py -q` | **13 passed** | 本次运行 |
+| 新增恢复单元测试（含新增 UI 库） | `pytest tests/test_backup_ui_extension.py -q` | **4 passed** | 本次运行 |
+| 原备份/恢复测试（回归） | `pytest tests/test_backup_restore.py -q` | **9 passed** | 本次运行 |
+| web 单元测试 | `vitest run`（`apps/web`） | **49 passed**（连续 3 次） | 本次运行 |
+| 正式 React 生产构建 | `npm run build --workspace @coursemate/web`（`tsc -b && vite build`） | **通过** | 本次运行 |
+| 原生 Chromium 端到端验收 | `playwright test --config playwright.ui.config.ts` | **7 passed** | 本次运行 |
+| 原仓库既有 E2E（`coursemate.spec.ts`） | `npx playwright test` | **未运行**（见 §7 原因） | — |
+| 真实千问两阶段 | — | **NOT RUN** | 无预算授权 |
+
+**接手前基线对照**：rag-api 原为 329 passed；本次改动新增 119 个测试（71 + 16 + 15 + 13 + 4），
+并使原 329 项全部保持通过。
+
+## 2. 新增测试覆盖了什么（真实行为，不是 mock 断言）
+
+### 2.1 `test_ui_extension_integration.py` — 挂载在真实 V3 上的新 UI
+
+用 `app.main.create_app(v3_enabled=True, ui_extension_enabled=True)` 构建真实宿主应用，
+经 `app.ui_extension.mount` 挂载交付的新 UI，再用 HTTP 驱动。数据全部来自真实
+`courses` / `documents` / `document_versions` / `chunks` 表。
+
+* 宿主路由 `/health` 与 UI 路由 `/ui-extension/...` 同时可用；宿主 lifespan 保留。
+* `/config` 报告 `integration_mode=integrated`、`auth_mode=injected`，且响应字段集合被
+  精确断言——不泄露任何模型凭据。
+* 未登录 / 未知 token → 401。
+* `course.list` 返回真实 V3 课程，并带回 `name`、`code`、`requirements`
+  （后两者是两阶段千问的硬索引键）。
+* 私人课程对其他用户 404，且不出现在其课程列表。
+* 上传落到**调用者自己的 workspace 私有语料课程**，列表带 `scope=private`、
+  `status=indexed`，且 DTO 里没有 `storage_key` / `owner`；其他用户看不到。
+* 文件内容就是授权的原件字节；`Range: bytes=0-9` → 206 且 10 字节；`HEAD` 空体；
+  共享课程资料任何登录用户可读，**私人上传对他人 404**。
+* `file.text` 返回真实 `chunks` 文本。
+* `context.retrieve` 用 V3 `HybridRetriever`（FTS5 + 向量 + RRF）返回课程语料，
+  来源编号严格 `S1..Sn`；**另一用户的私有内容不进入结果**。
+* 无已发布知识树时 `knowledge.tree` 返回 `[]`（不伪造节点）。
+* 未知节点测评 → 404（不伪造成绩）。
+* 未配置任务 Agent 时 `/tasks` → 503，带明确说明，不返回假数据。
+* 双用户收藏互相独立；评论回复生成对方通知、自己无通知；私信跨账号可读、第三人不可读。
+* 未实现的 operation → 501。
+
+### 2.2 `test_ui_extension_task_agent.py` — Node 任务 Agent 真实接线
+
+用一个严格复刻 `services/agent-api` 契约的本地 HTTP 桩（含 `validateCreateTask` 的
+JSON Schema 校验）验证：
+
+* 创建/列出/改名/完成/删除全部经 Agent REST 完成，**转发调用方原始 Bearer 凭据**。
+* 日期只发 `YYYY-MM-DD`（Agent 只接受这个格式）。
+* `task.list` 按凭据隔离；B 看不到 A 的任务。
+* 陈旧 `version` → 409，且 Agent 侧记录不变。
+* 他人任务 → 404（update 与 delete 均如此）。
+* `task.plan` 走 `POST /api/agent/chat`（原 Function Calling Agent），
+  不做正则、不返回假成功。
+* **未选择的课程被规范化为 null 而不是空字符串**（对应真实 400 缺陷）。
+* **未设置的可选字段被省略而不是发 `priority: null`**（对应真实 400 缺陷）。
+* 引用不存在的课程 → 404，Agent 侧零写入。
+* Agent 不可达 → 502；未配置 → 503。
+
+### 2.3 `test_ui_extension_cors.py` — 浏览器可用性契约
+
+交付的 `api.js` 固定发送 `credentials: 'include'`，所以浏览器要求预检与响应都带
+`Access-Control-Allow-Credentials: true`。参数化覆盖 `GET/PUT/DELETE/POST/PATCH`
+共 10 条真实路径；未列入白名单的 origin 得到 400 且**没有** allow-origin 与
+allow-credentials；扩展响应强制 `private, no-store`。
+
+### 2.4 `test_backup_ui_extension.py` — 恢复单元
+
+* 设置 `CMUI_DATA_DIR` 时，`ui.sqlite3` 与 `ui-uploads.tar.gz` 进入同一恢复单元，
+  写进 `manifest.json`，并通过校验和、完整性、外键、上传清单四重校验后恢复。
+* 未设置时产物与原恢复单元**逐项一致**（原 9 项备份测试仍通过）。
+* 声明了扩展目录但缺少 `ui.sqlite3` → 备份**失败**，不产出"看起来完整"的备份。
+* 只声明一半扩展产物 → 恢复拒绝，且不创建目标目录。
+
+## 3. 原生 Chromium 端到端验收（本次实测，替换交付包的 in-memory harness）
+
+**运行形态**：真实 Chromium + 三个真实服务——RAG API（挂载扩展、指向真实 V3 库副本）、
+既有 Node Agent（`dist/src/server.js`）、以及按 Netlify 规则服务 `apps/web/dist` 正式产物的
+静态服务器。身份走项目自带的测试验证器（与生产同一条 `subject_resolver` 代码路径）。
+
+| # | 用例 | 结果 |
+|---|---|---|
+| 1 | `/app` 提供新壳文档（不是旧文档）、六个全局入口、无 5xx、无 console 错误 | PASS |
+| 2 | 首次控制面板只有虚线创建框；从"所有课程"加号收藏后出现课程卡，刷新后仍在；课程导航与卡片入口指向同一路由 | PASS |
+| 3 | 真实课程资料按文件夹列出；上传私有 MD → 201 `scope=private` `status=indexed`；`/content` 返回 200 原件与 `inline`；`Range` → 206 且 10 字节；预览弹窗可用；行末菜单有下载且下载为 `attachment` | PASS |
+| 4 | 真实发帖入库、其他账号可见、无 console 错误 | PASS |
+| 5 | 学习页保留全局与课程两条左导航；知识树默认折叠、展开后覆盖内容区而导航保留、显示"还没有课程知识树"（不伪造）；双 Pane 同时可见；拖动分隔条改变 `aria-valuenow`；全屏保留左右两栏、Esc 恢复；两条历史入口存在 | PASS |
+| 6 | 手动新增计划 → 201；**同一记录出现在 Node Agent 自己的 REST 列表**；刷新后仍显示；在壳内完成后 Agent 记录变为 `completed` | PASS |
+| 7 | 390px 视口下无横向溢出 | PASS |
+
+### 浏览器测试发现并修复的真实缺陷（4 项）
+
+这些都是任何服务端测试都看不到的问题：
+
+1. **宿主 CORS 只允许 `WEB_ORIGIN`**，来自其它已批准站点的预检在扩展看到请求之前
+   就被 400 拒绝。修复：挂载扩展时把扩展允许的 origin 并入宿主策略。
+2. **`PUT` 不在宿主允许的方法里**，而收藏课程用 `PUT /courses/{id}/pin`。
+   修复：仅当扩展挂载时加入 `PUT`。
+3. **`Access-Control-Allow-Credentials` 缺失**：Starlette 为被挂载的子应用应答预检时
+   不带该头，浏览器因此拒绝一切请求。修复：在宿主对扩展路径补该响应头
+   （仅响应头，不含任何 cookie 或凭据；白名单外 origin 仍拿不到 allow-origin）。
+4. **`no-store` 未生效**：交付包的中间件按字面 `/api/` 前缀判断，挂载后路径是
+   `/ui-extension/api/...`，永不匹配。修复：宿主对扩展响应统一设置
+   `Cache-Control: private, no-store`。
+5. **日历创建任务 400**：适配器把空课程发成 `courseId: ""`、把可选项发成
+   `priority: null`，而 Agent 的 JSON Schema 两者都不接受。修复：未选择发 null、
+   未设置则省略字段。这一条只有把真实 Agent 接上才会暴露。
+
+## 4. 正式 React 生产构建
+
+```
+> tsc -b && vite build
+dist/index.html                  0.67 kB │ gzip:  0.39 kB
+dist/ui.html                     0.68 kB │ gzip:  0.44 kB
+dist/assets/main-jxvg7O-T.css   31.36 kB │ gzip:  6.48 kB
+dist/assets/ui-ra_uQrdw.css     53.05 kB │ gzip: 11.81 kB
+dist/assets/main-sCqwwDOm.js     0.59 kB │ gzip:  0.41 kB
+dist/assets/ui-BvjeJCl0.js     264.25 kB │ gzip: 77.75 kB
+dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
+✓ built in 272ms
+```
+
+* 使用**原仓库的** React 19.2.8 + Vite 8.2.1 + TypeScript 5.9.3 工具链，未新增框架。
+* 新增唯一运行时依赖：`katex@0.16.22`（替代交付包 265 KB 的离线 vendor 副本）。
+* 双文档产物：`index.html`（现有站点）+ `ui.html`（新壳，`/app`）。
+* **交付包的离线 React16 `web/dist` 未被使用、未被复制、未被发布**；
+  `app/cm_update/config.py:48` 的生产门仍然会在检测到 `not_for_production` 时拒绝启动。
+* 该正式产物中**不含** `test-session-token`，且包含 Clerk 客户端。
+* 依赖审计：`npm install` 报告 `found 0 vulnerabilities`。
+
+## 5. 未验证项（明确保留）
+
+| 项 | 状态 | 说明 |
+|---|---|---|
+| 真实 Clerk 登录 / 登出 / 刷新 / 恢复 | **NOT VERIFIED** | 需要真实 Clerk 应用与真实账号。注入式 resolver 与宿主 `ClerkAuthVerifier` 已在测试中走通，但浏览器侧真实 Clerk 流程未跑 |
+| 真实千问两阶段教学 | **NOT RUN** | 无付费授权，见 `QWEN_LIVE_TWO_STAGE_REPORT.md` |
+| 图片题视觉正确率 | **NOT VERIFIED** | 传输契约已测，模型是否"看对题"未测 |
+| Node 工具调用的真实模型选择 | **NOT VERIFIED** | Agent 侧桩与确定性客户端已测，真实模型多轮工具调用未测 |
+| 生产双用户隔离 | **NOT VERIFIED** | 本地真实库双用户已测，生产未测 |
+| 生产 PDF 内置查看器（CSP/插件） | NOT VERIFIED | 本地 Chromium iframe 预览通过 |
+| 多 worker 生成 runner | **未实现** | `app.py` 生成表是单进程内存结构 |
+| 旧 V3 会话在新壳内的只读入口 | **未实现** | 旧入口在旧文档中仍可用 |
+
+## 6. 环境
+
+| 项 | 值 |
+|---|---|
+| OS / Shell | Windows，PowerShell 7（`pwsh`） |
+| Python | 3.12.14（`services/rag-api/.venv`），pytest 9.1.1 |
+| Node / npm | v24.19.0 / 11.17.0（必须用 `npm.cmd`，`npm.ps1` 被执行策略拦截） |
+| 浏览器 | Google Chrome（`C:\Program Files\Google\Chrome\Application\chrome.exe`），Playwright 1.62.1 |
+| 时间 | 2026-09-14 |
+
+## 7. 已知的测试不稳定（如实记录）
+
+`apps/web` 的 vitest 套件在本次会话中出现过 **1 次** `1 failed | 48 passed`，
+随后立即重跑及连续 3 次均为 `49 passed`。失败出现时 vitest 未打印用例名，
+且没有留下可复现的断言信息，因此**无法确认**具体用例。同一时间内本机还有
+Playwright 的 Chromium 与两个 Node 服务在跑，最可能的原因是资源争用导致的超时。
+
+**结论**：该套件在本次改动下稳定通过（连续 3 次 49/49），但存在低频不稳定，
+不应当作"绝对零 flake"。若在生产前置流程中使用，建议对失败用例做一次重跑确认。
+
+## 8. 为什么原仓库既有 E2E 未运行
+
+`playwright.config.ts` 的 `testMatch` 只匹配 `coursemate.spec.ts`，它为 RAG API 设置了
+`V3_ENABLED=true` 但**没有**设置 `UI_EXTENSION_ENABLED`，因此只覆盖既有站点。
+本次没有改动该配置，以免把新壳的验收混进既有回归。既有站点本身通过 448 项
+rag-api 测试与 49 项 web 测试回归覆盖；其浏览器链路未在本次重新执行，
+这一点如实保留为未验证。
+
+## 8. 如何复现
+
+```powershell
+$repo = "C:\Users\Hp\Documents\Codex\2026-08-11\files-mentioned-by-the-user-coursemate\outputs\coursemate-ai"
+
+# 后端全量
+Set-Location "$repo\services\rag-api"
+.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider
+
+# 前端单测 + 正式构建
+Set-Location "$repo\apps\web"
+& "$repo\node_modules\.bin\vitest.cmd" run
+Set-Location $repo
+& npm.cmd run build --workspace @coursemate/web
+
+# 原生浏览器验收（需先按部署形态构建带测试令牌的验证包）
+Set-Location "$repo\apps\web"
+$env:VITE_AUTH_TEST_TOKEN = "test-session-token"
+$env:VITE_UI_API_BASE = "http://127.0.0.1:8100/ui-extension/api/ui/v1"
+$env:VITE_V3_ENABLED = "true"
+& "$repo\node_modules\.bin\vite.cmd" build
+Set-Location $repo
+& "$repo\node_modules\.bin\playwright.cmd" test --config playwright.ui.config.ts
+# 验收完必须恢复正式构建：
+Remove-Item Env:VITE_AUTH_TEST_TOKEN, Env:VITE_UI_API_BASE, Env:VITE_V3_ENABLED
+& npm.cmd run build --workspace @coursemate/web
+```
