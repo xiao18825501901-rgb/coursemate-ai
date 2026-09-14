@@ -5,7 +5,7 @@
 **仓库**：`C:\Users\Hp\Documents\Codex\2026-08-11\files-mentioned-by-the-user-coursemate\outputs\coursemate-ai`
 **分支**：`feature/dsh-ui-refresh-integration`
 **接手前基线**：`64e57501b380ffaefb55db92ef0fc328c39b0928`
-**本次最终 SHA**：`72619f2d5c702870b197317089d1b4fd8c98e8fe`
+**本次最终 SHA**：见 `git rev-parse HEAD`（本报告随最终提交入库，SHA 由该提交自身决定）
 
 ```text
 SOURCE INTEGRATION:               PASS
