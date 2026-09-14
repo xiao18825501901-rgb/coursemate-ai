@@ -394,7 +394,7 @@ export class Learn extends React.Component {
     learnNode(node) { this.setState({ activeNode: node.id, expanded: false, hover: null, mobile: 'teach' }, () => { this.saveLayout(); this.ask('teach', `请用中文从零教我理解 ${node.title}，保留英文术语，结合课程资料和例题。`); }); }
     async assess(node) { try {
         const result = await request(`/courses/${this.props.course.id}/knowledge/${node.id}/assessment`);
-        this.props.modal(node.title + ' · 测评', <Assessment result={result}/>);
+        this.props.modal(node.title + ' · 测评', <Assessment course={this.props.course} node={node} result={result} onDone={() => this.load()}/>);
     }
     catch (e) {
         this.props.modal(node.title + ' · 测评', <div><p>{e.message}</p><p className="helper-note" style={{ marginTop: 12 }}>学习进度和测评结果是两个独立状态。没有真实测评时不显示虚构分数。</p></div>);
@@ -409,8 +409,9 @@ export class Learn extends React.Component {
     catch (e) {
         this.props.toast(e.message);
     } }
-    renderTree() { const groups = this.state.nodes.filter(n => !n.parent); return <div className="tree-expanded"><div className="row between"><div><h2>课程知识点树</h2><p className="helper-note" style={{ marginTop: 5 }}>选择节点，分别查看学习进度与测评结果。</p></div><IconButton name="close" title="收起知识树" onClick={() => this.setState({ expanded: false })}/></div><div className="tree-columns">{groups.map(root => <div className="tree-group" key={root.id}><div className="tree-group-title">{root.title}</div>{this.renderNodes(root.id, 0)}</div>)}</div>{!groups.length && <div className="empty-state"><Icon name="tree"/><h3>还没有课程知识树</h3><p>上传资料后，需由现有 V3 知识引擎生成。此更新包不会伪造节点和学习状态。</p></div>}</div>; }
-    renderNodes(parent, depth) { return this.state.nodes.filter(n => n.parent === parent).map(n => <div key={n.id} style={{ marginLeft: depth * 14 }}><div className={'tree-node-new ' + (this.state.activeNode === n.id ? 'selected' : '')} tabIndex="0" onMouseEnter={() => this.setState({ hover: n.id })} onFocus={() => this.setState({ hover: n.id })} onMouseLeave={() => this.setState({ hover: null })} onClick={() => this.setState({ hover: n.id })}><Icon name="book"/><span>{n.title}</span><Icon name="arrow"/>{this.state.hover === n.id && <div className="node-popover" onClick={e => e.stopPropagation()}><strong>{n.title}</strong><button onClick={() => this.learnNode(n)}><span>学习进度</span><b>{n.progress === 'LEARNED' ? '教学已完成' : n.progress === 'LEARNING' ? '学习中' : '未开始'}</b><Icon name="arrow"/></button><button onClick={() => this.assess(n)}><span>测评结果</span><b>{n.grade || '未测评'}</b><Icon name="arrow"/></button></div>}</div>{this.renderNodes(n.id, depth + 1)}</div>); }
+    renderTree() { const groups = this.state.nodes.filter(n => !n.parent); return <div className="tree-expanded"><div className="row between"><div><h2>课程知识点树</h2><p className="helper-note" style={{ marginTop: 5 }}>选择节点，分别查看学习进度与测评结果。</p></div><IconButton name="close" title="收起知识树" onClick={() => this.setState({ expanded: false })}/></div><div className="tree-columns">{groups.map(root => { const children = this.state.nodes.filter(n => n.parent === root.id); return <div className="tree-group" key={root.id}>{children.length ? <div className="tree-group-title">{root.title}</div> : null}{children.length ? this.renderNodes(root.id, 0) : this.renderNodeRow(root, 0)}</div>; })}</div>{!groups.length && <div className="empty-state"><Icon name="tree"/><h3>还没有课程知识树</h3><p>上传资料后，需由现有 V3 知识引擎生成。此更新包不会伪造节点和学习状态。</p></div>}</div>; }
+    renderNodeRow(n, depth) { return <div key={n.id} style={{ marginLeft: depth * 14 }}><div className={'tree-node-new ' + (this.state.activeNode === n.id ? 'selected' : '')} tabIndex="0" onMouseEnter={() => this.setState({ hover: n.id })} onFocus={() => this.setState({ hover: n.id })} onMouseLeave={() => this.setState({ hover: null })} onClick={() => this.setState({ hover: n.id })}><Icon name="book"/><span>{n.title}</span><Icon name="arrow"/>{this.state.hover === n.id && <div className="node-popover" onClick={e => e.stopPropagation()}><strong>{n.title}</strong><button onClick={() => this.learnNode(n)}><span>学习进度</span><b>{n.progress === 'LEARNED' ? '教学已完成' : n.progress === 'LEARNING' ? '学习中' : '未开始'}</b><Icon name="arrow"/></button><button onClick={() => this.assess(n)}><span>测评结果</span><b>{n.grade || '未测评'}</b><Icon name="arrow"/></button></div>}</div>{this.renderNodes(n.id, depth + 1)}</div>; }
+    renderNodes(parent, depth) { return this.state.nodes.filter(n => n.parent === parent).map(n => this.renderNodeRow(n, depth)); }
     renderPane(lane) { const isTeach = lane === 'teach', messages = this.state.messages[lane]; return <section className={'learning-pane pane-' + lane + ' ' + (this.state.mobile === lane ? 'mobile-active' : '')}><header className="pane-header"><div className="row"><span className="pane-symbol"><Icon name={isTeach ? 'book' : 'edit'}/></span><div><h3>{isTeach ? '知识学习' : '题目应对'}</h3><small>{isTeach ? '理解原理，连接知识' : '拆解题目，逐步解决'}</small></div></div><div className="row" style={{ gap: 1 }}><IconButton name="history" title={(isTeach ? '知识' : '题目') + '历史'} onClick={() => this.history(lane)}/><IconButton name="plus" title={(isTeach ? '知识' : '题目') + '新对话'} onClick={() => this.newChat(lane)}/></div></header>{isTeach && this.state.bridge && <button className="bridge-banner" onClick={() => this.backToProblem()}><Icon name="back"/>返回原题 · 第 {this.state.bridge.step} 步 <small>已携带题目上下文</small></button>}<div className="pane-messages" id={'messages-' + lane} onScroll={e=>{const el=e.currentTarget;this.follow[lane]=el.scrollHeight-el.scrollTop-el.clientHeight<100;}}>{messages.length === 0 && !this.state.partial[lane] ? <div className="pane-welcome"><div className="welcome-symbol"><Icon name={isTeach ? 'book' : 'edit'}/></div><h2>{isTeach ? '从一个问题，真正学会' : '把难题，拆成能理解的小步'}</h2><p>{isTeach ? '选一个知识点，或者直接问我。\n从为什么开始，把概念和例题连起来。' : '输入题目或指定文件、题号。\n完整参考解法之后，每个步骤都能继续学。'}</p><div className="suggestion-stack">{(isTeach ? [(this.props.course.id === 'cs3481' ? '请用中文解释 DBSCAN 的核心点' : '请用中文介绍这门课的核心知识'), '我想先看看这门课的知识地图'] : [(this.props.course.id === 'cs3481' ? '讲解 Tutorial_02_Clustering.pdf 的 Question 2' : '请结合我上传的题目说明解题步骤'), '解题时怎样判断应该用哪种方法？']).map(text => <button key={text} onClick={() => this.ask(lane, text)}>{text}<Icon name="arrow"/></button>)}</div></div> : messages.map(m => <article className={'chat-message-new ' + m.role} key={m.id}><div className="message-byline">{m.role === 'user' ? this.props.user.name : 'CourseMate'}{m.role === 'assistant' && <span>{this.props.config.provider_mode === 'test' ? '本地测试 Provider' : this.props.config.model}</span>}</div>{m.attachments?.length>0&&<div className="attachment-chips">{m.attachments.map(f=><span key={f.id}><Icon name="file"/>{f.name}</span>)}</div>}<RichText text={m.text} message={m} lane={lane} onBridge={(...a) => this.bridge(...a)}/>{m.role==='assistant'&&m.run&&<button className="prompt-inspect-button" onClick={()=>this.inspectPrompt(m)}>查看本次教学 Prompt</button>}{m.citations?.length > 0 && <div className="citation-row">{m.citations.map(c => <button key={c.id} onClick={() => this.source(c)}><Icon name="file"/>{c.name} · p.{c.page}</button>)}</div>}</article>)}{this.state.partial[lane] && <article className="chat-message-new assistant"><div className="message-byline">CourseMate <span>生成中 / 未完成内容</span></div><RichText text={this.state.partial[lane]}/></article>}</div><footer className="pane-footer"><div className="generation-status" role="status">{this.state.status[lane] || 'CS3481 模板 → 千问撰写 Prompt → 千问教学'}</div>{this.state.attachments[lane].length>0&&<div className="attachment-chips">{this.state.attachments[lane].map(f=><span key={f.id}><Icon name="file"/>{f.name}<button title="移除本次附件" onClick={()=>this.setLane('attachments',lane,this.state.attachments[lane].filter(x=>x.id!==f.id))}>×</button></span>)}</div>}<form className="chat-composer" onSubmit={e => { e.preventDefault(); this.ask(lane); }}><textarea aria-label={isTeach ? '知识学习输入' : '题目应对输入'} placeholder={isTeach ? '问一个问题，或者告诉我你想学什么…' : '输入题目，或写下文件名与题号…'} value={this.state.inputs[lane]} maxLength="6000" onChange={e => this.setLane('inputs', lane, e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
         e.preventDefault();
         this.ask(lane);
@@ -421,7 +422,58 @@ export class Learn extends React.Component {
     } }}><span /></div>{this.renderPane('problem')}</div></div>{this.state.expanded && this.renderTree()}</div>; }
 }
 class Assessment extends React.Component {
-    render() { const r = this.props.result || {}; const status = r.status || 'NOT_ASSESSED'; const scored = status === 'GRADED' || typeof r.score === 'number'; return <div><dl className="assessment-grid"><dt>状态</dt><dd>{status === 'GRADED' ? '已评阅' : status === 'PARTIALLY_ASSESSED' ? '部分评阅' : status === 'NOT_ASSESSED' ? '未测评' : status}</dd><dt>成绩</dt><dd>{r.grade || '未出具'}</dd><dt>原始分</dt><dd>{typeof r.score === 'number' ? r.score : '—'}</dd>{r.session && <><dt>测评场次</dt><dd className="mono">{r.session}</dd></>}{r.mode && <><dt>模式</dt><dd>{r.mode === 'INDEPENDENT' ? '独立完成' : r.mode === 'PRACTICE' ? '练习' : r.mode}</dd></>}{r.assistance && <><dt>协助状态</dt><dd>{r.assistance === 'UNASSISTED' ? '无协助' : r.assistance === 'ASSISTED' ? '有提示' : r.assistance === 'ANSWER_EXPOSED' ? '已看过答案' : r.assistance}</dd></>}</dl>{r.source && <p className="helper-note" style={{ marginTop: 12 }}>来源：{r.source}</p>}{!scored && <p className="helper-note" style={{ marginTop: 12 }}>还没有真实测评成绩。学习进度和测评结果是两个独立状态，这里不显示虚构分数。</p>}</div>; }
+    state = { view: null, answers: {}, busy: false, error: '', finished: false };
+    componentDidMount() { const s = this.props.result || {}; if (s.status === 'IN_PROGRESS' && s.session)
+        this.open(s.session); }
+    base = () => `/courses/${this.props.course.id}/knowledge`;
+    async open(session) { this.setState({ busy: true, error: '' }); try {
+        this.setState({ view: await request(this.base() + '/assessment/' + session) });
+    }
+    catch (e) {
+        this.setState({ error: e.message });
+    }
+    finally {
+        this.setState({ busy: false });
+    } }
+    async start() { this.setState({ busy: true, error: '' }); try {
+        const started = await send(this.base() + '/' + this.props.node.id + '/assessment/session', { request_id: key() });
+        this.setState({ view: await request(this.base() + '/assessment/' + started.id), finished: false });
+    }
+    catch (e) {
+        this.setState({ error: e.message });
+    }
+    finally {
+        this.setState({ busy: false });
+    } }
+    async submit() { const view = this.state.view; if (!view || view.status !== 'IN_PROGRESS')
+        return; const answers = view.questions.map(q => ({ blueprint_item_id: q.id, answer: String(this.state.answers[q.id] ?? '').trim() })); if (answers.some(a => !a.answer))
+        return this.setState({ error: '请回答全部题目后再提交。' }); this.setState({ busy: true, error: '' }); try {
+        await send(this.base() + '/assessment/' + view.id + '/submit', { request_id: key(), answers });
+        const graded = await request(this.base() + '/assessment/' + view.id);
+        this.setState({ view: graded, finished: true });
+        this.props.onDone?.();
+    }
+    catch (e) {
+        this.setState({ error: e.message });
+    }
+    finally {
+        this.setState({ busy: false });
+    } }
+    async abandon() { const view = this.state.view; if (!view)
+        return; this.setState({ busy: true }); try {
+        await send(this.base() + '/assessment/' + view.id + '/abandon', { request_id: key() });
+        this.setState({ view: null, finished: true });
+        this.props.onDone?.();
+    }
+    catch (e) {
+        this.setState({ error: e.message });
+    }
+    finally {
+        this.setState({ busy: false });
+    } }
+    renderSummary() { const view = this.state.view; const r = view ? { status: view.status, grade: view.grade?.label || null, score: view.raw_score, session: view.id, mode: view.mode, assistance: view.assistance_status, source: 'V3 assessment engine' } : (this.props.result || {}); const status = r.status || 'NOT_ASSESSED'; const scored = status === 'GRADED' || typeof r.score === 'number'; return <div><dl className="assessment-grid"><dt>状态</dt><dd>{status === 'GRADED' ? '已评阅' : status === 'IN_PROGRESS' ? '进行中' : status === 'SUBMITTED' ? '已提交' : status === 'NOT_ASSESSED' ? '未测评' : status}</dd><dt>成绩</dt><dd>{r.grade || '未出具'}</dd><dt>原始分</dt><dd>{typeof r.score === 'number' ? r.score : '—'}</dd>{r.session && <><dt>测评场次</dt><dd className="mono">{r.session}</dd></>}{r.mode && <><dt>模式</dt><dd>{r.mode === 'INDEPENDENT' ? '独立完成' : r.mode === 'PRACTICE' ? '练习' : r.mode}</dd></>}{r.assistance && <><dt>协助状态</dt><dd>{r.assistance === 'UNASSISTED' ? '无协助' : r.assistance === 'ASSISTED' ? '有提示' : r.assistance === 'ANSWER_EXPOSED' ? '已看过答案' : r.assistance}</dd></>}</dl>{r.source && <p className="helper-note" style={{ marginTop: 12 }}>来源：{r.source}</p>}{!scored && status !== 'IN_PROGRESS' && <p className="helper-note" style={{ marginTop: 12 }}>还没有真实测评成绩。学习进度和测评结果是两个独立状态，这里不显示虚构分数。</p>}</div>; }
+    renderQuestion(q, i) { const value = this.state.answers[q.id] ?? ''; const locked = this.state.view?.status !== 'IN_PROGRESS'; return <article className="assessment-question" key={q.id}><header><strong>第 {i + 1} 题</strong><small>{q.question_type}{q.marks ? ' · ' + q.marks + ' 分' : ''}</small></header><p className="assessment-prompt">{q.prompt}</p>{q.options && q.options.length ? <div className="assessment-options">{q.options.map((option, j) => <label key={j} className={'assessment-option' + (value === String(option) ? ' selected' : '')}><input type="radio" name={q.id} disabled={locked} checked={value === String(option)} onChange={() => this.setState({ answers: { ...this.state.answers, [q.id]: option } })}/><span>{option}</span></label>)}</div> : <textarea aria-label={'第 ' + (i + 1) + ' 题答案'} disabled={locked} rows={3} maxLength="12000" placeholder="在这里作答…" value={value} onChange={e => this.setState({ answers: { ...this.state.answers, [q.id]: e.target.value } })}/>}{q.review && <div className="assessment-review"><p className="helper-note">你的答案：{q.review.submitted_answer ?? '（未作答）'}</p><p className="helper-note">参考答案：{JSON.stringify(q.review.answer)}</p><p className="helper-note">得分：{q.review.awarded_marks} / {q.marks}{q.review.feedback ? ' · ' + q.review.feedback : ''}</p></div>}</article>; }
+    render() { const { view, busy, error, finished } = this.state; const active = view && view.status === 'IN_PROGRESS'; return <div className="assessment-flow">{this.state.error && <p className="error-text">{this.state.error}</p>}{this.renderSummary()}{!view && !finished && <div className="row" style={{ marginTop: 16 }}><button className="btn primary" disabled={busy} onClick={() => this.start()}>{busy ? '正在准备…' : '开始测评（5 题）'}</button>{this.props.result?.status === 'GRADED' && <p className="helper-note">已有评分记录；再次测评会开启新的场次。</p>}</div>}{active && <><div className="assessment-questions">{view.questions.map((q, i) => this.renderQuestion(q, i))}</div><div className="row" style={{ marginTop: 16 }}><button className="btn primary" disabled={busy} onClick={() => this.submit()}>{busy ? '正在提交…' : '提交答案'}</button><button className="btn" disabled={busy} onClick={() => this.abandon()}>放弃本次测评</button></div></>}{view && view.status === 'GRADED' && <><p className="helper-note" style={{ marginTop: 12 }}>评阅完成。查看每题反馈后关闭即可。</p><div className="assessment-questions">{view.questions.map((q, i) => this.renderQuestion(q, i))}</div><div className="row" style={{ marginTop: 16 }}><button className="btn" onClick={() => this.setState({ view: null, finished: true })}>返回概览</button><button className="btn" onClick={() => this.start()}>再测一次</button></div></>}</div>; }
 }
 class History extends React.Component {
     state = { rows: [], legacy: [], open: null, error: '' };

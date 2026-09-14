@@ -72,7 +72,7 @@ def test_durable_agent_receipts_scoped_conflict_freeze_and_restart(client,env):
     db=Database(env[3].data_dir/'ui.sqlite3');db.initialize();db.initialize()
     owner=client.get(P+'/me').json()['id']
     assert db.one('SELECT status FROM cmui_agent_receipts WHERE owner=? AND request_id=?',(owner,'plan-new-001'))['status']=='completed'
-    assert db.one("SELECT value FROM cmui_meta WHERE key='schema_version'")['value']=='2'
+    assert db.one("SELECT value FROM cmui_meta WHERE key='schema_version'")['value']=='3'
     assert db.all('PRAGMA foreign_key_check')==[]
 
 

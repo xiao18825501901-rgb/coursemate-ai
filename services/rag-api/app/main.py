@@ -45,6 +45,7 @@ def create_app(
     embedding_provider: EmbeddingProvider | None = None,
     answer_provider: AnswerProvider | None = None,
     auth_verifier: AuthVerifier | None = None,
+    ui_provider: object | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     if resolved_settings.auth_test_user_id and (
@@ -221,5 +222,5 @@ def create_app(
     if resolved_settings.ui_extension_enabled:
         from app.ui_extension.mount import mount_ui_extension
 
-        mount_ui_extension(application)
+        mount_ui_extension(application, provider=ui_provider)
     return application

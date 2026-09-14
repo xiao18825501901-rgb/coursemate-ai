@@ -35,6 +35,12 @@ from app.course_access import require_course_access
 from app.db import Database
 from app.errors import ApiError
 from app.learning.orchestrator import LearningOrchestrator
+from app.learning.models import (
+    AssessmentAbandonInput,
+    AssessmentAnswer,
+    AssessmentStartInput,
+    AssessmentSubmitInput,
+)
 from app.learning.previews import IMAGE_MEDIA_TYPES
 from app.learning.problems import ProblemRepository
 from app.learning.workspaces import (
@@ -851,6 +857,31 @@ class V3DomainAdapter:
                     "learning": learning,
                 }
             )
+        # Registry entries that belong to the caller but are not members of the
+        # selected tree (for example the caller's own private nodes) still need to
+        # be reachable for their two status entries. They appear as top-level rows
+        # after the real tree members; they never fabricate hierarchy.
+        member_ids = {member.get("node_id") for member in ordered}
+        for node_id, node in sorted(registry.items(), key=lambda item: (item[1].get("title") or "", item[0])):
+            if node_id in member_ids:
+                continue
+            state = node.get("state") or {}
+            learning = state.get("learning") or {}
+            assessment = state.get("assessment") or {}
+            tree.append(
+                {
+                    "id": node_id,
+                    "parent": None,
+                    "title": node.get("title") or node_id,
+                    "description": node.get("description") or "",
+                    "kind": node.get("kind"),
+                    "position": len(tree),
+                    "progress": learning.get("status") or "NOT_STARTED",
+                    "grade": assessment.get("grade_label"),
+                    "assessment": assessment,
+                    "learning": learning,
+                }
+            )
         return tree
 
     def _knowledge_assessment(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -872,6 +903,110 @@ class V3DomainAdapter:
                     "source": "V3 assessment engine",
                 }
         raise ApiError(404, "NODE_NOT_FOUND", "The knowledge node was not found.")
+
+    # ----------------------------------------- V3 learning state (write paths)
+
+    def _workspace_for_node(self, course_id: str, subject: str) -> sqlite3.Row:
+        workspace = self._workspace_row(course_id, subject)
+        if workspace is None:
+            raise ApiError(409, "WORKSPACE_UNAVAILABLE", "The learning workspace is unavailable.")
+        return workspace
+
+    def _begin_learning(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Start (or continue) the V3 learning journey for a knowledge node.
+
+        This is the minimal, truthful write from the shell's free-text teaching to
+        the authoritative V3 learning state: it creates the same
+        `learning_journeys` row V3's own teach() would create, idempotently, and
+        never touches coverage. REQUIRED-item coverage stays exclusively owned by
+        V3 teach()/delivery evidence; the node's progress therefore stays honest
+        (NOT_STARTED until real coverage exists).
+        """
+
+        if self.learning is None:
+            raise ApiError(503, "V3_DISABLED", "The V3 learning engine is disabled.")
+        course_id = str(payload["course"])
+        node_id = str(payload["node"])
+        self._course_row(course_id, subject)
+        workspace = self._workspace_for_node(course_id, subject)
+        node = self.learning.node(workspace, node_id)  # 404/409 with real codes
+        with self.database.connect() as connection:
+            journey = LearningOrchestrator.journey(connection, workspace["id"], node)
+        return {
+            "journey_id": journey["id"],
+            "node_id": node_id,
+            "spec_version": node.get("spec_version"),
+            "workspace_id": workspace["id"],
+            "status": journey["status"],
+        }
+
+    def _assessment_start(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.learning is None:
+            raise ApiError(503, "V3_DISABLED", "The V3 learning engine is disabled.")
+        course_id = str(payload["course"])
+        node_id = str(payload["node"])
+        self._course_row(course_id, subject)
+        workspace = self._workspace_for_node(course_id, subject)
+        revision = self._workspace_revision(workspace["id"])
+        return self.learning.start_assessment(
+            workspace["id"],
+            subject,
+            AssessmentStartInput(operation_id=str(payload["request_id"]), revision=revision, node_id=node_id),
+        )
+
+    def _assessment_view(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.learning is None:
+            raise ApiError(503, "V3_DISABLED", "The V3 learning engine is disabled.")
+        course_id = str(payload["course"])
+        self._course_row(course_id, subject)
+        workspace = self._workspace_for_node(course_id, subject)
+        return self.learning.assessment(workspace["id"], subject, str(payload["session"]))
+
+    def _assessment_submit(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.learning is None:
+            raise ApiError(503, "V3_DISABLED", "The V3 learning engine is disabled.")
+        course_id = str(payload["course"])
+        self._course_row(course_id, subject)
+        workspace = self._workspace_for_node(course_id, subject)
+        answers = [AssessmentAnswer(**item) for item in (payload.get("answers") or [])]
+        request = AssessmentSubmitInput(
+            operation_id=str(payload["request_id"]), revision=0, answers=answers
+        )
+        # The optimistic revision is read right before the call. On a concurrent
+        # edit the V3 engine raises REVISION_CONFLICT; retry once with the fresh
+        # revision rather than silently overwriting someone else's state.
+        for attempt in range(2):
+            request.revision = self._workspace_revision(workspace["id"])
+            try:
+                return self.learning.submit_assessment(
+                    workspace["id"], subject, str(payload["session"]), request
+                )
+            except ApiError as error:
+                if error.code != "REVISION_CONFLICT" or attempt == 1:
+                    raise
+        raise ApiError(409, "REVISION_CONFLICT", "The workspace changed while submitting.")
+
+    def _assessment_abandon(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.learning is None:
+            raise ApiError(503, "V3_DISABLED", "The V3 learning engine is disabled.")
+        course_id = str(payload["course"])
+        self._course_row(course_id, subject)
+        workspace = self._workspace_for_node(course_id, subject)
+        return self.learning.abandon_assessment(
+            workspace["id"],
+            subject,
+            str(payload["session"]),
+            AssessmentAbandonInput(operation_id=str(payload["request_id"]), revision=self._workspace_revision(workspace["id"])),
+        )
+
+    def _workspace_revision(self, workspace_id: str) -> int:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT revision FROM learning_workspaces WHERE id=?", (workspace_id,)
+            ).fetchone()
+        if row is None:
+            raise ApiError(404, "WORKSPACE_NOT_FOUND", "The workspace was not found.")
+        return int(row["revision"])
 
     # ------------------------------------------------------- legacy V3 history
 
@@ -977,6 +1112,11 @@ class V3DomainAdapter:
             "attachments.prepare",
             "knowledge.tree",
             "knowledge.assessment",
+            "knowledge.begin_learning",
+            "knowledge.assessment.start",
+            "knowledge.assessment.view",
+            "knowledge.assessment.submit",
+            "knowledge.assessment.abandon",
         }
         # The legacy history routes pass `course` (never `id`), so they need their
         # own boundary check rather than the `id`-shaped one below.
@@ -1032,6 +1172,16 @@ class V3DomainAdapter:
             return self._knowledge_tree(subject, payload)
         if operation == "knowledge.assessment":
             return self._knowledge_assessment(subject, payload)
+        if operation == "knowledge.begin_learning":
+            return self._begin_learning(subject, payload)
+        if operation == "knowledge.assessment.start":
+            return self._assessment_start(subject, payload)
+        if operation == "knowledge.assessment.view":
+            return self._assessment_view(subject, payload)
+        if operation == "knowledge.assessment.submit":
+            return self._assessment_submit(subject, payload)
+        if operation == "knowledge.assessment.abandon":
+            return self._assessment_abandon(subject, payload)
         if operation == "legacy.conversations":
             return self._legacy_conversations(subject, str(payload["course"]))
         if operation == "legacy.conversation":

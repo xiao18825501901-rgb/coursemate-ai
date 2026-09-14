@@ -11,12 +11,15 @@ class DomainPort(Protocol):
         ...
 
 
-def install_ui_extension(host_app, settings, domain: DomainPort, subject_resolver, *, mount_path='/ui-extension'):
+def install_ui_extension(host_app, settings, domain: DomainPort, subject_resolver, *, mount_path='/ui-extension', provider=None):
     """Mount into an existing FastAPI application without replacing its routes/lifespan.
 
     Call once during host construction, before the server starts. The host application's
     existing startup/shutdown hooks are retained. User must supply real adapters; this
     helper intentionally cannot discover or guess a production V3 database schema.
+
+    `provider` is a test seam only: production mounts pass none and get the real
+    Qwen/disabled provider selected from `settings`.
     """
     from contextlib import asynccontextmanager
     from .app import create_app
@@ -27,7 +30,7 @@ def install_ui_extension(host_app, settings, domain: DomainPort, subject_resolve
     if settings.integration_mode!='integrated' or settings.auth_mode!='injected':
         raise ValueError('Host mount requires integrated domain and verified injected identity')
     settings.api_base=mount_path.rstrip('/')+'/api/ui/v1'
-    ui=create_app(settings,domain=domain,subject_resolver=subject_resolver)
+    ui=create_app(settings,domain=domain,subject_resolver=subject_resolver,provider=provider)
     original=host_app.router.lifespan_context
     @asynccontextmanager
     async def combined_lifespan(app):

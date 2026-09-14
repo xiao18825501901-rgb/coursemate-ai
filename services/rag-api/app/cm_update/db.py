@@ -13,6 +13,10 @@ def now() -> str:
 def uid(prefix: str = '') -> str:
     return prefix + uuid4().hex
 
+# Schema 3 adds cmui_run_v3, the cross-reference from a UI generation run to the
+# authoritative V3 learning journey it started. The bump is additive; initialize()
+# refuses to run against a newer version.
+SCHEMA_VERSION = 3
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS cmui_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -123,6 +127,12 @@ CREATE TABLE IF NOT EXISTS cmui_agent_receipts (
  result TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
  PRIMARY KEY(owner,request_id)
 );
+CREATE TABLE IF NOT EXISTS cmui_run_v3 (
+ run TEXT PRIMARY KEY REFERENCES cmui_runs(id) ON DELETE CASCADE,
+ workspace_id TEXT NOT NULL, journey_id TEXT NOT NULL,
+ node_id TEXT NOT NULL, spec_version INTEGER NOT NULL,
+ created_at TEXT NOT NULL
+);
 '''
 
 
@@ -154,10 +164,10 @@ class Database:
                 raise ValueError('Refusing to initialize UI database over an existing CourseMate domain database')
             if 'cmui_meta' in tables:
                 current=c.execute("SELECT value FROM cmui_meta WHERE key='schema_version'").fetchone()
-                if current and int(current[0])>2: raise ValueError('Newer UI database schema detected; do not downgrade')
+                if current and int(current[0])>SCHEMA_VERSION: raise ValueError('Newer UI database schema detected; do not downgrade')
             c.execute('PRAGMA journal_mode=WAL')
             c.executescript(SCHEMA)
-            c.execute("INSERT INTO cmui_meta VALUES ('schema_version','2') ON CONFLICT(key) DO UPDATE SET value='2'")
+            c.execute("INSERT INTO cmui_meta VALUES ('schema_version',?) ON CONFLICT(key) DO UPDATE SET value=?",(str(SCHEMA_VERSION),str(SCHEMA_VERSION)))
 
     def all(self, sql, args=()):
         with self.connect() as c: return [dict(r) for r in c.execute(sql, args)]

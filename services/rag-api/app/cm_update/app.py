@@ -592,6 +592,33 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         if domain: return await remote('knowledge.assessment',user,{'course':cid,'node':node_id},request)
         raise HTTPException(501,'正式测评沿用 V3 评分引擎；本更新包不伪造 GPA。请由 DSH 接入原服务。')
 
+    @r.post('/courses/{cid}/knowledge/{node_id}/assessment/session',status_code=201)
+    async def assessment_start(cid:str,node_id:str,user:User,request:Request):
+        await course(user,cid,request)
+        if not domain: raise HTTPException(501,'正式测评沿用 V3 评分引擎；本更新包不伪造 GPA。')
+        body=await request.json()
+        return await remote('knowledge.assessment.start',user,{'course':cid,'node':node_id,'request_id':str(body.get('request_id',''))},request)
+
+    @r.get('/courses/{cid}/knowledge/assessment/{session_id}')
+    async def assessment_view(cid:str,session_id:str,user:User,request:Request):
+        await course(user,cid,request)
+        if not domain: raise HTTPException(501,'正式测评沿用 V3 评分引擎；本更新包不伪造 GPA。')
+        return await remote('knowledge.assessment.view',user,{'course':cid,'session':session_id},request)
+
+    @r.post('/courses/{cid}/knowledge/assessment/{session_id}/submit')
+    async def assessment_submit(cid:str,session_id:str,user:User,request:Request):
+        await course(user,cid,request)
+        if not domain: raise HTTPException(501,'正式测评沿用 V3 评分引擎；本更新包不伪造 GPA。')
+        body=await request.json()
+        return await remote('knowledge.assessment.submit',user,{'course':cid,'session':session_id,'request_id':str(body.get('request_id','')),'answers':body.get('answers') or []},request)
+
+    @r.post('/courses/{cid}/knowledge/assessment/{session_id}/abandon')
+    async def assessment_abandon(cid:str,session_id:str,user:User,request:Request):
+        await course(user,cid,request)
+        if not domain: raise HTTPException(501,'正式测评沿用 V3 评分引擎；本更新包不伪造 GPA。')
+        body=await request.json()
+        return await remote('knowledge.assessment.abandon',user,{'course':cid,'session':session_id,'request_id':str(body.get('request_id',''))},request)
+
     @r.post('/courses/{cid}/bridges',status_code=201)
     async def bridge(cid:str,data:BridgeCreate,user:User,request:Request):
         await course(user,cid,request)
@@ -707,6 +734,14 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             bridge_data=dict(bridge_data,original_question=original['user_text'] if original else '',solution_excerpt=message['text'][:15000] if message else '')
         if data.node_id and not domain:
             if not db.one('SELECT id FROM cmui_nodes WHERE id=? AND course=?',(data.node_id,conv['course'])): raise HTTPException(404)
+        v3_link=None
+        if data.node_id and domain:
+            # Start (or continue) the authoritative V3 learning journey for this
+            # node BEFORE the run rows exist, so a missing node never leaves a
+            # queued run behind. Coverage is NOT claimed here: V3 teach() owns
+            # REQUIRED-item coverage, and the journey stays LEARNING forever until
+            # real delivery evidence exists.
+            v3_link=await remote('knowledge.begin_learning',user,{'course':conv['course'],'node':data.node_id},request)
         rid=uid('run_')
         try:
             with db.connect(True) as c:
@@ -716,6 +751,8 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 c.execute("UPDATE cmui_conversations SET title=CASE WHEN title='新对话' THEN ? ELSE title END,updated_at=? WHERE id=?",(data.text[:40],now(),conv_id))
                 if data.node_id and not domain:
                     c.execute("INSERT INTO cmui_learning(owner,node,progress) VALUES (?,?,'LEARNING') ON CONFLICT(owner,node) DO UPDATE SET progress=CASE WHEN progress='LEARNED' THEN progress ELSE 'LEARNING' END",(user['id'],data.node_id))
+                if v3_link is not None:
+                    c.execute('INSERT INTO cmui_run_v3(run,workspace_id,journey_id,node_id,spec_version,created_at) VALUES (?,?,?,?,?,?)',(rid,v3_link['workspace_id'],v3_link['journey_id'],v3_link['node_id'],v3_link['spec_version'],now()))
         except sqlite3.IntegrityError: raise HTTPException(409,'该对话已有任务正在生成，请先等待或停止') from None
         event(rid,'status',{'status':'queued'})
         task=asyncio.create_task(generate_run(rid,user,course_data,conv,sources,history,data,bridge_data,images))

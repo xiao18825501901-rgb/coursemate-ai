@@ -91,12 +91,17 @@ def _ui_settings(settings: Settings) -> object:
     return ui
 
 
-def mount_ui_extension(host_app: FastAPI, *, mount_path: str = MOUNT_PATH) -> object | None:
+def mount_ui_extension(
+    host_app: FastAPI, *, mount_path: str = MOUNT_PATH, provider: object = None
+) -> object | None:
     """Attach the new UI to an already-built host application.
 
     Callers gate this on ``Settings.ui_extension_enabled`` (env
     ``UI_EXTENSION_ENABLED``), which is off by default, so an operator must opt in
     explicitly before the new surface exists.
+
+    `provider` is a test seam only; production mounts pass none and the extension
+    selects the real Qwen/disabled provider from its own settings.
 
     One adapter instance is shared: it is stateless apart from a context variable
     that is reset at the start of every `DomainPort.call`, so concurrent requests
@@ -126,6 +131,7 @@ def mount_ui_extension(host_app: FastAPI, *, mount_path: str = MOUNT_PATH) -> ob
         adapter,
         clerk_subject_resolver(host_app),
         mount_path=mount_path,
+        provider=provider,
     )
     _allow_browser_credentials(host_app, mount_path, ui_settings.allowed_origins)
     _prepend_legacy_history(ui, adapter)

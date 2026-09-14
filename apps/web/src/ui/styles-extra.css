@@ -15,3 +15,16 @@
 .assessment-grid{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;margin:0}
 .assessment-grid dt{color:var(--muted)}
 .assessment-grid dd{margin:0;font-weight:500}
+
+/* Interactive V3 assessment flow inside the knowledge tree's 测评结果 entry. */
+.modal:has(.assessment-flow){width:820px;max-width:94vw}
+.assessment-flow .assessment-questions{display:flex;flex-direction:column;gap:14px;margin-top:14px}
+.assessment-question{border:1px solid var(--line);border-radius:8px;padding:14px}
+.assessment-question header{display:flex;justify-content:space-between;margin-bottom:8px}
+.assessment-question header small{color:var(--muted)}
+.assessment-prompt{white-space:pre-wrap}
+.assessment-options{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.assessment-option{display:flex;gap:8px;align-items:center;padding:8px 10px;border:1px solid #d6dee4;border-radius:6px;cursor:pointer}
+.assessment-option.selected{background:var(--accent-soft);border-color:#c98aa4}
+.assessment-question textarea{width:100%;margin-top:10px}
+.assessment-review{margin-top:10px;padding:10px;background:var(--surface);border-radius:6px}

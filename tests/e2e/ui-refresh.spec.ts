@@ -293,9 +293,10 @@ test("the learning workspace keeps two panes, a collapsed tree, and a draggable 
   await expect(tree).toBeVisible();
   await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
   await expect(page.getByRole("button", { name: "学习", exact: true })).toBeVisible();
-  // This corpus has no reviewed knowledge tree yet, and the shell must say so
-  // instead of inventing nodes or progress.
-  await expect(tree).toContainText("还没有课程知识树");
+  // This account owns one synthetic fixture node, so the tree shows the caller's
+  // real registry entry instead of an empty-state lie; a truly empty registry
+  // renders the honest "还没有课程知识树" message (covered by the API tests).
+  await expect(tree).toContainText("Assessment Addition");
   await tree.getByRole("button", { name: "收起知识树" }).click();
   await expect(tree).toHaveCount(0);
 
@@ -418,10 +419,10 @@ test("a node assessment renders the real V3 result instead of raw JSON", async (
   await page.goto("/app#/course/cs3481/learn");
   await expect(page.locator("button.knowledge-strip")).toBeVisible();
 
-  // This corpus has no reviewed knowledge tree, so the shell must state that
-  // rather than fabricate nodes; the assessment surface is still reachable.
+  // The caller's own registry node is listed; an unknown node still 404s through
+  // the real V3 authorisation instead of producing a fabricated result.
   await page.locator("button.knowledge-strip").click();
-  await expect(page.locator(".tree-expanded")).toContainText("还没有课程知识树");
+  await expect(page.locator(".tree-expanded")).toContainText("Assessment Addition");
 
   const response = await request.get(
     "http://127.0.0.1:8100/ui-extension/api/ui/v1/courses/cs3481/knowledge/does-not-exist/assessment",
@@ -430,6 +431,66 @@ test("a node assessment renders the real V3 result instead of raw JSON", async (
   expect(response.status()).toBe(404);
   const body = await response.json();
   expect(String(body.detail)).toContain("not found");
+});
+
+test("a node assessment runs the real V3 flow: start, answer, submit, grade", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/app#/course/cs3481/learn");
+  await expect(page.locator("button.knowledge-strip")).toBeVisible();
+  await page.locator("button.knowledge-strip").click();
+  const tree = page.locator(".tree-expanded");
+  await expect(tree).toBeVisible();
+
+  // The synthetic fixture node appears because the shell lists the caller's own
+  // registry nodes even when no reviewed tree exists yet.
+  const nodeLabel = tree.locator(".tree-node-new").filter({ hasText: "Assessment Addition" });
+  await expect(nodeLabel).toBeVisible();
+  await nodeLabel.hover();
+  const assessButton = tree.getByRole("button", { name: /测评结果/ });
+  await expect(assessButton).toBeVisible();
+  await assessButton.click();
+
+  const modal = page.locator(".modal");
+  await expect(modal).toBeVisible();
+  await expect(modal).toContainText("未测评");
+
+  const start = modal.getByRole("button", { name: /开始测评/ });
+  await expect(start).toBeVisible();
+  await start.click();
+
+  // The V3 session starts for real and exposes exactly five frozen questions.
+  await expect(modal.locator(".assessment-question")).toHaveCount(5);
+  const answerBoxes = modal.getByLabel(/题答案/);
+  await expect(answerBoxes).toHaveCount(5);
+  for (let i = 0; i < 5; i += 1) {
+    await answerBoxes.nth(i).fill("correct");
+  }
+  await modal.getByRole("button", { name: /提交答案/ }).click();
+
+  // Grading happened against the V3 assessment engine and its grade snapshot.
+  await expect(modal).toContainText("已评阅");
+  await expect(modal.locator(".assessment-review").first()).toContainText("参考答案");
+
+  // The node's own state reports the graded result too - still independent from
+  // the learning progress, which this fixture never faked. This fixture course
+  // has no published grade policy, so the letter grade is honestly null while
+  // the raw score exists (UNCONFIGURED mapping).
+  const listed = await request.get(
+    "http://127.0.0.1:8100/ui-extension/api/ui/v1/courses/cs3481/knowledge",
+    { headers: { Authorization: "Bearer test-session-token" } },
+  );
+  expect(listed.status()).toBe(200);
+  const nodes = (await listed.json()) as {
+    id: string;
+    progress: string;
+    assessment: { status: string; raw_score: number | null } | null;
+  }[];
+  const node = nodes.find((item) => item.id.startsWith("e2e-assessment-node-"));
+  expect(node?.assessment?.status).toBe("GRADED");
+  expect(typeof node?.assessment?.raw_score).toBe("number");
+  expect(node?.progress).toBe("NOT_STARTED");
 });
 
 test("help covers the new surfaces and no horizontal overflow at 390px", async ({ page }) => {
