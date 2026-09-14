@@ -37,7 +37,9 @@ app/main.py:create_app()
 ## 3. DomainPort 契约 → 真实 V3 实现
 
 实现：`services/rag-api/app/ui_extension/domain.py:V3DomainAdapter`
-（`integration/README.md` 的全部 21 个调用点，共 20 个 operation）
+（`integration/README.md` 的全部调用点，共 **26** 个 operation：22 个交付 ops +
+`knowledge.begin_learning`、`knowledge.assessment.start/view/submit/abandon`、
+`legacy.conversations/conversation`）
 
 | operation | 真实调用 | 交付包读取的字段 |
 |---|---|---|
@@ -153,8 +155,9 @@ app/main.py:create_app()
 
 ## 7. 新增数据与备份
 
-* 新表全部在独立文件 `CMUI_DATA_DIR/ui.sqlite3`（**Schema 3**，22 张 `cmui_*` 表，
-  其中 `cmui_run_v3` 是 Schema 2→3 新增的 run→V3 journey 交叉引用），
+* 新表全部在独立文件 `CMUI_DATA_DIR/ui.sqlite3`（**Schema 3**，26 张 `cmui_*` 表，
+  其中 `cmui_run_v3` 是 Schema 2→3 新增的 run→V3 journey 交叉引用，
+  `cmui_runs` 的 `lease_worker`/`lease_heartbeat` 是 Schema 3 租约列），
   与 `rag.sqlite3`、`agent.sqlite3` 物理分离；`Database.initialize()` 检测到
   `courses`/`chunks`/`tasks`/`schema_migrations` 会拒绝初始化，**不可能覆盖原库**。
 * 附件在 `CMUI_DATA_DIR/uploads/`。

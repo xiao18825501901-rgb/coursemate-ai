@@ -1,6 +1,6 @@
 # FINAL DSH COURSEMATE UI DEPLOYMENT REPORT
 
-**报告时间**：2026-09-14（Asia/Hong_Kong）
+**报告时间**：2026-09-15（Asia/Hong_Kong，本地收尾轮）
 **执行者**：DSH（DeepSeek Harness）
 **仓库**：`C:\Users\Hp\Documents\Codex\2026-08-11\files-mentioned-by-the-user-coursemate\outputs\coursemate-ai`
 **分支**：`feature/dsh-ui-refresh-integration`
@@ -9,9 +9,10 @@
 
 ```text
 SOURCE INTEGRATION:               PASS
-LOCAL TEST SUITE:                 PASS  (458 rag-api + 55 web)
+LOCAL TEST SUITE:                 PASS  (473 rag-api + 55 web + 66 agent)
 MODERN REACT PRODUCTION BUILD:    PASS  (React 19.2.8 + Vite 8.2.1 + tsc 5.9.3)
-NATIVE BROWSER ACCEPTANCE:        PASS  (9/9 real Chromium journeys)
+NATIVE BROWSER ACCEPTANCE:        PASS  (15/15 real Chromium journeys, new shell)
+LEGACY SITE E2E:                  PASS  (coursemate.spec.ts 4/4, learning.spec.ts 3/3)
 LIVE QWEN TWO-STAGE:              NOT RUN   (no paid authorization available)
 REAL CLERK SIGN-IN:               NOT VERIFIED
 PRODUCTION DEPLOYMENT:            NOT PERFORMED
@@ -23,25 +24,21 @@ OVERALL: SOURCE-COMPLETE AND LOCALLY VERIFIED — NOT PUBLISHED
 
 ## 0. 必须放在最前面的两件事
 
-### 0.1 开发执行模型与用户要求不一致
+### 0.1 开发执行模型已与用户要求一致（本轮核对）
 
-用户指定 DSH 的开发执行模型应为 `deepseek-v4-pro`。**Harness 的实际设置不是它。**
 `C:\Users\Hp\.dsh\settings.yaml`：
 
 ```yaml
 agent-default-model:
   provider: deepseek-official
-  model: deepseek-v4-flash
+  model: deepseek-v4-pro
   reasoningEffort: max
 ```
 
-本会话运行在 `deepseek-v4-flash`。会话中没有收到系统提示词声明的模型标识，因此以
-Harness 配置文件为准。本会话**没有修改**该设置——改模型配置属于需授权动作。
-如需 `deepseek-v4-pro`，请在 DSH 设置中切换后重启会话。
-
-**这条不影响网站教学模型**：网站教学链路用的是 `qwen3.8-max`
+用户在本轮切换后，本会话执行模型为 **deepseek-v4-pro**，与要求一致。
+**网站教学模型不变**：仍是 `qwen3.8-max`
 （`services/rag-api/app/config.py:v3_model`，`Literal["qwen3.8-max"]`），
-本次接线让新 UI 复用**同一个**模型凭据，没有新增第二份 key，也没有用 DeepSeek
+新 UI 复用**同一个**模型凭据，没有新增第二份 key，也没有用 DeepSeek
 生成任何教学内容。
 
 ### 0.2 本会话无法弹出授权框，因此生产动作一步都没有做
@@ -51,10 +48,9 @@ Harness 配置文件为准。本会话**没有修改**该设置——改模型�
 
 所以：**没有付费调用、没有生产写入、没有迁移、没有重启服务、没有 Git push、
 没有 Netlify 发布。** 这不是省略步骤，而是在无授权通道时的唯一正确行为。
-
-需要在生产执行时，请使用包内真实 Windows 弹窗
-`scripts/Request-DeploymentApproval.ps1`（默认 No、正数金额 + ISO 币种、唯一记录、
-10 分钟内开始、本身不部署），或在可用时使用 DSH 原生授权提示框。
+恢复授权通道的最小操作卡见 §7.1 与 `docs/ui-refresh/RELEASE_CLOSURE_CHECKLIST.md` §三。
+`scripts/Request-DeploymentApproval.ps1` 默认只产生业务同意记录；除非真实代码证明它接入
+Harness 审批决策，否则它不能改变 `never`（见 §7.1 的四项区分）。
 
 ---
 
@@ -64,31 +60,35 @@ Harness 配置文件为准。本会话**没有修改**该设置——改模型�
 
 | 项 | 结果 |
 |---|---|
-| 交付包后端模块 | `services/rag-api/app/cm_update/`（15 个文件） |
-| 与包 `FILE_MANIFEST.json` 的 hash 比对 | **13 个逐字节一致**，2 个有意修改（见 §1.1），0 个缺失 |
+| 交付包后端模块 | `services/rag-api/app/cm_update/`（15 个交付文件） |
+| 与包 `FILE_MANIFEST.json` 的 hash 比对 | **9 个逐字节一致**，6 个有意修改（`app.py`、`db.py`、`config.py`、`integration.py`、`provider.py`、`seed.py`，见 §1.1），0 个缺失 |
 | 交付包前端模块 | `apps/web/src/ui/`（8 个文件） |
 | 与包 `web/src` 的 hash 比对 | **6 个逐字节一致**（`App.jsx`、`api.js`、`icons.jsx`、`utils.js`、`richtext.jsx`、`styles.css`），2 个**纯新增式**修改（`pages.jsx`、`styles-extra.css`，见 §1.1） |
-| 真实 `DomainPort` 适配器 | `services/rag-api/app/ui_extension/domain.py`，实现全部 **22** 个 operation |
+| 真实 `DomainPort` 适配器 | `services/rag-api/app/ui_extension/domain.py`，实现全部 **26** 个 operation（22 个交付 ops + `knowledge.begin_learning`、`knowledge.assessment.start/view/submit/abandon`、`legacy.conversations/conversation`） |
 | 注入式身份桥 | `app/ui_extension/identity.py`，绑定宿主 Clerk 验证器 |
 | 宿主挂载 | `app/ui_extension/mount.py` + `app/main.py`（默认关闭） |
 | 新 React 壳 | `apps/web/src/ui/*`、`src/CourseMateUi.tsx`、`src/main.ui.tsx`、`ui.html` |
+| 默认入口路由 | `netlify.toml` + `scripts/serve_web_dist.mjs` + `apps/web/vite.config.ts` 三处共享同一决策表：`/` 与 `/app` → `ui.html`（新壳），旧深链前缀 → `index.html` |
 | Node 任务桥 | `domain.py` 的 `task.list/create/update/delete/plan` |
 | 旧 V3 问答历史只读入口 | `mount.py:_prepend_legacy_history` + `domain.py:legacy.*` |
 | 恢复单元扩展 | `ops/backup_v2.py`、`ops/restore_v2.py` |
-| 变更规模 | 65 个文件，+9536 / −18 行 |
 
-### 1.1 对交付包源码的六处修改（全部为可移植性/正确性/纯新增，无功能删减）
+### 1.1 对交付包源码的修改（全部为可移植性/正确性/纯新增，无功能删减）
 
 | 文件 | 修改 | 为什么必须改 |
 |---|---|---|
-| `app/cm_update/provider.py:20` | `read_text()` → `read_text(encoding='utf-8')` | Windows 中文 locale 是 GBK，会在**真实付费调用**路径上抛 `UnicodeDecodeError`；Linux 上看不到 |
-| `app/cm_update/config.py:48` | 同上，读 build 标记 | 同一类缺陷，且位于 production 启动门 |
+| `app/cm_update/provider.py` | `read_text()` → `read_text(encoding='utf-8')`；新增 `TestProvider` | Windows 中文 locale 是 GBK，会在**真实付费调用**路径上抛 `UnicodeDecodeError`；`TestProvider` 是 `provider_mode='test'` 的确定性本地/浏览器验收 Provider，生产被 `validate()` 拒绝 |
+| `app/cm_update/config.py` | 同上，读 build 标记 | 同一类缺陷，且位于 production 启动门 |
 | `app/cm_update/seed.py` | 新增可选 `documents` 参数 | 原实现从包根 `sample-documents/` 读示例 PDF；本仓库不发布示例课程资料 |
-| `apps/web/src/ui/pages.jsx` | 历史弹窗**新增**"旧版问答记录"分组；**新增** `Assessment` 组件 | 原 V3 问答历史要在新壳内可读；节点测评原本是 `JSON.stringify` 原始 JSON。纯新增，未改动既有页面布局、类名或交互 |
+| `app/cm_update/app.py` | ① run 带 `node_id` 时先走 `knowledge.begin_learning` 并写 `cmui_run_v3` 交叉引用；② Schema 3 单 worker 租约（`lease_worker`/`lease_heartbeat`、心跳、只回收过期租约、跨进程取消复读、条件式最终写入）；③ `provider_mode='test'` 选择 `TestProvider` | 学习闭环接线（journey 起步，不伪造覆盖）；把单 worker 从口头约定变成可执行防护；浏览器验收需要一个不收费、不冒充千问的确定性 Provider |
+| `app/cm_update/db.py` | `SCHEMA_VERSION=3`、`cmui_run_v3` 表、`cmui_runs` 租约列幂等 `ALTER` | 上述两条的持久化；旧库首次以新代码启动自动补列 |
+| `app/cm_update/integration.py` | `install_ui_extension(..., provider=None)` 测试接缝 | 宿主挂载时注入测试 Provider 的唯一入口；生产挂载不传 |
+| `apps/web/src/ui/pages.jsx` | 历史弹窗**新增**"旧版问答记录"分组；**新增** `Assessment` 组件；`backToProblem()` 返回后清除本地 bridge 状态 | 旧 V3 问答历史要在新壳内可读；节点测评原本是 `JSON.stringify` 原始 JSON；返回原题后桥接横幅必须消失（浏览器测试发现）。纯新增/单行修复，未改动既有布局或交互 |
 | `apps/web/src/ui/styles-extra.css` | **追加** `.legacy-*` / `.assessment-grid` 规则 | 只追加，未修改既有规则 |
 
 **未改动**交付包的 `App.jsx` / `api.js` / `icons.jsx` / `utils.js` / `richtext.jsx` /
-`styles.css` / `provider.py` 两阶段逻辑 / `sse.py` / `steps.py`。
+`styles.css` / `sse.py` / `steps.py` / `models.py` / `retrieval.py` / `filesystem.py` /
+`auth.py` / `main.py`，两阶段千问逻辑 `planner_messages()`/`stream()` 未改一行。
 
 ### 1.2 用户确认的产品方向全部保留
 
@@ -107,35 +107,43 @@ Harness 配置文件为准。本会话**没有修改**该设置——改模型�
   不要输出 JSON，不要回答学生问题"，system 消息内嵌 7422 字节的完整 CS3481 Word 模板。
 * 生成的 Prompt 落库 `cmui_runs.generated_prompt`，前端"查看生成的 Prompt"可读。
 * 第二阶段把第一阶段文本放进 system 消息执行教学。
-* 浏览器实测侧边栏显示"模型未连接"（`provider_mode=disabled`），**没有用预设回答假装千问**。
+* 浏览器验收用 `provider_mode='test'` 的确定性 Provider（侧边栏如实显示
+  "测试 Provider · 非真实千问"），跑通 run/SSE/步骤/Bridge 全路径；真实千问状态
+  仍为 NOT RUN（§4），**没有用预设回答假装千问**。
 
 ---
 
 ## 2. 正式 React 生产构建
 
 ```
-> npm run build --workspace @coursemate/web      # tsc -b && vite build
+> tsc -b && vite build（@coursemate/web，Clerk 正式形态）
 dist/index.html                  0.67 kB │ gzip:  0.39 kB
 dist/ui.html                     0.68 kB │ gzip:  0.44 kB
 dist/assets/main-jxvg7O-T.css   31.36 kB │ gzip:  6.48 kB
-dist/assets/ui-2w_08ciX.css     53.84 kB │ gzip: 11.97 kB
+dist/assets/ui-CZNEynfi.css     54.70 kB │ gzip: 12.11 kB
 dist/assets/main-sCqwwDOm.js     0.59 kB │ gzip:  0.41 kB
-dist/assets/ui-D3eWUBpF.js     264.26 kB │ gzip: 77.75 kB
+dist/assets/ui-C60rpF3L.js     264.26 kB │ gzip: 77.75 kB
 dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
-✓ built in 243ms
+✓ built in 239ms
 ```
 
 * 使用**原仓库的**工具链：React 19.2.8、Vite 8.2.1、TypeScript 5.9.3、`@clerk/react` 6.x。
   没有引入新框架，没有降级到离线运行时。
 * 新增唯一运行时依赖 `katex@0.16.22`，替代交付包 265 KB 的离线 vendor 副本。
-* 依赖审计：本次 `npm install` 输出 `found 0 vulnerabilities`。
-* **交付包 `web/dist` 从未被使用、复制或发布**；`app/cm_update/config.py:48` 的
+* 依赖审计：`npm install` 输出 `found 0 vulnerabilities`。
+* **交付包 `web/dist` 从未被使用、复制或发布**；`app/cm_update/config.py` 的
   production 门会拒绝带 `not_for_production` 标识的产物，该门**未被删除或绕过**。
-* 正式产物中**不含** `test-session-token`，且包含 Clerk 客户端（已实测校验）。
-* 双文档 + 路由：`/` → `index.html`（现有站点），`/app` → `ui.html`（新壳）；
-  `netlify.toml` 已加两条 `/app` 重写，排在 SPA 回退之前；Vite 开发服务器用插件复现同一 URL 形状。
-* 产物 SHA-256（前 16 位）：`ui-D3eWUBpF.js` = `9C9214A661399002`，
-  `ui-2w_08ciX.css` = `73B6C5513B10EEE6`，`dist-YiqoSCPN.js` = `456CB1E39F7CD904`。
+* 正式产物中**不含** `test-session-token` / `TestAuthBridge`，且包含 Clerk 客户端（本轮重建后重新扫描确认）。
+* E2E 构建与正式构建**严格隔离**：E2E 用 `VITE_AUTH_TEST_TOKEN` + `VITE_UI_API_BASE`
+  构建并运行（产物 348 KB，含测试桥），随后以 Clerk 形态重建正式 `dist`（264 KB），
+  两者都经扫描确认——E2E 令牌绝不进入正式产物。
+* 双文档 + 路由决策表（`netlify.toml` / `scripts/serve_web_dist.mjs` /
+  `apps/web/vite.config.ts` 三处共享同一张表）：
+  `/` → `ui.html`（新壳，**默认入口**）；`/app` → `ui.html`（兼容别名）；
+  旧深链前缀（`qa,learn,courses,tasks,documents,admin,about`）→ `index.html`（旧站）；
+  真实静态资源永远优先于任何重写。
+* 产物 SHA-256（前 16 位）：`ui-C60rpF3L.js` = `9C9214A661399002`，
+  `ui-CZNEynfi.css` = `4B68E8A48AA50437`，`dist-YiqoSCPN.js` = `456CB1E39F7CD904`。
 
 ---
 
@@ -143,7 +151,7 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 
 | 套件 | 结果 |
 |---|---|
-| rag-api 全量回归 | **458 passed**（接手前基线 329，新增 129） |
+| rag-api 全量回归 | **473 passed**（455.28s；接手前基线 329，新增 144 个 UI-extension 测试） |
 | 交付包契约测试（迁入后） | **71 passed** |
 | 新增 V3 DomainPort 集成测试 | **16 passed** |
 | 新增任务 Agent 桥测试 | **15 passed** |
@@ -151,13 +159,20 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 | 新增恢复单元测试 | **4 passed** |
 | 新增旧版问答历史测试 | **7 passed** |
 | 新增课程生命周期测试 | **3 passed** |
+| 新增学习状态闭环测试 | **5 passed** |
+| 新增单 worker 生成安全测试 | **4 passed** |
+| 新增非空知识树 + 双模式流程测试 | **3 passed** |
+| 新增 `test` 模式确定性 Provider 测试 | **3 passed** |
 | 原备份/恢复测试（回归） | **9 passed** |
 | web 单元测试（含真实 Clerk 桥 6 项） | **55 passed** |
-| 原生 Chromium 端到端 | **9 passed** |
+| Node Agent 单测 / typecheck / build | **66 passed** / 通过 / 通过 |
+| 原生 Chromium 端到端（新壳） | **15 passed**（53.0s） |
+| 原仓库既有 E2E `coursemate.spec.ts` | **4 passed** |
+| 原 V3 学习 E2E `learning.spec.ts` | **3 passed** |
 
 细节、命令与逐项覆盖见 `docs/ui-refresh/UI_AND_BACKEND_TEST_REPORT.md`。
 
-### 3.1 原生浏览器测试发现的 5 个真实缺陷（服务端测试看不到）
+### 3.1 原生浏览器测试发现的 6 个真实缺陷（服务端测试看不到）
 
 1. 宿主 CORS 只允许 `WEB_ORIGIN`，其他已批准站点的预检被 400 拒绝。
 2. `PUT` 不在宿主允许方法内，而收藏课程用 `PUT /courses/{id}/pin`。
@@ -166,6 +181,9 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 4. 交付包的 `no-store` 中间件按字面 `/api/` 前缀判断，挂载后永不匹配。
 5. 日历新建任务 400：适配器把空课程发成 `courseId: ""`、把可选项发成 `priority: null`，
    而 Node Agent 的 JSON Schema 两者都不接受。
+6. 教学 Pane 的"返回原题"横幅在服务端把 Bridge 置为 `returned` 之后仍留在页面上：
+   `backToProblem()` 只改 `mobile` 状态、不清除本地 bridge 状态。修复后横幅随返回消失
+   （浏览器用例 14 断言返回后横幅数 0 + 服务端 layout.bridge 为 null）。
 
 全部已修，并各配了回归测试（`test_ui_extension_cors.py` 13 项、
 `test_ui_extension_task_agent.py` 中 3 项、加浏览器用例）。
@@ -216,35 +234,47 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 
 **状态：`NOT PERFORMED`。生产环境未被触碰。**
 
-* 生产仍是 `qqttai.com` + 后端 release `cd8c121` + Netlify deploy `6aa70f2b5a330d5a8ae4be56`。
+* 早期 V3 报告记录生产为 `qqttai.com` + 后端 release `cd8c121` + Netlify deploy
+  `6aa70f2b5a330d5a8ae4be56`——这是**历史快照，本会话未做现场复核**，不能当作
+  当前已核验生产状态（复核属于授权后只读核验步骤）。
 * 本次**没有**执行备份、迁移、重启、DNS 变更、Git push 或 Netlify 发布。
 * 新入口在生产上**不存在**：`UI_EXTENSION_ENABLED` 默认 `false`，且在生产部署前必须保持 `false`。
 
 ### 6.1 数据与恢复单元（已备份工具化，未在生产执行）
 
 * 原 RAG `rag.sqlite3`（Schema 21）与 Agent 库 **Schema 未变**：没有新增表、列或迁移文件。
-* 新增数据在**独立文件** `<CMUI_DATA_DIR>/ui.sqlite3`（Schema 2，21 张 `cmui_*` 表）
-  与 `<CMUI_DATA_DIR>/uploads/`。`Database.initialize()` 在检测到
-  `courses`/`chunks`/`tasks`/`schema_migrations` 时**拒绝初始化**，不可能覆盖原库；
-  检测到更高版本时**拒绝降级**。
+* 新增数据在**独立文件** `<CMUI_DATA_DIR>/ui.sqlite3`（**Schema 3，26 张 `cmui_*` 表**，
+  含 `cmui_run_v3` 交叉引用与 `cmui_runs` 租约列）与 `<CMUI_DATA_DIR>/uploads/`。
+  `Database.initialize()` 在检测到 `courses`/`chunks`/`tasks`/`schema_migrations` 时
+  **拒绝初始化**，不可能覆盖原库；检测到更高版本时**拒绝降级**；
+  Schema 3 租约列升级是幂等的（缺列才 `ALTER`）。
+* 数据归属以 integrated 模式为准（见 `MIGRATION_AND_ROLLBACK.md` §2 归属表）：
+  课程/文件/检索/知识树/教学覆盖/测评在 RAG 库，任务在 Agent 库，
+  评论/通知/私信/新壳对话/Bridge 在 UI 库；`cmui_*` 镜像表只在 standalone 模式使用。
 * `ops/backup_v2.py` 在设置 `CMUI_DATA_DIR` 时把 `ui.sqlite3` 与 `ui-uploads.tar.gz`
   并入同一恢复单元并写入 manifest；缺少 `ui.sqlite3` 时**备份直接失败**。
+  **首次启用必须按 A/B/C 顺序**：A 未设置 `CMUI_DATA_DIR` 时先做一致备份 →
+  B 独立路径初始化 UI 库（不运行任何 seed）→ C 设置 `CMUI_DATA_DIR` 后三库两组上传
+  纳入新恢复单元（详见 `MIGRATION_AND_ROLLBACK.md` §4）。
 * `ops/restore_v2.py` 在发布目标目录**之前**校验：校验和覆盖完整性、未知 artifact 名、
   每个 artifact 的 sha256、`integrity_check`/`foreign_key_check`、
   两个上传归档的成员数与字节数与 manifest 一致，并拒绝 `\\`、绝对路径、`..`、重复路径。
 * **跨库原子性限制如实保留**：三个 SQLite `backup` 调用之间没有分布式事务，
-  必须在维护窗口内进行。`ui.sqlite3` 与 RAG 之间没有跨库外键，恢复后最坏表现为 404/空列表。
+  必须在维护窗口内进行。`ui.sqlite3` 与 RAG 之间没有跨库外键，恢复后最坏表现为 404/空列表；
+  **跨库无外键 ≠ 数据关联正确**，恢复后必须抽查课程/文件/节点引用、旧对话可读性与任务回执。
 
 ### 6.2 部署顺序与回滚
 
 见 `docs/ui-refresh/MIGRATION_AND_ROLLBACK.md`。要点：
 
-1. 先备份并在副本上恢复演练；
+1. 首次启用按 A/B/C：先备份（未设 `CMUI_DATA_DIR`）→ 独立路径初始化 UI 库 → 启用后纳入新恢复单元；
 2. 先发后端但保持 `UI_EXTENSION_ENABLED=false`（行为与原 V3 完全相同）并确认健康；
 3. 再开开关并设置 `CMUI_DATA_DIR` / `UI_TASK_AGENT_URL`；
-4. 最后发前端并确认 `/` 与 `/app` 都正确。
-5. 最小回滚是 `UI_EXTENSION_ENABLED=false` + 重启；**只回滚代码与配置，不回滚新库**，
-   否则会丢掉用户在新 UI 里产生的评论、私信、任务与上传。
+4. 最后发前端并确认 `/` 与 `/app` 都是新壳文档、旧深链仍回旧站。
+5. 最小回滚是 `UI_EXTENSION_ENABLED=false` + 重启；**这只关后端入口，不会回滚 Netlify 前端**，
+   前端要单独按**发布前现场记录**的 deploy id 回滚（早期报告里的 id 只是历史快照）。
+6. **只回滚代码与配置，不回滚新库**，否则会丢掉用户在新 UI 里产生的评论、私信与对话；
+   同理不能因 RAG Schema 未变就随意恢复旧 RAG 库，否则丢掉新课程/新上传/真实覆盖与测评。
 
 ---
 
@@ -268,51 +298,55 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 会话中检查过 `C:\Users\Hp\.dsh\.credentials.yaml` 的**键名结构**，取值为 `<REDACTED>`，
 未读取任何值。
 
-### 7.1 阻塞上报（第 3 轮，同一条件）
+### 7.1 审批通道诊断（closure prompt §9 的四项区分）
 
-目标最后两件事——**真实千问两阶段 canary** 与 **生产部署 + 双用户验收**——
-都要求在动作之前取得原生授权。本会话批准通道被禁用（`approval_policy: never`），
-需要批准的动作会被自动拒绝，且模型**无法自行**弹出该提示框，
-因此不存在取得授权的可执行路径。
+| # | 项 | 本轮读到的实际状态 |
+|---|---|---|
+| 1 | 用户是否批准具体动作/费用 | **未批准**：CNY 5.00 只是报告中的建议；没有任何预算/部署/发布批准记录 |
+| 2 | DSH 是否有可回答的原生审批通道 | 本会话有效策略为 `never`（批准提示禁用，需批准的动作被自动拒绝）。GUI 客户端自带 ApprovalPanel 组件（`dsh-client-ui-conversation`），但本会话没有弹出过一次；模型**不能**自行把策略从 `never` 改掉 |
+| 3 | 执行工具是否有网络/文件/进程能力 | 文件操作 `danger-full-access`（不受限）；本机命令可执行（受限于执行策略/沙箱规则）；**没有**生产 SSH/托管平台凭据用于线上操作 |
+| 4 | GitHub/Netlify/SSH/Clerk/模型账户凭据与角色 | 未验证可用性；本会话**没有**读取任何凭据值（`~/.dsh/.credentials.yaml` 只查键名结构，值为 `<REDACTED>`） |
 
-同一条件在连续 3 轮中未变化（每轮都转为推进非授权项）：
-第 1 轮实现旧版问答历史只读入口；第 2 轮补齐真实 Clerk 桥与课程生命周期测试、
-并精确复核多 worker 限制；第 3 轮非授权项已无剩余高价值工作，据实上报。
+`scripts/Request-DeploymentApproval.ps1` 默认只产生业务同意记录。除非真实代码证明它
+接入 Harness 的审批决策，否则运行它**不能改变 `never`**，也不能当作绕过平台限制的凭证。
 
-**解除阻塞只需二者之一**：重新启用 DSH 批准提示；或用户自行运行
-`scripts/Request-DeploymentApproval.ps1` 完成确认。
+**给用户的最小操作卡（就一条）：**
+
+| 字段 | 内容 |
+|---|---|
+| 位置 | DSH Web GUI（`http://127.0.0.1:3080`）的会话权限/审批预设选择器（GUI 自带 ApprovalPanel，说明通道存在于客户端；`C:\Users\Hp\.dsh\settings.yaml` 里**没有**审批字段，不要凭猜测写 YAML） |
+| 操作 | 把当前会话的审批策略从 `never`（禁用）切到 `ask`（询问）或对等可用模式；优先保留其余保护，不必全关 |
+| 生效 | 现有会话或新会话（以 GUI 提示为准）；切换后本会话收到一次真实工具审批提示即视为生效 |
+| 验证 | 之后我可以发起**一个**无生产影响、无费用、确实需要原生审批的测试动作；只有收到真实审批结果才能宣称通道有效 |
+
+DSH 安装版本：`@deepseek-ai/dsh 0.1.1-rc.2`（`C:\Users\Hp\AppData\Roaming\npm\node_modules\@deepseek-ai\dsh\package.json`）。
+开发模型已为 `deepseek-v4-pro`（§0.1），网站模型仍为 `qwen3.8-max`。
 
 ---
 
 ## 8. 未完成事项（明确保留，不改成 PASS）
 
-1. **真实千问两阶段教学** — `NOT RUN`，需预算授权。
-2. **真实 Clerk 登录全流程** — `NOT VERIFIED`，需真实 Clerk 应用与账号。
+1. **真实千问两阶段教学** — `NOT RUN`，需预算授权（建议 CNY 5.00 并非已批准）。
+2. **真实 Clerk 登录全流程** — `NOT VERIFIED`，需真实 Clerk 应用与账号（桥已 6 项单测覆盖）。
 3. **真实图像题视觉正确率** — `NOT VERIFIED`（传输契约已测）。
 4. **真实 Node 工具调用的模型侧选择** — `NOT VERIFIED`。
-5. **生成 runner 多 worker 支持** — **未实现**。`cm_update` 的生成任务表是单进程内存结构
-   （启动时把残留 run 标记为 `failed/SERVER_RESTARTED`）。多 worker 生产必须把生成搬到
-   既有持久化 worker。
-6. **多 worker 生成支持** — **未接线**。本轮做了精确复核而非猜测：
-   `app.py:49` 的启动清理是**无条件**的（第二个 worker 会杀掉第一个正在进行的 run
-   并标成 `SERVER_RESTARTED`，费用却已花掉）；`app.py:757` 的取消是**进程内**语义
-   （跨 worker 取消不会停止生成，之后仍会写入一条 assistant 消息）。
-   SSE 事件流、幂等键、配额都走数据库，**本来就是跨进程安全**的。
-   已核实 V3 当前是**单 worker**（仓库内无 durable worker/队列，部署文档无 `--workers`），
-   所以这两个失效模式**在当前部署上不会触发**。最小修法与所需 Schema 递增已写入
-   `MIGRATION_AND_ROLLBACK.md` §7。**本次刻意没有改交付包的 `app.py`**：
-   在 V3 侧 worker 形态不存在时凭空造一个多进程 runner 只会新增未经验证的代码路径。
-7. **原仓库既有浏览器 E2E（`coursemate.spec.ts`）** — 本次**未运行**；
-   既有站点由 458 项后端测试与 55 项前端测试回归覆盖。
-8. **生产多用户隔离、管理员边界、公开审核线上验收** — `NOT VERIFIED`。
-9. **开发执行模型仍为 `deepseek-v4-flash`**，与用户要求的 `deepseek-v4-pro` 不一致（§0.1）。
+5. **多 worker 生成支持** — **仍未实现，且如实保留为明确限制**。单 worker 约束已从
+   口头约定升级为可执行防护（worker 租约 + 心跳 + 只回收过期租约 + 跨进程取消 +
+   条件式最终写入，UI Schema 3；4 项双进程测试 + 浏览器 15 项回归），但内存任务表意味着
+   这**不是**多 worker 支持：生产部署检查必须是 rag-api 单进程、单一 `CMUI_DATA_DIR`
+   只挂一个实例。要扩容必须把生成搬到 V3 侧尚不存在的持久化 worker。
+   详见 `MIGRATION_AND_ROLLBACK.md` §8。
+6. **原仓库既有浏览器 E2E** — 本轮已补跑：`coursemate.spec.ts` 4/4、`learning.spec.ts` 3/3
+   （两套隔离端口/数据，均不调用付费模型）。
+7. **生产多用户隔离、管理员边界、公开审核线上验收** — `NOT VERIFIED`（本地真实库已测）。
+8. **生产只读核验、备份现场、受控部署、双用户验收** — `NOT PERFORMED`，需分别授权。
 
-### 8.1 本会话新闭环的两项
+### 8.1 本会话新闭环的四项
 
 **（1）旧 V3 问答历史在新壳内可读**（goal round 1）：`mount.py:_prepend_legacy_history`
 新增两条只读路由，`domain.py` 新增 `legacy.conversations` / `legacy.conversation`，
 学习页历史弹窗新增"旧版问答记录"分组与只读阅读器。**没有把旧记录复制进新表**。
-证据：7 项 Python 测试 + 浏览器用例 7。
+证据：7 项 Python 测试 + 浏览器用例 10。
 
 **（2）生产 Clerk 桥从零覆盖变为已覆盖**（goal round 2）：
 之前所有浏览器用例都用后端测试验证器，走的是 `TestAuthBridge` 分支，
@@ -325,19 +359,36 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 同时把课程删除的生命周期用 3 项测试固定下来：无 workspace 正常删除、
 确认名称不符 422、**有 workspace 时 409 且课程与私有语料都不受影响**。
 
+**（3）非空层级知识树 + 双模式流程（P0-3，本轮）**：
+`scripts/seed_tree_fixture.py` 通过真实触发器（DRAFT→PUBLISHED 转换、
+`teaching_specs` 扇出、`LEGACY_PRESERVED` delivery evidence）种出
+复合根节点 + 两个原子子节点（LEARNING 1/2 与 LEARNED 1/1）；
+`tests/test_ui_extension_tree_and_dual_mode.py`（3 项）断言层级、双状态、
+Problem→Step→Bridge→Teach→journey→Return 的数据库事实与伪造步骤 422。
+浏览器侧新增 2 个用例（树层级与状态、步骤桥接教学并返回），并因此
+给 `provider_mode='test'` 接上确定性 `TestProvider`（生产拒绝该模式），
+顺带修复"返回原题后横幅不消失"缺陷。浏览器套件 13 → 15 项。
+
+**（4）单 worker 约束与手册修正（P0-5 / P0-8，本轮）**：
+生成 run 增加 Schema 3 租约（`lease_worker`/`lease_heartbeat`）+ 心跳 +
+只回收过期租约 + 跨进程取消复读 + 条件式最终写入（`tests/test_ui_extension_single_worker.py`
+4 项双进程测试）；`MIGRATION_AND_ROLLBACK.md` 重写为：数据归属表（10 类操作）、
+首次启用 A/B/C 顺序、前端独立回滚（现场 deploy id）、恢复后跨库引用抽查。
+
 ## 9. 关键产物
 
 | 文件 | 内容 |
 |---|---|
 | `docs/ui-refresh/HANDOVER_BASELINE.md` | 接手前的真实工作区/Git/接口事实与复用结论表 |
 | `docs/ui-refresh/INTEGRATION_MAP.md` | 每个 DomainPort operation 的真实落点与调用点约束 |
-| `docs/ui-refresh/MIGRATION_AND_ROLLBACK.md` | 数据影响、部署顺序、环境变量、备份与回滚边界 |
+| `docs/ui-refresh/MIGRATION_AND_ROLLBACK.md` | 数据归属表、首次启用 A/B/C、部署顺序、环境变量、备份与回滚边界、单 worker 约束 |
 | `docs/ui-refresh/UI_AND_BACKEND_TEST_REPORT.md` | 本次全部测试结果、浏览器发现的缺陷、未验证项 |
 | `docs/ui-refresh/QWEN_LIVE_TWO_STAGE_REPORT.md` | 两阶段链路落点、密码学边界、授权后的 canary 方案 |
+| `docs/ui-refresh/RELEASE_CLOSURE_CHECKLIST.md` | 收尾清单：已完成本地工作/授权后外部任务/用户操作/未证明项 |
 | `DSH_EXECUTION_STATE.md` | 跨会话恢复用状态文件 |
-| `services/rag-api/app/ui_extension/` | 真实 DomainPort / 身份桥 / 宿主挂载 |
-| `services/rag-api/app/cm_update/` | 交付包后端（合入） |
+| `services/rag-api/app/ui_extension/` | 真实 DomainPort（26 ops）/ 身份桥 / 宿主挂载 |
+| `services/rag-api/app/cm_update/` | 交付包后端（合入，9 一致 6 修改） |
 | `apps/web/src/ui/`、`ui.html`、`src/CourseMateUi.tsx` | 新壳源码与真实构建入口 |
-| `tests/e2e/ui-refresh.spec.ts`、`playwright.ui.config.ts` | 原生浏览器验收 |
+| `tests/e2e/ui-refresh.spec.ts`、`playwright.ui.config.ts` | 原生浏览器验收（15 项） |
 | `scripts/serve_web_dist.mjs` | 按 Netlify 规则服务正式产物的验收用静态服务器 |
-| `scripts/seed_legacy_conversation.py` | 只向 `work/e2e-*` 副本注入一条旧 V3 会话，供浏览器验收 |
+| `scripts/seed_legacy_conversation.py`、`scripts/seed_tree_fixture.py` | 只向 `work/e2e-*` 副本注入旧 V3 会话与层级知识树，供浏览器验收 |

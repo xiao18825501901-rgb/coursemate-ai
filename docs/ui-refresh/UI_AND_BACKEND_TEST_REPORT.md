@@ -1,6 +1,6 @@
 # UI AND BACKEND TEST REPORT — 整合后的真实测试
 
-**测试日期**：2026-09-14
+**测试日期**：2026-09-15（含 2026-09-14 的历史轮次；本表为当前总表）
 **被测对象**：`feature/dsh-ui-refresh-integration` 上的整合结果（不是交付包的独立实现）
 **结论口径**：只有本文件列出的、本次真实运行过的结果才算通过；交付包原有结论一律不继承。
 
@@ -10,7 +10,7 @@
 
 | 套件 | 命令 | 结果 | 证据 |
 |---|---|---|---|
-| rag-api 全量回归（含原 329 项 + 新增） | `services/rag-api/.venv/Scripts/python.exe -m pytest -q` | **467 passed**, 408.09s | 本次运行 |
+| rag-api 全量回归（含原 329 项 + 新增） | `services/rag-api/.venv/Scripts/python.exe -m pytest -q` | **473 passed**, 455.28s | 本次运行 |
 | 交付包契约测试（迁入后） | `pytest tests/ui_extension -q` | **71 passed** | 本次运行 |
 | 新增 V3 DomainPort 集成测试 | `pytest tests/test_ui_extension_integration.py -q` | **16 passed** | 本次运行 |
 | 新增任务 Agent 桥测试 | `pytest tests/test_ui_extension_task_agent.py -q` | **15 passed** | 本次运行 |
@@ -20,18 +20,21 @@
 | 新增课程生命周期测试 | `pytest tests/test_ui_extension_course_lifecycle.py -q` | **3 passed** | 本次运行 |
 | 新增学习状态闭环测试（journey 写入 + 完整测评） | pytest tests/test_ui_extension_learning_closure.py -q | **5 passed** | 本次运行 |
 | 新增单 worker 生成安全测试（租约回收/取消竞争/不重试） | pytest tests/test_ui_extension_single_worker.py -q | **4 passed** | 本次运行 |
+| 新增非空知识树 + 双模式流程测试（层级/双状态/Problem→Step→Bridge→Teach→Return） | pytest tests/test_ui_extension_tree_and_dual_mode.py -q | **3 passed** | 本次运行 |
+| 新增 `test` 模式确定性 Provider 测试（选择路径 + 生产拒绝） | pytest tests/test_ui_extension_test_provider.py -q | **3 passed** | 本次运行 |
 | 原备份/恢复测试（回归） | `pytest tests/test_backup_restore.py -q` | **9 passed** | 本次运行 |
-| web 单元测试（含真实 Clerk 桥） | `vitest run`（`apps/web`） | **55 passed** | 本次运行 |
-| Node Agent 单元测试 | `npm test`（`services/agent-api`） | **66 passed** | 本次运行 |
-| Node Agent 类型检查 + 正式构建 | `npm run typecheck` + `npm run build` | **通过** | 本次运行 |
-| 正式 React 生产构建 | `npm run build --workspace @coursemate/web`（`tsc -b && vite build`） | **通过** | 本次运行 |
-| 原生 Chromium 端到端验收（新壳） | `playwright test --config playwright.ui.config.ts` | **13 passed** | 本次运行 |
-| 原仓库既有 E2E（`coursemate.spec.ts`） | `npx playwright test` | **4 passed** | 本次运行（此前未跑过） |
-| 原 V3 学习 E2E（`learning.spec.ts`） | `npx playwright test --config playwright.v3.config.ts` | **3 passed** | 本次运行 |
+| web 单元测试（含真实 Clerk 桥） | `vitest run`（`apps/web`） | **55 passed** | 本次运行（复跑） |
+| Node Agent 单元测试 | `npm test`（`services/agent-api`） | **66 passed** | 本次运行（复跑） |
+| Node Agent 类型检查 + 正式构建 | `npm run typecheck` + `npm run build` | **通过** | 本次运行（复跑） |
+| 正式 React 生产构建 | `tsc -b && vite build`（Clerk 形态） | **通过**；产物无测试令牌、含 Clerk | 本次运行（重建后重新扫描） |
+| 原生 Chromium 端到端验收（新壳） | `playwright test --config playwright.ui.config.ts` | **15 passed**, 53.0s | 本次运行（两跑：首跑暴露桥接横幅缺陷 → 修复 → 全绿） |
+| 原仓库既有 E2E（`coursemate.spec.ts`） | `npx playwright test` | **4 passed** | 本次运行（复跑） |
+| 原 V3 学习 E2E（`learning.spec.ts`） | `npx playwright test --config playwright.v3.config.ts` | **3 passed** | 本次运行（复跑） |
 | 真实千问两阶段 | — | **NOT RUN** | 无预算授权 |
 
-**接手前基线对照**：rag-api 原为 329 passed；当前新增 134 个测试
-（71 + 16 + 15 + 13 + 4 + 7 + 3 + 5），且原 329 项全部保持通过。
+**接手前基线对照**：rag-api 原为 329 passed；新增套件按上表累计
+（71 + 16 + 15 + 13 + 4 + 7 + 3 + 5 + 4 + 3 + 3 = 144 个新增 UI-extension 测试），
+且原 329 项全部保持通过。
 
 > 注：本表为**当前总表**。历史轮次的 448/455/458 等数字不再作为当前结论，
 > 只作为当时的阶段记录保留在旧提交历史里。
@@ -116,28 +119,59 @@ allow-credentials；扩展响应强制 `private, no-store`。
 
 ### 2.9 默认入口与旧站兼容的浏览器证据
 
-13 号套件前 4 个用例断言：`/` 服务新壳文档并渲染新控制面板；`/app` 兼容别名；
+15 号套件前 4 个用例断言：`/` 服务新壳文档并渲染新控制面板；`/app` 兼容别名；
 `/qa`、`/courses`、`/admin` 等旧深链仍服务旧文档且可渲染；哈希深链刷新后视图不变、
 后退回到控制面板。旧套件 `coursemate.spec.ts`（4/4）与 `learning.spec.ts`（3/3）
 验证旧站业务与 V3 学习链路不受影响。
 
+### 2.10 `test_ui_extension_tree_and_dual_mode.py` — 非空层级知识树 + 完整双模式流程（P0-3）
+
+`scripts/seed_tree_fixture.py` 通过真实触发器（DRAFT→PUBLISHED 转换、`teaching_specs`
+扇出、`LEGACY_PRESERVED` delivery evidence）种出复合根 + 两个原子子节点。3 项测试断言：
+
+* 层级与真实状态：root COMPOSITE、children `parent=root`；LEARNING 节点
+  `required_total=2, covered_required=1`，LEARNED 节点 `1/1`；assessment 独立
+  NOT_ASSESSED、grade 为 null（不伪造）。
+* 双模式全流程的数据库事实：Problem 生成编号步骤 → Bridge 绑定服务端步骤 →
+  Teach 带 bridge 上下文进 Provider（`original_question`/`solution_excerpt`/`step`）
+  并写 `cmui_run_v3` journey 链接（journey 状态 LEARNING）→ Return 后 layout 不再
+  暴露 bridge。
+* 伪造步骤编号 422（"编号步骤"在错误详情里），不产生任何 bridge 行。
+
+### 2.11 `test_ui_extension_test_provider.py` — `test` 模式的确定性 Provider（P0-3 支撑）
+
+浏览器验收需要一个不收费、不冒充千问的确定性 Provider。3 项测试断言：
+
+* `CMUI_PROVIDER_MODE=test` 时挂载扩展的 `/config` 报告 `provider_mode=test`；
+* problem/teach run 都能完整跑通（problem 输出两个 step 标题，teach 输出正文）；
+* `environment='production'` 下 `validate()` 直接拒绝 `test` 模式——浏览器验收形态
+  无法被部署到生产。
+
 ## 3. 原生 Chromium 端到端验收（本次实测，替换交付包的 in-memory harness）
 
-**运行形态**：真实 Chromium + 三个真实服务——RAG API（挂载扩展、指向真实 V3 库副本）、
-既有 Node Agent（`dist/src/server.js`）、以及按 Netlify 规则服务 `apps/web/dist` 正式产物的
-静态服务器。身份走项目自带的测试验证器（与生产同一条 `subject_resolver` 代码路径）。
+**运行形态**：真实 Chromium + 三个真实服务——RAG API（挂载扩展、指向真实 V3 库副本、
+`CMUI_PROVIDER_MODE=test`）、既有 Node Agent（`dist/src/server.js`）、以及按 Netlify
+规则服务 `apps/web/dist` 正式产物的静态服务器。身份走项目自带的测试验证器
+（与生产同一条 `subject_resolver` 代码路径）。config 先注入旧 V3 会话与层级知识树
+fixture（`seed_legacy_conversation.py` / `seed_tree_fixture.py`，只写 `work/e2e-*` 副本）。
 
 | # | 用例 | 结果 |
 |---|---|---|
-| 1 | `/app` 提供新壳文档（不是旧文档）、六个全局入口、无 5xx、无 console 错误 | PASS |
-| 2 | 首次控制面板只有虚线创建框；从"所有课程"加号收藏后出现课程卡，刷新后仍在；课程导航与卡片入口指向同一路由 | PASS |
-| 3 | 真实课程资料按文件夹列出；上传私有 MD → 201 `scope=private` `status=indexed`；`/content` 返回 200 原件与 `inline`；`Range` → 206 且 10 字节；预览弹窗可用；行末菜单有下载且下载为 `attachment` | PASS |
-| 4 | 真实发帖入库、其他账号可见、无 console 错误 | PASS |
-| 5 | 学习页保留全局与课程两条左导航；知识树默认折叠、展开后覆盖内容区而导航保留、显示"还没有课程知识树"（不伪造）；双 Pane 同时可见；拖动分隔条改变 `aria-valuenow`；全屏保留左右两栏、Esc 恢复；两条历史入口存在 | PASS |
-| 6 | 手动新增计划 → 201；**同一记录出现在 Node Agent 自己的 REST 列表**；刷新后仍显示；在壳内完成后 Agent 记录变为 `completed` | PASS |
-| 7 | **原 V3 问答历史在新壳内可读且只读**：历史弹窗出现"旧版问答记录"分组，能打开原对话、看到原提问、回答与引用文件名；该阅读器内**没有**重命名、删除按钮，也没有输入框 | PASS |
-| 8 | 节点测评入口返回真实 V3 结果（不存在节点 → 404），空知识树下不伪造节点与成绩 | PASS |
-| 9 | 390px 视口下无横向溢出 | PASS |
+| 1 | `/` 提供新壳文档（不是旧文档）、进入新控制面板、无 console 错误 | PASS |
+| 2 | `/app` 兼容别名、六个全局入口精确、扩展健康 `mode=integrated`、无 5xx | PASS |
+| 3 | 旧深链 `/qa` `/courses` `/admin` 仍服务旧文档且可渲染 | PASS |
+| 4 | 哈希深链刷新保持视图、后退回到控制面板 | PASS |
+| 5 | 首次控制面板只有虚线创建框；从"所有课程"加号收藏后出现课程卡，刷新后仍在；课程导航与卡片入口指向同一路由 | PASS |
+| 6 | 真实课程资料按文件夹列出；上传私有 MD → 201 `scope=private` `status=indexed`；`/content` 返回 200 原件与 `inline`；`Range` → 206 且 10 字节；预览弹窗可用；下载为 `attachment` | PASS |
+| 7 | 真实发帖入库、其他账号可见、无 console 错误 | PASS |
+| 8 | 学习页保留全局与课程两条左导航；知识树默认折叠、展开覆盖内容区、双 Pane、拖动分隔条、全屏 Esc、两条历史入口 | PASS |
+| 9 | 手动新增计划 → 201；同一记录出现在 Node Agent 自己的 REST 列表；壳内完成后 Agent 记录变为 `completed` | PASS |
+| 10 | 原 V3 问答历史在新壳内可读且只读（无重命名/删除/输入框） | PASS |
+| 11 | 节点测评入口返回真实 V3 结果（不存在节点 → 404） | PASS |
+| 12 | 测评全流程：开始 → 5 题 → 提交 → 已评阅 + 每题反馈；评分后进度仍 NOT_STARTED | PASS |
+| 13 | **层级知识树**：根组"数据科学基础"+ 子节点"聚类分析/学习中"、"K-means 聚类/教学已完成"、测评入口"未测评"；API 复读同一批 DB 事实 | PASS |
+| 14 | **双模式流程**：题目生成 2 个步骤按钮 → 点第 1 步 → 教学 Pane 出现"返回原题 · 第 1 步"横幅并完成教学 → 返回后横幅消失、回到 step 锚点、服务端 bridge 置 returned | PASS |
+| 15 | 390px 视口下无横向溢出 | PASS |
 
 ### 2.5 `test_ui_extension_legacy_history.py` — 旧记录不丢失
 新壳的历史在 `cmui_conversations`/`cmui_messages`，旧 V3 历史在
@@ -180,7 +214,7 @@ allow-credentials；扩展响应强制 `private, no-store`。
 （本轮先怀疑这里会抛未处理的上游错误，实测确认适配器已正确翻译为 409；
 记录为"已实测的正确行为"而非缺陷。）
 
-### 浏览器测试发现并修复的真实缺陷（4 项）
+### 浏览器测试发现并修复的真实缺陷（6 项）
 
 这些都是任何服务端测试都看不到的问题：
 
@@ -197,27 +231,32 @@ allow-credentials；扩展响应强制 `private, no-store`。
 5. **日历创建任务 400**：适配器把空课程发成 `courseId: ""`、把可选项发成
    `priority: null`，而 Agent 的 JSON Schema 两者都不接受。修复：未选择发 null、
    未设置则省略字段。这一条只有把真实 Agent 接上才会暴露。
+6. **"返回原题"后桥接横幅不消失**（P0-3 双模式浏览器用例首跑发现）：
+   `backToProblem()` 把服务端 bridge 置为 `returned` 但不清除本地 `state.bridge`，
+   横幅一直留在教学 Pane。修复：返回时同时清空本地 bridge 状态。
+   用例 14 断言返回后横幅数 0 + 服务端 `layout.bridge` 为 null。
 
 ## 4. 正式 React 生产构建
 
 ```
-> tsc -b && vite build
+> tsc -b && vite build（Clerk 形态）
 dist/index.html                  0.67 kB │ gzip:  0.39 kB
 dist/ui.html                     0.68 kB │ gzip:  0.44 kB
 dist/assets/main-jxvg7O-T.css   31.36 kB │ gzip:  6.48 kB
-dist/assets/ui-2w_08ciX.css     53.84 kB │ gzip: 11.97 kB
+dist/assets/ui-CZNEynfi.css     54.70 kB │ gzip: 12.11 kB
 dist/assets/main-sCqwwDOm.js     0.59 kB │ gzip:  0.41 kB
-dist/assets/ui-D3eWUBpF.js     264.26 kB │ gzip: 77.75 kB
+dist/assets/ui-C60rpF3L.js     264.26 kB │ gzip: 77.75 kB
 dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
-✓ built in 243ms
+✓ built in 239ms
 ```
 
 * 使用**原仓库的** React 19.2.8 + Vite 8.2.1 + TypeScript 5.9.3 工具链，未新增框架。
 * 新增唯一运行时依赖：`katex@0.16.22`（替代交付包 265 KB 的离线 vendor 副本）。
-* 双文档产物：`index.html`（现有站点）+ `ui.html`（新壳，`/app`）。
+* 双文档产物：`index.html`（旧站深链）+ `ui.html`（新壳，`/` 默认入口与 `/app` 别名）。
 * **交付包的离线 React16 `web/dist` 未被使用、未被复制、未被发布**；
-  `app/cm_update/config.py:48` 的生产门仍然会在检测到 `not_for_production` 时拒绝启动。
-* 该正式产物中**不含** `test-session-token`，且包含 Clerk 客户端。
+  `app/cm_update/config.py` 的生产门仍然会在检测到 `not_for_production` 时拒绝启动。
+* 该正式产物中**不含** `test-session-token`/`TestAuthBridge`，且包含 Clerk 客户端
+  （E2E 构建与正式构建严格隔离，两者都经扫描）。
 * 依赖审计：`npm install` 报告 `found 0 vulnerabilities`。
 
 ## 5. 未验证项（明确保留）
@@ -230,7 +269,7 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 | Node 工具调用的真实模型选择 | **NOT VERIFIED** | Agent 侧桩与确定性客户端已测，真实模型多轮工具调用未测 |
 | 生产双用户隔离 | **NOT VERIFIED** | 本地真实库双用户已测，生产未测 |
 | 生产 PDF 内置查看器（CSP/插件） | NOT VERIFIED | 本地 Chromium iframe 预览通过 |
-| 多 worker 生成 runner | **未接线** | 见 §9 |
+| 多 worker 生成 runner | **单 worker 防护已实现，多 worker 仍不支持** | Schema 3 租约/心跳/回收/条件写入已落地（4 项双进程测试）；内存任务表意味着扩容需持久化 worker，见 `MIGRATION_AND_ROLLBACK.md` §8 |
 | 旧 V3 会话在新壳内的只读入口 | **已实现** | 见 §2.5 |
 
 ## 6. 环境
@@ -241,7 +280,7 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 | Python | 3.12.14（`services/rag-api/.venv`），pytest 9.1.1 |
 | Node / npm | v24.19.0 / 11.17.0（必须用 `npm.cmd`，`npm.ps1` 被执行策略拦截） |
 | 浏览器 | Google Chrome（`C:\Program Files\Google\Chrome\Application\chrome.exe`），Playwright 1.62.1 |
-| 时间 | 2026-09-14 |
+| 时间 | 2026-09-15 |
 
 ## 7. 已知的测试不稳定（如实记录）
 
