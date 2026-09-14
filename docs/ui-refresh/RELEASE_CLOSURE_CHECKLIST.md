@@ -1,7 +1,7 @@
 # RELEASE CLOSURE CHECKLIST — 本地收尾与真实发布准备
 
 **更新日期**：2026-09-14（Asia/Hong_Kong）
-**HEAD**：`47b150a`（本清单随提交更新；最新以 `git rev-parse HEAD` 为准）
+**HEAD**：`dd710b3`（本清单随提交更新；最新以 `git rev-parse HEAD` 为准）
 **模型**：开发执行 `deepseek-v4-pro`（`C:\Users\Hp\.dsh\settings.yaml` 已切，与本会话系统设定一致）；网站教学 `qwen3.8-max`（未变）。
 **权限**：本会话记录为 `approval_policy: never`（批准提示禁用）；sandbox `danger-full-access`（文件操作不受限）。**没有任何动作被"当作已批准"。**
 
@@ -86,6 +86,6 @@ E2E 产物与正式产物隔离方式：E2E 用 `VITE_AUTH_TEST_TOKEN`+`VITE_UI_
 | 真实 Clerk 会话（浏览器侧完整流程） | NOT VERIFIED（桥代码已 6 项单测覆盖） |
 | 生产多用户隔离与管理员边界 | NOT VERIFIED（本地真实库已测） |
 | P0-3 非空知识树（父子层级、LEARNING/LEARNED 状态、双状态入口 + 教学→返回原步骤的数据库事实） | 部分完成：评估节点与孤儿节点渲染已测；**带层级的 published tree fixture 与 teach→step→return 的 DB 断言仍待下轮** |
-| P0-5 单 worker 约束（启动清理、取消/完成竞争、重启恢复的进程级测试） | 未实现（下轮做最小可测方案） |
+| P0-5 单 worker 约束 | **已实现**：run 租约（lease_worker/lease_heartbeat）+ 过期回收（grace 120s）+ 心跳 + 跨进程取消检查 + 条件式最终写入；4 项双进程测试通过（见 `tests/test_ui_extension_single_worker.py`） |
 | P0-8 数据归属表 + 首次启用 A/B/C 手册修订 | 未完成（下轮做文档修正） |
 | 生产数据/备份现场核验 | NOT RUN |
