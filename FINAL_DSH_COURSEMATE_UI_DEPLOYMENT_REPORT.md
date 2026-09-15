@@ -11,7 +11,7 @@
 SOURCE INTEGRATION:               PASS
 LOCAL TEST SUITE:                 PASS  (486 rag-api + 55 web + 66 agent)
 MODERN REACT PRODUCTION BUILD:    PASS  (React 19.2.8 + Vite 8.2.1 + tsc 5.9.3)
-NATIVE BROWSER ACCEPTANCE:        PASS  (15/15 real Chromium journeys, new shell)
+NATIVE BROWSER ACCEPTANCE:        PASS  (17/17 real Chromium journeys, new shell)
 LEGACY SITE E2E:                  PASS  (coursemate.spec.ts 4/4, learning.spec.ts 3/3)
 LIVE QWEN TWO-STAGE:              NOT RUN   (no paid authorization available)
 REAL CLERK SIGN-IN:               NOT VERIFIED
@@ -177,7 +177,7 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 | 原备份/恢复测试（回归） | **9 passed** |
 | web 单元测试（含真实 Clerk 桥 6 项） | **55 passed** |
 | Node Agent 单测 / typecheck / build | **66 passed** / 通过 / 通过 |
-| 原生 Chromium 端到端（新壳） | **16 passed**（1.1m） |
+| 原生 Chromium 端到端（新壳） | **17 passed**（1.3m；含"树节点教学 → 状态行已计入覆盖 → API LEARNED 2/2"用例） |
 | 原仓库既有 E2E `coursemate.spec.ts` | **4 passed** |
 | 原 V3 学习 E2E `learning.spec.ts` | **3 passed** |
 

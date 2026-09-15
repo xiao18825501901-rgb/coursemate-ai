@@ -8,7 +8,7 @@
 
 | 项 | 证据 |
 |---|---|
-| 新教学 → 权威覆盖闭环 | 迁移 022（`REVIEWED` 证据通道 + 唯一索引）、`coverage_review.py`（可注入评审器：Null/确定性/未授权的模型评审）、`shell_delivery.py`（单事务 unit+evidence+learning_coverage+journey 状态）、壳侧完成回调/回执/重启恢复；`tests/test_ui_extension_coverage_submission.py` **8 项**从零覆盖正反验收（0/2→LEARNING→2/2→LEARNED、测评独立、关键词/失败/截断/取消不计、重放不重复、跨库中断恢复零 Provider 调用、错课程/旧 Spec/跨用户隔离、旧入口读到 REVIEWED） |
+| 新教学 → 权威覆盖闭环 | 迁移 022（`REVIEWED` 证据通道 + 唯一索引）、`coverage_review.py`（可注入评审器：Null/确定性/未授权的模型评审）、`shell_delivery.py`（单事务 unit+evidence+learning_coverage+journey 状态；已覆盖 item 不重复记账）、壳侧完成回调/回执/重启恢复；`tests/test_ui_extension_coverage_submission.py` **8 项**从零覆盖正反验收；**浏览器用例 15**：树节点教学 → 状态行"已计入覆盖" → 挂载 API 读回 LEARNED 2/2（`CMUI_COVERAGE_REVIEWER=deterministic` + TestProvider 回显 Spec 验收句） |
 | UI Bridge ↔ V3 全链路追溯 | `shell_problems.py` 把新壳题目/解法映射进 V3 账本（`learning_problems`/`problem_revisions` VALIDATED+content_hash/`learning_solutions`/`learning_steps`，稳定 id `shell-<run>` 幂等重放）；`cmui_bridges` 增加 7 个追溯列（Schema 5）+ `GET /courses/{id}/bridges`；教学 run 开始时链 `teach_run/journey/spec`、交付后链 `delivery_unit_id`；`tests/test_ui_extension_bridge_trace.py` **5 项**（全链路解析、重复点击复用记录、跨用户拒绝+列表作用域、伪步骤 422+取消不链交付、未绑定节点保持导航且零记账） |
 | 生产构建预检与产物校验 | `scripts/preflight_release_build.mjs`（production 上下文强制：真实 `pk_live_` key、三个 https API origin、`VITE_V3_ENABLED=true`、禁 `VITE_AUTH_TEST_TOKEN`）+ `scripts/verify_release_build.mjs`（产物扫描测试身份/localhost API 兜底、`build-info.json` 耦合构建环境摘要+release SHA+产物 hash）；已接入 `netlify.toml` 构建命令；**本地演练**：4 个负向用例全部正确失败、正向通过、校验捕获烘入的 `localhost:8000/8001` 兜底 |
 | 后端测试身份守卫 | rag-api：`provider_mode='test'`/`auth_mode='development'` 生产被拒（既有）；agent：新增 `NODE_ENV=production` 时 `AUTH_TEST_USER_ID` 与 `AGENT_PROVIDER_MODE=deterministic` 直接退出（`server.ts`）；agent 单测/typecheck/build 复跑通过 |

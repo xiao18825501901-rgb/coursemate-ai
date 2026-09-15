@@ -71,7 +71,7 @@ dd710b3  feat(ui-extension): enforce single-worker safety for generation runs
 | rag-api 全量 | `.venv\Scripts\python.exe -m pytest -q` | **486 passed**（554.20s；含覆盖闭环 8 项、桥接追溯 5 项、两处过期断言修复） |
 | web 单测 | `vitest run`（`apps/web`） | **55 passed**（含真实 Clerk 桥 6 项） |
 | 正式构建 | `tsc -b && vite build`（三种形态） | 通过：E2E 形态（test token）`ui-rTcXnucO.js`；Clerk 验证形态（假 key）`ui-Bckh22_y.js`=B4BA950D3047F0A6 含 AuthBridge+fallbackRedirectUrl、无测试令牌；fail-closed 形态（无 key）`ui-C60rpF3L.js`=9C9214A661399002。**生产构建必须给真实 `VITE_CLERK_PUBLISHABLE_KEY`** |
-| 原生浏览器验收（新壳） | `playwright test --config playwright.ui.config.ts` | **16 passed**（1.1m，含树层级、双模式、键盘/触屏用例） |
+| 原生浏览器验收（新壳） | `playwright test --config playwright.ui.config.ts` | **17 passed**（1.3m，含覆盖闭环用例：教学 → 已计入覆盖 → API LEARNED 2/2） |
 | 旧站 E2E `coursemate.spec.ts` | `playwright test`（默认 config） | **4 passed**（本轮复跑） |
 | V3 学习 E2E `learning.spec.ts` | `playwright test --config playwright.v3.config.ts` | **3 passed**（本轮复跑） |
 | Node Agent 单测/typecheck/build | `vitest run` / `tsc --noEmit` / `tsc` | **66 passed** / 通过 / 通过（本轮复跑） |
@@ -112,7 +112,7 @@ Netlify 发布。
 1. 读本文件与 `docs/ui-refresh/HANDOVER_BASELINE.md`、`docs/ui-refresh/RELEASE_CLOSURE_CHECKLIST.md`。
 2. `git rev-parse HEAD` 确认 HEAD；工作树应为空改动（未提交项已入库）。
 3. 全量回归：见 §4 命令；关键数字 rag-api 全量、web 55、agent 66、
-   新壳浏览器 16、旧站 4、V3 学习 3。
+   新壳浏览器 17、旧站 4、V3 学习 3。
 4. 原生浏览器验收前，先按 `playwright.ui.config.ts` 前缀用部署形态构建前端：
    设置 `VITE_AUTH_TEST_TOKEN=test-session-token` 与
    `VITE_UI_API_BASE=http://127.0.0.1:8100/ui-extension/api/ui/v1` 后 `vite build`

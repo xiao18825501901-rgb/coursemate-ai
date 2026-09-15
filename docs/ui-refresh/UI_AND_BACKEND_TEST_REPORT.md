@@ -27,7 +27,7 @@
 | Node Agent 单元测试 | `npm test`（`services/agent-api`） | **66 passed** | 本次运行（复跑） |
 | Node Agent 类型检查 + 正式构建 | `npm run typecheck` + `npm run build` | **通过** | 本次运行（复跑） |
 | 正式 React 生产构建 | `tsc -b && vite build`（Clerk 形态） | **通过**；产物无测试令牌、含 Clerk | 本次运行（重建后重新扫描） |
-| 原生 Chromium 端到端验收（新壳） | `playwright test --config playwright.ui.config.ts` | **16 passed**, 1.1m | 本次运行（含键盘/触屏用例） |
+| 原生 Chromium 端到端验收（新壳） | `playwright test --config playwright.ui.config.ts` | **17 passed**, 1.3m | 本次运行（含覆盖闭环用例） |
 | 原仓库既有 E2E（`coursemate.spec.ts`） | `npx playwright test` | **4 passed** | 本次运行（复跑） |
 | 原 V3 学习 E2E（`learning.spec.ts`） | `npx playwright test --config playwright.v3.config.ts` | **3 passed** | 本次运行（复跑） |
 | 真实千问两阶段 | — | **NOT RUN** | 无预算授权 |
@@ -171,8 +171,9 @@ fixture（`seed_legacy_conversation.py` / `seed_tree_fixture.py`，只写 `work/
 | 12 | 测评全流程：开始 → 5 题 → 提交 → 已评阅 + 每题反馈；评分后进度仍 NOT_STARTED | PASS |
 | 13 | **层级知识树**：根组"数据科学基础"+ 子节点"聚类分析/学习中"、"K-means 聚类/教学已完成"、测评入口"未测评"；API 复读同一批 DB 事实 | PASS |
 | 14 | **双模式流程**：题目生成 2 个步骤按钮 → 点第 1 步 → 教学 Pane 出现"返回原题 · 第 1 步"横幅并完成教学 → 返回后横幅消失、回到 step 锚点、服务端 bridge 置 returned | PASS |
-| 15 | **知识树键盘与触屏可达**：Enter 展开树 → Tab/焦点揭示节点两个状态入口 → Enter 学习进度开始教学并收拢树；390px 下 tap 节点 → tap 学习进度 → 切到知识学习 tab 并生成教学（`hasTouch` 上下文） | PASS |
-| 16 | 390px 视口下无横向溢出 | PASS |
+| 15 | **覆盖闭环（浏览器级）**：树节点"聚类分析"从 LEARNING(1/2) 教学 → 状态行"已计入覆盖" → 挂载 API 读回 LEARNED(2/2)（确定性评审器确认第二项，REVIEWED 证据） | PASS |
+| 16 | **知识树键盘与触屏可达**：Enter 展开树 → Tab/焦点揭示节点两个状态入口 → Enter 学习进度开始教学并收拢树；390px 下 tap 节点 → tap 学习进度 → 切到知识学习 tab 并生成教学（`hasTouch` 上下文） | PASS |
+| 17 | 390px 视口下无横向溢出 | PASS |
 
 ### 2.5 `test_ui_extension_legacy_history.py` — 旧记录不丢失
 新壳的历史在 `cmui_conversations`/`cmui_messages`，旧 V3 历史在
