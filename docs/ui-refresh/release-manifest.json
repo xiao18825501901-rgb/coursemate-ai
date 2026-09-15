@@ -67,11 +67,20 @@
     "chatgpt_public_get": "connection errors from that environment (no status obtained); DSH re-tested from owner machine - see public_http_observations."
   },
   "external_status": {
-    "LIVE_CANARY_BUDGET": "NOT_APPROVED",
+    "LIVE_CANARY_BUDGET": "APPROVED_BY_USER_MESSAGE_CNY_5_00_WHOLE_BATCH_C1C2_FIRST",
+    "CANARY_CREDENTIAL_LOCAL": "NOT_PLACED",
     "PRODUCTION_READ_ACCESS": "PUBLIC_HTTP_OBSERVED",
     "PRODUCTION_READ_APPROVAL": "GRANTED_BY_USER_MESSAGE_FOR_PUBLIC_GET_ONLY",
     "PRODUCTION_WRITE_APPROVAL": "NOT_APPROVED",
     "PUSH_AND_PUBLISH_APPROVAL": "NOT_APPROVED",
     "ONGOING_MODEL_SPEND_APPROVAL": "NOT_APPROVED"
+  },
+  "canary": {
+    "driver": "scripts/run_canary_c1c2.mjs",
+    "seeder": "scripts/seed_canary_node.py",
+    "stage_cap_cny": 1.5,
+    "whole_batch_cap_cny": 5.0,
+    "status": "READY_BLOCKED_ON_LOCAL_CREDENTIAL",
+    "credential_mechanism": "services/rag-api/.env (gitignored): V3_MODEL_API_KEY + V3_MODEL_BASE_URL; never in chat"
   }
 }

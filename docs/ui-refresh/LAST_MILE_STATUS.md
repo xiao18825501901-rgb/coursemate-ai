@@ -77,10 +77,24 @@ CN 北京 in 12 / out 36 CNY·1M tokens；新加坡 International in 14.988 / ou
 
 规则：整批累计上限，不是每次 5 元；超限即停，不自动加钱/换模型/重试；评审启用与
 上线后持续费用分别征求；估计≠账单，有免费额度也记录实际 tokens 与原价估算。
-**请批准该整批预算（或调整金额/先批 C1+C2 子集）。**
+**状态：用户已批准该整批预算（CNY 5.00，C1+C2 优先）。**
+
+## Canary：预算已批准，等待本机凭据（最小操作卡）
+
+**当前唯一阻塞**：本机没有站点千问凭据（`V3_MODEL_API_KEY`/`V3_MODEL_BASE_URL`
+均未设置；`.dsh/.credentials.yaml` 只有 DeepSeek 开发模型键）。Canary 驱动已就绪：
+`scripts/run_canary_c1c2.mjs`（隔离副本 + `scripts/seed_canary_node.py` 从零节点 +
+真实两阶段 + 模型评审 + 覆盖提交 + 证据落盘 + 阶段上限 CNY 1.50；缺凭据时零连接退出）。
+
+| 字段 | 内容 |
+|---|---|
+| 位置 | `services/rag-api/.env`（已被 .gitignore 忽略；在该目录新建文件） |
+| 操作 | 写入两行：`V3_MODEL_API_KEY=sk-…` 与 `V3_MODEL_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`（用账户实际兼容 endpoint） |
+| 完成标志 | `node scripts/run_canary_c1c2.mjs` 不再打印 "Canary blocked"，开始 C1+C2 |
+| 验证 | 输出 `C1+C2 finished. run=… status=completed` 与 `work/canary-*/canary-evidence.json`（usage、Prompt 样本、覆盖回执、节点进度） |
 
 ## 下一步（等待用户回答，不空转）
 
-1. 批准整批 canary 预算（或 C1+C2 子集）；
+1. （预算已批准 ✓）把站点千问凭据放入 `services/rag-api/.env`（受保护机制，不贴聊天）；
 2. 提供受保护 SSH/Netlify/GitHub 访问以完成 SERVER_RUNTIME 与发布前控制面板盘点；
 3. 之后：canary → 备份/恢复演练 → 受控部署 → 真实 Clerk 多用户验收。
