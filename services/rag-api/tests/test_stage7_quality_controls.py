@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from test_learning_workspace import Identity
 
 from app.config import Settings
+from app.db import LATEST_V3_SCHEMA_VERSION
 from app.main import create_app
 
 MAJOR_EXPECTATIONS = {
@@ -394,4 +395,4 @@ def test_migration_021_backfills_existing_safe_model_run_evidence(tmp_path: Path
             0,
             0,
         )
-        assert versions == list(range(1, 22))
+        assert versions == list(range(1, LATEST_V3_SCHEMA_VERSION + 1))

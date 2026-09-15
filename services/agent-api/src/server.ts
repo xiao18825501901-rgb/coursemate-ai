@@ -15,6 +15,21 @@ import { ToolExecutor } from "./tools/executor.js";
 
 
 const config = loadConfig();
+// Production environment guard: a test identity or a deterministic provider must
+// never serve real traffic. This is the same boundary rag-api's settings
+// validator enforces for the UI extension.
+if (process.env.NODE_ENV === "production") {
+  if (config.authTestUserId !== undefined) {
+    console.error(
+      "AUTH_TEST_USER_ID is forbidden in production: the test identity would be live.",
+    );
+    process.exit(1);
+  }
+  if (config.providerMode === "deterministic") {
+    console.error("AGENT_PROVIDER_MODE=deterministic is forbidden in production.");
+    process.exit(1);
+  }
+}
 const database = new AgentDatabase(config.databasePath);
 database.initialize();
 const repository = new TaskRepository(database.connection);

@@ -775,30 +775,56 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             heartbeat(run_id)
             generate_kwargs={'attachments':images} if images else {}
             if spec_items: generate_kwargs['spec_items']=spec_items
-            async for item in model.generate(course_data,data.text,{k:user[k] for k in ['language','timezone','bio']},sources,history,conv['lane'],bridge_data,**generate_kwargs):
-                # A cancel from ANOTHER process cannot reach this loop through the
-                # local job map; the database is the coordination point. The row's
-                # status is re-read so a cancelled run stops promptly instead of
-                # streaming to completion and charging more.
-                state=db.one('SELECT status FROM cmui_runs WHERE id=?',(run_id,))
-                if state and state['status'] in TERMINAL: raise asyncio.CancelledError()
-                if time.time()-last_beat>5:
-                    heartbeat(run_id); last_beat=time.time()
-                kind=item['kind']
-                if kind=='status':
-                    db.execute('UPDATE cmui_runs SET status=?,updated_at=? WHERE id=?',(item['status'],now(),run_id))
-                    event(run_id,'status',item)
-                elif kind=='prompt':
-                    db.execute('UPDATE cmui_runs SET generated_prompt=? WHERE id=?',(item['text'],run_id))
-                    event(run_id,'prompt_ready',{'characters':len(item['text'])})
-                elif kind=='delta':
-                    output+=item['text']
-                    if len(output)>100000: raise ProviderError('ANSWER_TOO_LONG')
-                    db.execute('UPDATE cmui_runs SET partial_text=?,updated_at=? WHERE id=?',(output,now(),run_id))
-                    event(run_id,'delta',{'text':item['text']})
-                elif kind=='usage':
-                    usages.append(item)
-                    db.execute('UPDATE cmui_runs SET usage=? WHERE id=?',(json.dumps(usages),run_id))
+
+            async def consume():
+                nonlocal output, usages, last_beat
+                async for item in model.generate(course_data,data.text,{k:user[k] for k in ['language','timezone','bio']},sources,history,conv['lane'],bridge_data,**generate_kwargs):
+                    # A cancel from ANOTHER process cannot reach this loop through the
+                    # local job map; the database is the coordination point. The row's
+                    # status is re-read so a cancelled run stops promptly instead of
+                    # streaming to completion and charging more.
+                    state=db.one('SELECT status FROM cmui_runs WHERE id=?',(run_id,))
+                    if state and state['status'] in TERMINAL: raise asyncio.CancelledError()
+                    if time.time()-last_beat>5:
+                        heartbeat(run_id); last_beat=time.time()
+                    kind=item['kind']
+                    if kind=='status':
+                        db.execute('UPDATE cmui_runs SET status=?,updated_at=? WHERE id=?',(item['status'],now(),run_id))
+                        event(run_id,'status',item)
+                    elif kind=='prompt':
+                        db.execute('UPDATE cmui_runs SET generated_prompt=? WHERE id=?',(item['text'],run_id))
+                        event(run_id,'prompt_ready',{'characters':len(item['text'])})
+                    elif kind=='delta':
+                        output+=item['text']
+                        if len(output)>100000: raise ProviderError('ANSWER_TOO_LONG')
+                        db.execute('UPDATE cmui_runs SET partial_text=?,updated_at=? WHERE id=?',(output,now(),run_id))
+                        event(run_id,'delta',{'text':item['text']})
+                    elif kind=='usage':
+                        usages.append(item)
+                        db.execute('UPDATE cmui_runs SET usage=? WHERE id=?',(json.dumps(usages),run_id))
+
+            # A provider that goes silent (no SSE events) must not suspend
+            # cancellation: the watchdog polls the database and stops the
+            # consumer when the run reached a terminal state, so a cancel or a
+            # sibling-process failure takes effect within a bounded interval.
+            consume_task=asyncio.create_task(consume())
+            async def watchdog():
+                while True:
+                    await asyncio.sleep(2)
+                    state=db.one('SELECT status FROM cmui_runs WHERE id=?',(run_id,))
+                    if state and state['status'] in TERMINAL:
+                        consume_task.cancel()
+                        return
+                    if consume_task.done(): return
+            watchdog_task=asyncio.create_task(watchdog())
+            try:
+                await asyncio.gather(consume_task, watchdog_task, return_exceptions=True)
+                exception=consume_task.exception()
+                if exception is not None: raise exception
+                if consume_task.cancelled(): raise asyncio.CancelledError()
+            finally:
+                watchdog_task.cancel()
+
             if not output.strip(): raise ProviderError('EMPTY_MODEL_ANSWER')
             # Only referenced, existing source IDs become citation cards; existence is NOT entailment proof.
             import re

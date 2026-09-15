@@ -401,6 +401,47 @@ def test_cancel_never_books_coverage(client: TestClient) -> None:
     assert knowledge_node(client)["progress"] == "NOT_STARTED"
 
 
+def test_cancel_effective_during_provider_silence(client: TestClient) -> None:
+    """A provider that emits no events must not suspend cancellation: the
+    database watchdog stops the run within a bounded interval (§5)."""
+
+    provider: ScriptedProvider = client.app.state.ui_provider
+    original = provider.generate
+
+    async def silent(course, text, profile, sources, history, lane, bridge=None, **kwargs):
+        provider.calls.append({"lane": lane, "text": text})
+        # Yield nothing; only an external cancel can stop this generator.
+        await asyncio.Event().wait()
+
+    provider.generate = silent
+    try:
+        conversation = client.post(
+            f"{UI}/conversations",
+            headers=auth("Bearer token-a"),
+            json={"course": "cs3481", "lane": "teach"},
+        ).json()
+        started = client.post(
+            f"{UI}/conversations/{conversation['id']}/runs",
+            headers=auth("Bearer token-a"),
+            json={"text": "静默的教学", "request_id": "cov-silent-000001", "node_id": NODE},
+        )
+        time.sleep(0.5)
+        client.post(
+            f"{UI}/runs/{started.json()['id']}/cancel", headers=auth("Bearer token-a")
+        )
+        begin = time.monotonic()
+        row = wait_terminal(client, started.json()["id"])
+        elapsed = time.monotonic() - begin
+        assert row["status"] == "cancelled"
+        # The watchdog polls every 2s, so cancellation lands well before any
+        # "forever" bound; 8s allows slow CI without hiding a hang.
+        assert elapsed < 8.0, f"cancel took {elapsed:.1f}s during provider silence"
+        assert row.get("coverage") is None
+    finally:
+        provider.generate = original
+    assert evidence_rows(client) == []
+
+
 def test_replay_does_not_duplicate_and_recovery_never_calls_provider(
     client: TestClient, tmp_path: Path
 ) -> None:

@@ -1,13 +1,16 @@
 [build]
-  command = "npm run build --workspace @coursemate/web"
+  # Production deploys (CONTEXT=production) must pass the release preflight and
+  # artifact verification; non-production builds skip both and stay usable.
+  command = "node scripts/preflight_release_build.mjs && npm run build --workspace @coursemate/web && node scripts/verify_release_build.mjs"
   publish = "apps/web/dist"
 
 [build.environment]
   NODE_VERSION = "24.14.0"
 
-# Configure VITE_CLERK_PUBLISHABLE_KEY, VITE_RAG_API_URL, VITE_AGENT_API_URL,
-# VITE_UI_API_BASE and VITE_V3_ENABLED in the Netlify UI. Keep V3 false until the
-# gated canary. Never place Clerk secret keys here.
+# Configure VITE_CLERK_PUBLISHABLE_KEY (must be the real pk_live_... key for
+# production builds - the preflight rejects fake or test keys), VITE_RAG_API_URL,
+# VITE_AGENT_API_URL, VITE_UI_API_BASE and VITE_V3_ENABLED in the Netlify UI.
+# Never place Clerk secret keys here.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Document routing (first match wins, top to bottom).
