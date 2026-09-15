@@ -41,16 +41,17 @@ agent-default-model:
 新 UI 复用**同一个**模型凭据，没有新增第二份 key，也没有用 DeepSeek
 生成任何教学内容。
 
-### 0.2 本会话无法弹出授权框，因此生产动作一步都没有做
+### 0.2 审批通道已核验可用，但生产/付费动作仍未获批准
 
-会话策略为 `approval_policy: never`——**批准提示被禁用，需要批准的动作会被自动拒绝**。
-因此本会话没有、也不可能取得生产部署 / 真实付费模型 / 凭证变更的授权。
+本会话审批策略由用户切为 **`ask`**，且通道真实可用：本地收尾轮的每次仓库写入
+都经真实批准回执（received/decided，无生产影响、无模型费用）。但**没有任何
+生产部署 / 真实付费模型 / 凭证变更 / push / 发布的批准记录**——CNY 5.00 仍只是
+整批 canary 的建议预算。因此：
 
-所以：**没有付费调用、没有生产写入、没有迁移、没有重启服务、没有 Git push、
-没有 Netlify 发布。** 这不是省略步骤，而是在无授权通道时的唯一正确行为。
-恢复授权通道的最小操作卡见 §7.1 与 `docs/ui-refresh/RELEASE_CLOSURE_CHECKLIST.md` §三。
-`scripts/Request-DeploymentApproval.ps1` 默认只产生业务同意记录；除非真实代码证明它接入
-Harness 审批决策，否则它不能改变 `never`（见 §7.1 的四项区分）。
+**没有付费调用、没有生产写入、没有迁移、没有重启服务、没有 Git push、
+没有 Netlify 发布。** 外部步骤按 `LAST_MILE_STATUS.md` 的类别等待具体批准。
+`scripts/Request-DeploymentApproval.ps1` 默认只产生业务同意记录；除非真实代码证明
+它接入 Harness 审批决策，否则它不能替代原生审批回执。
 
 ---
 
@@ -255,7 +256,9 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 ### 6.1 数据与恢复单元（已备份工具化，未在生产执行）
 
 * 原 RAG `rag.sqlite3`（Schema 21）与 Agent 库 **Schema 未变**：没有新增表、列或迁移文件。
-* 新增数据在**独立文件** `<CMUI_DATA_DIR>/ui.sqlite3`（**Schema 3，26 张 `cmui_*` 表**，
+* 新增数据在**独立文件** `<CMUI_DATA_DIR>/ui.sqlite3`（**Schema 5，27 张 `cmui_*` 表**，
+  含 `cmui_run_v3`/`cmui_delivery_submissions` 交叉引用与回执、`cmui_runs` 租约列、
+  `cmui_bridges` 的 V3 追溯列），
   含 `cmui_run_v3` 交叉引用与 `cmui_runs` 租约列）与 `<CMUI_DATA_DIR>/uploads/`。
   `Database.initialize()` 在检测到 `courses`/`chunks`/`tasks`/`schema_migrations` 时
   **拒绝初始化**，不可能覆盖原库；检测到更高版本时**拒绝降级**；
