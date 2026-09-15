@@ -90,11 +90,14 @@ assessment.abandon、legacy.conversations/legacy.conversation。
    （`validation_reason='SHELL_COVERAGE_REVIEW_V1'`，content_hash 为 section 哈希）
    + `learning_coverage`，并按同一规则把 journey 置为 LEARNING/LEARNED；
 3. **覆盖认定不由模型决定**：可注入的 `CoverageReviewer` 接口
-   （`app/learning/coverage_review.py`）返回确认的 item 列表——
+   （`app/learning/coverage_review.py`）返回 `ReviewOutcome`（候选判定）——
    `NullCoverageReviewer`（默认：不确认任何覆盖）、`DeterministicCoverageReviewer`
    （本地/测试用规则：acceptance 全句必须出现在正文，生产被拒）、
-   模型评审器（文档化的收费第三次调用，**未实现且未授权运行**，见
-   `QWEN_LIVE_TWO_STAGE_REPORT.md` 费用说明）。未获评审确认时只保存教学单元，
+   **`ModelCoverageReviewer`（已实现、未启用）**：独立收费第三次调用
+   （`qwen_review_invoke` 计费门前置、无自动重试），判定只是候选，服务端逐项
+   校验（item 在冻结 Spec 内 + 证据引文逐字存在于已保存正文）后才写证据；
+   合同测试 9 项（假上游零计费）已通过，启用需单独付费批准
+   （见 `QWEN_LIVE_TWO_STAGE_REPORT.md` §6.1）。未获评审确认时只保存教学单元，
    不写任何证据，节点如实保持未覆盖；
 4. **失败/取消/截断/重复/闲聊不可能记账**：只有 claim 成功的 run 才提交；取消与
    完成由数据库终态裁决；`teaching_units(journey_id, operation_id)` 唯一索引 +

@@ -161,7 +161,7 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 
 | 套件 | 结果 |
 |---|---|
-| rag-api 全量回归 | **486 passed**（554.20s；含新增覆盖闭环 8 项 + 桥接追溯 5 项 + 两处过期断言修复） |
+| rag-api 全量回归 | **500 passed**（610.06s；冻结 SHA f5c1efe 同 SHA 复跑：旧 486 + 评审合同 9 + Schema 兼容 5） |
 | 交付包契约测试（迁入后） | **71 passed** |
 | 新增 V3 DomainPort 集成测试 | **16 passed** |
 | 新增任务 Agent 桥测试 | **15 passed** |
@@ -281,12 +281,30 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
   必须在维护窗口内进行。`ui.sqlite3` 与 RAG 之间没有跨库外键，恢复后最坏表现为 404/空列表；
   **跨库无外键 ≠ 数据关联正确**，恢复后必须抽查课程/文件/节点引用、旧对话可读性与任务回执。
 
+### 6.3 公开只读核验（PUBLIC_HTTP_OBSERVED，用户同意的固定范围）
+
+2026-09-15 本机执行的无身份 HTTPS GET（TLS 校验、不跟随重定向、每 URL 一次、无写入、无密钥、零费用）：
+
+| 端点 | 状态 | Content-Type | 解释 |
+|---|---|---|---|
+| `https://rag.qqttai.com/health` | **200** | application/json | `{"status":"ok","service":"rag-api"}` |
+| `https://rag.qqttai.com/ui-extension/health` | **404** | application/json | **EXPECTED_ABSENT**：扩展未启用（默认 false），宿主在且应答；非宕机 |
+| `https://agent.qqttai.com/health` | **200** | application/json | `{"status":"ok","service":"agent-api"}` |
+| `https://qqttai.com/` | **200** | text/html | title=CourseMate AI：生产仍服务旧版 V3 文档，新壳尚未成为默认入口（与未部署一致） |
+
+外部证据账本：ChatGPT 会话 2026-09-15 经其 Netlify 只读连接器核验
+`coursemate-ai-qqtt` 当前生产 deploy `6aa70f2b5a330d5a8ae4be56`（ready/production，
+published 2026-09-13T21:01:42Z，`commit_ref=null`——标题里的 `cd8c121` 只是标签，
+不是源码 SHA 证明）；该环境对上述公网端点未取得响应，本机已复测并取得真实响应。
+两者都**不是** DSH 原生审批回执。公开 health 不能证明后端 SHA/进程数/库 Schema/备份，
+这些仍需受保护盘点（`LAST_MILE_STATUS.md` 访问分层）。
+
 ### 6.2 部署顺序与回滚
 
 见 `docs/ui-refresh/MIGRATION_AND_ROLLBACK.md`。要点：
 
 1. 首次启用按 A/B/C：先备份（未设 `CMUI_DATA_DIR`）→ 独立路径初始化 UI 库 → 启用后纳入新恢复单元；
-2. 先发后端但保持 `UI_EXTENSION_ENABLED=false`（行为与原 V3 完全相同）并确认健康；
+2. 先发后端但保持 `UI_EXTENSION_ENABLED=false`（扩展不挂载，**但 RAG 022 迁移仍执行**，行为不等同旧版）并确认健康；
 3. 再开开关并设置 `CMUI_DATA_DIR` / `UI_TASK_AGENT_URL`；
 4. 最后发前端并确认 `/` 与 `/app` 都是新壳文档、旧深链仍回旧站。
 5. 最小回滚是 `UI_EXTENSION_ENABLED=false` + 重启；**这只关后端入口，不会回滚 Netlify 前端**，
@@ -320,22 +338,18 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 
 | # | 项 | 本轮读到的实际状态 |
 |---|---|---|
-| 1 | 用户是否批准具体动作/费用 | **未批准**：CNY 5.00 只是报告中的建议；没有任何预算/部署/发布批准记录 |
-| 2 | DSH 是否有可回答的原生审批通道 | 本会话有效策略为 `never`（批准提示禁用，需批准的动作被自动拒绝）。GUI 客户端自带 ApprovalPanel 组件（`dsh-client-ui-conversation`），但本会话没有弹出过一次；模型**不能**自行把策略从 `never` 改掉 |
-| 3 | 执行工具是否有网络/文件/进程能力 | 文件操作 `danger-full-access`（不受限）；本机命令可执行（受限于执行策略/沙箱规则）；**没有**生产 SSH/托管平台凭据用于线上操作 |
-| 4 | GitHub/Netlify/SSH/Clerk/模型账户凭据与角色 | 未验证可用性；本会话**没有**读取任何凭据值（`~/.dsh/.credentials.yaml` 只查键名结构，值为 `<REDACTED>`） |
+| 1 | 用户是否批准具体动作/费用 | **仅批准过一次有限范围**：四个公开端点的无身份 HTTPS GET 只读核验（本机执行，见 §6.3 PUBLIC_HTTP_OBSERVED）；CNY 5.00 仍只是建议；没有任何预算/部署/发布批准记录 |
+| 2 | DSH 是否有可回答的原生审批通道 | 会话策略经 ask → **用户切回 `never`**：批准提示当前被禁用，需批准的动作自动拒绝（本轮公开 GET 是用户在本消息中明确同意的固定范围，网络本身不受文件沙箱限制；**不是原生审批回执**）。GUI 客户端自带 ApprovalPanel 组件（`dsh-client-ui-conversation`） |
+| 3 | 执行工具是否有网络/文件/进程能力 | 文件 `danger-full-access`（不受限）；本机命令与公网 HTTPS GET 可执行；**没有**生产 SSH/托管平台凭据用于线上操作 |
+| 4 | GitHub/Netlify/SSH/Clerk/模型账户凭据与角色 | DSH 侧未验证可用性；外部证据：ChatGPT 会话已通过其 Netlify 只读连接器核验控制面板事实（§6.3，标注为非 DSH 回执）。本会话**没有**读取任何凭据值（`~/.dsh/.credentials.yaml` 只查键名结构，值为 `<REDACTED>`） |
 
 `scripts/Request-DeploymentApproval.ps1` 默认只产生业务同意记录。除非真实代码证明它
 接入 Harness 的审批决策，否则运行它**不能改变 `never`**，也不能当作绕过平台限制的凭证。
 
-**给用户的最小操作卡（就一条）：**
-
-| 字段 | 内容 |
-|---|---|
-| 位置 | DSH Web GUI（`http://127.0.0.1:3080`）的会话权限/审批预设选择器（GUI 自带 ApprovalPanel，说明通道存在于客户端；`C:\Users\Hp\.dsh\settings.yaml` 里**没有**审批字段，不要凭猜测写 YAML） |
-| 操作 | 把当前会话的审批策略从 `never`（禁用）切到 `ask`（询问）或对等可用模式；优先保留其余保护，不必全关 |
-| 生效 | 现有会话或新会话（以 GUI 提示为准）；切换后本会话收到一次真实工具审批提示即视为生效 |
-| 验证 | 之后我可以发起**一个**无生产影响、无费用、确实需要原生审批的测试动作；只有收到真实审批结果才能宣称通道有效 |
+**（历史参考）** 若用户希望恢复原生审批提示：在 DSH Web GUI（`http://127.0.0.1:3080`）
+把会话审批策略从 `never` 切到 `ask`（`settings.yaml` 无审批字段，不凭猜测写 YAML）；
+切换后一次无生产影响、无费用的测试动作收到真实审批提示即视为生效。当前按用户
+选择维持 `never`，外部付费/部署类申请以消息文本提出、由用户答复。
 
 DSH 安装版本：`@deepseek-ai/dsh 0.1.1-rc.2`（`C:\Users\Hp\AppData\Roaming\npm\node_modules\@deepseek-ai\dsh\package.json`）。
 开发模型已为 `deepseek-v4-pro`（§0.1），网站模型仍为 `qwen3.8-max`。

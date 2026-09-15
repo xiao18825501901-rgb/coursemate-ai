@@ -173,7 +173,9 @@ python3 ops/restore_v2.py
 
 1. **先备份**（§4-A 顺序），并在副本上完成恢复演练（§5）。
 2. **再发后端**：部署新 release 但保持 `UI_EXTENSION_ENABLED=false`。
-   此时行为与原 V3 **逐字节相同**，先用 `https://rag.qqttai.com/health` 确认无回归。
+   此时**不会挂载扩展，但 RAG 022 迁移仍会执行**（开关只控制扩展挂载，不控制
+   `Database.initialize` 的 V3 迁移；副本测试已证明）——数据库不是零影响，
+   行为也**不等同旧版**。先用 `https://rag.qqttai.com/health` 确认无回归。
 3. **再开开关**：设置 `UI_EXTENSION_ENABLED=true` 与 `CMUI_DATA_DIR`（§4-B），
    重启 rag-api；首次挂载自动幂等建库（不运行任何 seed）。
    `UI_TASK_AGENT_URL` 指向既有 agent 公网 origin（`https://agent.qqttai.com`）。

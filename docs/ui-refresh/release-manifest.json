@@ -4,8 +4,9 @@
   "note": "Machine-readable summary generated from the current working tree; external statuses are only updated by real user decisions, native approval receipts and access verification - never by report text.",
   "release": {
     "branch": "feature/dsh-ui-refresh-integration",
-    "head_at_generation": "a244654",
-    "frozen_release_sha": null,
+    "head_at_generation": "f5c1efe",
+    "frozen_release_sha": "f5c1efe5935fe9b75bf01f4abe88c8a1db2e6268",
+    "frozen_at": "2026-09-15T16:00:00Z",
     "schemas": { "rag": 22, "agent": 1, "ui": 5 },
     "domain_operations": 28
   },
@@ -28,20 +29,47 @@
     "production_readonly_check": "scripts/production_readonly_check.mjs"
   },
   "test_scope": {
-    "rag_api_full": { "count": 486, "when": "2026-09-15 full run" },
+    "frozen_sha": "f5c1efe5935fe9b75bf01f4abe88c8a1db2e6268",
+    "rag_api_full": { "count": 500, "command": "pytest -q -p no:cacheprovider --ignore=work", "log": "work/pytest-freeze.log", "at_sha": true },
     "reviewer_contract_tests": 9,
     "schema_compat_tests": 5,
     "coverage_closure_tests": 8,
     "bridge_trace_tests": 5,
-    "web_unit": 55,
-    "agent_unit": 66,
-    "browser_shell": 17,
-    "legacy_e2e": { "coursemate": 4, "learning": 3 }
+    "web_unit": { "count": 55, "at_sha": true },
+    "agent_unit": { "count": 66, "at_sha": true },
+    "browser_shell": { "count": 17, "at_sha": true },
+    "legacy_e2e": { "coursemate": 4, "learning": 3, "at_sha": true }
+  },
+  "public_http_observations": {
+    "executed_by": "DSH on owner Windows, 2026-09-15",
+    "scope": "Unauthenticated fixed public GET only; TLS on; no redirect follow; one attempt per URL; no writes; no tokens; no paid calls.",
+    "authorization": "User message consent for exactly this scope; approval prompts were disabled (policy never), so this is NOT a native approval receipt.",
+    "results": [
+      { "label": "rag_health", "url": "https://rag.qqttai.com/health", "status": 200, "content_type": "application/json", "summary": "{\"status\":\"ok\",\"service\":\"rag-api\"}" },
+      { "label": "ui_extension_health", "url": "https://rag.qqttai.com/ui-extension/health", "status": 404, "content_type": "application/json", "summary": "{\"detail\":\"Not Found\"}", "interpretation": "EXPECTED_ABSENT: the UI extension is not enabled in production yet; the host app is up and answers." },
+      { "label": "agent_health", "url": "https://agent.qqttai.com/health", "status": 200, "content_type": "application/json; charset=utf-8", "summary": "{\"status\":\"ok\",\"service\":\"agent-api\"}" },
+      { "label": "site_root", "url": "https://qqttai.com/", "status": 200, "content_type": "text/html; charset=UTF-8", "summary": "title=CourseMate AI", "interpretation": "The production site still serves the legacy V3 document at /; the refreshed shell is not the default entry yet (consistent with the not-deployed stage)." }
+    ]
+  },
+  "external_evidence_ledger": {
+    "source": "ChatGPT session read-only tools, 2026-09-15 (NOT a DSH approval receipt)",
+    "netlify": {
+      "site": "coursemate-ai-qqtt (166afb5a-4103-4236-9f13-4be34dc68cd2)",
+      "primary_url": "https://qqttai.com",
+      "current_production_deploy": "6aa70f2b5a330d5a8ae4be56",
+      "deploy_state": "ready",
+      "deploy_context": "production",
+      "published_at_utc": "2026-09-13T21:01:42.433Z",
+      "commit_ref": null,
+      "title_label_only": "CourseMate V3 cd8c121 on ap-southeast-1 backend",
+      "limits": "title is a label, not a verified source SHA; re-read before publish or rollback."
+    },
+    "chatgpt_public_get": "connection errors from that environment (no status obtained); DSH re-tested from owner machine - see public_http_observations."
   },
   "external_status": {
     "LIVE_CANARY_BUDGET": "NOT_APPROVED",
-    "PRODUCTION_READ_ACCESS": "NOT_YET_VERIFIED",
-    "PRODUCTION_READ_APPROVAL": "REQUESTED_PENDING_USER_RESPONSE",
+    "PRODUCTION_READ_ACCESS": "PUBLIC_HTTP_OBSERVED",
+    "PRODUCTION_READ_APPROVAL": "GRANTED_BY_USER_MESSAGE_FOR_PUBLIC_GET_ONLY",
     "PRODUCTION_WRITE_APPROVAL": "NOT_APPROVED",
     "PUSH_AND_PUBLISH_APPROVAL": "NOT_APPROVED",
     "ONGOING_MODEL_SPEND_APPROVAL": "NOT_APPROVED"

@@ -1,82 +1,86 @@
-# LAST MILE STATUS — 生产评审器补齐、迁移/回滚证据与外部授权状态
+# LAST MILE STATUS — 冻结版本、公开只读核验与后续授权
 
-**更新**：2026-09-15（随本轮提交）
+**更新**：2026-09-15（冻结 SHA `f5c1efe5935fe9b75bf01f4abe88c8a1db2e6268`）
 **口径**：外部状态只能由真实用户决定、原生审批回执与访问验证更新；本文件只记录。
 机器可读摘要见 `docs/ui-refresh/release-manifest.json`。
 
 ## 分项状态（本轮口径）
 
 ```text
-DELIVERY_ACCOUNTING_LOCAL               = DONE（022 REVIEWED 通道、回执、恢复、已覆盖跳过）
-PRODUCTION_REVIEWER_CODE                = DONE_LOCAL（ModelCoverageReviewer + qwen_review_invoke，默认关闭，未启用）
-REVIEWER_CONTRACT_TESTS                 = DONE（9 项，假上游零计费；非 live）
-MIGRATION_AND_ROLLBACK_COPY_TESTS       = DONE（5 项：21→22 保数据/幂等、重复数据响亮报错、UI 关闭仍迁移、旧 release 就绪与旧查询、旧 UI release 拒开 Schema 5）
-REAL_MODEL_CANARY                       = NOT_RUN（LIVE_CANARY_BUDGET = NOT_APPROVED）
-LIVE_COVERAGE_ACCEPTANCE                = NOT_RUN（依赖 canary + 真实评审启用授权）
-PRODUCTION_DEPLOYMENT                   = NOT_PERFORMED（PRODUCTION_WRITE_APPROVAL / PUSH_AND_PUBLISH_APPROVAL = NOT_APPROVED）
-AUTHENTICATED_MULTIUSER_ACCEPTANCE      = NOT_PERFORMED
+LOCAL_RELEASE_VERIFIED           = PASS（冻结 SHA f5c1efe：rag-api 全量 500、web 55、
+                                  agent 66、新壳浏览器 17、旧站 4/3 同 SHA 复跑）
+PUBLIC_HTTP_OBSERVED             = PASS（本机无身份 HTTPS GET，四个端点全部取得真实响应，
+                                  2026-09-15T15:59:51Z；详情见 manifest.public_http_observations）
+CONTROL_PLANE_OBSERVED           = EXTERNAL_ONLY（ChatGPT 会话 Netlify 只读连接器：
+                                  current production deploy 6aa70f2b5a330d5a8ae4be56，
+                                  ready/production；commit_ref=null，标题非源码 SHA 证明；
+                                  标注为非 DSH 回执）
+SERVER_RUNTIME_VERIFIED          = NOT_YET（需要受保护 SSH/运维盘点：进程数、目录、
+                                  service unit、三库 Schema、上传目录、备份、模型 endpoint；
+                                  health 200 不证明这些）
+LIVE_QWEN_VERIFIED               = NOT_RUN（LIVE_CANARY_BUDGET = NOT_APPROVED）
+LIVE_COVERAGE_VERIFIED           = NOT_RUN（依赖 canary + 评审启用授权）
+DEPLOYMENT_PERFORMED             = NOT_PERFORMED（写/发布批准 NOT_APPROVED）
+REAL_AUTH_MULTIUSER_VERIFIED     = NOT_PERFORMED
 ```
 
-当前评审器实际状态：**生产默认仍为 Null**——新壳教学显示"覆盖待确认/未启用"，
-不自动确认覆盖；`Deterministic` 仅测试；`ModelCoverageReviewer` 已实现并通过
-合同测试，但**未启用**（需要单独的付费批准：第三次调用的整批预算）。
+## 本轮公开只读核验结果（用户同意的固定范围，本机执行）
 
-## DONE_LOCAL — 已实现且本地测试
+| 端点 | 结果 | 解释 |
+|---|---|---|
+| `https://rag.qqttai.com/health` | **200** application/json `{"status":"ok","service":"rag-api"}` | 后端存活 |
+| `https://rag.qqttai.com/ui-extension/health` | **404** application/json `{"detail":"Not Found"}` | **EXPECTED_ABSENT**：扩展未启用（`UI_EXTENSION_ENABLED` 默认 false），宿主在且应答；不是宕机 |
+| `https://agent.qqttai.com/health` | **200** application/json `{"status":"ok","service":"agent-api"}` | Agent 存活 |
+| `https://qqttai.com/` | **200** text/html，title=CourseMate AI | 生产仍服务**旧版 V3 文档**（`/` 尚未是新壳），与未部署阶段一致 |
 
-| 项 | 证据 |
-|---|---|
-| 生产模型覆盖评审器（代码） | `coverage_review.py`：async 协议 + `ReviewOutcome`（状态/逐项判定/理由/证据引文/评审器与 policy 版本）；`ModelCoverageReviewer` 独立第三次调用（默认关闭、候选判定、fail-closed）；`qwen_review_invoke` 计费门在请求前、无自动重试、finish_reason 校验；`resolve` 生产只接受 `model` 且要求 allow_billable + 站点同一凭据 |
-| 服务端逐项校验与评审持久化 | `shell_delivery.py`：评审在写事务外运行；`covered` 判定必须带**逐字存在于已保存正文**的证据引文；逐项写入；评审结果（含失败状态）随 teaching_units 持久化；重放只重放记账，模型调用次数不增；评审失败不撤销教学、覆盖待评审 |
-| 合同测试 | `tests/test_coverage_reviewer_contract.py` **9 项**：合理改写+真实引文计入、关键词/验收回显拒绝、partial/uncertain/not_covered 逐项、非法 JSON/伪造 id/越界拒绝、默认关闭零请求+计费门前置（MockTransport 计数为 0）、评审失败保教学、持久化后重放零模型调用、部分覆盖只提交确认项 |
-| 迁移/回滚副本测试 | `tests/test_ui_extension_schema_compat.py` **5 项**：Schema-21 历史副本升级 22 保 VALIDATED/LEGACY 行且幂等（integrity/FK/索引核查）；预存重复 (journey_id, operation_id) 时升级**响亮失败**不静默删除；`UI_EXTENSION_ENABLED=false` 仍执行 RAG 迁移；旧 release 就绪探针在 22 库上仍 READY、旧覆盖查询不计 REVIEWED 但正常运行；旧 UI release 拒开 Schema 5 库 |
-| 旧摘要修正 | 残留的"RAG Schema 未变""批准提示被禁用"等表述已按 Schema 22/5 与 ask 通道现状修正（`FINAL` §4/§6.1、`MIGRATION` §7、`QWEN` §4） |
-| 机器可读 manifest | `docs/ui-refresh/release-manifest.json`：SHA、Schema、operation 数、评审器模式、构建门、测试范围与外部状态（外部状态字段只能由真实决策更新） |
-| 生产只读核验脚本 | `scripts/production_readonly_check.mjs`：HTTPS GET 只读（health/文档形状），不写、不打印 secrets、不调用模型；缺端点时零连接并输出访问清单 |
+每个请求记录：时间戳、URL、HTTP 状态、Content-Type、受限正文摘要、错误阶段（本轮无错误）。
+范围外（未执行）：SSH/数据库访问、任何写入、模型付费、重启、push、Netlify 发布。
 
-## NOT_IMPLEMENTED / 受限
+## 已完成的本地收口（冻结版本证据）
 
-| 项 | 状态 |
-|---|---|
-| 模型评审器的**实际启用** | 代码完成、未启用：需要整批 canary 预算批准（第三次调用）与 `CMUI_COVERAGE_REVIEWER=model` + `CMUI_ALLOW_BILLABLE=true`（生产环境） |
-| 多 worker 生成平台 | 首发单实例（租约防护 + 看门狗），扩容需持久化 worker |
+- **冻结 SHA**：`f5c1efe5935fe9b75bf01f4abe88c8a1db2e6268`（HEAD，工作树干净）。
+- **同 SHA 回归**（本轮实跑，日志 `work/pytest-freeze.log`）：
+  rag-api 全量 **500 passed**（610.06s，`--ignore=work` 跳过历史 checkpoint 目录）、
+  web **55**、agent **66**、新壳浏览器 **17 passed**（1.3m）、旧站 4 / V3 学习 3。
+  500 = 旧 486 + 合同测试 9 + Schema 兼容测试 5（同一冻结 SHA 下）。
+- **文档校准**：manifest `head_at_generation`/`frozen_release_sha` 指向 f5c1efe；
+  `INTEGRATION_MAP` 的"模型评审器未实现"改为"已实现、合同测试通过、未启用"；
+  `MIGRATION` §6 的"逐字节相同"改为"扩展不挂载但 RAG 022 迁移仍执行，不等同旧版"；
+  `FINAL` §7.1 按当前事实（用户切回 `never` + 本轮公开 GET 为消息内同意的固定范围）。
+- 评审器/桥接/迁移机制未重写；`ModelCoverageReviewer` 为 implemented-not-enabled。
 
-## WAITING_APPROVAL（按依赖顺序）
+## 尚缺的受保护访问条件（分层，不与公开 GET 混淆）
 
-1. **生产只读核验**：已通过原生机制提出申请（范围见脚本头注释）；`PRODUCTION_READ_APPROVAL = REQUESTED_PENDING_USER_RESPONSE`。
-2. **Canary 整批预算**：按实时价格估算 C1（两阶段教学）+ C2（教学+覆盖评审+实际提交）+ C3（题目→步骤→教学→返回，可与 C2 复用）+ C4（图像题）+ C5（Node 工具调用）的总费用后申请；含可选第三次评审、Embedding、图像 tokens、工具多轮上限与未知超时用量；人工重试从总额扣。
-3. **模型评审启用授权**：与上线后持续模型费用分开征求。
-4. **备份与隔离恢复演练**、**迁移 022/UI Schema 5 与受控部署**、**push/Netlify 发布**（先确认 push 是否触发自动构建）、**数据灾难恢复**（独立审批）。
+| 层 | 现状 | 需要 |
+|---|---|---|
+| 公开 GET | ✅ 已核验 | — |
+| Netlify 控制面板只读 | 仅 ChatGPT 连接器核验过 | DSH 侧需要 Netlify 只读令牌/登录态（受保护环境）才能现场重读 current deploy 与构建规则 |
+| GitHub 仓库 | 未连接（连接器 404） | push 权限/远程配置核验（发布前确认 push 是否触发自动构建） |
+| SSH 运行环境 | 无凭据/无别名 | 受保护 SSH agent/配置别名；只读盘点：进程数、service unit、目录、三库 Schema、上传目录、备份、模型 endpoint（仅非敏感值） |
+| 模型调用 | 未授权 | 整批预算批准 + 账户/地域/endpoint/价格核验 |
+| 真实 Clerk 浏览器身份 | 未验证 | 用户登录/验证码 + 生产 publishable key 构建 |
 
-## WAITING_ACCESS — 生产只读访问卡
+## Canary 预算申请（C1/C2 优先，整批，未批准）
 
-| 字段 | 内容 |
-|---|---|
-| 访问方式 | HTTPS 只读（无需 SSH/密钥）：脚本只请求 `/health`、`/ui-extension/health` 与站点首页文档形状 |
-| 目标 | `https://rag.qqttai.com`（后端+扩展）、`https://agent.qqttai.com`（Agent）、站点域名（`qqttai.com`） |
-| 所需角色 | 无需账号角色；若端点仅内网可达，则需一台可达主机的受保护环境（SSH agent/key 或已登录会话，不要求明文密码/密钥进聊天） |
-| 已配置 | 否（本机没有生产端点配置） |
-| 你的操作 | 在受保护终端/CI 里 `export PROD_RAG_BASE_URL=… PROD_AGENT_BASE_URL=… PROD_SITE_URL=…` 后运行 `node scripts/production_readonly_check.mjs`，或授权我在你提供的受保护会话中执行 |
-| 验证 | 输出三行 status（200/非 200）即完成；不需要发送任何 token 或密钥 |
+**价格输入**（2026-09-15 官方公开页，仅预算输入，非账单）：
+CN 北京 in 12 / out 36 CNY·1M tokens；新加坡 International in 14.988 / out 44.965。
+按**新加坡**（较高档）保守估算，实际账户地域/价格在首次调用前核验：
 
-## OWNER_ACTION — 必须用户本人操作
+| 阶段 | 内容 | 保守估算 |
+|---|---|---|
+| C1+C2 合并 | 一次两阶段教学（Word 模板自由文本；输入≤30k、输出≤10k 上限）+ 独立覆盖评审（输入≤8k、输出≤0.8k）+ 真实覆盖提交（从零、两条 REQUIRED） | ≤ CNY 1.20 |
+| C3 | 题目→步骤→教学→返回（复用已覆盖 run 以省费） | ≤ CNY 0.60 |
+| C4 | 一张已知答案题图（人工确认读题） | ≤ CNY 0.40 |
+| C5 | Node Agent 一次真实多轮工具调用（专用测试任务） | ≤ CNY 0.50 |
+| 未知用量/失败预留 | 超时未知用量保守记账、人工重试从总额扣 | ≤ CNY 1.80 |
+| **整批上限（提案）** | | **CNY 5.00** |
 
-| 项 | 完成标志 |
-|---|---|
-| 预算决定（整批，含可选第三次评审） | 明确批准记录 + 账单/usage 一致 |
-| 真实 Clerk 登录、验证码、OAuth/SSO 确认 | 真实浏览器登录成功并落回新控制面板 |
-| 公开内容审核（真实知识树） | 审核通过 + 留痕 |
-| canary 教学/评审质量人工评价 | 反馈写入报告 |
-
-## LIVE / PRODUCTION 证据（必须本次真实）
-
-| 项 | 状态 |
-|---|---|
-| 真实千问两阶段 / 覆盖评审 live | **NOT RUN**（零真实调用，费用 CNY 0.00） |
-| 生产只读核验 | **NOT YET VERIFIED**（申请已提出，等待回答与端点配置） |
-| 部署与多用户验收 | **NOT PERFORMED** |
+规则：整批累计上限，不是每次 5 元；超限即停，不自动加钱/换模型/重试；评审启用与
+上线后持续费用分别征求；估计≠账单，有免费额度也记录实际 tokens 与原价估算。
+**请批准该整批预算（或调整金额/先批 C1+C2 子集）。**
 
 ## 下一步（等待用户回答，不空转）
 
-1. 用户答复生产只读核验申请（并配置端点或提供受保护执行环境）；
-2. 用户批准整批 canary 预算（含可选第三次评审）；
-3. 依次：只读核验 → canary（C1/C2 优先）→ 备份演练 → 受控部署 → 真实 Clerk 多用户验收。
+1. 批准整批 canary 预算（或 C1+C2 子集）；
+2. 提供受保护 SSH/Netlify/GitHub 访问以完成 SERVER_RUNTIME 与发布前控制面板盘点；
+3. 之后：canary → 备份/恢复演练 → 受控部署 → 真实 Clerk 多用户验收。
