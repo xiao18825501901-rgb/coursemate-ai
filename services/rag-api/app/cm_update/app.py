@@ -85,6 +85,11 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 "covered_items=excluded.covered_items,error=NULL,updated_at=excluded.updated_at",
                 (run_id, result.get('unit_id'), result.get('journey_id'), covered, now(), now()),
             )
+            if data.bridge_id:
+                db.execute(
+                    "UPDATE cmui_bridges SET delivery_unit_id=? WHERE id=? AND owner=?",
+                    (result.get('unit_id'), data.bridge_id, user['id']),
+                )
             event(run_id, 'coverage', {
                 'unit_id': result.get('unit_id'),
                 'covered': result.get('covered'),
@@ -726,6 +731,11 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         body=await request.json()
         return await remote('knowledge.assessment.abandon',user,{'course':cid,'session':session_id,'request_id':str(body.get('request_id',''))},request)
 
+    @r.get('/courses/{cid}/bridges')
+    async def bridges(cid:str,user:User,request:Request):
+        await course(user,cid,request)
+        return db.all('SELECT * FROM cmui_bridges WHERE owner=? AND course=? ORDER BY created_at DESC',(user['id'],cid))
+
     @r.post('/courses/{cid}/bridges',status_code=201)
     async def bridge(cid:str,data:BridgeCreate,user:User,request:Request):
         await course(user,cid,request)
@@ -736,8 +746,19 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         if data.node and not domain and not db.one('SELECT id FROM cmui_nodes WHERE id=? AND course=?',(data.node,cid)): raise HTTPException(404)
         old=db.one('SELECT * FROM cmui_bridges WHERE owner=? AND problem_message=? AND step=? AND question=?',(user['id'],data.problem_message,data.step,data.question))
         if old: return old
+        # Map the completed problem run into the V3 versioned problem ledger so
+        # the bridge carries verifiable ids; failure never blocks the bridge.
+        link={}
+        if domain:
+            try:
+                original=db.one('SELECT r.user_text FROM cmui_messages m JOIN cmui_runs r ON r.id=m.run WHERE m.id=?',(data.problem_message,))
+                steps=[{'number':x['number'],'title':x['title']} for x in solution_steps(m['text'])]
+                if original:
+                    link=await remote('knowledge.record_problem',user,{'course':cid,'run_id':str(m['run']),'question':original['user_text'],'steps':steps},request)
+            except HTTPException: pass
         bid=uid('bridge_')
-        db.execute('INSERT INTO cmui_bridges VALUES (?,?,?,?,?,?,?,?,?)',(bid,user['id'],cid,data.problem_message,data.step,data.question,data.node,'open',now(),))
+        db.execute('INSERT INTO cmui_bridges (id,owner,course,problem_message,step,question,node,status,created_at,teach_run,journey_id,spec_version,delivery_unit_id,problem_revision_id,solution_id,step_ids_json) VALUES (?,?,?,?,?,?,?,?,?,NULL,NULL,NULL,NULL,?,?,?)',
+            (bid,user['id'],cid,data.problem_message,data.step,data.question,data.node,'open',now(),link.get('problem_revision_id'),link.get('solution_id'),json.dumps(link.get('step_ids') or [],ensure_ascii=False)))
         return db.one('SELECT * FROM cmui_bridges WHERE id=?',(bid,))
 
     @r.patch('/bridges/{bid}/return')
@@ -889,6 +910,8 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                     c.execute("INSERT INTO cmui_learning(owner,node,progress) VALUES (?,?,'LEARNING') ON CONFLICT(owner,node) DO UPDATE SET progress=CASE WHEN progress='LEARNED' THEN progress ELSE 'LEARNING' END",(user['id'],data.node_id))
                 if v3_link is not None:
                     c.execute('INSERT INTO cmui_run_v3(run,workspace_id,journey_id,node_id,spec_version,created_at) VALUES (?,?,?,?,?,?)',(rid,v3_link['workspace_id'],v3_link['journey_id'],v3_link['node_id'],v3_link['spec_version'],now()))
+                    if data.bridge_id:
+                        c.execute('UPDATE cmui_bridges SET teach_run=?,journey_id=?,spec_version=? WHERE id=? AND owner=?',(rid,v3_link['journey_id'],v3_link['spec_version'],data.bridge_id,user['id']))
         except sqlite3.IntegrityError: raise HTTPException(409,'该对话已有任务正在生成，请先等待或停止') from None
         event(rid,'status',{'status':'queued'})
         task=asyncio.create_task(generate_run(rid,user,course_data,conv,sources,history,data,bridge_data,images,v3_link,spec_items))

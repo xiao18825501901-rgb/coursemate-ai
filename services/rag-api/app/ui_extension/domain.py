@@ -37,6 +37,7 @@ from app.errors import ApiError
 from app.learning.coverage_review import NullCoverageReviewer, CoverageReviewer
 from app.learning.orchestrator import LearningOrchestrator
 from app.learning.shell_delivery import submit_shell_delivery
+from app.learning.shell_problems import record_shell_problem
 from app.learning.models import (
     AssessmentAbandonInput,
     AssessmentAnswer,
@@ -1015,6 +1016,41 @@ class V3DomainAdapter:
             reviewer=self.coverage_reviewer,
         )
 
+    def _record_problem(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Map a completed shell problem run into the V3 problem ledger.
+
+        Records the original question as an immutable, content-hashed problem
+        revision and the completed solution steps as versioned V3 rows, so the
+        shell bridge can carry verifiable ids. Never regenerates an answer.
+        """
+
+        course_id = str(payload["course"])
+        run_id = str(payload.get("run_id") or "")
+        question = str(payload.get("question") or "").strip()
+        if not run_id or not question:
+            raise ApiError(422, "EMPTY_PROBLEM", "A problem run id and question are required.")
+        self._course_row(course_id, subject)
+        workspace = self._workspace_for_node(course_id, subject)
+        steps = []
+        for step in payload.get("steps") or []:
+            if not isinstance(step, dict) or not str(step.get("number") or "").isdigit():
+                raise ApiError(422, "INVALID_STEPS", "Solution steps must carry numeric ordinals.")
+            steps.append(
+                {
+                    "number": int(step["number"]),
+                    "title": str(step.get("title") or "")[:160],
+                    "content": str(step.get("content") or step.get("title") or "")[:20000],
+                }
+            )
+        return record_shell_problem(
+            self.database,
+            workspace_id=workspace["id"],
+            course_id=course_id,
+            question=question,
+            steps=steps,
+            operation_id=run_id,
+        )
+
     def _assessment_start(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
         if self.learning is None:
             raise ApiError(503, "V3_DISABLED", "The V3 learning engine is disabled.")
@@ -1193,6 +1229,7 @@ class V3DomainAdapter:
             "knowledge.assessment.submit",
             "knowledge.assessment.abandon",
             "knowledge.submit_delivery",
+            "knowledge.record_problem",
         }
         # The legacy history routes pass `course` (never `id`), so they need their
         # own boundary check rather than the `id`-shaped one below.
@@ -1252,6 +1289,8 @@ class V3DomainAdapter:
             return self._begin_learning(subject, payload)
         if operation == "knowledge.submit_delivery":
             return self._submit_delivery(subject, payload)
+        if operation == "knowledge.record_problem":
+            return self._record_problem(subject, payload)
         if operation == "knowledge.assessment.start":
             return self._assessment_start(subject, payload)
         if operation == "knowledge.assessment.view":

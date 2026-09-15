@@ -344,7 +344,9 @@ export class Learn extends React.Component {
                 const [saved, run] = await Promise.all([request('/conversations/' + cid), request('/runs/' + rid)]);
                 this.setLane('messages', lane, saved.messages);
                 this.setLane('partial', lane, run.status === 'completed' ? '' : run.partial_text);
-                this.setLane('status', lane, run.status === 'completed' ? (this.props.config.provider_mode === 'test' ? '已保存 · 本地合同测试' : '已保存 · 千问双阶段教学') : `${run.status} · ${run.error || ''}`);
+                const coverage = run.coverage;
+                const coverageLabel = coverage && coverage.status === 'submitted' ? (coverage.covered_items && JSON.parse(coverage.covered_items).length > 0 ? ' · 已计入覆盖' : ' · 覆盖待确认') : '';
+                this.setLane('status', lane, run.status === 'completed' ? (this.props.config.provider_mode === 'test' ? '已保存 · 本地合同测试' + coverageLabel : '已保存 · 千问双阶段教学' + coverageLabel) : `${run.status} · ${run.error || ''}`);
                 this.setLane('busy', lane, false);
                 this.setLane('run', lane, null);
             }

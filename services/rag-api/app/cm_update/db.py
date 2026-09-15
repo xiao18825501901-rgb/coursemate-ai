@@ -16,7 +16,7 @@ def uid(prefix: str = '') -> str:
 # Schema 3 adds cmui_run_v3, the cross-reference from a UI generation run to the
 # authoritative V3 learning journey it started. The bump is additive; initialize()
 # refuses to run against a newer version.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS cmui_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -183,6 +183,12 @@ class Database:
                 c.execute("ALTER TABLE cmui_runs ADD COLUMN lease_worker TEXT")
             if 'lease_heartbeat' not in run_columns:
                 c.execute("ALTER TABLE cmui_runs ADD COLUMN lease_heartbeat TEXT")
+            # Schema 5 amendment: the bridge's trace chain into the V3 ledgers.
+            bridge_columns = {r[1] for r in c.execute("PRAGMA table_info(cmui_bridges)")}
+            for column in ('teach_run','journey_id','spec_version','delivery_unit_id',
+                           'problem_revision_id','solution_id','step_ids_json'):
+                if column not in bridge_columns:
+                    c.execute(f"ALTER TABLE cmui_bridges ADD COLUMN {column} TEXT")
             c.execute("INSERT INTO cmui_meta VALUES ('schema_version',?) ON CONFLICT(key) DO UPDATE SET value=?",(str(SCHEMA_VERSION),str(SCHEMA_VERSION)))
 
     def all(self, sql, args=()):
