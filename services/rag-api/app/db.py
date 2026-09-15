@@ -17,9 +17,10 @@ V3_MIGRATIONS = (
     "019_scoped_publication_reviews.sql",
     "020_official_publication_resource_locks.sql",
     "021_model_call_budget_reservations.sql",
+    "022_shell_delivery_evidence.sql",
 )
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 21
+LATEST_V3_SCHEMA_VERSION = 22
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (

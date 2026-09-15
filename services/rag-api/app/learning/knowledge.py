@@ -357,7 +357,7 @@ class KnowledgeService:
                 "AND coverage.item_id=items.item_id "
                 "WHERE items.node_id=? AND items.spec_version=? "
                 "AND items.requirement='REQUIRED' AND coverage.validation_status IN "
-                "('VALIDATED','LEGACY_PRESERVED')",
+                "('VALIDATED','LEGACY_PRESERVED','REVIEWED')",
                 (workspace_id, node_id, spec_version),
             ).fetchone()[0]
         )

@@ -67,13 +67,43 @@ app/main.py:create_app()
 | `legacy.conversations` | 直接读原 `conversations` 表，按 `owner_user_id` + `course_id` 过滤 | 宿主新增路由使用 |
 | `legacy.conversation` | 直接读原 `conversations` / `messages`，返回真实正文与引用 | 宿主新增路由使用 |
 
-**覆盖记录的权威归属（本轮审计结论，有代码证据）**：
-`app/learning/knowledge.py:_atomic_learning` 只用 `teaching_delivery_evidence` 计算
-`covered_required` 与 `NOT_STARTED/LEARNING/LEARNED` 状态。新壳的自由文本两阶段教学
-**只写** journey 起步与 `cmui_run_v3` 交叉引用，**从不**写 delivery evidence，
-因此节点进度如实停留在 `NOT_STARTED`，直到通过 V3 `teach()` 产生真实覆盖。
-这满足"不重复生成一套答案、不伪造 LEARNED"的硬约束；REQUIRED 覆盖的唯一权威来源
-仍是 V3 `teach()`（`teaching_delivery_evidence` + `learning_coverage`）。
+**覆盖记录的权威归属（本轮闭环接线后，有代码与测试证据）**：
+`app/learning/knowledge.py:_atomic_learning` 用 `teaching_delivery_evidence` 计算
+`covered_required` 与 `NOT_STARTED/LEARNING/LEARNED`，计数的
+`validation_status` 集合为 `('VALIDATED','LEGACY_PRESERVED','REVIEWED')`
+（`VALIDATED`=计划式 `teach()`；`LEGACY_PRESERVED`=迁移 015 保留的旧行；
+`REVIEWED`=迁移 022 新增的**经评审的新壳自由文本交付**）。
+
+新壳两阶段教学现在走完整闭环（不重复生成答案、不伪造 LEARNED）：
+
+1. run 创建时先 `knowledge.begin_learning` 绑定用户/课程/workspace/journey/
+   node/spec 版本，并把该 Spec 的 REQUIRED items 作为 `spec_requirements` 交给
+   第一阶段规划（仍是自由文本 Prompt，不改为 JSON，不授予模型任何数据库权限）；
+2. 第二阶段正文只有在 run 的**条件式最终写入**（`status='completed'` 且 assistant
+   消息落库）之后才提交覆盖：`knowledge.submit_delivery` →
+   `app/learning/shell_delivery.submit_shell_delivery`，在**单个 RAG 事务**内写入
+   `teaching_units`（正文可恢复的 section）+ 每条确认 item 一条
+   `validation_status='REVIEWED'` 的 `teaching_delivery_evidence`
+   （`validation_reason='SHELL_COVERAGE_REVIEW_V1'`，content_hash 为 section 哈希）
+   + `learning_coverage`，并按同一规则把 journey 置为 LEARNING/LEARNED；
+3. **覆盖认定不由模型决定**：可注入的 `CoverageReviewer` 接口
+   （`app/learning/coverage_review.py`）返回确认的 item 列表——
+   `NullCoverageReviewer`（默认：不确认任何覆盖）、`DeterministicCoverageReviewer`
+   （本地/测试用规则：acceptance 全句必须出现在正文，生产被拒）、
+   模型评审器（文档化的收费第三次调用，**未实现且未授权运行**，见
+   `QWEN_LIVE_TWO_STAGE_REPORT.md` 费用说明）。未获评审确认时只保存教学单元，
+   不写任何证据，节点如实保持未覆盖；
+4. **失败/取消/截断/重复/闲聊不可能记账**：只有 claim 成功的 run 才提交；取消与
+   完成由数据库终态裁决；`teaching_units(journey_id, operation_id)` 唯一索引 +
+   UI 库 `cmui_delivery_submissions` 回执（Schema 4）保证跨库中断后重启恢复只重放
+   幂等记账、不重调 Provider；run 的 `coverage` 字段暴露回执。
+5. 新旧入口读取一致：`teach()` 的已覆盖集合同样计入 REVIEWED，已覆盖的 item
+   不再被旧入口重复教学。
+
+正反验收（从零覆盖、无预种证据）见
+`tests/test_ui_extension_coverage_submission.py`（7 项）：0/2→LEARNING、2/2→LEARNED、
+测评低分不影响 LEARNED、仅提关键词/失败/截断/取消不计、重放不重复、
+跨库中断恢复零 Provider 调用、错课程/旧 Spec/跨用户隔离、旧入口读到 REVIEWED。
 
 ### 管理员用真实资料生成、检查、发布官方知识树的最小路径（closure §五）
 

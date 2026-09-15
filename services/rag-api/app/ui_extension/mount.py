@@ -40,6 +40,24 @@ def ui_allowed_origins(settings: Settings) -> tuple[str, ...]:
     return (settings.web_origin,)
 
 
+def _coverage_reviewer(settings: Settings) -> object:
+    """Resolve the injected free-text coverage reviewer.
+
+    ``none`` (default) never claims coverage; ``deterministic`` is local/test
+    only and refused in production; ``model`` is the documented paid option and
+    is refused until implemented and billing is authorized. The same variable
+    the site already uses for billable model calls gates the paid reviewer.
+    """
+
+    from app.learning.coverage_review import resolve_coverage_reviewer
+
+    return resolve_coverage_reviewer(
+        "production" if settings.app_env == "production" else "development",
+        os.getenv("CMUI_COVERAGE_REVIEWER"),
+        allow_billable=os.getenv("CMUI_ALLOW_BILLABLE", "false").lower() == "true",
+    )
+
+
 def _ui_settings(settings: Settings) -> object:
     """Build the `cm_update` settings from the host configuration.
 
@@ -92,7 +110,11 @@ def _ui_settings(settings: Settings) -> object:
 
 
 def mount_ui_extension(
-    host_app: FastAPI, *, mount_path: str = MOUNT_PATH, provider: object = None
+    host_app: FastAPI,
+    *,
+    mount_path: str = MOUNT_PATH,
+    provider: object = None,
+    coverage_reviewer: object = None,
 ) -> object | None:
     """Attach the new UI to an already-built host application.
 
@@ -121,6 +143,7 @@ def mount_ui_extension(
         learning=learning,
         retriever=retriever,
         task_agent_url=os.getenv("UI_TASK_AGENT_URL", settings.ui_task_agent_url),
+        coverage_reviewer=coverage_reviewer or _coverage_reviewer(settings),
     )
     ui_settings = _ui_settings(settings)
     from app.cm_update.integration import install_ui_extension

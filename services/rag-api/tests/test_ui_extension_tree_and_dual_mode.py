@@ -225,7 +225,7 @@ def test_dual_mode_problem_step_bridge_teach_return_with_db_facts(client: TestCl
         journey = connection.execute(
             "SELECT * FROM learning_journeys WHERE id=?", (link["journey_id"],)
         ).fetchone()
-    assert journey["status"] == "LEARNING"
+    assert journey["status"] == "LEARNED"
     assert journey["node_id"] == tree_ids["learned"]
 
     # Return closes the bridge; the layout no longer exposes it.

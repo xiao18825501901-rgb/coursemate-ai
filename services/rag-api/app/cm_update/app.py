@@ -57,6 +57,95 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         cutoff=str(time.time()-lease_grace_seconds)
         db.execute("UPDATE cmui_runs SET status='failed',error='SERVER_RESTARTED',updated_at=? WHERE status IN ('queued','planning','generating') AND (lease_heartbeat IS NULL OR CAST(lease_heartbeat AS REAL)<?)",(now(),cutoff))
 
+    async def submit_delivery(*, run_id, user, conv, data, v3_link, spec_items, content):
+        """Submit a completed teaching into the V3 evidence ledger.
+
+        Bookkeeping only: never calls a provider. The same run id is the
+        operation id, and `teaching_units(journey_id, operation_id)` is unique,
+        so a retry after a cross-database interruption replays the same rows.
+        Failures are recorded on the receipt without failing the run; the
+        teaching stays visible either way.
+        """
+
+        if domain is None or v3_link is None or not content.strip():
+            return
+        payload = {
+            'course': conv['course'], 'node': v3_link['node_id'],
+            'spec_version': v3_link['spec_version'], 'run_id': run_id,
+            'content': content, 'bridge_id': data.bridge_id,
+        }
+        try:
+            result = await domain.call('knowledge.submit_delivery', user['id'], payload, '')
+            covered = json.dumps(result.get('covered') or [], ensure_ascii=False)
+            db.execute(
+                "INSERT INTO cmui_delivery_submissions(run,unit_id,journey_id,status,"
+                "covered_items,created_at,updated_at) VALUES(?,?,?,'submitted',?,?,?) "
+                "ON CONFLICT(run) DO UPDATE SET unit_id=excluded.unit_id,"
+                "journey_id=excluded.journey_id,status='submitted',"
+                "covered_items=excluded.covered_items,error=NULL,updated_at=excluded.updated_at",
+                (run_id, result.get('unit_id'), result.get('journey_id'), covered, now(), now()),
+            )
+            event(run_id, 'coverage', {
+                'unit_id': result.get('unit_id'),
+                'covered': result.get('covered'),
+                'progress': result.get('progress'),
+            })
+        except Exception as error:
+            db.execute(
+                "INSERT INTO cmui_delivery_submissions(run,status,error,created_at,updated_at) "
+                "VALUES(?,'failed',?,?,?) ON CONFLICT(run) DO UPDATE SET status='failed',"
+                "error=excluded.error,updated_at=excluded.updated_at",
+                (run_id, str(error)[:500], now(), now()),
+            )
+
+    async def recover_delivery_submissions():
+        """Restart recovery: resume interrupted coverage bookkeeping.
+
+        Only completed runs whose receipt row is missing are retried - the
+        process died between the final write and the receipt. The retry replays
+        the same operation id and never touches the provider; a run whose
+        submission genuinely failed keeps its recorded failure.
+        """
+
+        if domain is None:
+            return
+        rows = db.all(
+            "SELECT r.id AS run, r.conversation, v.workspace_id, v.journey_id, "
+            "v.node_id, v.spec_version FROM cmui_runs r "
+            "JOIN cmui_run_v3 v ON v.run=r.id "
+            "LEFT JOIN cmui_delivery_submissions s ON s.run=r.id "
+            "WHERE r.status='completed' AND s.run IS NULL"
+        )
+        for row in rows:
+            try:
+                message = db.one("SELECT text FROM cmui_messages WHERE run=?", (row['run'],))
+                conv = db.one('SELECT * FROM cmui_conversations WHERE id=?', (row['conversation'],))
+                owner = db.one('SELECT owner FROM cmui_runs WHERE id=?', (row['run'],))
+                if not message or not conv or not owner:
+                    continue
+                payload = {
+                    'course': conv['course'], 'node': row['node_id'],
+                    'spec_version': row['spec_version'], 'run_id': row['run'],
+                    'content': message['text'],
+                }
+                result = await domain.call('knowledge.submit_delivery', owner['owner'], payload, '')
+                covered = json.dumps(result.get('covered') or [], ensure_ascii=False)
+                db.execute(
+                    "INSERT INTO cmui_delivery_submissions(run,unit_id,journey_id,status,"
+                    "covered_items,created_at,updated_at) VALUES(?,?,?,'submitted',?,?,?) "
+                    "ON CONFLICT(run) DO UPDATE SET unit_id=excluded.unit_id,"
+                    "journey_id=excluded.journey_id,status='submitted',"
+                    "covered_items=excluded.covered_items,error=NULL,updated_at=excluded.updated_at",
+                    (row['run'], result.get('unit_id'), result.get('journey_id'), covered, now(), now()),
+                )
+            except Exception as error:
+                db.execute(
+                    "INSERT INTO cmui_delivery_submissions(run,status,error,created_at,updated_at) "
+                    "VALUES(?,'failed',?,?,?) ON CONFLICT(run) DO UPDATE SET status='failed',"
+                    "error=excluded.error,updated_at=excluded.updated_at",
+                    (row['run'], str(error)[:500], now(), now()),
+                )
+
     @asynccontextmanager
     async def lifespan(app):
         # Only runs with provably dead owners are reclaimed. A sibling process
@@ -64,6 +153,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         # must never kill the first worker's in-flight run (its model cost has
         # already been spent, so killing it would waste money AND lose the answer).
         reclaim_orphaned_runs()
+        await recover_delivery_submissions()
         yield
         for task in list(jobs.values()): task.cancel()
         if jobs: await asyncio.gather(*jobs.values(),return_exceptions=True)
@@ -658,11 +748,13 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         if not db.execute("UPDATE cmui_bridges SET status='returned' WHERE id=? AND owner=?",(bid,user['id'])): raise HTTPException(404)
         return db.one('SELECT * FROM cmui_bridges WHERE id=?',(bid,))
 
-    async def generate_run(run_id,user,course_data,conv,sources,history,data,bridge_data,images=None):
+    async def generate_run(run_id,user,course_data,conv,sources,history,data,bridge_data,images=None,v3_link=None,spec_items=None):
         output=''; usages=[]; last_beat=0.0
         try:
             heartbeat(run_id)
-            async for item in model.generate(course_data,data.text,{k:user[k] for k in ['language','timezone','bio']},sources,history,conv['lane'],bridge_data,**({'attachments':images} if images else {})):
+            generate_kwargs={'attachments':images} if images else {}
+            if spec_items: generate_kwargs['spec_items']=spec_items
+            async for item in model.generate(course_data,data.text,{k:user[k] for k in ['language','timezone','bio']},sources,history,conv['lane'],bridge_data,**generate_kwargs):
                 # A cancel from ANOTHER process cannot reach this loop through the
                 # local job map; the database is the coordination point. The row's
                 # status is re-read so a cancelled run stops promptly instead of
@@ -703,6 +795,14 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 else:
                     raise asyncio.CancelledError()
             event(run_id,'done',{'message_id':message_id,'citations':citations,'provider_mode':cfg.provider_mode})
+            # A run that claimed 'completed' and persisted its message may now
+            # contribute coverage. Submission is bookkeeping only: it never
+            # calls a provider, and a cancel after the claim cannot happen
+            # because the conditional write above owns the terminal state.
+            await submit_delivery(
+                run_id=run_id, user=user, conv=conv, data=data,
+                v3_link=v3_link, spec_items=spec_items, content=output,
+            )
         except asyncio.CancelledError:
             # Terminal already? Keep whatever state won; otherwise mark cancelled.
             db.execute("UPDATE cmui_runs SET status='cancelled',error=CASE WHEN status IN ('queued','planning','generating') THEN 'CANCELLED' ELSE error END,updated_at=? WHERE id=? AND status NOT IN ('completed','failed')",(now(),run_id))
@@ -768,13 +868,16 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         if data.node_id and not domain:
             if not db.one('SELECT id FROM cmui_nodes WHERE id=? AND course=?',(data.node_id,conv['course'])): raise HTTPException(404)
         v3_link=None
+        spec_items=None
         if data.node_id and domain:
-            # Start (or continue) the authoritative V3 learning journey for this
-            # node BEFORE the run rows exist, so a missing node never leaves a
-            # queued run behind. Coverage is NOT claimed here: V3 teach() owns
-            # REQUIRED-item coverage, and the journey stays LEARNING forever until
-            # real delivery evidence exists.
+            # Bind the run to the authoritative V3 learning journey BEFORE the
+            # run rows exist, so a missing node never leaves a queued run behind.
+            # Coverage is claimed only after completion through the reviewed
+            # delivery submission (knowledge.submit_delivery); the spec's
+            # REQUIRED items are carried into stage-one planning as requirements,
+            # never as database authority for the model.
             v3_link=await remote('knowledge.begin_learning',user,{'course':conv['course'],'node':data.node_id},request)
+            spec_items=v3_link.get('required_items') or None
         rid=uid('run_')
         try:
             with db.connect(True) as c:
@@ -788,7 +891,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                     c.execute('INSERT INTO cmui_run_v3(run,workspace_id,journey_id,node_id,spec_version,created_at) VALUES (?,?,?,?,?,?)',(rid,v3_link['workspace_id'],v3_link['journey_id'],v3_link['node_id'],v3_link['spec_version'],now()))
         except sqlite3.IntegrityError: raise HTTPException(409,'该对话已有任务正在生成，请先等待或停止') from None
         event(rid,'status',{'status':'queued'})
-        task=asyncio.create_task(generate_run(rid,user,course_data,conv,sources,history,data,bridge_data,images))
+        task=asyncio.create_task(generate_run(rid,user,course_data,conv,sources,history,data,bridge_data,images,v3_link,spec_items))
         jobs[rid]=task
         return {'id':rid,'status':'queued'}
 
@@ -797,6 +900,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         row=owned_run(user,rid)
         conv=conversation(user,row['conversation']); await course(user,conv['course'],request)
         row['citations']=json.loads(row['citations']); row['usage']=json.loads(row['usage'])
+        row['coverage']=db.one('SELECT unit_id,journey_id,status,covered_items,error FROM cmui_delivery_submissions WHERE run=?',(rid,))
         return row
 
     @r.get('/runs/{rid}/events')

@@ -16,7 +16,7 @@ class QwenProvider:
         self.transport=transport
         self.calls=[]
 
-    def planner_messages(self, course: dict, text: str, profile: dict, sources: list, history: list, lane: str, bridge=None):
+    def planner_messages(self, course: dict, text: str, profile: dict, sources: list, history: list, lane: str, bridge=None, spec_items=None):
         template=SOURCE_TEMPLATE.read_text(encoding='utf-8')
         instruction=('你要为下一次 qwen3.8-max 调用撰写一份完整的教学 Prompt。直接输出 Prompt 正文，'
             '不要输出 JSON，不要回答学生问题，不要写内部推理记录。以以下 CS3481 原始 Word 模板为基础，'
@@ -24,10 +24,13 @@ class QwenProvider:
             '根据当前实际课程替换 CS3481 专有课程名；没有资料的部分不要假装读过。'
             '解题请使用 ## Step 1 标题、## Step 2 标题等稳定的步骤标题；模糊图像或缺条件不得猜。'
             '如果是普通寒暄，生成自然回应指令，不强制检索拒答；如果是题目模式，要求给完整参考解法和编号步骤。'
+            '若提供教学要求（spec_requirements），围绕其中未覆盖的 REQUIRED 项组织讲解；'
+            '不要声称已完成覆盖，也不要输出覆盖结论或评分。'
             '最终 Prompt 要能直接交给下一次千问调用执行。\n\n【原始模板全文】\n'+template)
         payload={'course':course['name'],'code':course['code'],'mode':lane,'student_preferences':profile,
             'course_requirements':course.get('requirements',''),'student_question':text,
-            'materials':sources,'recent_conversation':history[-12:],'problem_bridge':bridge}
+            'materials':sources,'recent_conversation':history[-12:],'problem_bridge':bridge,
+            'spec_requirements':spec_items or []}
         return [{'role':'system','content':instruction},{'role':'user','content':json.dumps(payload,ensure_ascii=False)}]
 
     def attach_images(self, messages: list, images: list) -> None:
@@ -104,10 +107,10 @@ class QwenProvider:
         except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
             raise ProviderError('PROVIDER_TIMEOUT_OR_NETWORK') from None
 
-    async def generate(self, course, text, profile, sources, history, lane, bridge=None, *, attachments=None):
+    async def generate(self, course, text, profile, sources, history, lane, bridge=None, *, attachments=None, spec_items=None):
         yield {'kind':'status','status':'planning','label':'千问正在根据 CS3481 模板撰写教学 Prompt'}
         prompt=''
-        planner=self.planner_messages(course,text,profile,sources,history,lane,bridge)
+        planner=self.planner_messages(course,text,profile,sources,history,lane,bridge,spec_items)
         self.attach_images(planner, attachments or [])
         async for item in self.stream(planner,self.cfg.prompt_tokens):
             if 'text' in item: prompt+=item['text']
@@ -142,7 +145,7 @@ class TestProvider:
     bridge context. It never writes learning state and never pretends to be Qwen.
     """
 
-    async def generate(self, course, text, profile, sources, history, lane, bridge=None, *, attachments=None):
+    async def generate(self, course, text, profile, sources, history, lane, bridge=None, *, attachments=None, spec_items=None):
         yield {'kind': 'status', 'status': 'planning', 'label': '本地测试 Provider：撰写教学 Prompt'}
         yield {'kind': 'prompt', 'text': '本地测试教学 Prompt（非千问实测）：逐步讲解，保留英文术语，引用材料标记。'}
         yield {'kind': 'status', 'status': 'generating', 'label': '本地测试 Provider：生成讲解'}

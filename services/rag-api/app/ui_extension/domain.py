@@ -34,7 +34,9 @@ from app.config import Settings
 from app.course_access import require_course_access
 from app.db import Database
 from app.errors import ApiError
+from app.learning.coverage_review import NullCoverageReviewer, CoverageReviewer
 from app.learning.orchestrator import LearningOrchestrator
+from app.learning.shell_delivery import submit_shell_delivery
 from app.learning.models import (
     AssessmentAbandonInput,
     AssessmentAnswer,
@@ -109,6 +111,7 @@ class V3DomainAdapter:
         task_agent_url: str = "",
         task_agent_timeout: float = 60.0,
         task_agent_credential: str = "",
+        coverage_reviewer: CoverageReviewer | None = None,
     ) -> None:
         self.database = database
         self.settings = settings
@@ -119,6 +122,7 @@ class V3DomainAdapter:
         self.task_agent_url = task_agent_url.rstrip("/")
         self.task_agent_timeout = task_agent_timeout
         self.task_agent_credential = task_agent_credential
+        self.coverage_reviewer = coverage_reviewer or NullCoverageReviewer()
 
     # ------------------------------------------------------------------ helpers
 
@@ -932,13 +936,84 @@ class V3DomainAdapter:
         node = self.learning.node(workspace, node_id)  # 404/409 with real codes
         with self.database.connect() as connection:
             journey = LearningOrchestrator.journey(connection, workspace["id"], node)
+            spec = connection.execute(
+                "SELECT content_json FROM teaching_specs WHERE node_id=? AND version=?",
+                (node_id, journey["spec_version"]),
+            ).fetchone()
+            items = json.loads(spec["content_json"]) if spec is not None else []
         return {
             "journey_id": journey["id"],
             "node_id": node_id,
-            "spec_version": node.get("spec_version"),
+            "spec_version": journey["spec_version"],
             "workspace_id": workspace["id"],
             "status": journey["status"],
+            "required_items": [
+                {
+                    "item_id": item.get("item_id"),
+                    "requirement": item.get("requirement"),
+                    "objective": item.get("objective"),
+                    "acceptance": item.get("acceptance"),
+                }
+                for item in items
+                if item.get("requirement") == "REQUIRED"
+            ],
         }
+
+    def _submit_delivery(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Record a completed free-text teaching into the V3 evidence ledger.
+
+        Called by the shell only after the run's conditional final write has
+        claimed ``completed`` and the assistant message is persisted, so a
+        failed, cancelled or truncated run can never reach this point. Coverage
+        is decided by the injected reviewer; without a confirmed reviewer no
+        evidence is written and the node honestly stays uncovered.
+        """
+
+        if self.learning is None:
+            raise ApiError(503, "V3_DISABLED", "The V3 learning engine is disabled.")
+        course_id = str(payload["course"])
+        node_id = str(payload["node"])
+        run_id = str(payload.get("run_id") or "")
+        content = str(payload.get("content") or "").strip()
+        if not run_id or not content:
+            raise ApiError(422, "EMPTY_DELIVERY", "A run id and non-empty teaching content are required.")
+        self._course_row(course_id, subject)
+        workspace = self._workspace_for_node(course_id, subject)
+        node = self.learning.node(workspace, node_id)  # 404/409 with real codes
+        with self.database.connect() as connection:
+            journey = LearningOrchestrator.journey(connection, workspace["id"], node)
+            spec_version = int(journey["spec_version"])
+        if int(payload.get("spec_version") or 0) != spec_version:
+            raise ApiError(
+                422,
+                "STALE_SPEC",
+                "The teaching spec changed since this run started; no coverage was recorded.",
+            )
+        with self.database.connect() as connection:
+            spec = connection.execute(
+                "SELECT content_json FROM teaching_specs WHERE node_id=? AND version=?",
+                (node_id, spec_version),
+            ).fetchone()
+        items = json.loads(spec["content_json"]) if spec is not None else []
+        return submit_shell_delivery(
+            self.database,
+            workspace_id=workspace["id"],
+            journey_id=journey["id"],
+            node=node,
+            spec_version=spec_version,
+            items=items,
+            content=content,
+            operation_id=run_id,
+            provenance={
+                "run_id": run_id,
+                "bridge_id": payload.get("bridge_id"),
+                "course_id": course_id,
+                "reviewer": getattr(
+                    self.coverage_reviewer, "__class__", type(self.coverage_reviewer)
+                ).__name__,
+            },
+            reviewer=self.coverage_reviewer,
+        )
 
     def _assessment_start(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
         if self.learning is None:
@@ -1117,6 +1192,7 @@ class V3DomainAdapter:
             "knowledge.assessment.view",
             "knowledge.assessment.submit",
             "knowledge.assessment.abandon",
+            "knowledge.submit_delivery",
         }
         # The legacy history routes pass `course` (never `id`), so they need their
         # own boundary check rather than the `id`-shaped one below.
@@ -1174,6 +1250,8 @@ class V3DomainAdapter:
             return self._knowledge_assessment(subject, payload)
         if operation == "knowledge.begin_learning":
             return self._begin_learning(subject, payload)
+        if operation == "knowledge.submit_delivery":
+            return self._submit_delivery(subject, payload)
         if operation == "knowledge.assessment.start":
             return self._assessment_start(subject, payload)
         if operation == "knowledge.assessment.view":

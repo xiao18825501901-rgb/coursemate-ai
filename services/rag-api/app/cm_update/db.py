@@ -16,7 +16,7 @@ def uid(prefix: str = '') -> str:
 # Schema 3 adds cmui_run_v3, the cross-reference from a UI generation run to the
 # authoritative V3 learning journey it started. The bump is additive; initialize()
 # refuses to run against a newer version.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS cmui_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -133,6 +133,13 @@ CREATE TABLE IF NOT EXISTS cmui_run_v3 (
  workspace_id TEXT NOT NULL, journey_id TEXT NOT NULL,
  node_id TEXT NOT NULL, spec_version INTEGER NOT NULL,
  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS cmui_delivery_submissions (
+ run TEXT PRIMARY KEY REFERENCES cmui_runs(id) ON DELETE CASCADE,
+ unit_id TEXT, journey_id TEXT, status TEXT NOT NULL
+  CHECK(status IN ('submitted','failed')),
+ covered_items TEXT NOT NULL DEFAULT '[]', error TEXT,
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 '''
 

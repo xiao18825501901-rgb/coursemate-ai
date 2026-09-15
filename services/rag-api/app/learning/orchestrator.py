@@ -1488,7 +1488,7 @@ class LearningOrchestrator:
                     for r in db.execute(
                         "SELECT DISTINCT item_id FROM teaching_delivery_evidence "
                         "WHERE journey_id=? AND validation_status IN "
-                        "('VALIDATED','LEGACY_PRESERVED')",
+                        "('VALIDATED','LEGACY_PRESERVED','REVIEWED')",
                         (journey["id"],),
                     )
                 }
@@ -1757,7 +1757,7 @@ class LearningOrchestrator:
                 for r in db.execute(
                     "SELECT DISTINCT item_id FROM teaching_delivery_evidence "
                     "WHERE journey_id=? AND validation_status IN "
-                    "('VALIDATED','LEGACY_PRESERVED')",
+                    "('VALIDATED','LEGACY_PRESERVED','REVIEWED')",
                     (journey_id,),
                 )
             }
