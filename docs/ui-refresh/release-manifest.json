@@ -1,0 +1,49 @@
+{
+  "manifest_version": 1,
+  "generated_at": "2026-09-15",
+  "note": "Machine-readable summary generated from the current working tree; external statuses are only updated by real user decisions, native approval receipts and access verification - never by report text.",
+  "release": {
+    "branch": "feature/dsh-ui-refresh-integration",
+    "head_at_generation": "a244654",
+    "frozen_release_sha": null,
+    "schemas": { "rag": 22, "agent": 1, "ui": 5 },
+    "domain_operations": 28
+  },
+  "reviewer": {
+    "default": "none",
+    "modes": ["none", "deterministic", "model"],
+    "deterministic": { "status": "test_only", "production_forbidden": true },
+    "model": {
+      "status": "implemented_contract_tested_not_enabled",
+      "enabled": false,
+      "billing_required": true,
+      "policy_version": "SHELL_COVERAGE_REVIEW_V1",
+      "notes": "Independent default-off third call over the site's single Qwen credential; verdicts are candidates, server validates quotes against the saved body; enabling requires a separate paid approval."
+    }
+  },
+  "build_gate": {
+    "preflight": "scripts/preflight_release_build.mjs",
+    "verify": "scripts/verify_release_build.mjs",
+    "wired_in": "netlify.toml build command",
+    "production_readonly_check": "scripts/production_readonly_check.mjs"
+  },
+  "test_scope": {
+    "rag_api_full": { "count": 486, "when": "2026-09-15 full run" },
+    "reviewer_contract_tests": 9,
+    "schema_compat_tests": 5,
+    "coverage_closure_tests": 8,
+    "bridge_trace_tests": 5,
+    "web_unit": 55,
+    "agent_unit": 66,
+    "browser_shell": 17,
+    "legacy_e2e": { "coursemate": 4, "learning": 3 }
+  },
+  "external_status": {
+    "LIVE_CANARY_BUDGET": "NOT_APPROVED",
+    "PRODUCTION_READ_ACCESS": "NOT_YET_VERIFIED",
+    "PRODUCTION_READ_APPROVAL": "REQUESTED_PENDING_USER_RESPONSE",
+    "PRODUCTION_WRITE_APPROVAL": "NOT_APPROVED",
+    "PUSH_AND_PUBLISH_APPROVAL": "NOT_APPROVED",
+    "ONGOING_MODEL_SPEND_APPROVAL": "NOT_APPROVED"
+  }
+}

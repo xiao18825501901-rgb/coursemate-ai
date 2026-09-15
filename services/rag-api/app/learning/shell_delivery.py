@@ -5,28 +5,36 @@ The refreshed shell's two-stage flow ends with persisted free-text content in
 reviewer-confirmed delivery into the authoritative records:
 
 * one ``teaching_units`` row (workflow ``TEACHING``) whose content_json carries
-  the actual second-stage body in a section, so the text stays recoverable;
-* one ``teaching_delivery_evidence`` row per confirmed REQUIRED item with
+  the actual second-stage body in a section, so the text stays recoverable, and
+  whose provenance persists the full review outcome (reviewer, policy version,
+  per-item verdicts and error state);
+* one ``teaching_delivery_evidence`` row per SERVER-VALIDATED item with
   ``validation_status='REVIEWED'`` (schema 022) and the section content hash;
 * a ``learning_coverage`` row and a consistent journey status update
   (LEARNING / LEARNED), recomputed the same way the plan-based teach() does.
 
+The reviewer only proposes candidates. Before any evidence is written the
+server checks, for every ``covered`` verdict: the item exists in the frozen
+spec passed in, the verdict's evidence quote appears verbatim in the saved
+body, and the item is not already covered in this journey.
+
 Idempotency: ``operation_id`` is the stable cmui run id and
 ``teaching_units(journey_id, operation_id)`` is unique, so a retry after a
-cross-database interruption replays the same bookkeeping and never touches the
-provider again. No evidence is ever written for failed, cancelled or truncated
-runs because the caller only invokes this after the run's conditional final
-write has claimed ``completed``.
+cross-database interruption replays the same bookkeeping and never calls the
+teaching or reviewing model again. No evidence is ever written for failed,
+cancelled or truncated runs because the caller only invokes this after the
+run's conditional final write has claimed ``completed``.
 """
 
 from __future__ import annotations
 
 import hashlib
+import re
 import sqlite3
 import uuid
 from typing import Any
 
-from app.learning.coverage_review import CoverageReviewer
+from app.learning.coverage_review import CoverageReviewer, ReviewOutcome
 from app.learning.orchestrator import encode
 
 SECTION_ID = "teaching"
@@ -85,7 +93,35 @@ def _replay(
     }
 
 
-def submit_shell_delivery(
+def _server_validate(
+    outcome: ReviewOutcome,
+    required: list[dict[str, Any]],
+    content: str,
+) -> list[str]:
+    """Server-side confirmation of the reviewer's candidate verdicts.
+
+    A ``covered`` verdict only counts when its evidence quote exists verbatim
+    in the saved body (whitespace-normalised) and the item is in the frozen
+    spec passed in. Uncertain, partial, refusals, out-of-scope ids and quote
+    mismatches never write coverage.
+    """
+
+    if outcome.status != "completed":
+        return []
+    normalized = re.sub(r"\s+", " ", content or "")
+    confirmed: list[str] = []
+    for item in required:
+        item_id = str(item["item_id"])
+        verdict = outcome.verdicts.get(item_id)
+        if not verdict or verdict.get("decision") != "covered":
+            continue
+        quote = re.sub(r"\s+", " ", str(verdict.get("evidence_quote") or "")).strip()
+        if quote and quote in normalized:
+            confirmed.append(item_id)
+    return confirmed
+
+
+async def submit_shell_delivery(
     database: Any,
     *,
     workspace_id: str,
@@ -109,13 +145,21 @@ def submit_shell_delivery(
             (journey_id, operation_id),
         ).fetchone()
         if existing is not None:
+            # The review was already persisted with the unit: replay the saved
+            # bookkeeping and never call a model again.
             return _replay(connection, journey_id, operation_id, required_ids)
 
-    confirmed = [
-        str(item["item_id"])
-        for item in required
-        if item["item_id"] in reviewer.review(required, content, provenance)
-    ]
+    # The review runs on the already-saved body, outside any write transaction.
+    outcome = await reviewer.review(
+        required,
+        content,
+        {
+            **provenance,
+            "spec_version": spec_version,
+            "node_id": node["id"],
+        },
+    )
+    confirmed = _server_validate(outcome, required, content)
     # Evidence is immutable and coverage counts distinct items: never record a
     # second confirmation for an item this journey already covered.
     with database.connect() as connection:
@@ -153,6 +197,14 @@ def submit_shell_delivery(
                             "spec_hash": node.get("spec_hash"),
                             "node_id": node["id"],
                             "spec_version": spec_version,
+                            "review": {
+                                "status": outcome.status,
+                                "reviewer": outcome.reviewer,
+                                "policy_version": outcome.policy_version,
+                                "verdicts": outcome.verdicts,
+                                "error": outcome.error,
+                                "confirmed": confirmed,
+                            },
                         }
                     ),
                 ),
@@ -200,4 +252,9 @@ def submit_shell_delivery(
         "workspace_id": workspace_id,
         "journey_id": journey_id,
         "spec_version": spec_version,
+        "review": {
+            "status": outcome.status,
+            "reviewer": outcome.reviewer,
+            "error": outcome.error,
+        },
     }

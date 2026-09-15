@@ -73,6 +73,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             'course': conv['course'], 'node': v3_link['node_id'],
             'spec_version': v3_link['spec_version'], 'run_id': run_id,
             'content': content, 'bridge_id': data.bridge_id,
+            'question': data.text,
         }
         try:
             result = await domain.call('knowledge.submit_delivery', user['id'], payload, '')

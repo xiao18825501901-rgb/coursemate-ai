@@ -44,9 +44,10 @@ def _coverage_reviewer(settings: Settings) -> object:
     """Resolve the injected free-text coverage reviewer.
 
     ``none`` (default) never claims coverage; ``deterministic`` is local/test
-    only and refused in production; ``model`` is the documented paid option and
-    is refused until implemented and billing is authorized. The same variable
-    the site already uses for billable model calls gates the paid reviewer.
+    only and refused in production; ``model`` is the production reviewer: one
+    independent, default-off third call over the site's single Qwen credential,
+    enabled only when billing is authorized. The billable gate is checked
+    before any request is built.
     """
 
     from app.learning.coverage_review import resolve_coverage_reviewer
@@ -55,6 +56,13 @@ def _coverage_reviewer(settings: Settings) -> object:
         "production" if settings.app_env == "production" else "development",
         os.getenv("CMUI_COVERAGE_REVIEWER"),
         allow_billable=os.getenv("CMUI_ALLOW_BILLABLE", "false").lower() == "true",
+        base_url=os.getenv("CMUI_QWEN_BASE_URL") or (settings.v3_model_base_url or ""),
+        api_key=os.getenv("CMUI_QWEN_API_KEY")
+        or (settings.v3_model_api_key.get_secret_value() if settings.v3_model_api_key else ""),
+        model=os.getenv("CMUI_QWEN_MODEL") or settings.v3_model,
+        timeout=float(
+            os.getenv("CMUI_MODEL_TIMEOUT", str(settings.v3_model_timeout_seconds))
+        ),
     )
 
 

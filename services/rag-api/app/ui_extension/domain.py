@@ -960,7 +960,7 @@ class V3DomainAdapter:
             ],
         }
 
-    def _submit_delivery(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _submit_delivery(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Record a completed free-text teaching into the V3 evidence ledger.
 
         Called by the shell only after the run's conditional final write has
@@ -996,7 +996,7 @@ class V3DomainAdapter:
                 (node_id, spec_version),
             ).fetchone()
         items = json.loads(spec["content_json"]) if spec is not None else []
-        return submit_shell_delivery(
+        return await submit_shell_delivery(
             self.database,
             workspace_id=workspace["id"],
             journey_id=journey["id"],
@@ -1009,6 +1009,7 @@ class V3DomainAdapter:
                 "run_id": run_id,
                 "bridge_id": payload.get("bridge_id"),
                 "course_id": course_id,
+                "student_question": str(payload.get("question") or "")[:2000],
                 "reviewer": getattr(
                     self.coverage_reviewer, "__class__", type(self.coverage_reviewer)
                 ).__name__,
@@ -1288,7 +1289,7 @@ class V3DomainAdapter:
         if operation == "knowledge.begin_learning":
             return self._begin_learning(subject, payload)
         if operation == "knowledge.submit_delivery":
-            return self._submit_delivery(subject, payload)
+            return await self._submit_delivery(subject, payload)
         if operation == "knowledge.record_problem":
             return self._record_problem(subject, payload)
         if operation == "knowledge.assessment.start":
