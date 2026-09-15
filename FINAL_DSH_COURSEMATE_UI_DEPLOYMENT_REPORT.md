@@ -206,7 +206,7 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 
 **状态：`NOT RUN`。真实千问调用次数 0，实际费用 CNY 0.00。**
 
-原因：真实付费调用需要授权，而本会话的批准提示被禁用（§0.2）。
+原因：真实付费调用需要预算批准，而本会话尚未收到付费批准（审批通道为 ask 且已验证可用，见 §0.2）。
 
 * 两阶段链路的 HTTP 契约由 `MockTransport` 覆盖（2 次调用、Word 全文入第一阶段、
   生成的 Prompt 入第二阶段、截断不进入第二阶段、`allow_billable=False` 时零出网请求）。
@@ -255,7 +255,10 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 
 ### 6.1 数据与恢复单元（已备份工具化，未在生产执行）
 
-* 原 RAG `rag.sqlite3`（Schema 21）与 Agent 库 **Schema 未变**：没有新增表、列或迁移文件。
+* 原 RAG `rag.sqlite3`（Schema 21 → **22**）：一个真实迁移
+  `022_shell_delivery_evidence.sql`（证据表 12 步重建 + `REVIEWED` 状态 + 作用域触发器重写 +
+  `teaching_units(journey_id, operation_id)` 唯一索引；列未增删改）。
+  Agent 库 Schema 1 不变（仅加生产启动守卫）。
 * 新增数据在**独立文件** `<CMUI_DATA_DIR>/ui.sqlite3`（**Schema 5，27 张 `cmui_*` 表**，
   含 `cmui_run_v3`/`cmui_delivery_submissions` 交叉引用与回执、`cmui_runs` 租约列、
   `cmui_bridges` 的 V3 追溯列），
@@ -289,7 +292,7 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 5. 最小回滚是 `UI_EXTENSION_ENABLED=false` + 重启；**这只关后端入口，不会回滚 Netlify 前端**，
    前端要单独按**发布前现场记录**的 deploy id 回滚（早期报告里的 id 只是历史快照）。
 6. **只回滚代码与配置，不回滚新库**，否则会丢掉用户在新 UI 里产生的评论、私信与对话；
-   同理不能因 RAG Schema 未变就随意恢复旧 RAG 库，否则丢掉新课程/新上传/真实覆盖与测评。
+   同理不能因"Schema 22 是加性重建、列没变"就随意恢复旧 RAG 库，否则丢掉新课程/新上传/真实覆盖与测评。
 
 ---
 

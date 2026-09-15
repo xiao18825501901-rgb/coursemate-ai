@@ -1,65 +1,82 @@
-# LAST MILE STATUS — 学习闭环接线、发布门与回滚校准后的收尾状态
+# LAST MILE STATUS — 生产评审器补齐、迁移/回滚证据与外部授权状态
 
 **更新**：2026-09-15（随本轮提交）
-**口径**：每项只标一个真实状态；`LIVE_VERIFIED` / `PRODUCTION_VERIFIED` 必须来自
-本次真实证据，否则标 NOT。HEAD 以 `git rev-parse HEAD` 为准。
+**口径**：外部状态只能由真实用户决定、原生审批回执与访问验证更新；本文件只记录。
+机器可读摘要见 `docs/ui-refresh/release-manifest.json`。
+
+## 分项状态（本轮口径）
+
+```text
+DELIVERY_ACCOUNTING_LOCAL               = DONE（022 REVIEWED 通道、回执、恢复、已覆盖跳过）
+PRODUCTION_REVIEWER_CODE                = DONE_LOCAL（ModelCoverageReviewer + qwen_review_invoke，默认关闭，未启用）
+REVIEWER_CONTRACT_TESTS                 = DONE（9 项，假上游零计费；非 live）
+MIGRATION_AND_ROLLBACK_COPY_TESTS       = DONE（5 项：21→22 保数据/幂等、重复数据响亮报错、UI 关闭仍迁移、旧 release 就绪与旧查询、旧 UI release 拒开 Schema 5）
+REAL_MODEL_CANARY                       = NOT_RUN（LIVE_CANARY_BUDGET = NOT_APPROVED）
+LIVE_COVERAGE_ACCEPTANCE                = NOT_RUN（依赖 canary + 真实评审启用授权）
+PRODUCTION_DEPLOYMENT                   = NOT_PERFORMED（PRODUCTION_WRITE_APPROVAL / PUSH_AND_PUBLISH_APPROVAL = NOT_APPROVED）
+AUTHENTICATED_MULTIUSER_ACCEPTANCE      = NOT_PERFORMED
+```
+
+当前评审器实际状态：**生产默认仍为 Null**——新壳教学显示"覆盖待确认/未启用"，
+不自动确认覆盖；`Deterministic` 仅测试；`ModelCoverageReviewer` 已实现并通过
+合同测试，但**未启用**（需要单独的付费批准：第三次调用的整批预算）。
 
 ## DONE_LOCAL — 已实现且本地测试
 
 | 项 | 证据 |
 |---|---|
-| 新教学 → 权威覆盖闭环 | 迁移 022（`REVIEWED` 证据通道 + 唯一索引）、`coverage_review.py`（可注入评审器：Null/确定性/未授权的模型评审）、`shell_delivery.py`（单事务 unit+evidence+learning_coverage+journey 状态；已覆盖 item 不重复记账）、壳侧完成回调/回执/重启恢复；`tests/test_ui_extension_coverage_submission.py` **8 项**从零覆盖正反验收；**浏览器用例 15**：树节点教学 → 状态行"已计入覆盖" → 挂载 API 读回 LEARNED 2/2（`CMUI_COVERAGE_REVIEWER=deterministic` + TestProvider 回显 Spec 验收句） |
-| UI Bridge ↔ V3 全链路追溯 | `shell_problems.py` 把新壳题目/解法映射进 V3 账本（`learning_problems`/`problem_revisions` VALIDATED+content_hash/`learning_solutions`/`learning_steps`，稳定 id `shell-<run>` 幂等重放）；`cmui_bridges` 增加 7 个追溯列（Schema 5）+ `GET /courses/{id}/bridges`；教学 run 开始时链 `teach_run/journey/spec`、交付后链 `delivery_unit_id`；`tests/test_ui_extension_bridge_trace.py` **5 项**（全链路解析、重复点击复用记录、跨用户拒绝+列表作用域、伪步骤 422+取消不链交付、未绑定节点保持导航且零记账） |
-| 生产构建预检与产物校验 | `scripts/preflight_release_build.mjs`（production 上下文强制：真实 `pk_live_` key、三个 https API origin、`VITE_V3_ENABLED=true`、禁 `VITE_AUTH_TEST_TOKEN`）+ `scripts/verify_release_build.mjs`（产物扫描测试身份/localhost API 兜底、`build-info.json` 耦合构建环境摘要+release SHA+产物 hash）；已接入 `netlify.toml` 构建命令；**本地演练**：4 个负向用例全部正确失败、正向通过、校验捕获烘入的 `localhost:8000/8001` 兜底 |
-| 后端测试身份守卫 | rag-api：`provider_mode='test'`/`auth_mode='development'` 生产被拒（既有）；agent：新增 `NODE_ENV=production` 时 `AUTH_TEST_USER_ID` 与 `AGENT_PROVIDER_MODE=deterministic` 直接退出（`server.ts`）；agent 单测/typecheck/build 复跑通过 |
-| 回滚手册 A/B 拆分 | `MIGRATION_AND_ROLLBACK.md` §7：A 代码/路由/配置撤回（保留全部数据 + 旧代码对 Schema 22/5 的兼容性核查）、B 数据灾难恢复（独立审批 + 先快照 + 损失窗口 + 成套恢复 + 跨库抽查）；§4 首次启用区分**应用进程**与**备份进程**的 `CMUI_DATA_DIR`；§1–§2 上传分元数据/字节/题目图片三处、覆盖与题目账本归属更新 |
-| 单 worker 防护 + 静默取消看门狗 | 既有租约/心跳/回收/条件写；新增生成循环的**数据库看门狗**（Provider 完全静默时取消 ≤~2s 生效），`tests/test_ui_extension_coverage_submission.py::test_cancel_effective_during_provider_silence` 实测 <8s 断言 |
-| 审批通道验证 | 会话策略已切 `ask`；本轮所有仓库写入均经真实批准回执（多次 received/decided），符合 closure §6 的验证要求；`never` 时代的诊断与最小操作卡保留在 `FINAL` 报告 §7.1 |
-| 文档纠错（4.3） | operation 程序枚举 **28 个**（更新 INTEGRATION_MAP）；canary 预算统一为**整批总预算 CNY 5.00**（非每次调用，上线费用另批；QWEN 报告 + 清单）；flaky 捕捉命令路径实测修正（`apps/web` 到仓库根是两级）；构建三形态如实（无 key hash 不作 Clerk 成品） |
+| 生产模型覆盖评审器（代码） | `coverage_review.py`：async 协议 + `ReviewOutcome`（状态/逐项判定/理由/证据引文/评审器与 policy 版本）；`ModelCoverageReviewer` 独立第三次调用（默认关闭、候选判定、fail-closed）；`qwen_review_invoke` 计费门在请求前、无自动重试、finish_reason 校验；`resolve` 生产只接受 `model` 且要求 allow_billable + 站点同一凭据 |
+| 服务端逐项校验与评审持久化 | `shell_delivery.py`：评审在写事务外运行；`covered` 判定必须带**逐字存在于已保存正文**的证据引文；逐项写入；评审结果（含失败状态）随 teaching_units 持久化；重放只重放记账，模型调用次数不增；评审失败不撤销教学、覆盖待评审 |
+| 合同测试 | `tests/test_coverage_reviewer_contract.py` **9 项**：合理改写+真实引文计入、关键词/验收回显拒绝、partial/uncertain/not_covered 逐项、非法 JSON/伪造 id/越界拒绝、默认关闭零请求+计费门前置（MockTransport 计数为 0）、评审失败保教学、持久化后重放零模型调用、部分覆盖只提交确认项 |
+| 迁移/回滚副本测试 | `tests/test_ui_extension_schema_compat.py` **5 项**：Schema-21 历史副本升级 22 保 VALIDATED/LEGACY 行且幂等（integrity/FK/索引核查）；预存重复 (journey_id, operation_id) 时升级**响亮失败**不静默删除；`UI_EXTENSION_ENABLED=false` 仍执行 RAG 迁移；旧 release 就绪探针在 22 库上仍 READY、旧覆盖查询不计 REVIEWED 但正常运行；旧 UI release 拒开 Schema 5 库 |
+| 旧摘要修正 | 残留的"RAG Schema 未变""批准提示被禁用"等表述已按 Schema 22/5 与 ask 通道现状修正（`FINAL` §4/§6.1、`MIGRATION` §7、`QWEN` §4） |
+| 机器可读 manifest | `docs/ui-refresh/release-manifest.json`：SHA、Schema、operation 数、评审器模式、构建门、测试范围与外部状态（外部状态字段只能由真实决策更新） |
+| 生产只读核验脚本 | `scripts/production_readonly_check.mjs`：HTTPS GET 只读（health/文档形状），不写、不打印 secrets、不调用模型；缺端点时零连接并输出访问清单 |
 
-## NOT_IMPLEMENTED — 仍缺代码
+## NOT_IMPLEMENTED / 受限
 
-| 项 | 说明 |
+| 项 | 状态 |
 |---|---|
-| 模型覆盖评审器（付费第三次调用） | 接口与 Null/确定性实现已就位；生产语义评审需 qwen3.8-max 追加调用，**未实现且未授权**。未启用前生产覆盖如实停在未确认（受限候选版本），不用关键词规则冒充评审 |
-| 多 worker 生成平台 | 首发单实例约束（已有租约防护 + 看门狗）；扩容需持久化 worker，本轮不做 |
+| 模型评审器的**实际启用** | 代码完成、未启用：需要整批 canary 预算批准（第三次调用）与 `CMUI_COVERAGE_REVIEWER=model` + `CMUI_ALLOW_BILLABLE=true`（生产环境） |
+| 多 worker 生成平台 | 首发单实例（租约防护 + 看门狗），扩容需持久化 worker |
 
-## WAITING_APPROVAL — 缺具体动作批准
+## WAITING_APPROVAL（按依赖顺序）
 
-| 项 | 需要的批准 |
+1. **生产只读核验**：已通过原生机制提出申请（范围见脚本头注释）；`PRODUCTION_READ_APPROVAL = REQUESTED_PENDING_USER_RESPONSE`。
+2. **Canary 整批预算**：按实时价格估算 C1（两阶段教学）+ C2（教学+覆盖评审+实际提交）+ C3（题目→步骤→教学→返回，可与 C2 复用）+ C4（图像题）+ C5（Node 工具调用）的总费用后申请；含可选第三次评审、Embedding、图像 tokens、工具多轮上限与未知超时用量；人工重试从总额扣。
+3. **模型评审启用授权**：与上线后持续模型费用分开征求。
+4. **备份与隔离恢复演练**、**迁移 022/UI Schema 5 与受控部署**、**push/Netlify 发布**（先确认 push 是否触发自动构建）、**数据灾难恢复**（独立审批）。
+
+## WAITING_ACCESS — 生产只读访问卡
+
+| 字段 | 内容 |
 |---|---|
-| 千问 canary（含预算） | 整批总预算（建议 CNY 5.00，按实时价格估算总费用后批准）；canary 授权 ≠ 上线持续费用授权 |
-| 生产只读核验 / 备份与隔离恢复 / 受控部署（含 push/发布） | 各自范围的部署/发布授权；Git push 若触发自动发布也属发布动作 |
-| 数据灾难恢复演练（如需 B 流程） | 独立审批 + 损失窗口确认 |
-
-## WAITING_ACCESS — 缺账号/凭据/可用工具
-
-| 项 | 说明 |
-|---|---|
-| 生产 SSH/托管平台凭据与角色 | 本会话未持有；只读核验需要可用的生产访问通道（不与密钥索要混淆：凭据应由用户受保护地注入） |
-| 真实 Clerk 生产应用 | 真实 `pk_live_...` key 由平台配置/授权操作提供；本会话不索取 Secret |
+| 访问方式 | HTTPS 只读（无需 SSH/密钥）：脚本只请求 `/health`、`/ui-extension/health` 与站点首页文档形状 |
+| 目标 | `https://rag.qqttai.com`（后端+扩展）、`https://agent.qqttai.com`（Agent）、站点域名（`qqttai.com`） |
+| 所需角色 | 无需账号角色；若端点仅内网可达，则需一台可达主机的受保护环境（SSH agent/key 或已登录会话，不要求明文密码/密钥进聊天） |
+| 已配置 | 否（本机没有生产端点配置） |
+| 你的操作 | 在受保护终端/CI 里 `export PROD_RAG_BASE_URL=… PROD_AGENT_BASE_URL=… PROD_SITE_URL=…` 后运行 `node scripts/production_readonly_check.mjs`，或授权我在你提供的受保护会话中执行 |
+| 验证 | 输出三行 status（200/非 200）即完成；不需要发送任何 token 或密钥 |
 
 ## OWNER_ACTION — 必须用户本人操作
 
 | 项 | 完成标志 |
 |---|---|
-| 预算决定（CNY 5.00 整批或调整） | 明确批准记录 + canary 后账单/usage 一致 |
+| 预算决定（整批，含可选第三次评审） | 明确批准记录 + 账单/usage 一致 |
 | 真实 Clerk 登录、验证码、OAuth/SSO 确认 | 真实浏览器登录成功并落回新控制面板 |
-| 公开内容审核（真实知识树/官方发布） | 审核通过 + `reviewed_by_user_id`/`reviewed_at` 留痕 |
-| canary 教学/图片识别质量人工评价 | 反馈写入报告 |
+| 公开内容审核（真实知识树） | 审核通过 + 留痕 |
+| canary 教学/评审质量人工评价 | 反馈写入报告 |
 
-## LIVE_VERIFIED / PRODUCTION_VERIFIED — 必须本次真实证据
+## LIVE / PRODUCTION 证据（必须本次真实）
 
 | 项 | 状态 |
 |---|---|
-| 真实千问两阶段 | **NOT RUN**（零真实调用，费用 CNY 0.00） |
-| 真实 Clerk 登录全流程 | **NOT VERIFIED**（桥代码 6 项单测 + 产物层扫描，浏览器侧未跑真实会话） |
-| 生产部署/双用户验收/管理员边界 | **NOT PERFORMED / NOT VERIFIED** |
-| 生产数据/备份现场 | **NOT RUN**（未现场复核） |
+| 真实千问两阶段 / 覆盖评审 live | **NOT RUN**（零真实调用，费用 CNY 0.00） |
+| 生产只读核验 | **NOT YET VERIFIED**（申请已提出，等待回答与端点配置） |
+| 部署与多用户验收 | **NOT PERFORMED** |
 
-## 下一步（按依赖顺序）
+## 下一步（等待用户回答，不空转）
 
-1. 用户批准整批 canary 总预算 → 只读核验 → canary → 备份/恢复演练；
-2. 部署授权后：后端 disabled 验证 → 开开关 → 生产构建（真实 `pk_live_` key）→ 根路径发布；
-3. 真实 Clerk 登录 + 双用户/管理员验收；
-4. 如需官方知识树：真实资料草案 → 审核 → 发布（不用 fixture）。
+1. 用户答复生产只读核验申请（并配置端点或提供受保护执行环境）；
+2. 用户批准整批 canary 预算（含可选第三次评审）；
+3. 依次：只读核验 → canary（C1/C2 优先）→ 备份演练 → 受控部署 → 真实 Clerk 多用户验收。
