@@ -611,6 +611,59 @@ test("a problem's steps bridge into teaching and return to the same step", async
   expect((await closedLayout.json()).bridge).toBeNull();
 });
 
+test("teaching a node from the shell books reviewed coverage end-to-end", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/app#/course/cs3481/learn");
+  await expect(page.locator(".workspace-columns")).toBeVisible();
+
+  // The seeded clustering node starts at LEARNING: 1 of 2 REQUIRED items has
+  // legacy evidence. Teaching it through the shell must add the second item as
+  // REVIEWED evidence and move the node to LEARNED - the same V3 ledger the
+  // old entry reads.
+  const knowledgeUrl =
+    "http://127.0.0.1:8100/ui-extension/api/ui/v1/courses/cs3481/knowledge";
+  const readNode = async () => {
+    const body = (await (
+      await request.get(knowledgeUrl, {
+        headers: { Authorization: "Bearer test-session-token" },
+      })
+    ).json()) as {
+      id: string;
+      progress: string;
+      learning: { required_total: number; covered_required: number };
+    }[];
+    return body.find((node) => node.id === "e2e-tree-clustering");
+  };
+  const before = await readNode();
+  expect(before?.progress).toBe("LEARNING");
+  expect(before?.learning.covered_required).toBe(1);
+
+  await page.locator("button.knowledge-strip").click();
+  const tree = page.locator(".tree-expanded");
+  await expect(tree).toBeVisible();
+  const nodeRow = tree.locator(".tree-node-new").filter({ hasText: "聚类分析" });
+  await nodeRow.hover();
+  await nodeRow.locator(".node-popover").getByRole("button", { name: /学习进度/ }).click();
+
+  // The labelled test provider echoes the spec acceptance statements, the
+  // deterministic reviewer confirms them, and the status line says so.
+  await expect(
+    page.locator(".learning-pane.pane-teach .generation-status"),
+  ).toContainText("已计入覆盖", {
+    timeout: 30_000,
+  });
+
+  // The same authoritative state is visible through the mounted API.
+  await expect
+    .poll(async () => {
+      const node = await readNode();
+      return node ? `${node.progress}:${node.learning.covered_required}` : "missing";
+    })
+    .toBe("LEARNED:2");
+});
+
 test("the knowledge tree is reachable by keyboard and by touch", async ({ page }) => {
   await page.goto("/app#/course/cs3481/learn");
   await expect(page.locator(".workspace-columns")).toBeVisible();
@@ -644,7 +697,8 @@ test("the knowledge tree is reachable by keyboard and by touch", async ({ page }
   await expect(teachPane).toContainText("请用中文从零教我理解 K-means 聚类", {
     timeout: 30_000,
   });
-  await expect(teachPane).toContainText("从定义出发", { timeout: 30_000 });
+  // The labelled test provider echoes this node's spec acceptance statement.
+  await expect(teachPane).toContainText("State the update rule", { timeout: 30_000 });
 
   // Touch: at 390px the panes are tabs; a tap opens the same popover and a tap
   // on 学习进度 switches to the teach tab for that node.
@@ -655,9 +709,10 @@ test("the knowledge tree is reachable by keyboard and by touch", async ({ page }
   await clustering.tap();
   const touchPopover = clustering.locator(".node-popover");
   await expect(touchPopover).toBeVisible();
+  // The coverage-closure test taught this node to LEARNED earlier in the run.
   await expect(
     touchPopover.getByRole("button", { name: /学习进度/ }),
-  ).toContainText("学习中");
+  ).toContainText("教学已完成");
   await touchPopover.getByRole("button", { name: /学习进度/ }).tap();
 
   await expect(page.locator(".mobile-pane-tabs button.active")).toHaveText("知识学习");

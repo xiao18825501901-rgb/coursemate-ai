@@ -80,6 +80,9 @@ export default defineConfig({
         // the full run/SSE/step/bridge path without a billable model. Production
         // forbids this mode in settings validation.
         CMUI_PROVIDER_MODE: "test",
+        // The deterministic coverage reviewer lets the browser acceptance prove
+        // the reviewed-coverage closure end-to-end; production refuses it too.
+        CMUI_COVERAGE_REVIEWER: "deterministic",
         UI_TASK_AGENT_URL: "http://127.0.0.1:8101",
         // The mounted extension allows this origin, and its injected resolver uses
         // the project's own verified-session path rather than a browser stub.

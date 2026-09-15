@@ -154,6 +154,17 @@ class TestProvider:
                       '## Step 2 计算核心点\n对每个点统计其 eps 邻域内的样本数，达到 MinPts 即为核心点。')
         elif bridge and bridge.get('step'):
             answer = f"这是围绕原题第 {bridge['step']} 步的教学输出，携带桥接上下文。"
+        elif spec_items:
+            # Node-bound teaching carries the spec's REQUIRED acceptance
+            # statements so the deterministic test reviewer can confirm them;
+            # this exercises the same reviewed-coverage path a live answer
+            # would take, without ever pretending to be Qwen.
+            sentences = ' '.join(
+                f"{item.get('objective','')}：{item.get('acceptance','')}"
+                for item in spec_items
+                if item.get('requirement') == 'REQUIRED'
+            )
+            answer = f"这是测试教学。{sentences}"
         else:
             answer = '从定义出发：核心点是邻域内样本数不少于 MinPts 的点。'
         yield {'kind': 'delta', 'text': answer}

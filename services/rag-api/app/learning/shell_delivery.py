@@ -116,6 +116,18 @@ def submit_shell_delivery(
         for item in required
         if item["item_id"] in reviewer.review(required, content, provenance)
     ]
+    # Evidence is immutable and coverage counts distinct items: never record a
+    # second confirmation for an item this journey already covered.
+    with database.connect() as connection:
+        already = {
+            str(row[0])
+            for row in connection.execute(
+                f"SELECT DISTINCT item_id FROM teaching_delivery_evidence "
+                f"WHERE journey_id=? AND validation_status IN {COUNTED_STATUSES}",
+                (journey_id,),
+            )
+        }
+    confirmed = [item_id for item_id in confirmed if item_id not in already]
     section = {
         "section_id": SECTION_ID,
         "content": content,
