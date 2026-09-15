@@ -14,7 +14,7 @@
 | 开发执行模型 | `deepseek-v4-pro`（`C:\Users\Hp\.dsh\settings.yaml` 的 `agent-default-model.model`；用户已切换，本会话一致） |
 | 网站教学模型 | `qwen3.8-max`（`services/rag-api/app/config.py:v3_model` / `app/cm_update` 复用同一凭据） |
 | DSH 版本 | `@deepseek-ai/dsh 0.1.1-rc.2`（全局 npm 安装） |
-| 会话权限 | `approval_policy: never`（批准提示禁用）；文件 sandbox `danger-full-access` |
+| 会话权限 | **`approval_policy: ask`**（用户已切换；本轮所有仓库写入均经真实批准回执，无生产/付费批准）；文件 sandbox `danger-full-access`（逐次批准） |
 
 实际提交（HEAD 以 `git rev-parse HEAD` 为准）：
 
@@ -39,7 +39,7 @@ dd710b3  feat(ui-extension): enforce single-worker safety for generation runs
 | 模块 | 位置 | 状态 |
 |---|---|---|
 | 交付包后端 | `services/rag-api/app/cm_update/` | 已合入，**9/15 文件 hash 与包 manifest 一致**，6 处有意修改（`app.py`/`db.py`/`config.py`/`integration.py`/`provider.py`/`seed.py`） |
-| 真实 DomainPort 适配器 | `services/rag-api/app/ui_extension/domain.py` | 已实现 **26** 个 operation（22 交付 ops + `knowledge.begin_learning` + `knowledge.assessment.start/view/submit/abandon` + `legacy.conversations/conversation`） |
+| 真实 DomainPort 适配器 | `services/rag-api/app/ui_extension/domain.py` | 已实现 **28** 个 operation（程序枚举；含 `knowledge.submit_delivery`/`knowledge.record_problem`） |
 | 注入式身份桥 | `services/rag-api/app/ui_extension/identity.py` | 已实现，绑定宿主 Clerk 验证器 |
 | 宿主挂载 | `services/rag-api/app/ui_extension/mount.py` + `app/main.py` | 已实现，默认关闭 |
 | 新 React 壳 | `apps/web/src/ui/*`、`src/CourseMateUi.tsx`、`src/main.ui.tsx`、`ui.html` | 已合入真实 Vite 构建；`/` 默认入口 + `/app` 别名 |
@@ -68,7 +68,7 @@ dd710b3  feat(ui-extension): enforce single-worker safety for generation runs
 
 | 套件 | 命令 | 结果 |
 |---|---|---|
-| rag-api 全量 | `.venv\Scripts\python.exe -m pytest -q` | **473 passed**（455.28s；含新增 `test_ui_extension_test_provider.py` 3 项、`test_ui_extension_tree_and_dual_mode.py` 3 项、`test_ui_extension_single_worker.py` 4 项） |
+| rag-api 全量 | `.venv\Scripts\python.exe -m pytest -q` | **486 passed**（554.20s；含覆盖闭环 8 项、桥接追溯 5 项、两处过期断言修复） |
 | web 单测 | `vitest run`（`apps/web`） | **55 passed**（含真实 Clerk 桥 6 项） |
 | 正式构建 | `tsc -b && vite build`（三种形态） | 通过：E2E 形态（test token）`ui-rTcXnucO.js`；Clerk 验证形态（假 key）`ui-Bckh22_y.js`=B4BA950D3047F0A6 含 AuthBridge+fallbackRedirectUrl、无测试令牌；fail-closed 形态（无 key）`ui-C60rpF3L.js`=9C9214A661399002。**生产构建必须给真实 `VITE_CLERK_PUBLISHABLE_KEY`** |
 | 原生浏览器验收（新壳） | `playwright test --config playwright.ui.config.ts` | **16 passed**（1.1m，含树层级、双模式、键盘/触屏用例） |

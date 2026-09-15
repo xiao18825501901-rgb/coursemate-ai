@@ -3,7 +3,7 @@
 **更新日期**：2026-09-15（Asia/Hong_Kong）
 **HEAD**：以 `git rev-parse HEAD` 为准（本文件随提交更新，不写自引用 SHA）
 **模型**：开发执行 `deepseek-v4-pro`（`C:\Users\Hp\.dsh\settings.yaml` 已切，本会话一致）；网站教学 `qwen3.8-max`（未变）。
-**权限**：本会话 `approval_policy: never`（批准提示禁用，需批准的动作自动拒绝）；文件 sandbox `danger-full-access`。**没有任何动作被"当作已批准"。**
+**权限**：本会话审批策略已由用户切为 **`ask`**；本轮所有仓库写入均经真实批准回执（多次 received/decided，无生产影响、无模型费用）。文件 sandbox `danger-full-access`（经逐次批准）。**没有任何动作被"当作已批准"：真实千问/生产操作/发布仍未被批准。**
 
 ---
 
@@ -21,15 +21,16 @@
 | dev 中间件不再吞 Vite 预打包模块（此前旧应用 dev 整页崩溃） | 修复后旧套件 4/4 |
 | 上线切换仍为受控发布步骤 | 只改配置与产物；**未 push、未发布** |
 
-### 2. 学习状态闭环审计与最小真实接线
+### 2. 学习状态闭环：新教学 → V3 权威覆盖（最终提示 P0，本轮完成）
 
 | 审计项 | 结论与证据 |
 |---|---|
-| 新教学 → REQUIRED 覆盖 | **不直接写覆盖**。`app/learning/knowledge.py:_atomic_learning` 只用 `teaching_delivery_evidence` 计算进度；新壳自由文本教学只写 journey 起步 + `cmui_run_v3` 交叉引用。证据：`tests/test_ui_extension_learning_closure.py`（5 项：delivery_evidence=0、进度 NOT_STARTED） |
-| 新教学 → V3 journey | 已接线：run 带 `node_id` 时先创建/复用 `learning_journeys`（幂等），失败不留下 queued 脏行；UI 库 Schema 3 的 `cmui_run_v3` 存 workspace/journey/node 交叉引用 |
-| Problem/Step/Bridge 绑定 | UI Bridge（`cmui_bridges`）是壳内返回原步骤的 UX 上下文（服务端抽取真实步骤编号）；V3 `LearningBridge` 是 V3 运行时权威记录，二者是**两个独立系统**，未冒充同名接通 |
-| 测评全流程 | **已接通**：start/view/submit/abandon 委托真实 V3 AssessmentService；submit 带 revision 与一次 REVISION_CONFLICT 重试；成绩写入 `grade_snapshots`。浏览器用例 12 走完 开始→5 题→提交→已评阅→每题反馈 |
-| 学习与测评独立 | 用例 12 断言评分后进度仍 NOT_STARTED；无成绩不显示伪造分数（无 GradePolicy 时 letter grade 如实为 null） |
+| 覆盖权威 | `_atomic_learning` 按 `teaching_delivery_evidence` 计数（`VALIDATED`/`LEGACY_PRESERVED`/`REVIEWED`）；迁移 022 新增 `REVIEWED` 通道（plan 列 NULL、content_hash 64 位 hex、作用域触发器锚定 journey/node/spec/section） |
+| 新教学 → 覆盖 | run 完成的条件式最终写入后才 `knowledge.submit_delivery`：单事务写入 `teaching_units`（正文可恢复 section）+ 每条评审确认 item 一条 `REVIEWED` 证据 + `learning_coverage` + journey 状态一致更新；UI 库 `cmui_delivery_submissions` 回执（Schema 4）+ 重启恢复（只重放幂等记账、零 Provider 调用） |
+| 覆盖认定不由模型自报 | 可注入 `CoverageReviewer`：Null（默认，不确认）、Deterministic（acceptance 全句规则，生产被拒）、模型评审（收费第三次调用，未实现未授权）。Spec 要求进入第一阶段规划（自由文本不变，无数据库授权） |
+| 正反验收 | `test_ui_extension_coverage_submission.py` **8 项**从零覆盖：0/2→LEARNING→2/2→LEARNED、测评低分不影响 LEARNED、仅提关键词/失败/截断/取消不计、重放不重复、跨库中断恢复零 Provider 调用、错课程/旧 Spec/跨用户隔离、旧入口读到 REVIEWED |
+| Problem/Step/Bridge 绑定 | `cmui_bridges` 是壳内导航；新壳题目/解法映射进 V3 账本（`learning_problems`/`problem_revisions` VALIDATED+hash/`learning_solutions`/`learning_steps`，幂等 `shell-<run>` id）；桥接 7 列追溯 + `GET /courses/{id}/bridges`；`test_ui_extension_bridge_trace.py` **5 项**（全链路、重复点击、跨用户、伪步骤/取消、未绑定节点零记账） |
+| 测评全流程与独立性 | start/view/submit/abandon 委托 V3 AssessmentService；评分独立于覆盖（正反均有断言） |
 
 ### 3. 非空知识树与完整双模式流程（P0-3，本轮补齐）
 
@@ -45,47 +46,57 @@
 | 顺手修复的真实缺陷 | "返回原题"后桥接横幅不消失（`pages.jsx:backToProblem` 未清本地 bridge 状态）——浏览器用例 14 首跑发现，修复后全绿 |
 | 生产树的真实发布路径（空态如实） | 无 PUBLISHED 官方树时新壳如实空态；管理员用真实资料生成/检查/发布的最小路径已写入 `INTEGRATION_MAP.md` §3（V3 管理面 7 步：生成草案 → 组装 DRAFT 官方树 → 提交申请 → 快照检查 → 审核 approve 留痕 → 生效 → 撤回/supersede）。**测试 fixture 不得冒充发布**；真实模型生成与公开审核分别需要预算与用户动作 |
 
-### 4. 单 worker 生成约束（P1-7：实际防护，不是文档提醒）
+### 4. 单 worker 生成约束 + 静默取消看门狗（§5 恢复边界）
 
 | 防护 | 证据 |
 |---|---|
-| 每进程唯一 worker 身份 + run 租约（Schema 3 `lease_worker`/`lease_heartbeat`） | `app/cm_update/db.py`；`tests/test_ui_extension_single_worker.py`（4 项双进程测试） |
+| 每进程唯一 worker 身份 + run 租约（`lease_worker`/`lease_heartbeat`） | `app/cm_update/db.py`；`tests/test_ui_extension_single_worker.py`（4 项双进程测试） |
 | 启动清理只回收失去拥有者的 run（心跳缺失/超 grace 120s） | 同套件：第二个进程启动不再杀第一个进程的进行中 run |
 | 生成期间心跳（每 5s，条件更新） | 同套件 |
 | 跨进程取消：取消写库优先，生成循环复读状态 | 同套件：取消后不产出消息 |
+| **Provider 完全静默时取消有界生效** | 生成循环新增数据库看门狗（2s 轮询终态）；`test_cancel_effective_during_provider_silence` 实测 <8s 断言 |
 | 完成/取消竞争由数据库裁决（条件式最终写入） | 同套件 |
 | 失败不自动重试、不重复计费 | 既有 provider 测试 |
 | 仍为明确限制 | 单实例/单 worker 仍是部署前提（内存任务表 ≠ 多 worker）；扩容需 V3 侧尚不存在的持久化 worker |
 
-### 5. 数据归属表 + 首次启用 A/B/C + 回滚修正（P0-8，本轮补齐）
+### 5. 数据归属表 + 首次启用 A/B/C + 回滚 A/B 拆分（最终提示 4.2）
 
 | 项 | 证据 |
 |---|---|
-| 数据归属表（10 类操作 → 权威库/目录 → 引用 → 备份 → 回滚影响） | `MIGRATION_AND_ROLLBACK.md` §2：课程/文件/旧问答/覆盖/测评在 RAG 库；任务在 Agent 库；评论/通知/私信/新壳对话/Bridge 在 UI 库；`cmui_*` 镜像表仅 standalone |
-| 首次启用 A/B/C 顺序 | 同文档 §4：A 未设 `CMUI_DATA_DIR` 先一致备份 → B 独立路径初始化 UI 库（不跑 seed）→ C 设置后三库两组上传纳入新恢复单元 |
-| 回滚修正 | 关后端开关**不会**自动回滚 Netlify 前端；前端回滚用**发布前现场记录**的 deploy id（早期报告 id 只是历史快照）；只回滚代码不回滚新库；不能因 RAG Schema 未变随意恢复旧 RAG 库 |
-| 恢复后跨库引用抽查 | 同文档 §5：目录重映射、引用可读性、任务回执、孤引用表现为 404/空列表 |
+| 数据归属表（上传分元数据/字节/题目图片三处；覆盖与题目账本入表） | `MIGRATION_AND_ROLLBACK.md` §2：课程/文件/旧问答/覆盖/测评/题目账本在 RAG 库；任务在 Agent 库；评论/通知/私信/新壳对话/Bridge 在 UI 库；`cmui_*` 镜像表仅 standalone |
+| 首次启用 A/B/C 顺序（区分两个进程的 `CMUI_DATA_DIR`） | 同文档 §4：A 备份进程 `unset CMUI_DATA_DIR` 先一致备份 → B 应用进程独立路径自动建库（不跑 seed）→ C 备份进程再 `export`，三库两组上传纳入新恢复单元；空目录/建库/纳入备份发生在哪一步明确无循环依赖 |
+| 回滚 A/B 拆分 | 同文档 §7：**A** 代码/路由/配置撤回（保留全部数据；核查旧代码对 Schema 22/5 的兼容性；前后端分别撤回）；**B** 数据灾难恢复（独立审批 + 先快照当前库 + 损失窗口说明 + 成套恢复 + 跨库抽查）。禁止机械用陈旧数据覆盖生产 |
+| 恢复后跨库引用抽查 | 同文档 §5：目录重映射、引用可读性、任务回执、桥接的 problem_revision/unit/证据可解析、孤引用 404/空列表 |
 
-### 6. 回归与构建（本轮全部实跑）
+### 6. 发布构建预检与产物校验（最终提示 4.1，已接入 Netlify 构建命令）
+
+| 项 | 证据 |
+|---|---|
+| 生产构建预检 | `scripts/preflight_release_build.mjs`（production 上下文强制：真实 `pk_live_` key、三个 https API origin、`VITE_V3_ENABLED=true`、禁 `VITE_AUTH_TEST_TOKEN`；非生产 no-op）；**本地演练**：缺 key/假 key/localhost origin/test token 四个负向全部正确失败，正向通过 |
+| 产物校验 | `scripts/verify_release_build.mjs`：扫描测试身份与端口限定 localhost API 兜底（排除 react-router 库内裸字符串误报），写 `build-info.json`（环境摘要+release SHA+产物 hash 同一构建）；**演练**：干净生产形态通过、烘入 `localhost:8000/8001` 的构建被正确拒绝 |
+| 后端测试身份守卫 | agent 新增 `NODE_ENV=production` 时 `AUTH_TEST_USER_ID`/`AGENT_PROVIDER_MODE=deterministic` 直接退出；rag-api 既有生产 validate 拒绝 test provider/dev 登录 |
+| 无 key fail-closed 仍可本地测试 | 两种文档（legacy 与 shell）无 key 构建都只渲染配置缺失页；生产构建则直接失败并提示，不能发布一个只显示"认证未配置"的站点 |
+
+### 7. 回归与构建（本轮全部实跑）
 
 | 套件 | 结果 |
 |---|---|
-| rag-api 全量 | **473 passed**（455.28s；新增 `test_ui_extension_test_provider.py` 3 项、`test_ui_extension_tree_and_dual_mode.py` 3 项已并入） |
-| 新壳浏览器验收（含树层级、双模式、键盘/触屏 3 项新用例） | **16 passed**（1.1m；本会话多跑：首跑暴露横幅缺陷与 tap 上下文缺失 → 修复 → 全绿） |
-| 旧站 E2E `coursemate.spec.ts` | **4 passed**（本轮复跑） |
-| V3 学习 E2E `learning.spec.ts` | **3 passed**（本轮复跑） |
-| Node Agent 单测 / typecheck / build | **66 passed** / 通过 / 通过（本轮复跑） |
-| web 单测（含真实 Clerk 桥 6 项） | **55 passed**（本轮复跑，13 文件） |
-| 正式 React 构建 | 三种形态如实区分（本轮**更正**此前"正式产物含 Clerk"的不准确说法）：E2E 形态（test token）`ui-rTcXnucO.js`；**Clerk 验证形态**（假 `pk_test_...` key 构建，实测含 AuthBridge + `openSignIn({fallbackRedirectUrl: origin+'/'})`、无测试令牌）`ui-Bckh22_y.js`=B4BA950D3047F0A6；fail-closed 形态（无 key）`ui-C60rpF3L.js`=9C9214A661399002 只渲染"认证未配置"。生产 Netlify 构建必须设置真实 `VITE_CLERK_PUBLISHABLE_KEY` |
-| E2E 产物与正式产物隔离 + 全资源扫描 | 源码中 `test-session-token` 只出现在 6 个预期位置（全部由测试环境显式启用）；发布形态产物均无该标记；agent 产物中的测试策略仅当操作员设置 `AUTH_TEST_USER_ID` 时启用 |
+| rag-api 全量 | 本轮全量重跑（两处过期断言修复后；新增覆盖闭环 8 项 + 桥接追溯 5 项已并入，数字见运行结果） |
+| 新壳浏览器验收（含树层级、双模式、键盘/触屏、覆盖状态行） | **16 passed**（1.1m，E2E 产物重建后复跑） |
+| 旧站 E2E `coursemate.spec.ts` | **4 passed**（本会话复跑） |
+| V3 学习 E2E `learning.spec.ts` | **3 passed**（本会话复跑） |
+| Node Agent 单测 / typecheck / build | **66 passed** / 通过 / 通过（生产守卫后复跑） |
+| web 单测（含真实 Clerk 桥 6 项） | **55 passed**（verbose 复跑亦全绿） |
+| 正式 React 构建三形态 + 全资源扫描 | 同前 §6；新增生产预检/产物校验演练见上 |
+| 回滚/flaky 文档纠错 | canary 预算统一为整批总预算；operation 程序枚举 28 个；flaky 捕捉命令路径实测修正（apps/web 到仓库根是两级） |
 
-### 7. flaky 状态
+### 8. flaky 状态
 
-`apps/web` vitest 此前出现 1 次 1/49 失败（未定位到用例名），随后连续 5+ 次全绿
-（本轮会话 55/55 连续 4 次）。本轮没有复现；保留"未定位低频风险"并落成**捕捉机制**
-（`UI_AND_BACKEND_TEST_REPORT.md` §7：`vitest run --reporter=verbose` + `Tee-Object`
-落盘 + 关并发单独重跑 + 复现则修复/不复现则如实保留），未写"已彻底解决"。
-本轮 Playwright 各套件（16 + 4 + 3）全部一次或修复后通过，无 flaky。
+`apps/web` vitest 此前出现 1 次 1/49 失败（未定位到用例名），随后连续 6+ 次全绿
+（本轮会话 55/55 多次，含 `--reporter=verbose` 一次）。本轮没有复现；保留
+"未定位低频风险"并落成**捕捉机制**（`UI_AND_BACKEND_TEST_REPORT.md` §7：路径已
+实测修正的 `vitest run --reporter=verbose` + `Tee-Object` 落盘 + 关并发单独重跑），
+未写"已彻底解决"。本轮 Playwright 各套件（16 + 4 + 3）全部一次或修复后通过，无 flaky。
 
 ---
 
@@ -93,7 +104,9 @@
 
 1. **生产只读核验**：线上 release、服务单元、进程数（确认 rag-api 单进程）、配置名、
    数据路径、备份与 Netlify 当前 deploy（不打印 secrets）。
-2. **千问 canary（需预算授权，CNY 5.00 仅为建议）**：先最小两阶段教学 → 题目/Bridge →
+2. **千问 canary（需预算授权；CNY 5.00 是整批 canary 的保守总预算建议，不是每次
+   调用各 5 元，也不是上线后持续费用授权——先按实时价格估算全部计划调用的总费用，
+   超限即停、不自动加钱/换模型/重试）**：先最小两阶段教学 → 题目/Bridge →
    图片与 Node 工具；记录真实 Prompt、非敏感示例、usage、延迟、估算/账单证据；
    人工判定质量与图片识别。取消/超时竞争已由本地模拟覆盖，不故意付费制造故障。
 3. **备份与隔离恢复**：按 `MIGRATION_AND_ROLLBACK.md` 的首次启用 A/B/C 顺序执行，
@@ -109,7 +122,7 @@
 | 1 | DSH Web GUI（`http://127.0.0.1:3080`）的会话权限/审批预设选择器 | 把审批策略从 `never` 切到 `ask` 或对等可用模式（保留其余保护） | 本会话 `never` 下模型无法自行弹出批准；GUI 自带 ApprovalPanel，说明通道在客户端；`settings.yaml` 无审批字段，不凭猜测写 YAML | 之后一次无生产影响、无费用且确实需要原生审批的测试动作收到真实审批提示并能回答 |
 | 2 | （已完成）开发模型切换 | `agent-default-model.model: deepseek-v4-pro` | 目标模型 | 本会话系统设定已显示 deepseek-v4-pro |
 | 3 | Clerk 控制台 | 确认生产应用的 publishable key、allowed origins/redirect URLs 与新域名形态一致 | 新壳为默认入口后登录/回调必须匹配 | 真实浏览器登录成功并落回新控制面板 |
-| 4 | 预算决策 | 对 CNY 5.00（或调整后金额）给出明确批准 | 付费调用前置条件 | 批准记录 + canary 后账单与 usage 一致 |
+| 4 | 预算决策 | 对 CNY 5.00（整批 canary 总预算，或调整后金额）给出明确批准；上线后的持续费用需另行批准 | 付费调用前置条件 | 批准记录 + canary 后账单与 usage 一致 |
 | 5 | 登录/验证码 | 真实账号登录、任何验证码、OAuth 确认 | 本人凭据，不索取 | 会话建立且 401 不再出现 |
 | 6 | 效果确认 | 对 canary 教学/图片识别质量给出人工评价 | Mock 不能代替质量验收 | 反馈记录写入报告 |
 

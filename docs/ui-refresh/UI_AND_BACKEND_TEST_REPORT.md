@@ -300,10 +300,11 @@ Playwright 的 Chromium 与两个 Node 服务在跑，最可能的原因是资�
 
 ```powershell
 # 出现失败时，用详细 reporter 复现 5 次并保留完整输出与用例名：
+# （路径已实测：apps/web 上一级是 apps/，仓库根在两级之上）
 cd apps/web
-& ..\node_modules\.bin\vitest.cmd run --reporter=verbose 2>&1 | Tee-Object ..\work\vitest-capture.log
+& ..\..\node_modules\.bin\vitest.cmd run --reporter=verbose 2>&1 | Tee-Object ..\..\work\vitest-capture.log
 # 若仅资源争用，关闭并发的 Playwright/Node 服务后单独重跑：
-& ..\node_modules\.bin\vitest.cmd run
+& ..\..\node_modules\.bin\vitest.cmd run
 ```
 
 任何复现都必须记录：失败用例名、完整断言输出、当时并发负载；复现后修复并补回归，

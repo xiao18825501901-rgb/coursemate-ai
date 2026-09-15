@@ -9,11 +9,11 @@
 
 | 存储 | 变化 | 说明 |
 |---|---|---|
-| `data/rag.sqlite3`（RAG Schema 21） | **Schema 不变** | 本次没有新增表、没有新增列、没有新增迁移文件。`migrations/` 目录与 `app/db.py` 的 `SCHEMA_SQL`、`V3_MIGRATIONS` 全部未改 |
-| `data/agent.sqlite3`（Agent Schema 1） | **Schema 不变** | `services/agent-api` 未改一行 |
-| `data/uploads/` | **不变** | 原上传目录与路径规则未改 |
-| `<CMUI_DATA_DIR>/ui.sqlite3` | **新增**（Schema 3，26 张 `cmui_*` 表） | 承载新 UI 的 profile、收藏、评论/点赞/通知、私信、会话/消息/生成、布局、Bridge、限额、Agent receipt、`cmui_run_v3` 交叉引用。`cmui_runs` 带 Schema 3 租约列（`lease_worker`/`lease_heartbeat`）。**`cmui_courses`/`cmui_files`/`cmui_chunks`/`cmui_nodes`/`cmui_learning`/`cmui_tasks` 是独立模式（standalone）的镜像表，integrated 模式下由 V3 域适配器委托真实表，不写入这些镜像** |
-| `<CMUI_DATA_DIR>/uploads/` | **新增** | 新 UI 上传的附件原件 |
+| `data/rag.sqlite3`（RAG Schema 22） | **一个真实迁移** | `022_shell_delivery_evidence.sql`：证据表按 12 步模式重建，`validation_status` 增加 `REVIEWED`（经评审的新壳自由文本交付，plan 列 NULL + content_hash 64 位 hex）；作用域触发器同步重写；`teaching_units(journey_id, operation_id)` 唯一索引。列**未**增删改，`VALIDATED`/`LEGACY_PRESERVED` 契约不变 |
+| `data/agent.sqlite3`（Agent Schema 1） | **Schema 不变** | 只加了启动守卫：`NODE_ENV=production` 时 `AUTH_TEST_USER_ID` 与 `AGENT_PROVIDER_MODE=deterministic` 直接退出 |
+| `data/uploads/` | **不变** | 原上传目录与路径规则未改；**文件字节**的唯一存放处 |
+| `<CMUI_DATA_DIR>/ui.sqlite3` | **新增**（Schema 5） | 承载新 UI 的 profile、收藏、评论/点赞/通知、私信、会话/消息/生成、布局、Bridge、限额、Agent receipt、`cmui_run_v3`、`cmui_delivery_submissions` 覆盖回执。`cmui_runs` 带租约列；`cmui_bridges` 带 V3 追溯列（`problem_revision_id`/`solution_id`/`step_ids_json`/`teach_run`/`journey_id`/`spec_version`/`delivery_unit_id`）。`cmui_courses`/`cmui_files`/`cmui_chunks`/`cmui_nodes`/`cmui_learning`/`cmui_tasks` 是 standalone 镜像表，integrated 模式不写入 |
+| `<CMUI_DATA_DIR>/uploads/` | **新增** | 新 UI 会话中上传的**题目图片附件字节**（元数据仍在 RAG 库）；课程文件字节仍在 `data/uploads/` |
 
 **没有任何原 V3 表被复制、改名或删除。** 新课程、新文件、新知识节点全部只映射不复制：
 `course.list`/`course.get` 直接读 `courses`，文件直接读 `documents ⋈ document_versions`，
@@ -29,19 +29,20 @@ standalone 模式（开发/离线演示）被读写，integrated 模式一律走
 | 操作 | 权威数据库/文件目录 | 新增引用（谁引用谁） | 备份要求 | 回滚影响 |
 |---|---|---|---|---|
 | 课程（列表/详情/加入） | `rag.sqlite3.courses` | UI 库不复制课程，按 id 实时读取 | 随 RAG 库 | 课程数据不受新壳回滚影响 |
-| 私人资料（上传文件与解析文本） | `rag.sqlite3.documents` / `document_versions` / `chunks` + `data/uploads/` | UI 附件消息只存文件 id | RAG 库 + 上传包 | 上传原件与解析结果都在原库，新壳回滚不丢文件 |
+| 私人资料 | **元数据**：`rag.sqlite3.documents` / `document_versions` / `chunks`；**字节**：`data/uploads/` | UI 附件消息只存文件 id | RAG 库 + 上传包 | 上传原件与解析结果都在原库，新壳回滚不丢文件 |
 | 任务（日历计划） | `agent.sqlite3`（经 Node Agent REST） | UI 库 `cmui_agent_receipts` 只存请求回执；`cmui_tasks` 是 standalone 镜像，integrated 不写 | Agent 库 | 关闭新壳不影响任务；恢复时三库同单元 |
 | 评论/点赞/通知 | `ui.sqlite3.cmui_comments` / `cmui_likes` / `cmui_notifications` | 引用课程/文件字符串 id | UI 库 | **只回滚代码不回滚 UI 库**；回滚 UI 库即丢新评论 |
 | 私信 | `ui.sqlite3.cmui_threads` / `cmui_direct_messages` | 用户 id | UI 库 | 同上，只存在于 UI 库 |
-| 新壳对话/消息/生成（自由文本两阶段教学与题目） | `ui.sqlite3.cmui_conversations` / `cmui_messages` / `cmui_runs` / `cmui_run_events` | `cmui_run_v3(run → workspace_id/journey_id/node_id)` 反向引用 V3 旅程 | UI 库 | 同上；`cmui_runs.usage` 保留真实用量记录 |
+| 新壳对话/消息/生成 | `ui.sqlite3.cmui_conversations` / `cmui_messages` / `cmui_runs` / `cmui_run_events` | `cmui_run_v3(run → workspace/journey/node/spec)`；`cmui_delivery_submissions(run → unit)` | UI 库 | 同上；`cmui_runs.usage` 保留真实用量 |
 | 旧版问答记录 | `rag.sqlite3.conversations` / `messages`（只读投影） | 无复制，`legacy.conversations` 直接读原表 | RAG 库 | 原样保留，新壳只读 |
-| Bridge（原步骤返回上下文） | `ui.sqlite3.cmui_bridges`（UX 层） | `problem_message` 引用 `cmui_messages`；`question`/`step` 为快照 | UI 库 | 关闭新壳即不可达；与 V3 `LearningBridge` 是**两个独立系统**，见 `INTEGRATION_MAP.md` |
-| 教学覆盖（REQUIRED item 覆盖、LEARNING/LEARNED） | `rag.sqlite3.teaching_delivery_evidence`（经 `learning_journeys`/`teaching_units`），V3 `teach()` 权威 | UI 自由文本教学只写 journey 起步 + `cmui_run_v3`，**不写覆盖** | RAG 库 | 覆盖事实与新旧壳无关，回滚 RAG 库才会丢真实覆盖 |
+| 新壳题目与解法（V3 账本映射） | `rag.sqlite3.learning_problems` / `problem_revisions`（不可变、VALIDATED+content_hash）/ `learning_solutions` / `learning_steps` | UI `cmui_bridges.problem_revision_id`/`solution_id`/`step_ids_json` 回指；稳定 id 由问题 run id 派生（`shell-<run>`），重放幂等 | RAG 库 | 与教学事实同库备份；UI 桥接表只是导航快照 |
+| Bridge（返回原步骤 + 教学追溯） | UI `cmui_bridges` 承担导航；V3 承担教学事实（journey/unit/evidence 经 `teach_run`/`delivery_unit_id` 链接） | `problem_message`→`problem_revision_id`→`solution_id`→`step_ids`→`teach_run`→`journey`→`delivery_unit_id`→`REVIEWED` 证据 | UI 库 + RAG 库（同单元） | 关闭新壳即导航不可达；V3 侧记录原样保留 |
+| 教学覆盖（REQUIRED item 覆盖、LEARNING/LEARNED） | `rag.sqlite3.teaching_delivery_evidence` + `learning_coverage` + `learning_journeys` | 新壳教学完成后经评审器提交 `REVIEWED` 证据（`SHELL_COVERAGE_REVIEW_V1`）；未确认不写证据 | RAG 库 | 覆盖事实与新旧壳无关；回滚 RAG 库才会丢真实覆盖 |
 | 测评（场次/提交/评分） | `rag.sqlite3.assessment_sessions` / `grade_snapshots`（V3 AssessmentService 权威） | UI 不复制结果，实时委托 | RAG 库 | 测评结果独立于学习进度，同 RAG 库备份单元 |
 
 恢复后的校验不能只看 SQLite 完整性：跨库引用无外键约束，必须抽查
 **孤立引用与可读性**（课程/文件/节点 id 是否还能命中、旧对话可读、任务回执
-对应的任务存在），见 §4 末尾的校验清单。
+对应的任务存在、桥接的 problem_revision/unit/证据还能解析），见 §5 末尾的校验清单。
 
 ## 3. 为什么 `ui.sqlite3` 可以安全新增
 
@@ -53,26 +54,35 @@ if tables.intersection({'courses','chunks','tasks','schema_migrations'}):
     raise ValueError('Refusing to initialize UI database over an existing CourseMate domain database')
 if 'cmui_meta' in tables:
     current = c.execute("SELECT value FROM cmui_meta WHERE key='schema_version'").fetchone()
-    if current and int(current[0]) > SCHEMA_VERSION:   # SCHEMA_VERSION = 3
+    if current and int(current[0]) > SCHEMA_VERSION:   # SCHEMA_VERSION = 5
         raise ValueError('Newer UI database schema detected; do not downgrade')
 ```
 
-Schema 3 的租约列升级是幂等的（`ALTER TABLE cmui_runs ADD COLUMN lease_worker/lease_heartbeat`，
-仅在缺列时执行），旧库首次以新代码启动即自动补列，无需手工迁移。
+Schema 升级全部幂等（缺列才 `ALTER`：租约列、桥接追溯列；新表用
+`CREATE TABLE IF NOT EXISTS`），旧库首次以新代码启动即自动升级，无需手工迁移。
 
 因此：
 
 * 把 `CMUI_DATA_DIR` 误指向 `data/`（含 `rag.sqlite3`）**不会**破坏原库——只会报错退出；
 * 如果这个库将来被更高版本初始化过，旧版代码**拒绝降级**，不会静默写坏数据。
 
-## 4. 首次启用 A/B/C 与备份（P0-8 修正后的顺序）
+## 4. 首次启用 A/B/C 与备份（区分两个进程的 `CMUI_DATA_DIR`）
 
-**关键顺序：先把备份做完，再让 UI 库存在。** `backup_v2.py` 在设置了
-`CMUI_DATA_DIR` 时强制要求 `ui.sqlite3` 已存在（防止产出缺库的假备份），
-因此**第一次备份必须在设置 `CMUI_DATA_DIR` 之前**完成，否则会自相矛盾。
+**关键顺序：先把备份做完，再让 UI 库存在。** `backup_v2.py` 在**备份进程**设置了
+`CMUI_DATA_DIR` 时强制要求 `ui.sqlite3` 已存在（防止产出缺库的假备份）。
+注意区分两个使用方：
+
+* **应用进程（rag-api）**：由 systemd 环境注入 `CMUI_DATA_DIR`，A 阶段必须
+  **不设置**（扩展未启用时它也不读这个变量）；
+* **备份进程（`ops/backup_v2.py`）**：独立 shell 里的 `export`，只影响那一次
+  备份命令，与 systemd 无关。
+
+因此 A 阶段在**备份 shell**里 `unset CMUI_DATA_DIR` 即可；B 阶段应用进程首次
+启动自动建库；C 阶段备份 shell 再 `export` 它——空目录、建库、纳入备份分别
+发生在哪一步是明确的，没有循环依赖。
 
 **A. UI 库尚不存在时，对现有两库一上传做一致备份**
-此时**不要**设置 `CMUI_DATA_DIR`（保持其未定义）：
+备份进程里**不要**设置 `CMUI_DATA_DIR`：
 
 ```bash
 export RAG_DATABASE_PATH=/srv/coursemate/data/rag.sqlite3
@@ -84,21 +94,21 @@ python3 ops/backup_v2.py             # 两库 + uploads.tar.gz，通过
 ```
 
 **B. 在独立路径初始化 UI 库，不调用任何集成/生产禁止的 seed**
-后端 release 已部署但 `UI_EXTENSION_ENABLED=false` 时，挂载不执行、库不会
-被触碰。开启开关后，首次请求挂载时 `Database.initialize()` 以
-`CREATE TABLE IF NOT EXISTS` 幂等建表（Schema 3，含租约列）。**不要**运行
+后端 release 已部署但 `UI_EXTENSION_ENABLED=false` 时，挂载不执行、库不会被触碰。
+开启开关（应用进程）后，首次请求挂载时 `Database.initialize()` 以
+`CREATE TABLE IF NOT EXISTS` 幂等建表（Schema 5）。**不要**运行
 `scripts/seed_*.py` 或任何集成/生产禁止的 seed——`scripts/seed_*` 是
 test-only 夹具，且会拒绝 `work/` 以外的目标。
 
 ```bash
-mkdir -p /srv/coursemate/data/ui-extension
-# 首次启动（见 §6 部署顺序第 4 步）后确认：
+mkdir -p /srv/coursemate/data/ui-extension      # 空目录先建好（应用进程的变量指向它）
+# 应用进程首次启动后确认：
 ls /srv/coursemate/data/ui-extension/ui.sqlite3     # 建表完成
 ```
 
 **C. 启用后，三个库和两组上传纳入新的恢复单元**
-现在才设置 `CMUI_DATA_DIR`，之后的每次备份自动包含 `ui.sqlite3` 与
-`ui-uploads.tar.gz`，并写入 `manifest.json` 与 `SHA256SUMS`：
+现在备份进程才 `export CMUI_DATA_DIR`，之后的每次备份自动包含 `ui.sqlite3`
+与 `ui-uploads.tar.gz`，并写入 `manifest.json` 与 `SHA256SUMS`：
 
 ```bash
 export CMUI_DATA_DIR=/srv/coursemate/data/ui-extension   # 现在合法：ui.sqlite3 已存在
@@ -190,7 +200,10 @@ python3 ops/restore_v2.py
 千问凭据**不需要新增**：`mount.py` 直接复用 `V3_MODEL_API_KEY` / `V3_MODEL_BASE_URL`，
 所以站点仍然只有一份模型密钥。
 
-## 7. 回滚
+## 7. 回滚（两类流程严格分开）
+
+普通撤回与数据灾难恢复是**两种不同流程**：A 只撤回代码/路由/配置并保留全部数据；
+B 是确需覆盖数据时的灾难恢复，需要独立审批与损失窗口说明。
 
 ### 前置
 
@@ -198,46 +211,51 @@ python3 ops/restore_v2.py
   早期报告里的 deploy id（如 `6a83d079cd1da1000859b96c`）只是历史快照，
   发布前的生产现场可能已变化，**不能盲用**——必须从 Netlify 控制台取发布前记录。
 * 确认 `UI_EXTENSION_ENABLED=true` 之前的那次 release 仍在服务器上（本次不需要 DNS 变更）。
+* **核查目标旧代码对当前 Schema 的兼容性**（A 流程必做）：本次 RAG 库升到 Schema 22
+  （022 迁移：证据表重建 + `REVIEWED` 状态 + `teaching_units(journey_id,operation_id)`
+  唯一索引），UI 库升到 Schema 5（回执表 + 桥接追溯列）。旧代码打不开更高版本库
+  （RAG/UI 两侧都有 downgrade 守卫），因此回退到旧 release 时：旧 UI 扩展代码会
+  拒绝打开 Schema 5 的 UI 库（报"Newer UI database schema detected"而不是写坏），
+  旧 V3 代码读 Schema 22 的 RAG 库不受影响（022 是加性重建，列未变）。
+  需要在旧代码上继续用 UI 库时，**保留当前 UI 库不动**，等到重新启用新 release
+  再使用，或按 B 流程单独决策。
 
-### 回滚步骤（按代价从低到高）
+### A. 代码 / 路由 / 配置撤回（默认路径，保留全部新增数据）
 
-**A. 只关后端新入口（最小、最先试；注意它不动前端）**
-```
-UI_EXTENSION_ENABLED=false
-systemctl restart coursemate-rag        # 实际 unit 名以生产控制台为准
-```
-新 UI API 立即 404，`ui.sqlite3` 与 `ui-uploads/` 保持不动，用户下次开启后数据照旧。
-**但 Netlify 的新前端仍在服务 `/` 的新壳文档**：壳能渲染，只是 API 全部不可达。
-这只是降级的第一步，不是完整回滚；需要同时做 C 才能回到旧站首页。
+1. **关后端新入口**：`UI_EXTENSION_ENABLED=false` + 重启 rag-api。新 UI API 立即
+   404，`ui.sqlite3` 与 `ui-uploads/` 保持不动，数据照旧。
+2. **回滚后端 release**：停服务 → 移除新 release 的 drop-in → 恢复受保护环境副本
+   （`/etc/coursemate/env-backups/…`，只恢复**配置**，不恢复数据库）→
+   `systemctl daemon-reload` → 启动上一版 unit → 健康检查。
+3. **回滚前端**（必须单独做，第 1 步不会自动带上它）：重新发布**发布前现场记录**
+   的上一个可用 Netlify deploy；验证 `/` 与 `/qa/...` 都回到旧站文档。
+4. **核查**：目标旧代码对当前库的兼容性见前置；数据一律保留，不还原任何库。
 
-**B. 回滚后端 release**
-按 V3 报告 `COURSEMATE_V3_FINAL_PRODUCTION_DEPLOYMENT_REPORT.md` 的回滚边界：
-停服务 → 移除新 release 的 drop-in → 恢复受保护环境副本
-（`/etc/coursemate/env-backups/…`）→ 用恢复单元还原数据库与上传 → `systemctl daemon-reload`
-→ 启动上一版 unit → 重复本地与公网完整性与健康检查。
+**A 不做什么**：不删除新 UI 的评论、私信、通知、对话、回执、覆盖记录；
+不还原 `rag.sqlite3` / `agent.sqlite3` / `ui.sqlite3` / 两组上传。
 
-**C. 回滚前端（必须单独做，A 不会自动带上它）**
-重新发布**发布前现场记录**的上一个可用 Netlify deploy。后端 DNS 未变，
-前端回滚不依赖 DNS 传播。之后验证 `/` 与 `/qa/...` 都回到旧站文档。
+### B. 数据灾难恢复（独立审批，只确需时执行）
 
-### 回滚不会做什么
+触发条件：数据损坏/误删/审计要求回退数据，**不是**普通功能撤回。执行前：
 
-* 不会删除用户在新 UI 中创建的评论、私信、通知或对话——它们都在
-  `ui.sqlite3` 里，回滚后文件仍在原地，只是入口暂时不可达。
-  **只回滚代码、路由与配置，不要回滚新库**（见下）。
-* 不会自动回滚 Netlify 前端——前端部署与后端开关是两个独立发布单元（见 C）。
-* 不会回滚 `rag.sqlite3`，因为**本次没有改动它的 Schema**；
-  若 RAG 库因其它原因需要回滚，用 A 步之后的完整恢复单元。
+1. **独立审批**：说明要恢复的数据范围、目标时间点与预期损失窗口；
+2. **先快照当前库**：对**当前**（可能含最新写入的）三库与两组上传做一次完整备份，
+   恢复后任何"切换后新增数据"都不被静默丢弃；
+3. **明确损失窗口**：恢复到时间点 T 后，T 之后的评论/私信/任务/教学覆盖/测评
+   （RAG 库与 UI 库）与上传字节都会回到 T 状态——**"Schema 没变"不等于恢复旧数据
+   没有损失**；
+4. **成套恢复 + 跨库抽查**：用 §5 的恢复单元整套还原（三库 + 两组上传必须来自
+   **同一次**备份），恢复后执行 §5 的跨库引用抽查（课程/文件/节点引用、旧对话
+   可读性、任务回执、孤引用表现为 404/空列表）；
+5. 恢复后再按需走 A 流程撤回代码。
 
 ### 不可逆点
 
-* 一旦在新 UI 中产生了真实用户数据（评论、私信、任务回执、上传、对话），
-  **这些数据只存在于 `ui.sqlite3`**。回滚到「未部署扩展」的备份单元会丢失它们，
-  除非单独保留 `ui.sqlite3` 与 `ui-uploads/`。
-  因此回滚时**只回滚代码与配置，不要回滚新库**。
+* 一旦在新 UI 中产生了真实用户数据（评论、私信、任务回执、上传、对话、覆盖回执），
+  **这些数据只存在于 `ui.sqlite3`**。A 流程绝不触碰它们；B 流程恢复旧副本会
+  丢掉 T 之后的新增数据（必须先快照并在审批里写明损失窗口）。
 * **同理，不能因为 RAG Schema 未变就随意恢复旧 RAG 库**：V3 侧的新课程、新上传、
-  真实教学覆盖与测评成绩同样存在于当前 RAG 库，恢复旧副本会丢掉这些新写入。
-  只有确需数据回滚时才走完整恢复单元，并先做 §5 的跨库引用抽查。
+  真实教学覆盖（含 REVIEWED 证据）与测评成绩同样存在于当前 RAG 库。
 * 千问两阶段的真实调用一旦发出即已计费，无法回滚；`cmui_runs.usage` 会保留真实用量。
 
 ## 8. 生产开关、预算与单 worker 约束

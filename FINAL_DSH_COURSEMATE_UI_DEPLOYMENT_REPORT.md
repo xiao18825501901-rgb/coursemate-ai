@@ -9,7 +9,7 @@
 
 ```text
 SOURCE INTEGRATION:               PASS
-LOCAL TEST SUITE:                 PASS  (473 rag-api + 55 web + 66 agent)
+LOCAL TEST SUITE:                 PASS  (486 rag-api + 55 web + 66 agent)
 MODERN REACT PRODUCTION BUILD:    PASS  (React 19.2.8 + Vite 8.2.1 + tsc 5.9.3)
 NATIVE BROWSER ACCEPTANCE:        PASS  (15/15 real Chromium journeys, new shell)
 LEGACY SITE E2E:                  PASS  (coursemate.spec.ts 4/4, learning.spec.ts 3/3)
@@ -160,7 +160,7 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 
 | 套件 | 结果 |
 |---|---|
-| rag-api 全量回归 | **473 passed**（455.28s；接手前基线 329，新增 144 个 UI-extension 测试） |
+| rag-api 全量回归 | **486 passed**（554.20s；含新增覆盖闭环 8 项 + 桥接追溯 5 项 + 两处过期断言修复） |
 | 交付包契约测试（迁入后） | **71 passed** |
 | 新增 V3 DomainPort 集成测试 | **16 passed** |
 | 新增任务 Agent 桥测试 | **15 passed** |
@@ -172,6 +172,8 @@ dist/assets/dist-YiqoSCPN.js   309.62 kB │ gzip: 90.63 kB
 | 新增单 worker 生成安全测试 | **4 passed** |
 | 新增非空知识树 + 双模式流程测试 | **3 passed** |
 | 新增 `test` 模式确定性 Provider 测试 | **3 passed** |
+| 新增覆盖闭环测试（从零覆盖正反验收 + 静默取消看门狗） | **8 passed** |
+| 新增桥接全链路追溯测试（V3 题目账本映射 + 教学链） | **5 passed** |
 | 原备份/恢复测试（回归） | **9 passed** |
 | web 单元测试（含真实 Clerk 桥 6 项） | **55 passed** |
 | Node Agent 单测 / typecheck / build | **66 passed** / 通过 / 通过 |

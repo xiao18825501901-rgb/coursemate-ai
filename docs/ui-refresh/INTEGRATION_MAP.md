@@ -37,9 +37,12 @@ app/main.py:create_app()
 ## 3. DomainPort 契约 → 真实 V3 实现
 
 实现：`services/rag-api/app/ui_extension/domain.py:V3DomainAdapter`
-（`integration/README.md` 的全部调用点，共 **26** 个 operation：22 个交付 ops +
-`knowledge.begin_learning`、`knowledge.assessment.start/view/submit/abandon`、
-`legacy.conversations/conversation`）
+（`integration/README.md` 的全部调用点，共 **28** 个 operation，程序枚举自
+`if operation == "…"` 分支）：course.list/get/create/update/delete、
+file.list/upload/content/text/delete、context.retrieve、attachments.prepare、
+task.list/create/update/delete/plan、knowledge.tree/assessment/begin_learning/
+submit_delivery/record_problem/assessment.start/assessment.view/assessment.submit/
+assessment.abandon、legacy.conversations/legacy.conversation。
 
 | operation | 真实调用 | 交付包读取的字段 |
 |---|---|---|
