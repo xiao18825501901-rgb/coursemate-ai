@@ -93,6 +93,32 @@ def _replay(
     }
 
 
+_QUOTE_SEGMENT_SPLIT = re.compile(r"(?:…|\.\.\.|\n)+")
+_MIN_SEGMENT_CHARS = 6
+
+
+def _quote_anchored(quote: str, content: str) -> bool:
+    """The reviewer's evidence quote must anchor to the saved body.
+
+    Live reviewers join fragments with ellipses; a single contiguous match is
+    therefore too strict. Every non-trivial segment of the quote must appear
+    verbatim (whitespace-normalised) in the saved content, which still anchors
+    the evidence to the real body without demanding one unbroken sentence.
+    """
+
+    normalized = re.sub(r"\s+", " ", quote or "")
+    if not normalized:
+        return False
+    segments = [
+        re.sub(r"\s+", " ", part).strip()
+        for part in _QUOTE_SEGMENT_SPLIT.split(normalized)
+    ]
+    segments = [part for part in segments if len(part) >= _MIN_SEGMENT_CHARS]
+    if not segments:
+        return False
+    return all(part in content for part in segments)
+
+
 def _server_validate(
     outcome: ReviewOutcome,
     required: list[dict[str, Any]],
@@ -100,10 +126,11 @@ def _server_validate(
 ) -> list[str]:
     """Server-side confirmation of the reviewer's candidate verdicts.
 
-    A ``covered`` verdict only counts when its evidence quote exists verbatim
-    in the saved body (whitespace-normalised) and the item is in the frozen
-    spec passed in. Uncertain, partial, refusals, out-of-scope ids and quote
-    mismatches never write coverage.
+    A ``covered`` verdict only counts when its evidence quote anchors to the
+    saved body (every non-trivial segment appears verbatim, whitespace
+    normalised) and the item is in the frozen spec passed in. Uncertain,
+    partial, refusals, out-of-scope ids and quote mismatches never write
+    coverage.
     """
 
     if outcome.status != "completed":
@@ -115,8 +142,7 @@ def _server_validate(
         verdict = outcome.verdicts.get(item_id)
         if not verdict or verdict.get("decision") != "covered":
             continue
-        quote = re.sub(r"\s+", " ", str(verdict.get("evidence_quote") or "")).strip()
-        if quote and quote in normalized:
+        if _quote_anchored(str(verdict.get("evidence_quote") or ""), normalized):
             confirmed.append(item_id)
     return confirmed
 

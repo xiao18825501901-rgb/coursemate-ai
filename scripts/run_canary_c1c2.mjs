@@ -35,8 +35,22 @@ function env(name) {
   return value && value.trim() ? value.trim() : undefined;
 }
 
-const apiKey = env("V3_MODEL_API_KEY") || env("CMUI_QWEN_API_KEY");
-const baseUrl = env("V3_MODEL_BASE_URL") || env("CMUI_QWEN_BASE_URL");
+function loadProtectedEnvFile() {
+  // The site credential lives in the gitignored services/rag-api/.env; the
+  // driver reads exactly the two Qwen variables from it and never prints them.
+  const file = path.join(ROOT, "services/rag-api/.env");
+  if (!existsSync(file)) return {};
+  const parsed = {};
+  for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
+    const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
+    if (match) parsed[match[1]] = match[2];
+  }
+  return parsed;
+}
+
+const protectedEnv = loadProtectedEnvFile();
+const apiKey = env("V3_MODEL_API_KEY") || protectedEnv.V3_MODEL_API_KEY || env("CMUI_QWEN_API_KEY");
+const baseUrl = env("V3_MODEL_BASE_URL") || protectedEnv.V3_MODEL_BASE_URL || env("CMUI_QWEN_BASE_URL");
 
 if (!apiKey || !baseUrl) {
   console.error("Canary blocked: the site Qwen credential is not on this machine.");
@@ -131,6 +145,19 @@ async function waitRun(runId) {
   throw new Error(`run ${runId} did not finish in 300s`);
 }
 
+async function waitReceipt(runId, timeoutMs = 300_000) {
+  // The run status turns 'completed' BEFORE the coverage review finishes (the
+  // review is an independent post-processing call). Never shut the backend
+  // down while a receipt is still pending.
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const { body } = await jsonFetch(`${api}/runs/${runId}`);
+    if (body?.coverage) return body.coverage;
+    if (Date.now() > deadline) throw new Error(`run ${runId} has no coverage receipt after ${timeoutMs}ms`);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+}
+
 function usageOf(run) {
   const usage = run.usage ?? [];
   let input = 0;
@@ -179,18 +206,23 @@ async function main() {
   if (started.status !== 202) stop(`FAIL run start: ${started.status} ${JSON.stringify(started.body)}`);
   const run = await waitRun(started.body.id);
   const usage = usageOf(run);
+  // The coverage review is a separate third call; its tokens are not part of
+  // the run usage, so book it conservatively as an unknown-cost line.
+  const receipt = await waitReceipt(started.body.id);
   evidence.steps.push({
     step: "teach_run",
     run_id: run.id,
     status: run.status,
     error: run.error ?? null,
     usage,
+    reviewer_call_booked_conservatively_cny: 0.2,
     generated_prompt_chars: (run.generated_prompt ?? "").length,
     prompt_sample_head: String(run.generated_prompt ?? "").slice(0, 500),
     answer_sample_head: String(run.partial_text ?? "").slice(0, 500),
-    coverage_receipt: run.coverage ?? null,
+    coverage_receipt: receipt ?? null,
   });
-  if (usage.estimated_cny > STAGE_CAP_CNY) stop(`STAGE_CAP exceeded: ${usage.estimated_cny.toFixed(4)} CNY`);
+  const estimatedTotal = usage.estimated_cny + 0.2;
+  if (estimatedTotal > STAGE_CAP_CNY) stop(`STAGE_CAP exceeded: ${estimatedTotal.toFixed(4)} CNY`);
 
   const knowledge = await jsonFetch(`${api}/courses/cs3481/knowledge`);
   const node = (knowledge.body ?? []).find((row) => row.id === "canary-clustering-zero");

@@ -155,6 +155,43 @@ async def test_server_validation_rejects_quote_not_in_body_and_keyword_only() ->
     assert _server_validate(echo, items(), CONTENT) == []
 
 
+async def test_ellipsis_joined_segments_anchor_but_fabricated_segments_reject() -> None:
+    # Live reviewers assemble quotes with ellipses; every non-trivial segment
+    # must still appear verbatim in the body.
+    joined = ReviewOutcome(
+        status="completed",
+        confirmed=[ITEM_A, ITEM_B],
+        verdicts={
+            ITEM_A: {
+                "decision": "covered",
+                "reason": "r",
+                "evidence_quote": "大量独立随机变量的均值近似正态分布…正面比例的分布会越来越接近钟形",
+            },
+            ITEM_B: {
+                "decision": "covered",
+                "reason": "r",
+                "evidence_quote": "沿着梯度方向移动，公式为 θ ← θ − η∇L(θ)",
+            },
+        },
+        reviewer="ModelCoverageReviewer",
+    )
+    assert _server_validate(joined, items(), CONTENT) == [ITEM_A, ITEM_B]
+
+    fabricated = ReviewOutcome(
+        status="completed",
+        confirmed=[ITEM_A],
+        verdicts={
+            ITEM_A: {
+                "decision": "covered",
+                "reason": "r",
+                "evidence_quote": "大量独立随机变量的均值近似正态分布…这段内容并不存在于正文之中",
+            }
+        },
+        reviewer="ModelCoverageReviewer",
+    )
+    assert _server_validate(fabricated, items(), CONTENT) == []
+
+
 async def test_invalid_json_forged_ids_and_extra_fields_fail_closed() -> None:
     reviewer = ModelCoverageReviewer(FakeInvoke(["这不是 JSON"]), model="qwen3.8-max")
     bad = await reviewer.review(items(), CONTENT, {"spec_version": 1})

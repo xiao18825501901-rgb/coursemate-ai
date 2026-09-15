@@ -167,7 +167,9 @@ class ModelCoverageReviewer:
                     "你是 CourseMate 的覆盖评审器。你只评审已经完整保存的教学内容是否"
                     "实际完成了给定 REQUIRED 教学项，不授课、不评分、不决定学生是否掌握。"
                     "逐项输出判定：covered / partial / not_covered / uncertain；"
-                    "covered 必须给出正文中真实存在的证据引文（逐字），不确定就不要判 covered。"
+                    "covered 必须给出正文中真实存在的证据引文：可以摘录正文中的连续片段，"
+                    "多个片段之间用省略号（…）连接，但每个片段必须逐字来自正文，"
+                    "不确定就不要判 covered。"
                     "只输出 JSON，形如 {\"verdicts\":[{\"item_id\":\"…\",\"decision\":\"covered\","
                     "\"reason\":\"…\",\"evidence_quote\":\"…\"}]}。只使用给定 item_id。"
                 ),
