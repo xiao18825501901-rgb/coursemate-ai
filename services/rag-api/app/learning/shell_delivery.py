@@ -94,7 +94,41 @@ def _replay(
 
 
 _QUOTE_SEGMENT_SPLIT = re.compile(r"(?:…|\.\.\.|\n)+")
-_MIN_SEGMENT_CHARS = 6
+_MIN_SEGMENT_CHARS = 5
+_FORMAT_STRIP = re.compile(r"\*\*|`|\$")
+_PUNCTUATION_MAP = str.maketrans(
+    {
+        "：": ":",
+        "，": ",",
+        "。": ".",
+        "？": "?",
+        "！": "!",
+        "（": "(",
+        "）": ")",
+        "【": "[",
+        "】": "]",
+        "≥": ">=",
+        "≤": "<=",
+        "→": "->",
+        "“": '"',
+        "”": '"',
+    }
+)
+
+
+def _normalize_quote_text(text: str) -> str:
+    """Formatting-tolerant normalisation for quote anchoring.
+
+    Live reviewers quote loosely: markdown bold, backticks, LaTeX delimiters
+    and Chinese/ASCII punctuation variants differ from the saved body. These
+    are stripped/normalised on BOTH sides so anchoring still verifies the
+    substantive words exist verbatim, not that formatting was copied.
+    """
+
+    lowered = text.lower()
+    stripped = _FORMAT_STRIP.sub("", lowered)
+    mapped = stripped.translate(_PUNCTUATION_MAP)
+    return re.sub(r"\s+", " ", mapped)
 
 
 def _quote_anchored(quote: str, content: str) -> bool:
@@ -102,21 +136,20 @@ def _quote_anchored(quote: str, content: str) -> bool:
 
     Live reviewers join fragments with ellipses; a single contiguous match is
     therefore too strict. Every non-trivial segment of the quote must appear
-    verbatim (whitespace-normalised) in the saved content, which still anchors
-    the evidence to the real body without demanding one unbroken sentence.
+    verbatim in the saved content after formatting-tolerant normalisation,
+    which anchors the evidence to the real body without demanding one
+    unbroken, identically formatted sentence.
     """
 
-    normalized = re.sub(r"\s+", " ", quote or "")
-    if not normalized:
-        return False
     segments = [
-        re.sub(r"\s+", " ", part).strip()
-        for part in _QUOTE_SEGMENT_SPLIT.split(normalized)
+        part.strip()
+        for part in _QUOTE_SEGMENT_SPLIT.split(_normalize_quote_text(quote or ""))
+        if len(part.strip()) >= _MIN_SEGMENT_CHARS
     ]
-    segments = [part for part in segments if len(part) >= _MIN_SEGMENT_CHARS]
     if not segments:
         return False
-    return all(part in content for part in segments)
+    normalized_content = _normalize_quote_text(content or "")
+    return all(part in normalized_content for part in segments)
 
 
 def _server_validate(
@@ -127,22 +160,21 @@ def _server_validate(
     """Server-side confirmation of the reviewer's candidate verdicts.
 
     A ``covered`` verdict only counts when its evidence quote anchors to the
-    saved body (every non-trivial segment appears verbatim, whitespace
-    normalised) and the item is in the frozen spec passed in. Uncertain,
+    saved body (every non-trivial segment appears verbatim after formatting
+    normalisation) and the item is in the frozen spec passed in. Uncertain,
     partial, refusals, out-of-scope ids and quote mismatches never write
     coverage.
     """
 
     if outcome.status != "completed":
         return []
-    normalized = re.sub(r"\s+", " ", content or "")
     confirmed: list[str] = []
     for item in required:
         item_id = str(item["item_id"])
         verdict = outcome.verdicts.get(item_id)
         if not verdict or verdict.get("decision") != "covered":
             continue
-        if _quote_anchored(str(verdict.get("evidence_quote") or ""), normalized):
+        if _quote_anchored(str(verdict.get("evidence_quote") or ""), content or ""):
             confirmed.append(item_id)
     return confirmed
 

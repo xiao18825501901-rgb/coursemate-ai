@@ -156,8 +156,9 @@ async def test_server_validation_rejects_quote_not_in_body_and_keyword_only() ->
 
 
 async def test_ellipsis_joined_segments_anchor_but_fabricated_segments_reject() -> None:
-    # Live reviewers assemble quotes with ellipses; every non-trivial segment
-    # must still appear verbatim in the body.
+    # Live reviewers assemble quotes with ellipses and formatting drift
+    # (markdown bold, LaTeX delimiters, punctuation variants); every
+    # non-trivial segment must still appear verbatim after normalisation.
     joined = ReviewOutcome(
         status="completed",
         confirmed=[ITEM_A, ITEM_B],
@@ -170,7 +171,7 @@ async def test_ellipsis_joined_segments_anchor_but_fabricated_segments_reject() 
             ITEM_B: {
                 "decision": "covered",
                 "reason": "r",
-                "evidence_quote": "沿着梯度方向移动，公式为 θ ← θ − η∇L(θ)",
+                "evidence_quote": "沿着**梯度**方向移动，公式为 $θ ← θ − η∇L(θ)$",
             },
         },
         reviewer="ModelCoverageReviewer",
