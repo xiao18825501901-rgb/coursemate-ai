@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from app.config import Settings
 from app.db import Database
@@ -188,7 +189,6 @@ def _prepend_legacy_history(ui: object, adapter: V3DomainAdapter) -> None:
     """
 
     from fastapi import APIRouter, HTTPException
-    from fastapi.responses import JSONResponse
 
     from app.cm_update.auth import current_user
 
@@ -203,15 +203,23 @@ def _prepend_legacy_history(ui: object, adapter: V3DomainAdapter) -> None:
         except HTTPException:
             raise
 
-    @router.get("/api/ui/v1/courses/{course_id}/legacy-conversations")
-    async def legacy_conversations(course_id: str, request: Request) -> JSONResponse:
+    @router.get(
+        "/api/ui/v1/courses/{course_id}/legacy-conversations",
+        response_model=None,
+    )
+    async def legacy_conversations(course_id: str, request: Request):
         rows = await _call("legacy.conversations", {"course": course_id}, request)
         return JSONResponse(content=rows)
 
-    @router.get("/api/ui/v1/courses/{course_id}/legacy-conversations/{conversation_id}")
+    @router.get(
+        "/api/ui/v1/courses/{course_id}/legacy-conversations/{conversation_id}",
+        response_model=None,
+    )
     async def legacy_conversation(
-        course_id: str, conversation_id: str, request: Request
-    ) -> JSONResponse:
+        course_id: str,
+        conversation_id: str,
+        request: Request,
+    ):
         body = await _call(
             "legacy.conversation",
             {"course": course_id, "id": conversation_id},
