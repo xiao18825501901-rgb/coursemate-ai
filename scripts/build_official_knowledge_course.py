@@ -68,7 +68,8 @@ def main() -> int:
     raw_plan = json.loads(args.plan.read_text(encoding="utf-8"))
     if isinstance(raw_plan, dict) and "plan" in raw_plan:
         raw_plan = raw_plan["plan"]
-    plan = OfficialKnowledgeCoursePlan.model_validate(raw_plan)    payload = OfficialKnowledgeCourseBuild(
+    plan = OfficialKnowledgeCoursePlan.model_validate(raw_plan)
+    payload = OfficialKnowledgeCourseBuild(
         operation_id=args.operation_id,
         plan=plan,
         max_model_calls_per_batch=args.max_model_calls_per_batch,
