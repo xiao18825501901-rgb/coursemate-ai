@@ -31,6 +31,7 @@ from app.rag.retrieval import HybridRetriever
 from app.repositories.chunks import ChunkRepository
 from app.services.ingestion import IngestionService, MissingEmbeddingProvider
 from app.services.knowledge_publication import KnowledgePublicationService
+from app.services.official_knowledge_draft_builder import OfficialKnowledgeDraftBuilder
 from app.services.overlay_publication import OverlayPublicationService
 from app.services.publication import PublicationService
 from app.services.qa import QaService
@@ -104,6 +105,9 @@ def create_app(
         application.state.learning = LearningOrchestrator(
             database, resolved_settings,
             HybridRetriever(ChunkRepository(database), embedding_provider)
+        )
+        application.state.official_knowledge_draft_builder = OfficialKnowledgeDraftBuilder(
+            database, resolved_settings, application.state.learning
         )
     teaching_profile_service = TeachingProfileService(database)
     application.state.teaching_profile_service = teaching_profile_service

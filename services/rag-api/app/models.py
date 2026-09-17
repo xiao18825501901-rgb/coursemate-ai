@@ -380,6 +380,51 @@ class OfficialKnowledgeDraftPage(ApiModel):
     items: list[OfficialKnowledgeDraft]
 
 
+class OfficialKnowledgeDraftGenerate(ApiModel):
+    """Admin request to build an OFFICIAL DRAFT knowledge tree from real corpus.
+
+    Hard ceilings come from the builder's fixed constants; this model's bounds
+    mirror them so validation fails loudly before any provider call.
+    """
+
+    operation_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,100}$")
+    max_nodes: int = Field(default=1, ge=1, le=10)
+    max_model_calls: int = Field(default=2, ge=1, le=20)
+    max_reserved_output_tokens: int = Field(default=8_000, ge=1, le=20_000)
+    dry_run: bool = False
+
+
+class OfficialKnowledgeDraftCorpus(ApiModel):
+    document_count: int
+    chunk_count: int
+    version_count: int
+
+
+class OfficialKnowledgeDraftBudget(ApiModel):
+    max_nodes: int
+    max_model_calls: int
+    max_reserved_output_tokens: int
+    planned_model_calls: int
+    planned_reserved_output_tokens: int
+    model_calls_made: int
+    reserved_output_tokens_booked: int
+
+
+class OfficialKnowledgeDraftGeneration(ApiModel):
+    course_id: str
+    operation_id: str
+    dry_run: bool
+    existing_draft: bool
+    tree_version_id: str | None = None
+    tree_version: int | None = None
+    node_ids: list[str] = Field(default_factory=list)
+    corpus_fingerprint: str
+    corpus: OfficialKnowledgeDraftCorpus
+    budget: OfficialKnowledgeDraftBudget
+    evidence_chunk_count: int = 0
+    evidence_rows: list[str] = Field(default_factory=list)
+
+
 class OfficialKnowledgePublicationRequest(ApiModel):
     id: str
     course_id: str

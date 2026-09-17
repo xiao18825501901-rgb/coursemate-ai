@@ -7,6 +7,8 @@ from app.auth import AuthenticatedUser, require_admin, require_user
 from app.errors import ApiError
 from app.learning.workspaces import original_path
 from app.models import (
+    OfficialKnowledgeDraftGenerate,
+    OfficialKnowledgeDraftGeneration,
     OfficialKnowledgeDraftPage,
     OfficialKnowledgePublicationRequest,
     OfficialKnowledgePublicationRequestPage,
@@ -22,6 +24,7 @@ from app.models import (
     PublicationSubmit,
 )
 from app.services.knowledge_publication import KnowledgePublicationService
+from app.services.official_knowledge_draft_builder import OfficialKnowledgeDraftBuilder
 from app.services.overlay_publication import OverlayPublicationService
 from app.services.publication import PublicationService
 
@@ -36,6 +39,13 @@ def _service(request: Request) -> PublicationService:
 def _knowledge_service(request: Request) -> KnowledgePublicationService:
     service: KnowledgePublicationService = request.app.state.knowledge_publication_service
     return service
+
+
+def _draft_builder(request: Request) -> OfficialKnowledgeDraftBuilder:
+    builder: OfficialKnowledgeDraftBuilder = (
+        request.app.state.official_knowledge_draft_builder
+    )
+    return builder
 
 
 def _overlay_service(request: Request) -> OverlayPublicationService:
@@ -166,6 +176,26 @@ def official_knowledge_drafts(
     _admin: Annotated[AuthenticatedUser, Depends(require_admin)],
 ) -> OfficialKnowledgeDraftPage:
     return OfficialKnowledgeDraftPage(items=_knowledge_service(request).list_drafts())
+
+
+@router.post(
+    "/api/admin/courses/{course_id}/official-knowledge-drafts/generate",
+    response_model=OfficialKnowledgeDraftGeneration,
+)
+def generate_official_knowledge_draft(
+    course_id: str,
+    payload: OfficialKnowledgeDraftGenerate,
+    request: Request,
+    admin: Annotated[AuthenticatedUser, Depends(require_admin)],
+) -> OfficialKnowledgeDraftGeneration:
+    """Build an OFFICIAL DRAFT from the real official corpus.
+
+    Bounded by maxNodes/maxModelCalls/maxReservedOutputTokens; dryRun makes no
+    model call and writes nothing. The result is a DRAFT only: submitting and
+    approving publication remain separate human steps with independent review.
+    """
+
+    return _draft_builder(request).generate(course_id, payload, admin_user_id=admin.user_id)
 
 
 @router.post(

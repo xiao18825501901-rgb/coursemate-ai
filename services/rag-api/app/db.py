@@ -18,9 +18,10 @@ V3_MIGRATIONS = (
     "020_official_publication_resource_locks.sql",
     "021_model_call_budget_reservations.sql",
     "022_shell_delivery_evidence.sql",
+    "023_official_knowledge_draft_fingerprint.sql",
 )
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 22
+LATEST_V3_SCHEMA_VERSION = 23
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (
@@ -463,6 +464,24 @@ class Database:
                             encoding="utf-8"
                         )
                     )
+                # Migration 023 is a conditional ALTER: SQLite cannot ADD COLUMN
+                # IF NOT EXISTS, so the column and its partial index are applied
+                # here under a table_info guard (ledger entry lives in the SQL file).
+                tree_columns = {
+                    row["name"]
+                    for row in connection.execute("PRAGMA table_info(knowledge_tree_versions)")
+                }
+                if "corpus_fingerprint" not in tree_columns:
+                    connection.execute(
+                        "ALTER TABLE knowledge_tree_versions ADD COLUMN "
+                        "corpus_fingerprint TEXT CHECK (corpus_fingerprint IS NULL "
+                        "OR length(corpus_fingerprint) = 64)"
+                    )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_official_draft_corpus_fingerprint "
+                    "ON knowledge_tree_versions(course_id, corpus_fingerprint) "
+                    "WHERE tree_kind = 'OFFICIAL' AND status = 'DRAFT'"
+                )
 
     def is_ready(self) -> bool:
         if not self.upload_dir.is_dir():

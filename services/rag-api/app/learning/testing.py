@@ -161,4 +161,37 @@ def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
             "next_actions": ["RETURN", "CONTINUE", "PAUSE"],
             "uncertainties": ["Synthetic fixture, not a real course lesson"],
         }
+    if schema == "OfficialNodeDraftOutput":
+        evidence = context.get("evidence") or []
+        items = [
+            {
+                "item_id": "core_concept",
+                "requirement": "REQUIRED",
+                "objective": "Explain the core concept from the official corpus",
+                "acceptance": "State the concept and give one corpus example",
+                "evidence_ids": [evidence[0]["id"]] if evidence else [],
+            }
+        ]
+        return {
+            "title": f"{context['course_id']} core concept",
+            "description": (
+                "[FAKE TEST FIXTURE] Synthetic official node draft; not live model output."
+            ),
+            "major": "CS",
+            "kind": "ATOMIC",
+            "items": items,
+        }
+    if schema == "OfficialTeachingSpecDraftOutput":
+        return {
+            "change_reason": "M6D1 deterministic canary generation",
+            "items": context["node_draft"]["items"],
+        }
+    if schema == "OfficialKnowledgeDraftBundleOutput":
+        node_context = dict(context)
+        node = fixture_output("OfficialNodeDraftOutput", node_context)
+        spec = fixture_output(
+            "OfficialTeachingSpecDraftOutput",
+            {**context, "node_draft": {"items": node["items"]}},
+        )
+        return {"node": node, "spec": spec}
     raise ValueError("Unsupported synthetic fixture schema")

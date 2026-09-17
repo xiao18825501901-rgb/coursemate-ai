@@ -180,7 +180,7 @@ def test_rag_migration_runs_even_with_ui_extension_disabled(tmp_path: Path) -> N
             "SELECT MAX(version) FROM schema_migrations WHERE version <= ?",
             (app_db.LATEST_V3_SCHEMA_VERSION,),
         ).fetchone()[0]
-    assert version == 22
+    assert version == app_db.LATEST_V3_SCHEMA_VERSION
 
 
 def test_old_release_readiness_and_progress_on_schema_22(tmp_path: Path) -> None:

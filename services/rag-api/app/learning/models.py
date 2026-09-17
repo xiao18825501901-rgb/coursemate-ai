@@ -292,6 +292,73 @@ class TeachingSpecDraft(OperationInput):
         return self
 
 
+class OfficialNodeDraftItem(Contract):
+    """A bounded official-knowledge item grounded in official-course evidence.
+
+    Evidence ids are chunk ids the builder resolved from the current official
+    corpus; the builder (never the model output alone) validates every id before
+    canonicalization.
+    """
+
+    item_id: Identifier
+    requirement: Literal["REQUIRED", "RECOMMENDED", "OPTIONAL"]
+    objective: Text
+    acceptance: Text
+    evidence_ids: list[Identifier] = Field(default_factory=list, max_length=20)
+
+
+class OfficialNodeDraftOutput(Contract):
+    """Provider contract for the M6D1 official node draft (one call of two).
+
+    Bounded to a single ATOMIC node: composite canonicalization is deliberately
+    out of the first builder version.
+    """
+
+    title: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=150)
+    ]
+    description: Text
+    major: Major
+    kind: Literal["ATOMIC"]
+    items: list[OfficialNodeDraftItem] = Field(min_length=1, max_length=10)
+
+    @model_validator(mode="after")
+    def valid_scope(self) -> "OfficialNodeDraftOutput":
+        ids = [item.item_id for item in self.items]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Official node item IDs must be unique")
+        if not any(item.requirement == "REQUIRED" for item in self.items):
+            raise ValueError("An official node requires at least one REQUIRED item")
+        return self
+
+
+class OfficialTeachingSpecDraftOutput(Contract):
+    """Provider contract for the validated Teaching Spec (second call).
+
+    The item id set must match the node draft; the builder enforces this and the
+    official-evidence grounding before anything is canonicalized.
+    """
+
+    change_reason: Text
+    items: list[OfficialNodeDraftItem] = Field(min_length=1, max_length=30)
+
+    @model_validator(mode="after")
+    def valid_scope(self) -> "OfficialTeachingSpecDraftOutput":
+        ids = [item.item_id for item in self.items]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Official spec item IDs must be unique")
+        if not any(item.requirement == "REQUIRED" for item in self.items):
+            raise ValueError("An official spec requires at least one REQUIRED item")
+        return self
+
+
+class OfficialKnowledgeDraftBundleOutput(Contract):
+    """Single-call bundle contract for bounded one-node generation."""
+
+    node: OfficialNodeDraftOutput
+    spec: OfficialTeachingSpecDraftOutput
+
+
 class AssessmentStartInput(OperationInput):
     node_id: Identifier
 
