@@ -65,10 +65,10 @@ def main() -> int:
     )
     node_builder = OfficialKnowledgeDraftBuilder(database, settings, orchestrator)
     builder = OfficialKnowledgeCourseBuilder(database, settings, orchestrator, node_builder)
-    plan = OfficialKnowledgeCoursePlan.model_validate(
-        json.loads(args.plan.read_text(encoding="utf-8"))
-    )
-    payload = OfficialKnowledgeCourseBuild(
+    raw_plan = json.loads(args.plan.read_text(encoding="utf-8"))
+    if isinstance(raw_plan, dict) and "plan" in raw_plan:
+        raw_plan = raw_plan["plan"]
+    plan = OfficialKnowledgeCoursePlan.model_validate(raw_plan)    payload = OfficialKnowledgeCourseBuild(
         operation_id=args.operation_id,
         plan=plan,
         max_model_calls_per_batch=args.max_model_calls_per_batch,
