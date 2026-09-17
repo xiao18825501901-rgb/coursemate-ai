@@ -163,6 +163,7 @@ def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
         }
     if schema == "OfficialNodeDraftOutput":
         evidence = context.get("evidence") or []
+        title = (context.get("topic") or "").strip() or f"{context['course_id']} core concept"
         items = [
             {
                 "item_id": "core_concept",
@@ -173,7 +174,7 @@ def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
             }
         ]
         return {
-            "title": f"{context['course_id']} core concept",
+            "title": title[:150],
             "description": (
                 "[FAKE TEST FIXTURE] Synthetic official node draft; not live model output."
             ),

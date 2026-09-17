@@ -55,6 +55,37 @@ def content_hash(value: object) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
+def corpus_fingerprint(
+    course_id: str,
+    versions: list[sqlite3.Row],
+    *,
+    builder_version: str,
+    config: dict[str, object],
+) -> str:
+    """Stable fingerprint over the current OFFICIAL corpus + builder identity.
+
+    No timestamps or random values: identical corpus + config always hashes to
+    the same fingerprint, which is what makes generation idempotent.
+    """
+
+    return content_hash(
+        {
+            "builder_version": builder_version,
+            "course_id": course_id,
+            "config": config,
+            "documents": [
+                {
+                    "version_id": str(row["id"]),
+                    "version": int(row["version"]),
+                    "sha256": row["sha256"],
+                    "status": row["status"],
+                }
+                for row in versions
+            ],
+        }
+    )
+
+
 class OfficialKnowledgeDraftBuilder:
     """Builds one auditable OFFICIAL DRAFT per corpus+config fingerprint."""
 
@@ -126,25 +157,15 @@ class OfficialKnowledgeDraftBuilder:
         versions: list[sqlite3.Row],
         payload: OfficialKnowledgeDraftGenerate,
     ) -> str:
-        return content_hash(
-            {
-                "builder_version": BUILDER_VERSION,
-                "course_id": course_id,
-                "config": {
-                    "max_nodes": payload.max_nodes,
-                    "max_model_calls": payload.max_model_calls,
-                    "max_reserved_output_tokens": payload.max_reserved_output_tokens,
-                },
-                "documents": [
-                    {
-                        "version_id": str(row["id"]),
-                        "version": int(row["version"]),
-                        "sha256": row["sha256"],
-                        "status": row["status"],
-                    }
-                    for row in versions
-                ],
-            }
+        return corpus_fingerprint(
+            course_id,
+            versions,
+            builder_version=BUILDER_VERSION,
+            config={
+                "max_nodes": payload.max_nodes,
+                "max_model_calls": payload.max_model_calls,
+                "max_reserved_output_tokens": payload.max_reserved_output_tokens,
+            },
         )
 
     def _existing_draft(
@@ -159,8 +180,11 @@ class OfficialKnowledgeDraftBuilder:
 
     # ---------------------------------------------------------------- evidence
 
-    def _official_evidence(
-        self, workspace: sqlite3.Row, course: sqlite3.Row
+    def official_evidence(
+        self,
+        workspace: sqlite3.Row,
+        course: sqlite3.Row,
+        query: str | None = None,
     ) -> list[dict[str, Any]]:
         """Retrieve official-course chunks and re-verify every binding.
 
@@ -170,7 +194,7 @@ class OfficialKnowledgeDraftBuilder:
         """
 
         retrieved = self.learning.evidence(
-            workspace, f"{course['name']} knowledge structure", scope="official"
+            workspace, query or f"{course['name']} knowledge structure", scope="official"
         )
         verified: list[dict[str, Any]] = []
         with self.database.connect() as connection:
@@ -193,7 +217,7 @@ class OfficialKnowledgeDraftBuilder:
         return verified
 
     @staticmethod
-    def _validate_outputs(
+    def validate_outputs(
         node: OfficialNodeDraftOutput,
         spec: OfficialTeachingSpecDraftOutput,
         official_evidence: list[dict[str, Any]],
@@ -228,35 +252,54 @@ class OfficialKnowledgeDraftBuilder:
     # ---------------------------------------------------------------- generation
 
     def _guard_call(
-        self, calls_made: int, payload: OfficialKnowledgeDraftGenerate
+        self,
+        calls_made: int,
+        max_model_calls: int,
+        max_reserved_output_tokens: int,
     ) -> None:
         per_call = self.settings.v3_max_output_tokens
-        if calls_made + 1 > payload.max_model_calls:
+        if calls_made + 1 > max_model_calls:
             raise ApiError(
                 429,
                 "OFFICIAL_DRAFT_BUDGET_EXCEEDED",
                 "The requested model-call budget has been reached; no provider call was made.",
             )
-        if (calls_made + 1) * per_call > payload.max_reserved_output_tokens:
+        if (calls_made + 1) * per_call > max_reserved_output_tokens:
             raise ApiError(
                 429,
                 "OFFICIAL_DRAFT_BUDGET_EXCEEDED",
                 "The reserved-output-token ceiling would be exceeded; no provider call was made.",
             )
 
-    def _generate_drafts(
+    def plan_calls(
+        self, max_model_calls: int, max_reserved_output_tokens: int
+    ) -> int:
+        per_call = self.settings.v3_max_output_tokens
+        planned = min(max_model_calls, 2)
+        if planned * per_call > max_reserved_output_tokens:
+            planned = max_reserved_output_tokens // per_call
+        return planned
+
+    def generate_drafts(
         self,
         *,
         workspace: sqlite3.Row,
         course: sqlite3.Row,
         official_evidence: list[dict[str, Any]],
-        payload: OfficialKnowledgeDraftGenerate,
+        operation_id: str,
+        max_model_calls: int,
+        max_reserved_output_tokens: int,
         planned_calls: int,
+        max_nodes: int = 1,
+        topic: str | None = None,
+        node_key: str | None = None,
     ) -> tuple[OfficialNodeDraftOutput, OfficialTeachingSpecDraftOutput, int]:
         context = {
             "course_id": course["id"],
             "course_name": course["name"],
-            "max_nodes": payload.max_nodes,
+            "max_nodes": max_nodes,
+            "topic": topic or "",
+            "node_key": node_key or "",
             "evidence": [
                 {
                     "id": entry["id"],
@@ -281,16 +324,29 @@ class OfficialKnowledgeDraftBuilder:
             call_context: dict[str, Any],
         ) -> Any:
             with self.database.connect() as connection:
-                connection.execute(
-                    "INSERT INTO learning_operations("
-                    "workspace_id,id,request_hash,kind,status) VALUES(?,?,?,?,'RUNNING')",
-                    (
-                        workspace_id,
-                        operation,
-                        content_hash({"operation": operation, "kind": kind}),
-                        kind,
-                    ),
-                )
+                connection.execute("BEGIN IMMEDIATE")
+                existing = connection.execute(
+                    "SELECT status FROM learning_operations WHERE workspace_id=? AND id=?",
+                    (workspace_id, operation),
+                ).fetchone()
+                if existing is None:
+                    connection.execute(
+                        "INSERT INTO learning_operations("
+                        "workspace_id,id,request_hash,kind,status) VALUES(?,?,?,?,'RUNNING')",
+                        (
+                            workspace_id,
+                            operation,
+                            content_hash({"operation": operation, "kind": kind}),
+                            kind,
+                        ),
+                    )
+                else:
+                    # Resume/retry of the same logical operation re-opens it.
+                    connection.execute(
+                        "UPDATE learning_operations SET status='RUNNING' "
+                        "WHERE workspace_id=? AND id=?",
+                        (workspace_id, operation),
+                    )
             try:
                 output, _run = self.learning.generate(
                     workspace_id,
@@ -323,39 +379,46 @@ class OfficialKnowledgeDraftBuilder:
                 )
             return output
 
+        topic_instruction = (
+            f" The node topic scope is: {topic}."
+            if topic
+            else ""
+        )
         if planned_calls == 1:
-            self._guard_call(calls_made, payload)
+            self._guard_call(calls_made, max_model_calls, max_reserved_output_tokens)
             bundle = run_operation(
-                f"{payload.operation_id}-bundle",
+                f"{operation_id}-bundle",
                 "official.draft.bundle",
                 OfficialKnowledgeDraftBundleOutput,
                 (
                     "Build ONE bounded ATOMIC knowledge node for the official course "
                     "grounded ONLY in the supplied official corpus evidence, plus its "
                     "validated Teaching Spec. Never invent facts outside the evidence."
+                    + topic_instruction
                 ),
                 "teacher",
                 context,
             )
             calls_made += 1
             return bundle.node, bundle.spec, calls_made
-        self._guard_call(calls_made, payload)
+        self._guard_call(calls_made, max_model_calls, max_reserved_output_tokens)
         node = run_operation(
-            f"{payload.operation_id}-node",
+            f"{operation_id}-node",
             "official.draft.node",
             OfficialNodeDraftOutput,
             (
                 "Draft ONE bounded ATOMIC knowledge node for the official course, "
                 "grounded ONLY in the supplied official corpus evidence. Every item "
                 "cites chunk ids from that evidence."
+                + topic_instruction
             ),
             "teacher",
             context,
         )
         calls_made += 1
-        self._guard_call(calls_made, payload)
+        self._guard_call(calls_made, max_model_calls, max_reserved_output_tokens)
         spec = run_operation(
-            f"{payload.operation_id}-spec",
+            f"{operation_id}-spec",
             "official.draft.spec",
             OfficialTeachingSpecDraftOutput,
             (
@@ -371,6 +434,170 @@ class OfficialKnowledgeDraftBuilder:
 
     # ------------------------------------------------------------ canonicalize
 
+    @staticmethod
+    def _content_node_id(course: sqlite3.Row, node: OfficialNodeDraftOutput, spec: OfficialTeachingSpecDraftOutput) -> str:
+        node_identity = content_hash(
+            {
+                "course_id": course["id"],
+                "title": node.title,
+                "major": node.major,
+                "kind": node.kind,
+                "items": [item.model_dump() for item in spec.items],
+            }
+        )
+        return "official-node-" + node_identity[:24]
+
+    def _canonicalize_node_tx(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        course: sqlite3.Row,
+        node_id: str,
+        node: OfficialNodeDraftOutput,
+        spec: OfficialTeachingSpecDraftOutput,
+        cited_evidence: set[str],
+        official_evidence: list[dict[str, Any]],
+        fingerprint: str,
+        admin_user_id: str,
+        fingerprint_payload: OfficialKnowledgeDraftGenerate,
+        fingerprint_builder_version: str = BUILDER_VERSION,
+        fingerprint_config: dict[str, object] | None = None,
+    ) -> list[str]:
+        """Node + exact Spec + OFFICIAL evidence writes (no tree). Caller owns
+        the transaction and has already verified the corpus fingerprint."""
+
+        current_versions = self._official_versions(connection, course["id"])
+        config = fingerprint_config if fingerprint_config is not None else {
+            "max_nodes": fingerprint_payload.max_nodes,
+            "max_model_calls": fingerprint_payload.max_model_calls,
+            "max_reserved_output_tokens": fingerprint_payload.max_reserved_output_tokens,
+        }
+        if (
+            corpus_fingerprint(
+                course["id"],
+                current_versions,
+                builder_version=fingerprint_builder_version,
+                config=config,
+            )
+            != fingerprint
+        ):
+            raise ApiError(
+                409,
+                "OFFICIAL_CORPUS_CHANGED",
+                "The official corpus changed during generation; nothing was written.",
+            )
+        node_row = connection.execute(
+            "SELECT * FROM knowledge_nodes WHERE id=?", (node_id,)
+        ).fetchone()
+        if node_row is None:
+            connection.execute(
+                "INSERT INTO knowledge_nodes("
+                "id,course_id,owner_user_id,title,description,major,kind,status) "
+                "VALUES(?,?,NULL,?,?,?,?,'CANDIDATE')",
+                (
+                    node_id,
+                    course["id"],
+                    node.title,
+                    node.description,
+                    node.major,
+                    node.kind,
+                ),
+            )
+        else:
+            if (
+                node_row["course_id"] != course["id"]
+                or node_row["owner_user_id"] is not None
+                or node_row["status"] not in {"CANDIDATE", "PUBLISHED"}
+                or node_row["title"] != node.title
+                or node_row["description"] != node.description
+                or node_row["major"] != node.major
+                or node_row["kind"] != node.kind
+            ):
+                raise ApiError(
+                    409,
+                    "CANONICAL_NODE_CONFLICT",
+                    "An existing canonical node id collides with different content.",
+                )
+        spec_content = canonical_json([item.model_dump() for item in spec.items])
+        spec_hash = hashlib.sha256(spec_content.encode("utf-8")).hexdigest()
+        spec_row = connection.execute(
+            "SELECT content_hash FROM teaching_specs WHERE node_id=? AND version=1",
+            (node_id,),
+        ).fetchone()
+        if spec_row is None:
+            connection.execute(
+                "INSERT INTO teaching_specs(node_id,version,content_json,content_hash) "
+                "VALUES(?,1,?,?)",
+                (node_id, spec_content, spec_hash),
+            )
+        elif spec_row["content_hash"] != spec_hash:
+            raise ApiError(
+                409,
+                "CANONICAL_NODE_CONFLICT",
+                "The canonical node's Teaching Spec no longer matches its identity.",
+            )
+        connection.execute(
+            "UPDATE teaching_spec_metadata SET created_by_user_id=?,change_reason=? "
+            "WHERE node_id=? AND version=1",
+            (admin_user_id, spec.change_reason[:2000], node_id),
+        )
+
+        evidence_rows: list[str] = []
+        by_id = {str(entry["id"]): entry for entry in official_evidence}
+        for evidence_id in sorted(cited_evidence):
+            entry = by_id[evidence_id]
+            evidence_row_id = "official-evidence-" + uuid4().hex
+            connection.execute(
+                "INSERT OR IGNORE INTO material_evidence("
+                "id,node_id,document_version_id,chunk_id,owner_user_id,"
+                "source_scope,locator_type,locator_value,status) "
+                "VALUES(?,?,?,?,NULL,'OFFICIAL',?,?,'ACTIVE')",
+                (
+                    evidence_row_id,
+                    node_id,
+                    entry["document_version_id"],
+                    entry["id"],
+                    entry["locator_type"],
+                    entry["locator_value"],
+                ),
+            )
+            evidence_rows.append(evidence_row_id)
+        return evidence_rows
+
+    def canonicalize_node(
+        self,
+        *,
+        course: sqlite3.Row,
+        node_id: str,
+        node: OfficialNodeDraftOutput,
+        spec: OfficialTeachingSpecDraftOutput,
+        cited_evidence: set[str],
+        official_evidence: list[dict[str, Any]],
+        fingerprint: str,
+        admin_user_id: str,
+        fingerprint_payload: OfficialKnowledgeDraftGenerate,
+        fingerprint_builder_version: str = BUILDER_VERSION,
+        fingerprint_config: dict[str, object] | None = None,
+    ) -> list[str]:
+        """Node-only canonicalization for the bulk course builder (no tree)."""
+
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            return self._canonicalize_node_tx(
+                connection,
+                course=course,
+                node_id=node_id,
+                node=node,
+                spec=spec,
+                cited_evidence=cited_evidence,
+                official_evidence=official_evidence,
+                fingerprint=fingerprint,
+                admin_user_id=admin_user_id,
+                fingerprint_payload=fingerprint_payload,
+                fingerprint_builder_version=fingerprint_builder_version,
+                fingerprint_config=fingerprint_config,
+            )
+
     def _canonicalize(
         self,
         *,
@@ -383,18 +610,7 @@ class OfficialKnowledgeDraftBuilder:
         payload: OfficialKnowledgeDraftGenerate,
         admin_user_id: str,
     ) -> tuple[str, int, list[str], list[str]]:
-        spec_content = canonical_json([item.model_dump() for item in spec.items])
-        spec_hash = hashlib.sha256(spec_content.encode("utf-8")).hexdigest()
-        node_identity = content_hash(
-            {
-                "course_id": course["id"],
-                "title": node.title,
-                "major": node.major,
-                "kind": node.kind,
-                "items": [item.model_dump() for item in spec.items],
-            }
-        )
-        node_id = "official-node-" + node_identity[:24]
+        node_id = self._content_node_id(course, node, spec)
         tree_title = f"{course['name']} official knowledge draft"[:200].strip()
         change_reason = (
             f"AI-assisted official draft from verified corpus; "
@@ -403,13 +619,6 @@ class OfficialKnowledgeDraftBuilder:
 
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            current_versions = self._official_versions(connection, course["id"])
-            if self._fingerprint(course["id"], current_versions, payload) != fingerprint:
-                raise ApiError(
-                    409,
-                    "OFFICIAL_CORPUS_CHANGED",
-                    "The official corpus changed during generation; nothing was written.",
-                )
             existing = self._existing_draft(connection, course["id"], fingerprint)
             if existing is not None:
                 members = [
@@ -421,81 +630,18 @@ class OfficialKnowledgeDraftBuilder:
                     )
                 ]
                 return str(existing["id"]), int(existing["version"]), members, []
-
-            node_row = connection.execute(
-                "SELECT * FROM knowledge_nodes WHERE id=?", (node_id,)
-            ).fetchone()
-            if node_row is None:
-                connection.execute(
-                    "INSERT INTO knowledge_nodes("
-                    "id,course_id,owner_user_id,title,description,major,kind,status) "
-                    "VALUES(?,?,NULL,?,?,?,?,'CANDIDATE')",
-                    (
-                        node_id,
-                        course["id"],
-                        node.title,
-                        node.description,
-                        node.major,
-                        node.kind,
-                    ),
-                )
-            else:
-                if (
-                    node_row["course_id"] != course["id"]
-                    or node_row["owner_user_id"] is not None
-                    or node_row["status"] not in {"CANDIDATE", "PUBLISHED"}
-                    or node_row["title"] != node.title
-                    or node_row["description"] != node.description
-                    or node_row["major"] != node.major
-                    or node_row["kind"] != node.kind
-                ):
-                    raise ApiError(
-                        409,
-                        "CANONICAL_NODE_CONFLICT",
-                        "An existing canonical node id collides with different content.",
-                    )
-            spec_row = connection.execute(
-                "SELECT content_hash FROM teaching_specs WHERE node_id=? AND version=1",
-                (node_id,),
-            ).fetchone()
-            if spec_row is None:
-                connection.execute(
-                    "INSERT INTO teaching_specs(node_id,version,content_json,content_hash) "
-                    "VALUES(?,1,?,?)",
-                    (node_id, spec_content, spec_hash),
-                )
-            elif spec_row["content_hash"] != spec_hash:
-                raise ApiError(
-                    409,
-                    "CANONICAL_NODE_CONFLICT",
-                    "The canonical node's Teaching Spec no longer matches its identity.",
-                )
-            connection.execute(
-                "UPDATE teaching_spec_metadata SET created_by_user_id=?,change_reason=? "
-                "WHERE node_id=? AND version=1",
-                (admin_user_id, spec.change_reason[:2000], node_id),
+            evidence_rows = self._canonicalize_node_tx(
+                connection,
+                course=course,
+                node_id=node_id,
+                node=node,
+                spec=spec,
+                cited_evidence=cited_evidence,
+                official_evidence=official_evidence,
+                fingerprint=fingerprint,
+                admin_user_id=admin_user_id,
+                fingerprint_payload=payload,
             )
-
-            evidence_rows: list[str] = []
-            by_id = {str(entry["id"]): entry for entry in official_evidence}
-            for evidence_id in sorted(cited_evidence):
-                entry = by_id[evidence_id]
-                evidence_row_id = "official-evidence-" + uuid4().hex
-                connection.execute(
-                    "INSERT OR IGNORE INTO material_evidence("
-                    "id,node_id,document_version_id,chunk_id,owner_user_id,"
-                    "source_scope,locator_type,locator_value,status) "
-                    "VALUES(?,?,?,?,NULL,'OFFICIAL',?,?,'ACTIVE')",
-                    (
-                        evidence_row_id,
-                        node_id,
-                        entry["document_version_id"],
-                        entry["id"],
-                        entry["locator_type"],
-                        entry["locator_value"],
-                    ),
-                )
-                evidence_rows.append(evidence_row_id)
 
             node_row = connection.execute(
                 "SELECT * FROM knowledge_nodes WHERE id=?", (node_id,)
@@ -579,11 +725,9 @@ class OfficialKnowledgeDraftBuilder:
             existing = self._existing_draft(connection, course_id, fingerprint)
 
         per_call = self.settings.v3_max_output_tokens
-        planned_calls = min(payload.max_model_calls, 2)
-        if planned_calls * per_call > payload.max_reserved_output_tokens:
-            # The ceiling cannot cover the whole plan; report the calls it can
-            # cover (possibly zero) and let a real run fail fast before any call.
-            planned_calls = payload.max_reserved_output_tokens // per_call
+        planned_calls = self.plan_calls(
+            payload.max_model_calls, payload.max_reserved_output_tokens
+        )
         planned_reserved = planned_calls * per_call
         budget = OfficialKnowledgeDraftBudget(
             max_nodes=payload.max_nodes,
@@ -657,21 +801,24 @@ class OfficialKnowledgeDraftBuilder:
         workspace = workspace_for(
             self.database, self._admin_workspace_id(course_id, admin_user_id), admin_user_id
         )
-        official_evidence = self._official_evidence(workspace, course)
+        official_evidence = self.official_evidence(workspace, course)
         if not official_evidence:
             raise ApiError(
                 422,
                 "OFFICIAL_DRAFT_EVIDENCE_UNAVAILABLE",
                 "No official corpus chunks could be retrieved for this course.",
             )
-        node, spec, calls_made = self._generate_drafts(
+        node, spec, calls_made = self.generate_drafts(
             workspace=workspace,
             course=course,
             official_evidence=official_evidence,
-            payload=payload,
+            operation_id=payload.operation_id,
+            max_model_calls=payload.max_model_calls,
+            max_reserved_output_tokens=payload.max_reserved_output_tokens,
             planned_calls=planned_calls,
+            max_nodes=payload.max_nodes,
         )
-        cited = self._validate_outputs(node, spec, official_evidence)
+        cited = self.validate_outputs(node, spec, official_evidence)
         tree_id, tree_version, node_ids, evidence_rows = self._canonicalize(
             course=course,
             node=node,

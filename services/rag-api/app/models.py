@@ -1,8 +1,8 @@
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def to_camel(value: str) -> str:
@@ -423,6 +423,105 @@ class OfficialKnowledgeDraftGeneration(ApiModel):
     budget: OfficialKnowledgeDraftBudget
     evidence_chunk_count: int = 0
     evidence_rows: list[str] = Field(default_factory=list)
+
+
+class OfficialKnowledgeCourseNodeTarget(ApiModel):
+    """One atomic generation target: topic scope comes from the course source
+    map (never invented by the model); evidence queries select real corpus
+    chunks the model must ground on."""
+
+    node_key: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,100}$")
+    title: str = Field(min_length=1, max_length=150)
+    description: str = Field(min_length=1, max_length=6000)
+    major: Literal["CS", "SMART_MANUFACTURING", "MATERIALS", "ENERGY"]
+    parent_key: str | None = None
+    prerequisites: list[str] = Field(default_factory=list, max_length=20)
+    evidence_queries: list[str] = Field(min_length=1, max_length=4)
+
+
+class OfficialKnowledgeCourseModuleTarget(ApiModel):
+    """One composite module derived from the course source map."""
+
+    module_key: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,100}$")
+    title: str = Field(min_length=1, max_length=150)
+    description: str = Field(min_length=1, max_length=6000)
+    major: Literal["CS", "SMART_MANUFACTURING", "MATERIALS", "ENERGY"]
+    parent_key: str | None = None
+    prerequisites: list[str] = Field(default_factory=list, max_length=20)
+
+
+class OfficialKnowledgeCoursePlan(ApiModel):
+    modules: list[OfficialKnowledgeCourseModuleTarget] = Field(default_factory=list, max_length=40)
+    nodes: list[OfficialKnowledgeCourseNodeTarget] = Field(min_length=1, max_length=60)
+
+    @model_validator(mode="after")
+    def valid_plan(self) -> "OfficialKnowledgeCoursePlan":
+        module_keys = {m.module_key for m in self.modules}
+        node_keys = {n.node_key for n in self.nodes}
+        if module_keys & node_keys:
+            raise ValueError("Module and node keys must be disjoint")
+        if len(module_keys) != len(self.modules) or len(node_keys) != len(self.nodes):
+            raise ValueError("Plan keys must be unique")
+        for node in self.nodes:
+            if node.parent_key is not None and node.parent_key not in module_keys:
+                raise ValueError("A node parent must be a plan module")
+            for prereq in node.prerequisites:
+                if prereq not in node_keys:
+                    raise ValueError("A node prerequisite must reference a plan node")
+        for module in self.modules:
+            if module.parent_key is not None and module.parent_key not in module_keys:
+                raise ValueError("A module parent must be a plan module")
+            if module.parent_key == module.module_key:
+                raise ValueError("A module cannot be its own parent")
+        parents: dict[str, str] = {m.module_key: m.parent_key or "" for m in self.modules}
+        for node in self.nodes:
+            parents[node.node_key] = node.parent_key or ""
+        for key in list(parents):
+            seen: set[str] = set()
+            cursor = parents[key]
+            while cursor:
+                if cursor in seen:
+                    raise ValueError("Plan hierarchy contains a cycle")
+                seen.add(cursor)
+                cursor = parents.get(cursor, "")
+        children: dict[str, int] = {}
+        for key, parent in parents.items():
+            children[parent] = children.get(parent, 0) + 1
+        for module in self.modules:
+            if children.get(module.module_key, 0) == 0:
+                raise ValueError("Every module needs at least one child")
+        return self
+
+
+class OfficialKnowledgeCourseBuild(ApiModel):
+    operation_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,100}$")
+    plan: OfficialKnowledgeCoursePlan
+    max_model_calls_per_batch: int = Field(default=2, ge=1, le=20)
+    max_reserved_output_tokens_per_batch: int = Field(default=8000, ge=1, le=20000)
+    dry_run: bool = False
+
+
+class OfficialKnowledgeCourseProgress(ApiModel):
+    course_id: str
+    plan_hash: str
+    corpus_fingerprint: str
+    builder_version: str
+    status: str
+    node_total: int
+    node_completed: int
+    completed_node_ids: dict[str, str] = Field(default_factory=dict)
+    final_tree_version_id: str | None = None
+
+
+class OfficialKnowledgeCourseBuildResult(ApiModel):
+    course_id: str
+    operation_id: str
+    dry_run: bool
+    existing_finalized: bool
+    progress: OfficialKnowledgeCourseProgress
+    model_calls_made: int
+    reserved_output_tokens_booked: int
+    final_tree_version_id: str | None = None
 
 
 class OfficialKnowledgePublicationRequest(ApiModel):
