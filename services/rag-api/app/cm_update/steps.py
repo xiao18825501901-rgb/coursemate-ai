@@ -23,3 +23,25 @@ def solution_steps(text: str) -> list[dict]:
         result.append({'number': number, 'line': line_index, 'title': title,
                        'anchor': hashlib.sha256(f'{line_index}:{line}'.encode()).hexdigest()[:16]})
     return result
+
+
+def answer_steps_parse(text: str) -> list[dict]:
+    """Split a full answer into stable steps WITH their bodies. step_id is a
+    server-side content-derived id (not a frontend array position), so the
+    详解 window can address the same step across refreshes and shares."""
+    headings = solution_steps(text)
+    if not headings:
+        return []
+    lines = text.splitlines()
+    steps = []
+    for index, heading in enumerate(headings):
+        start = heading['line'] + 1
+        end = headings[index + 1]['line'] if index + 1 < len(headings) else len(lines)
+        body = '\n'.join(lines[start:end]).strip()
+        steps.append({
+            'step_id': heading['anchor'],
+            'ordinal': heading['number'],
+            'title': heading['title'],
+            'text': (f"{heading['title']}\n{body}").strip() if body else heading['title'],
+        })
+    return steps

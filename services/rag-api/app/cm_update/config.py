@@ -35,6 +35,8 @@ class Settings:
     integration_mode: str = field(default_factory=lambda: os.getenv('CMUI_INTEGRATION_MODE', 'standalone'))
     api_base: str = field(default_factory=lambda: os.getenv('CMUI_PUBLIC_API_BASE', '/api/ui/v1'))
     web_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parents[2] / 'web' / 'dist')
+    verification_secret: str = field(default_factory=lambda: os.getenv('CMUI_VERIFICATION_SECRET', ''))
+    auto_verify_new_users: bool = field(default_factory=lambda: flag('CMUI_AUTO_VERIFY_NEW_USERS'))
 
     def validate(self) -> None:
         if self.environment not in {'development','test','production'}: raise ValueError('Unknown environment')
@@ -57,6 +59,10 @@ class Settings:
                 raise ValueError('Production requires the reviewed V3 domain adapter; do not seed a replacement database')
             if any(urlparse(x).scheme != 'https' for x in self.allowed_origins):
                 raise ValueError('Production origins must be HTTPS')
+            if not self.verification_secret:
+                raise ValueError('CMUI_VERIFICATION_SECRET is required in production')
+            if self.auto_verify_new_users:
+                raise ValueError('CMUI_AUTO_VERIFY_NEW_USERS is a test/dev convenience and is forbidden in production')
         if self.auth_mode == 'clerk' and not (self.clerk_issuer and self.clerk_jwt_key):
             raise ValueError('Clerk issuer and public verification key are required')
         if self.provider_mode == 'qwen':

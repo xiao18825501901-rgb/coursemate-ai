@@ -1,6 +1,6 @@
 import { RichText } from './richtext.jsx';
 import React from 'react';
-import { request, send, remove, download, key, streamEvents } from './api.js';
+import { request, send, remove, download, key, streamEvents, listPairs, getPair, createPair, renamePair, deletePair, bindPair, createExercise, revealExercise, createExplanation, getExplanation, postExplanationMessage, cancelExplanation, searchPeople, listShares, getShare, createShare, joinShare } from './api.js';
 import { dateKey, zonedParts, wallTimeToISO, formatBytes, formatTime, goto } from './utils.js';
 import { Icon, IconButton, Avatar } from './icons.jsx';
 export class CourseFiles extends React.Component {
@@ -134,14 +134,14 @@ export class Discussion extends React.Component {
     } }}>删除</button>}</div>{rows.filter(x => x.parent === row.id).map(reply => <div className="reply" key={reply.id}><Avatar name={reply.name}/><div><div className="discussion-title"><strong>{reply.name}</strong><time>{formatTime(reply.created_at)}</time></div><p className="discussion-text">{reply.text}</p><button className="link small" onClick={() => this.setState({ replyTo: reply.id, reply: '' })}>回复</button></div></div>)}{(this.state.replyTo === row.id || rows.some(x => x.id === this.state.replyTo && x.parent === row.id)) && <form className="reply-box" onSubmit={e => { e.preventDefault(); this.post(this.state.replyTo); }}><input autoFocus aria-label="回复评论" placeholder="写下你的回复…" value={this.state.reply} maxLength="6000" onChange={e => this.setState({ reply: e.target.value })}/><button className="btn small primary" disabled={this.state.busy}>发送回复</button></form>}</div></article>)}{!rows.length && <div className="empty-state"><Icon name="comment"/><h3>开始这门课的第一段讨论</h3><p>别人回复后，你会在收件箱收到通知。</p></div>}</div></div>; }
 }
 export class Inbox extends React.Component {
-    state = { notifications: [], threads: [], tab: 'all', selected: null, messages: [], reply: '', error: '' };
+    state = { notifications: [], threads: [], shares: { received: [], sent: [] }, sharesQ: 'received', tab: 'all', selected: null, messages: [], reply: '', error: '' };
     componentDidMount() { this.load(); this.timer = setInterval(() => { if (!document.hidden)
         this.load(); }, 10000); }
     componentWillUnmount() { clearInterval(this.timer); this.unmounted = true; }
     async load() { try {
-        const [notifications, threads] = await Promise.all([request('/notifications'), request('/threads')]);
+        const [notifications, threads, received, sent] = await Promise.all([request('/notifications'), request('/threads'), listShares('received'), listShares('sent')]);
         if (!this.unmounted)
-            this.setState({ notifications, threads, error: '' });
+            this.setState({ notifications, threads, shares: { received, sent }, error: '' });
         if (this.state.selected?.kind === 'thread') {
             const messages = await request(`/threads/${this.state.selected.id}/messages`);
             if (!this.unmounted)
@@ -169,6 +169,28 @@ export class Inbox extends React.Component {
     } }
     compose = () => this.props.modal('发送信息', <ComposeMessage onSubmit={async (payload) => { const m = await send('/messages', payload); this.props.closeModal(); await this.load(); const t = this.state.threads.find(t => t.id === m.thread); if (t)
         this.select({ ...t, kind: 'thread' }); this.props.toast('信息已发送到对方收件箱'); }}/>);
+    shareCourse = () => this.props.modal('共享课程', <ShareCourseModal toast={this.props.toast} closeModal={this.props.closeModal} onDone={() => this.load()}/>);
+    async viewShare(share) { try {
+        const d = await getShare(share.id);
+        const files = d.files || [];
+        this.props.modal('共享内容 · ' + d.course_name, <div className="share-review"><p><strong>{d.sender_name}</strong> · {formatTime(d.snapshot_at)}</p><p className="muted">{files.length} 个文件 · {d.history_scope === 'none' ? '不含历史' : '含历史'}{d.pair_count ? ' · ' + d.pair_count + ' 个知识点对话' : ''}{d.requires_student_verification ? ' · 需学生认证' : ''}</p><div className="divider"/>{files.map(f => <div key={f.id || f.name} className="share-pair-row"><Icon name="file"/><span>{f.name}</span></div>)}{!files.length && <p className="helper-note">没有文件</p>}</div>);
+    }
+    catch (e) {
+        this.props.toast(e.message);
+    } }
+    async joinShare(share) { try {
+        await joinShare(share.id);
+        this.props.toast('已加入课程');
+        await this.load();
+        this.props.onRead?.();
+    }
+    catch (e) {
+        if (e.status === 403)
+            this.props.toast('请先完成学生认证（账户 → 学生认证）');
+        else
+            this.props.toast(e.message);
+    } }
+    renderShares() { const { shares, sharesQ } = this.state; const rows = shares[sharesQ] || []; return <div className="inbox-share-list"><div className="mail-tabs"><button className={sharesQ === 'received' ? 'active' : ''} onClick={() => this.setState({ sharesQ: 'received' })}>收到</button><button className={sharesQ === 'sent' ? 'active' : ''} onClick={() => this.setState({ sharesQ: 'sent' })}>发出</button></div>{rows.map(sh => <div key={sh.id} className="inbox-share-item"><div className="inbox-share-head"><strong>{sh.course_name}</strong><span>{formatTime(sh.snapshot_at)}</span></div><div className="share-meta">{sharesQ === 'received' && sh.sender_name ? sh.sender_name + ' · ' : ''}{sh.file_count} 个文件 · {sh.history_scope === 'none' ? '不含历史' : '含历史'}{sh.requires_student_verification ? ' · 需学生认证' : ''}</div><div className="share-actions"><button className="btn" onClick={() => this.viewShare(sh)}>查看共享内容</button>{sharesQ === 'received' && (sh.joined_course_id ? <span className="helper-note">已加入</span> : <button className="btn primary" onClick={() => this.joinShare(sh)}>加入所有课程</button>)}</div></div>)}{!rows.length && <div className="empty-state">还没有共享课程</div>}</div>; }
     async reply(e) { e.preventDefault(); const s = this.state.selected; try {
         await send('/messages', { recipient: s.peer.id, text: this.state.reply, request_id: key() });
         this.setState({ reply: '' });
@@ -177,7 +199,7 @@ export class Inbox extends React.Component {
     catch (e) {
         this.props.toast(e.message);
     } }
-    render() { const { notifications, threads, selected: s, tab, messages } = this.state; const all = [...notifications.map(n => ({ ...n, kind: 'notice', title: '回复了你的课程评论', name: n.actor_name, preview: n.text, time: n.created_at, unread: !n.read_at })), ...threads.map(t => ({ ...t, kind: 'thread', title: t.peer.name, name: t.peer.name, preview: t.last?.text || '', time: t.last?.created_at || t.created_at }))].filter(x => tab === 'all' || (tab === 'reply' ? x.kind === 'notice' : x.kind === 'thread')).sort((a, b) => b.time.localeCompare(a.time)); return <div className="page"><header className="page-heading row between"><div><h1>收件箱</h1><p>课程里的回应，以及与你有关的交流。</p></div><button className="btn primary" onClick={this.compose}><Icon name="edit"/>写信息</button></header>{this.state.error && <p className="error-text">{this.state.error}</p>}<div className="inbox-layout"><div className="mail-list"><div className="mail-tabs">{[['all', '全部'], ['reply', '评论回复'], ['dm', '私信']].map(([id, label]) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => this.setState({ tab })}>{label}</button>)}</div>{all.map(x => <button className={'mail-item ' + (s?.id === x.id ? 'selected' : '')} key={x.id} onClick={() => this.select(x)}><Avatar name={x.name}/><div className="mail-info"><div className="from">{x.name}<span>{formatTime(x.time)}</span></div><strong>{x.title}</strong><p>{x.preview}</p></div>{x.unread > 0 && <i className="unread-dot"/>}</button>)}{!all.length && <div className="empty-state">还没有信息</div>}</div><div className="mail-detail">{!s ? <div className="empty-state"><Icon name="mail"/><h3>选择一条信息，开始交流</h3><p>你的私信不会出现在公开课程评论中。</p></div> : s.kind === 'notice' ? <><div className="mail-detail-head"><h2>{s.actor_name} 回复了你</h2><Icon name="comment"/></div><p className="helper-note">{formatTime(s.created_at)}</p><div className="mail-message">{s.text}</div><button className="btn primary" onClick={() => goto(`course/${s.course}/comments`)}>查看课程讨论 <Icon name="arrow"/></button></> : <><div className="mail-detail-head"><div><h2>{s.peer.name}</h2><span className="helper-note">@{s.peer.handle}</span></div><IconButton name="more" title="屏蔽此联系人" onClick={async () => { if (window.confirm('屏蔽后双方无法继续发私信。确认？')) {
+    render() { const { notifications, threads, selected: s, tab, messages } = this.state; const all = [...notifications.map(n => ({ ...n, kind: 'notice', title: '回复了你的课程评论', name: n.actor_name, preview: n.text, time: n.created_at, unread: !n.read_at })), ...threads.map(t => ({ ...t, kind: 'thread', title: t.peer.name, name: t.peer.name, preview: t.last?.text || '', time: t.last?.created_at || t.created_at }))].filter(x => tab === 'all' || (tab === 'reply' ? x.kind === 'notice' : x.kind === 'thread')).sort((a, b) => b.time.localeCompare(a.time)); return <div className="page"><header className="page-heading row between"><div><h1>收件箱</h1><p>课程里的回应，以及与你有关的交流。</p></div><div className="row" style={{ gap: 8 }}><button className="btn" onClick={this.shareCourse}><Icon name="shareCourse"/>共享课程</button><button className="btn primary" onClick={this.compose}><Icon name="edit"/>写信息</button></div></header>{this.state.error && <p className="error-text">{this.state.error}</p>}<div className="inbox-layout"><div className="mail-list"><div className="mail-tabs">{[['all', '全部'], ['reply', '评论回复'], ['dm', '私信'], ['shares', '共享']].map(([id, label]) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => this.setState({ tab })}>{label}</button>)}</div>{tab === 'shares' ? this.renderShares() : <>{all.map(x => <button className={'mail-item ' + (s?.id === x.id ? 'selected' : '')} key={x.id} onClick={() => this.select(x)}><Avatar name={x.name}/><div className="mail-info"><div className="from">{x.name}<span>{formatTime(x.time)}</span></div><strong>{x.title}</strong><p>{x.preview}</p></div>{x.unread > 0 && <i className="unread-dot"/>}</button>)}{!all.length && <div className="empty-state">还没有信息</div>}</>}</div><div className="mail-detail">{!s ? <div className="empty-state"><Icon name="mail"/><h3>选择一条信息，开始交流</h3><p>你的私信不会出现在公开课程评论中。</p></div> : s.kind === 'notice' ? <><div className="mail-detail-head"><h2>{s.actor_name} 回复了你</h2><Icon name="comment"/></div><p className="helper-note">{formatTime(s.created_at)}</p><div className="mail-message">{s.text}</div><button className="btn primary" onClick={() => goto(`course/${s.course}/comments`)}>查看课程讨论 <Icon name="arrow"/></button></> : <><div className="mail-detail-head"><div><h2>{s.peer.name}</h2><span className="helper-note">@{s.peer.handle}</span></div><IconButton name="more" title="屏蔽此联系人" onClick={async () => { if (window.confirm('屏蔽后双方无法继续发私信。确认？')) {
         await send(`/people/${s.peer.id}/block`, {}, 'PUT');
         this.props.toast('已屏蔽此联系人');
     } }}/></div><div className="direct-message-log">{messages.map(m => <div className={'dm-bubble ' + (m.sender === this.props.user.id ? 'mine' : '')} key={m.id}><div className="helper-note">{m.name} · {formatTime(m.created_at)}</div><p>{m.text}</p></div>)}</div><form onSubmit={e => this.reply(e)}><textarea aria-label="私信回复" placeholder="写下回复…" value={this.state.reply} maxLength="6000" onChange={e => this.setState({ reply: e.target.value })}/><button className="btn primary" disabled={!this.state.reply.trim()}>发送回复</button></form></>}</div></div></div>; }
@@ -201,6 +223,53 @@ class ComposeMessage extends React.Component {
         this.setState({ error: e.message, busy: false });
     } }
     render() { return <form onSubmit={e => this.submit(e)}><div className="field"><label>收件人</label><input autoFocus aria-label="查找收件人" value={this.state.q} placeholder="输入至少两个字或用户名" onChange={e => this.search(e.target.value)}/><div className="people-results">{this.state.people.map(p => <button type="button" key={p.id} className={'person-option ' + (this.state.person?.id === p.id ? 'selected' : '')} onClick={() => this.setState({ person: p })}><Avatar name={p.name}/><span>{p.name}<small>@{p.handle}</small></span>{this.state.person?.id === p.id && <Icon name="check"/>}</button>)}</div>{this.state.person && <p className="helper-note">收件人：{this.state.person.name}</p>}</div><div className="field"><label>信息内容</label><textarea required maxLength="6000" style={{ minHeight: 130 }} value={this.state.text} onChange={e => this.setState({ text: e.target.value })}/></div><p className="helper-note">只展示已允许搜索的用户，不公开邮箱或手机号。</p>{this.state.error && <p className="error-text">{this.state.error}</p>}<button className="btn primary" style={{ marginTop: 20 }} disabled={!this.state.person || this.state.busy}>发送信息</button></form>; }
+}
+class ShareCourseModal extends React.Component {
+    state = { step: 1, courses: [], course: null, q: '', people: [], recipients: [], scope: 'none', pairs: [], selectedPairs: [], fileCount: 0, busy: false, error: '', requestId: null };
+    componentDidMount() { this.loadCourses(); }
+    componentWillUnmount() { clearTimeout(this.timer); }
+    async loadCourses() { try {
+        const courses = await request('/courses');
+        this.setState({ courses });
+    }
+    catch (e) {
+        this.setState({ error: e.message });
+    } }
+    search(q) { this.setState({ q }); clearTimeout(this.timer); this.timer = setTimeout(async () => { try {
+        const people = await searchPeople(q);
+        this.setState({ people });
+    }
+    catch (e) {
+        this.setState({ error: e.message });
+    } }, 250); }
+    pickCourse(c) { this.setState({ course: c, step: 2, scope: 'none', selectedPairs: [], recipients: [], q: '' }); }
+    toggleRecipient(p) { this.setState(s => ({ recipients: s.recipients.some(r => r.id === p.id) ? s.recipients.filter(r => r.id !== p.id) : [...s.recipients, p] })); }
+    async pickScope(scope) { this.setState({ scope, selectedPairs: [] }); if (scope === 'selected') { try {
+        const pairs = await listPairs(this.state.course.id);
+        this.setState({ pairs });
+    }
+    catch (e) {
+        this.setState({ error: e.message });
+    } } }
+    togglePair(id) { this.setState(s => ({ selectedPairs: s.selectedPairs.includes(id) ? s.selectedPairs.filter(x => x !== id) : [...s.selectedPairs, id] })); }
+    async review() { try {
+        const files = await request(`/courses/${this.state.course.id}/files`);
+        this.setState({ fileCount: files.length, step: 4 });
+    }
+    catch (e) {
+        this.setState({ error: e.message });
+    } }
+    async send() { const payload = { course: this.state.course.id, recipients: this.state.recipients.map(r => r.id), history_scope: this.state.scope, selected_pair_ids: this.state.scope === 'selected' ? this.state.selectedPairs : [] }; const requestId = this.state.requestId || key(); this.setState({ requestId, busy: true }); try {
+        const result = await createShare(payload, requestId);
+        this.props.closeModal();
+        this.props.toast('共享已发送' + (result.reused ? '（已复用之前的请求）' : ''));
+        this.props.onDone?.();
+    }
+    catch (e) {
+        this.setState({ error: e.message, busy: false });
+    } }
+    scopeLabel() { return this.state.scope === 'all' ? '全部发送' : this.state.scope === 'none' ? '全部不发送' : '选择特定知识点对话'; }
+    render() { const { step, courses, course, q, people, recipients, scope, pairs, selectedPairs, fileCount, busy, error } = this.state; return <div className="share-wizard">{error && <p className="error-text">{error}</p>}{step === 1 && <div className="share-step"><h4>1. 选择要共享的课程</h4><div className="node-picker-list">{courses.map(c => <button type="button" key={c.id} className="node-picker-row" onClick={() => this.pickCourse(c)}><Icon name="book"/><span>{c.name}</span><small className="muted">{c.code}</small></button>)}{!courses.length && <p className="helper-note" style={{ padding: 12 }}>没有可共享的课程</p>}</div></div>}{step === 2 && <div className="share-step"><h4>2. 选择接收者</h4><input autoFocus aria-label="查找接收者" placeholder="输入至少两个字或用户名搜索" value={q} onChange={e => this.search(e.target.value)}/><div className="people-results">{people.map(p => <button type="button" key={p.id} className={'person-option ' + (recipients.some(r => r.id === p.id) ? 'selected' : '')} onClick={() => this.toggleRecipient(p)}><Avatar name={p.name}/><span>{p.name}<small>@{p.handle}</small></span>{recipients.some(r => r.id === p.id) && <Icon name="check"/>}</button>)}</div><div className="recipient-chips">{recipients.map(r => <span className="recipient-chip" key={r.id}>{r.name}<button type="button" onClick={() => this.toggleRecipient(r)}>×</button></span>)}</div><div className="row" style={{ marginTop: 16 }}><button className="btn" onClick={() => this.setState({ step: 1 })}>上一步</button><button className="btn primary" disabled={!recipients.length} onClick={() => this.setState({ step: 3 })}>下一步</button></div></div>}{step === 3 && <div className="share-step"><h4>3. 历史范围</h4><div className="share-radio"><label><input type="radio" name="scope" checked={scope === 'all'} onChange={() => this.pickScope('all')}/>全部发送</label><label><input type="radio" name="scope" checked={scope === 'none'} onChange={() => this.pickScope('none')}/>全部不发送</label><label><input type="radio" name="scope" checked={scope === 'selected'} onChange={() => this.pickScope('selected')}/>选择特定知识点对话</label></div>{scope === 'selected' && <div className="share-pair-list">{pairs.map(p => <label key={p.id} className="share-pair-row"><input type="checkbox" checked={selectedPairs.includes(p.id)} onChange={() => this.togglePair(p.id)}/><span>{p.title}</span><small className="muted">{formatTime(p.updated_at)}</small></label>)}{!pairs.length && <p className="helper-note" style={{ padding: 12 }}>没有知识点对话</p>}</div>}<div className="row" style={{ marginTop: 16 }}><button className="btn" onClick={() => this.setState({ step: 2 })}>上一步</button><button className="btn primary" disabled={scope === 'selected' && !selectedPairs.length} onClick={() => this.review()}>下一步</button></div></div>}{step === 4 && <div className="share-step"><h4>4. 确认发送</h4><div className="share-review"><p>课程：{course?.name}</p><p>接收者：{recipients.map(r => r.name).join('、')}</p><p>文件：{fileCount} 个</p><p>历史：{this.scopeLabel()}{scope === 'selected' ? '（' + selectedPairs.length + ' 个对话）' : ''}</p></div><div className="row" style={{ marginTop: 16 }}><button className="btn" onClick={() => this.setState({ step: 3 })}>上一步</button><button className="btn primary" disabled={busy} onClick={() => this.send()}>{busy ? '发送中…' : '确认发送'}</button></div></div>}</div>; }
 }
 export class Calendar extends React.Component {
     state = { month: new Date(new Date().getFullYear(), new Date().getMonth(), 1), tasks: [], plan: '', answer: '', busy: false, error: '' };
@@ -251,9 +320,12 @@ class TaskForm extends React.Component {
 }
 function inline(text) { return text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((x, i) => x.startsWith('**') ? <strong key={i}>{x.slice(2, -2)}</strong> : x.startsWith('`') ? <code key={i}>{x.slice(1, -1)}</code> : x); }
 export class Learn extends React.Component {
-    state = { attachments:{teach:[],problem:[]}, uploading:{teach:false,problem:false}, nodes: [], expanded: false, hover: null, ratio: .5, fullscreen: false, mobile: 'teach', conv: { teach: null, problem: null }, messages: { teach: [], problem: [] }, inputs: { teach: '', problem: '' }, run: { teach: null, problem: null }, partial: { teach: '', problem: '' }, status: { teach: '', problem: '' }, activeNode: null, bridge: null, error: '', busy: { teach: false, problem: false } };
+    state = { attachments:{teach:[],problem:[]}, uploading:{teach:false,problem:false}, nodes: [], expanded: false, hover: null, ratio: .5, fullscreen: false, mobile: 'teach', conv: { teach: null, problem: null }, messages: { teach: [], problem: [] }, inputs: { teach: '', problem: '' }, run: { teach: null, problem: null }, partial: { teach: '', problem: '' }, status: { teach: '', problem: '' }, activeNode: null, bridge: null, error: '', busy: { teach: false, problem: false }, thinking: { teach: false }, exercises: {}, explanations: {}, windows: {}, pair: null };
     controllers = {};
+    explanationControllers = {};
     follow = {teach:true,problem:true};
+    winZ = 0;
+    winCount = 0;
     componentDidUpdate(prevProps,prevState){
         for(const lane of ['teach','problem'])if(this.follow[lane]&&(prevState.messages[lane]!==this.state.messages[lane]||prevState.partial[lane]!==this.state.partial[lane])){
             const el=document.getElementById('messages-'+lane);if(el)el.scrollTop=el.scrollHeight;
@@ -261,7 +333,7 @@ export class Learn extends React.Component {
     }
     componentDidMount() { this.load(); this.keyHandler = e => { if (e.key === 'Escape')
         this.setState({ fullscreen: false, expanded: false }); }; window.addEventListener('keydown', this.keyHandler); }
-    componentWillUnmount() { this.unmounted = true; window.removeEventListener('keydown', this.keyHandler); Object.values(this.controllers).forEach(c => c.abort()); if(this.onMove){window.removeEventListener('mousemove',this.onMove);window.removeEventListener('touchmove',this.onMove);}if(this.onUp){window.removeEventListener('mouseup',this.onUp);window.removeEventListener('touchend',this.onUp);window.removeEventListener('touchcancel',this.onUp);} }
+    componentWillUnmount() { this.unmounted = true; window.removeEventListener('keydown', this.keyHandler); Object.values(this.controllers).forEach(c => c.abort()); Object.values(this.explanationControllers).forEach(c => c.abort()); if(this.onMove){window.removeEventListener('mousemove',this.onMove);window.removeEventListener('touchmove',this.onMove);}if(this.onUp){window.removeEventListener('mouseup',this.onUp);window.removeEventListener('touchend',this.onUp);window.removeEventListener('touchcancel',this.onUp);} }
     async load() { try {
         const cid = this.props.course.id;
         const [nodes, layout] = await Promise.all([request(`/courses/${cid}/knowledge`), request(`/courses/${cid}/layout`)]);
@@ -285,7 +357,53 @@ export class Learn extends React.Component {
     catch (e) {
         this.props.toast(e.message);
     } }
-    async newChat(lane) { this.controllers[lane]?.abort(); this.setLane('conv', lane, null, () => this.saveLayout()); this.setLane('messages', lane, []); this.setLane('partial', lane, ''); this.setLane('status', lane, ''); this.setLane('run', lane, null); this.setLane('busy', lane, false); }
+    async newPair() { for (const lane of ['teach', 'problem'])
+        this.controllers[lane]?.abort(); try {
+        const pair = await createPair(this.props.course.id);
+        this.setState({ pair: pair.id, conv: { teach: null, problem: null }, messages: { teach: [], problem: [] }, inputs: { teach: '', problem: '' }, attachments: { teach: [], problem: [] }, partial: { teach: '', problem: '' }, status: { teach: '', problem: '' }, run: { teach: null, problem: null }, busy: { teach: false, problem: false } }, () => this.saveLayout());
+    }
+    catch (e) {
+        this.props.toast(e.message);
+    } }
+    async restorePair(id) { for (const lane of ['teach', 'problem'])
+        this.controllers[lane]?.abort(); try {
+        const pair = await getPair(id);
+        for (const lane of ['teach', 'problem']) {
+            const data = pair[lane];
+            this.follow[lane] = true;
+            if (data) {
+                this.setLane('conv', lane, data.conversation.id);
+                this.setLane('messages', lane, data.messages);
+                this.setLane('partial', lane, '');
+                this.setLane('status', lane, '');
+                this.setLane('run', lane, null);
+                this.setLane('busy', lane, false);
+                const active = data.active_run;
+                if (active && !['completed', 'cancelled', 'failed'].includes(active.status)) {
+                    this.setLane('run', lane, active.id);
+                    this.setLane('partial', lane, active.partial_text);
+                    this.setLane('busy', lane, true);
+                    this.watch(lane, active.id, data.conversation.id, true);
+                }
+                else if (active && active.status === 'failed') {
+                    this.setLane('status', lane, `上次生成未完成：${active.error}`);
+                    this.setLane('partial', lane, active.partial_text);
+                }
+            }
+            else {
+                this.setLane('conv', lane, null);
+                this.setLane('messages', lane, []);
+                this.setLane('partial', lane, '');
+                this.setLane('status', lane, '');
+                this.setLane('run', lane, null);
+                this.setLane('busy', lane, false);
+            }
+        }
+        this.setState({ pair: id }, () => this.saveLayout());
+    }
+    catch (e) {
+        this.props.toast(e.message);
+    } }
     async restore(lane, id, save = true) { this.follow[lane]=true;this.controllers[lane]?.abort(); const data = await request('/conversations/' + id); if (this.unmounted)
         return; this.setLane('conv', lane, id, () => { if (save)
         this.saveLayout(); }); this.setLane('messages', lane, data.messages); this.setLane('partial', lane, ''); this.setLane('status', lane, ''); this.setLane('run', lane, null); this.setLane('busy', lane, false); const active = data.active_run; if (active && !['completed', 'cancelled', 'failed'].includes(active.status)) {
@@ -298,8 +416,9 @@ export class Learn extends React.Component {
         this.setLane('status', lane, `上次生成未完成：${active.error}`);
         this.setLane('partial', lane, active.partial_text);
     } }
-    history(lane) { this.props.modal(lane === 'teach' ? '知识学习 · 历史对话' : '题目应对 · 历史对话', <History course={this.props.course.id} lane={lane} onSelect={id => { this.props.closeModal(); this.restore(lane, id); }} onDelete={id => { if (this.state.conv[lane] === id)
-        this.newChat(lane); }}/>); }
+    history() { this.props.modal('历史对话', <PairHistory course={this.props.course.id} toast={this.props.toast} closeModal={this.props.closeModal} onSelect={id => { this.props.closeModal(); this.restorePair(id); }} onDeleted={(id, teachConv, problemConv) => { if (teachConv === this.state.conv.teach || problemConv === this.state.conv.problem) {
+        this.setState({ pair: null, conv: { teach: null, problem: null }, messages: { teach: [], problem: [] }, partial: { teach: '', problem: '' }, status: { teach: '', problem: '' }, run: { teach: null, problem: null }, busy: { teach: false, problem: false } });
+    } }}/>); }
     async ask(lane, text = null, bridge = null) {
         const value = text || this.state.inputs[lane];
         if (!value.trim() || this.state.busy[lane])
@@ -307,7 +426,7 @@ export class Learn extends React.Component {
         this.follow[lane]=true;
         this.setLane('busy', lane, true);
         this.setLane('partial', lane, '');
-        this.setLane('status', lane, '正在保存问题…');
+        this.setLane('status', lane, '正在思考中');
         try {
             let id = this.state.conv[lane];
             if (!id) {
@@ -315,7 +434,7 @@ export class Learn extends React.Component {
                 id = c.id;
                 this.setLane('conv', lane, id, () => this.saveLayout());
             }
-            const result = await send(`/conversations/${id}/runs`, { text: value, request_id: key(), bridge_id: bridge?.id || null, node_id: lane === 'teach' ? this.state.activeNode : null, attachment_ids:this.state.attachments[lane].map(f=>f.id) });
+            const result = await send(`/conversations/${id}/runs`, { text: value, request_id: key(), bridge_id: bridge?.id || null, node_id: lane === 'teach' ? this.state.activeNode : null, attachment_ids:this.state.attachments[lane].map(f=>f.id), teaching_mode: lane === 'teach' && this.state.thinking.teach ? 'thinking' : 'normal' });
             const saved = await request('/conversations/' + id);
             this.setLane('messages', lane, saved.messages);
             this.setLane('inputs', lane, '');
@@ -335,18 +454,28 @@ export class Learn extends React.Component {
         try {
             if (recover)
                 this.setLane('partial', lane, '');
+            let seenDelta = false;
             await streamEvents(rid, (type, data) => { if (this.state.conv[lane] !== cid)
-                return; if (type === 'delta')
-                this.setState(s => ({ partial: { ...s.partial, [lane]: s.partial[lane] + data.text } })); if (type === 'status')
-                this.setLane('status', lane, data.label || '准备生成…'); if (type === 'error')
-                this.setLane('status', lane, data.code + ' · ' + data.message); }, controller.signal);
+                return; if (type === 'delta') {
+                seenDelta = true;
+                this.setState(s => ({ partial: { ...s.partial, [lane]: s.partial[lane] + data.text } }));
+                this.setLane('status', lane, '正在输出中');
+            }
+            if (type === 'status')
+                this.setLane('status', lane, seenDelta ? '正在输出中' : (data.label || '正在思考中')); if (type === 'error')
+                this.setLane('status', lane, data.message || (data.code + ' · ' + data.message)); }, controller.signal);
             if (this.state.conv[lane] === cid && !this.unmounted) {
                 const [saved, run] = await Promise.all([request('/conversations/' + cid), request('/runs/' + rid)]);
                 this.setLane('messages', lane, saved.messages);
                 this.setLane('partial', lane, run.status === 'completed' ? '' : run.partial_text);
-                const coverage = run.coverage;
-                const coverageLabel = coverage && coverage.status === 'submitted' ? (coverage.covered_items && JSON.parse(coverage.covered_items).length > 0 ? ' · 已计入覆盖' : ' · 覆盖待确认') : '';
-                this.setLane('status', lane, run.status === 'completed' ? (this.props.config.provider_mode === 'test' ? '已保存 · 本地合同测试' + coverageLabel : '已保存 · 千问双阶段教学' + coverageLabel) : `${run.status} · ${run.error || ''}`);
+                if (run.status === 'completed') {
+                    const coverage = run.coverage;
+                    const coverageLabel = coverage && coverage.status === 'submitted' ? (coverage.covered_items && JSON.parse(coverage.covered_items).length > 0 ? ' · 已计入覆盖' : ' · 覆盖待确认') : '';
+                    this.setLane('status', lane, (this.props.config.provider_mode === 'test' ? '已保存 · 本地合同测试' : '已保存 · 千问双阶段教学') + coverageLabel);
+                }
+                else if (!this.state.status[lane]) {
+                    this.setLane('status', lane, `${run.status} · ${run.error || ''}`);
+                }
                 this.setLane('busy', lane, false);
                 this.setLane('run', lane, null);
             }
@@ -369,11 +498,134 @@ export class Learn extends React.Component {
             if(!this.state.inputs[lane].trim())this.setLane('inputs',lane,'请阅读这个附件，'+(lane==='problem'?'逐步讲解题目；看不清的条件请先指出。':'用中文帮我学习其中的知识，保留英文术语。'));
         }catch(error){this.props.toast(error.message);}finally{input.value='';this.setLane('uploading',lane,false);}
     }
-    async inspectPrompt(message){
-        try{const run=await request('/runs/'+message.run);this.props.modal('本次千问生成的教学 Prompt',<div><p className="helper-note">这是第一阶段实际生成并保存的 Prompt 正文，第二阶段用它生成讲解。不是模型的私有思维链。</p><pre className="prompt-inspector">{run.generated_prompt||'本次没有保存生成的 Prompt'}</pre><p className="helper-note">状态：{run.status} · 请求：{run.id}</p></div>);}catch(e){this.props.toast(e.message);}
-    }
     async stop(lane) { const rid = this.state.run[lane]; if (rid)
         await send('/runs/' + rid + '/cancel', {}); }
+    async doExercise() { const lane = 'problem'; if (this.state.busy.problem)
+        return; this.follow.problem = true; this.setLane('busy', lane, true); this.setLane('partial', lane, ''); this.setLane('status', lane, '正在出题…'); try {
+        const run = await createExercise(this.props.course.id, null);
+        this.setLane('run', lane, run.id);
+        await this.watchExercise(run.id);
+    }
+    catch (e) {
+        this.setLane('status', lane, e.message);
+        this.setLane('busy', lane, false);
+        this.props.toast(e.message);
+    } }
+    async watchExercise(rid) {
+        const controller = new AbortController();
+        this.controllers['problem'] = controller;
+        let seenDelta = false;
+        try {
+            await streamEvents(rid, (type, data) => { if (type === 'delta') {
+                seenDelta = true;
+                this.setState(s => ({ partial: { ...s.partial, problem: s.partial.problem + data.text } }));
+                this.setLane('status', 'problem', '正在输出中');
+            }
+            if (type === 'status')
+                this.setLane('status', 'problem', seenDelta ? '正在输出中' : (data.label || '正在思考中')); if (type === 'error')
+                this.setLane('status', 'problem', data.message || (data.code + ' · ' + data.message)); }, controller.signal);
+            if (!this.unmounted) {
+                const run = await request('/runs/' + rid);
+                if (run.conversation) {
+                    this.setLane('conv', 'problem', run.conversation, () => this.saveLayout());
+                    const saved = await request('/conversations/' + run.conversation);
+                    this.setLane('messages', 'problem', saved.messages);
+                }
+                this.setLane('partial', 'problem', run.status === 'completed' ? '' : run.partial_text);
+                if (run.status === 'completed')
+                    this.setLane('status', 'problem', '已保存 · 题目已生成');
+                else if (!this.state.status.problem)
+                    this.setLane('status', 'problem', `${run.status} · ${run.error || ''}`);
+                this.setLane('busy', 'problem', false);
+                this.setLane('run', 'problem', null);
+            }
+        }
+        catch (e) {
+            if (e.name !== 'AbortError') {
+                this.setLane('status', 'problem', '连接中断。题目可能仍在生成，可稍后刷新查看。');
+                this.setLane('busy', 'problem', false);
+            }
+        }
+    }
+    async revealSteps(exerciseId) { try {
+        const revealed = await revealExercise(exerciseId);
+        this.setState(s => ({ exercises: { ...s.exercises, [exerciseId]: { ...(s.exercises[exerciseId] || {}), revealed: true, steps: revealed.steps } } }));
+    }
+    catch (e) {
+        this.props.toast(e.message);
+    } }
+    renderExercise(m) { const ex = this.state.exercises[m.exercise]; const revealed = !!ex?.revealed; return <div className="exercise-actions">{!revealed ? <button className="show-answer-link" onClick={() => this.revealSteps(m.exercise)}>显示答案</button> : <div className="exercise-steps">{(ex.steps || []).map(s => <div className="exercise-step" key={s.step_id}><div className="step-title">{s.ordinal}. {s.title}</div><div className="step-text">{s.text}</div><button className="step-explain-link" onClick={() => this.openExplanation(m.exercise, s, s.ordinal)}>详解</button></div>)}</div>}</div>; }
+    openExplanation(exerciseId, step, ordinal) {
+        const key = exerciseId + ':' + step.step_id;
+        if (this.state.windows[key]) {
+            this.closeWindow(key);
+            return;
+        }
+        const n = this.winCount++, z = ++this.winZ, w = 520, h = 420;
+        const x = Math.max(12, Math.round((window.innerWidth - w) / 2) - 60 + n * 24);
+        const y = Math.max(12, Math.round((window.innerHeight - h) / 2) - 40 + n * 24);
+        this.setState(s => ({ windows: { ...s.windows, [key]: { exerciseId, stepId: step.step_id, ordinal, title: step.title, x, y, w, h, z } } }));
+        this.ensureExplanation(key, exerciseId, step.step_id);
+    }
+    closeWindow(key) { this.explanationControllers[key]?.abort(); this.setState(s => { const w = { ...s.windows };
+        delete w[key];
+        return { windows: w }; }); }
+    raiseWindow(key) { const z = ++this.winZ; this.setState(s => ({ windows: { ...s.windows, [key]: { ...(s.windows[key] || {}), z } } })); }
+    async ensureExplanation(key, exerciseId, stepId) { try {
+        let exp = this.state.explanations[key];
+        if (!exp?.id) {
+            const created = await createExplanation(exerciseId, stepId);
+            if (created.status === 'completed' || !created.run) {
+                const detail = await getExplanation(created.id);
+                this.setState(s => ({ explanations: { ...s.explanations, [key]: { ...detail } } }));
+                return;
+            }
+            this.setState(s => ({ explanations: { ...s.explanations, [key]: { id: created.id, status: 'generating', text: '', messages: [], run: created.run, partial: '' } } }));
+            this.watchExplanation(key, created.id, created.run);
+            return;
+        }
+        const detail = await getExplanation(exp.id);
+        this.setState(s => ({ explanations: { ...s.explanations, [key]: { ...detail } } }));
+        if (detail.status === 'generating' && detail.run)
+            this.watchExplanation(key, detail.id, detail.run);
+    }
+    catch (e) {
+        this.setState(s => ({ explanations: { ...s.explanations, [key]: { ...(s.explanations[key] || {}), status: 'error', error: e.message } } }));
+    } }
+    refreshExplanation(key) { const exp = this.state.explanations[key]; if (!exp?.id)
+        return; getExplanation(exp.id).then(detail => { if (!this.unmounted)
+        this.setState(s => ({ explanations: { ...s.explanations, [key]: { ...detail } } })); }).catch(() => { }); }
+    watchExplanation(key, expId, runId) {
+        const controller = new AbortController();
+        this.explanationControllers[key] = controller;
+        streamEvents(runId, (type, data) => { if (this.unmounted)
+            return; if (type === 'delta')
+            this.setState(s => ({ explanations: { ...s.explanations, [key]: { ...(s.explanations[key] || {}), status: 'generating', partial: ((s.explanations[key] || {}).partial || '') + data.text } } })); if (type === 'error')
+            this.setState(s => ({ explanations: { ...s.explanations, [key]: { ...(s.explanations[key] || {}), status: 'error', error: data.message || data.code } } })); }, controller.signal).then(() => { if (!this.unmounted)
+            this.refreshExplanation(key); }).catch(e => { if (e.name !== 'AbortError' && !this.unmounted)
+            this.setState(s => ({ explanations: { ...s.explanations, [key]: { ...(s.explanations[key] || {}), status: 'error', error: '连接中断' } } })); });
+    }
+    sendExplanationFollowUp(key, text) { const exp = this.state.explanations[key]; if (!exp || !text || !text.trim())
+        return; const t = text.trim(); this.setState(s => ({ explanations: { ...s.explanations, [key]: { ...(s.explanations[key] || {}), status: 'generating', partial: '', error: '' } } })); (async () => { try {
+        const result = await postExplanationMessage(exp.id, t);
+        if (result.run)
+            this.watchExplanation(key, exp.id, result.run);
+        else
+            this.refreshExplanation(key);
+    }
+    catch (e) {
+        this.props.toast(e.message);
+    } })(); }
+    cancelExplanationWindow(key) { const exp = this.state.explanations[key]; if (!exp)
+        return; this.explanationControllers[key]?.abort(); (async () => { try {
+        await cancelExplanation(exp.id);
+        this.setState(s => ({ explanations: { ...s.explanations, [key]: { ...(s.explanations[key] || {}), status: 'cancelled' } } }));
+    }
+    catch (e) {
+        this.props.toast(e.message);
+    } })(); }
+    renderWindows() { const keys = Object.keys(this.state.windows); if (!keys.length)
+        return null; return keys.map(key => <ExplanationWindow key={key} win={this.state.windows[key]} exp={this.state.explanations[key]} onClose={() => this.closeWindow(key)} onRaise={() => this.raiseWindow(key)} onFollowUp={text => this.sendExplanationFollowUp(key, text)} onCancel={() => this.cancelExplanationWindow(key)}/>); }
     drag(e) {
         e.preventDefault();
         const rect=this.workspace.getBoundingClientRect();
@@ -414,14 +666,14 @@ export class Learn extends React.Component {
     renderTree() { const groups = this.state.nodes.filter(n => !n.parent); return <div className="tree-expanded"><div className="row between"><div><h2>课程知识点树</h2><p className="helper-note" style={{ marginTop: 5 }}>选择节点，分别查看学习进度与测评结果。</p></div><IconButton name="close" title="收起知识树" onClick={() => this.setState({ expanded: false })}/></div><div className="tree-columns">{groups.map(root => { const children = this.state.nodes.filter(n => n.parent === root.id); return <div className="tree-group" key={root.id}>{children.length ? <div className="tree-group-title">{root.title}</div> : null}{children.length ? this.renderNodes(root.id, 0) : this.renderNodeRow(root, 0)}</div>; })}</div>{!groups.length && <div className="empty-state"><Icon name="tree"/><h3>还没有课程知识树</h3><p>上传资料后，需由现有 V3 知识引擎生成。此更新包不会伪造节点和学习状态。</p></div>}</div>; }
     renderNodeRow(n, depth) { return <div key={n.id} style={{ marginLeft: depth * 14 }}><div className={'tree-node-new ' + (this.state.activeNode === n.id ? 'selected' : '')} tabIndex="0" onMouseEnter={() => this.setState({ hover: n.id })} onFocus={() => this.setState({ hover: n.id })} onMouseLeave={() => this.setState({ hover: null })} onClick={() => this.setState({ hover: n.id })}><Icon name="book"/><span>{n.title}</span><Icon name="arrow"/>{this.state.hover === n.id && <div className="node-popover" onClick={e => e.stopPropagation()}><strong>{n.title}</strong><button onClick={() => this.learnNode(n)}><span>学习进度</span><b>{n.progress === 'LEARNED' ? '教学已完成' : n.progress === 'LEARNING' ? '学习中' : '未开始'}</b><Icon name="arrow"/></button><button onClick={() => this.assess(n)}><span>测评结果</span><b>{n.grade || '未测评'}</b><Icon name="arrow"/></button></div>}</div>{this.renderNodes(n.id, depth + 1)}</div>; }
     renderNodes(parent, depth) { return this.state.nodes.filter(n => n.parent === parent).map(n => this.renderNodeRow(n, depth)); }
-    renderPane(lane) { const isTeach = lane === 'teach', messages = this.state.messages[lane]; return <section className={'learning-pane pane-' + lane + ' ' + (this.state.mobile === lane ? 'mobile-active' : '')}><header className="pane-header"><div className="row"><span className="pane-symbol"><Icon name={isTeach ? 'book' : 'edit'}/></span><div><h3>{isTeach ? '知识学习' : '题目应对'}</h3><small>{isTeach ? '理解原理，连接知识' : '拆解题目，逐步解决'}</small></div></div><div className="row" style={{ gap: 1 }}><IconButton name="history" title={(isTeach ? '知识' : '题目') + '历史'} onClick={() => this.history(lane)}/><IconButton name="plus" title={(isTeach ? '知识' : '题目') + '新对话'} onClick={() => this.newChat(lane)}/></div></header>{isTeach && this.state.bridge && <button className="bridge-banner" onClick={() => this.backToProblem()}><Icon name="back"/>返回原题 · 第 {this.state.bridge.step} 步 <small>已携带题目上下文</small></button>}<div className="pane-messages" id={'messages-' + lane} onScroll={e=>{const el=e.currentTarget;this.follow[lane]=el.scrollHeight-el.scrollTop-el.clientHeight<100;}}>{messages.length === 0 && !this.state.partial[lane] ? <div className="pane-welcome"><div className="welcome-symbol"><Icon name={isTeach ? 'book' : 'edit'}/></div><h2>{isTeach ? '从一个问题，真正学会' : '把难题，拆成能理解的小步'}</h2><p>{isTeach ? '选一个知识点，或者直接问我。\n从为什么开始，把概念和例题连起来。' : '输入题目或指定文件、题号。\n完整参考解法之后，每个步骤都能继续学。'}</p><div className="suggestion-stack">{(isTeach ? [(this.props.course.id === 'cs3481' ? '请用中文解释 DBSCAN 的核心点' : '请用中文介绍这门课的核心知识'), '我想先看看这门课的知识地图'] : [(this.props.course.id === 'cs3481' ? '讲解 Tutorial_02_Clustering.pdf 的 Question 2' : '请结合我上传的题目说明解题步骤'), '解题时怎样判断应该用哪种方法？']).map(text => <button key={text} onClick={() => this.ask(lane, text)}>{text}<Icon name="arrow"/></button>)}</div></div> : messages.map(m => <article className={'chat-message-new ' + m.role} key={m.id}><div className="message-byline">{m.role === 'user' ? this.props.user.name : 'CourseMate'}{m.role === 'assistant' && <span>{this.props.config.provider_mode === 'test' ? '本地测试 Provider' : this.props.config.model}</span>}</div>{m.attachments?.length>0&&<div className="attachment-chips">{m.attachments.map(f=><span key={f.id}><Icon name="file"/>{f.name}</span>)}</div>}<RichText text={m.text} message={m} lane={lane} onBridge={(...a) => this.bridge(...a)}/>{m.role==='assistant'&&m.run&&<button className="prompt-inspect-button" onClick={()=>this.inspectPrompt(m)}>查看本次教学 Prompt</button>}{m.citations?.length > 0 && <div className="citation-row">{m.citations.map(c => <button key={c.id} onClick={() => this.source(c)}><Icon name="file"/>{c.name} · p.{c.page}</button>)}</div>}</article>)}{this.state.partial[lane] && <article className="chat-message-new assistant"><div className="message-byline">CourseMate <span>生成中 / 未完成内容</span></div><RichText text={this.state.partial[lane]}/></article>}</div><footer className="pane-footer"><div className="generation-status" role="status">{this.state.status[lane] || 'CS3481 模板 → 千问撰写 Prompt → 千问教学'}</div>{this.state.attachments[lane].length>0&&<div className="attachment-chips">{this.state.attachments[lane].map(f=><span key={f.id}><Icon name="file"/>{f.name}<button title="移除本次附件" onClick={()=>this.setLane('attachments',lane,this.state.attachments[lane].filter(x=>x.id!==f.id))}>×</button></span>)}</div>}<form className="chat-composer" onSubmit={e => { e.preventDefault(); this.ask(lane); }}><textarea aria-label={isTeach ? '知识学习输入' : '题目应对输入'} placeholder={isTeach ? '问一个问题，或者告诉我你想学什么…' : '输入题目，或写下文件名与题号…'} value={this.state.inputs[lane]} maxLength="6000" onChange={e => this.setLane('inputs', lane, e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+    renderPane(lane) { const isTeach = lane === 'teach', messages = this.state.messages[lane]; return <section className={'learning-pane pane-' + lane + ' ' + (this.state.mobile === lane ? 'mobile-active' : '')}><header className="pane-header"><div className="row"><span className="pane-symbol"><Icon name={isTeach ? 'book' : 'edit'}/></span><div><h3>{isTeach ? '知识学习' : '题目应对'}</h3><small>{isTeach ? '理解原理，连接知识' : '拆解题目，逐步解决'}</small></div></div><div className="row" style={{ gap: 1 }}><IconButton name="history" title="历史对话" onClick={() => this.history()}/><IconButton name="plus" title="新对话" onClick={() => this.newPair()}/></div></header>{isTeach && this.state.bridge && <button className="bridge-banner" onClick={() => this.backToProblem()}><Icon name="back"/>返回原题 · 第 {this.state.bridge.step} 步 <small>已携带题目上下文</small></button>}<div className="pane-messages" id={'messages-' + lane} onScroll={e=>{const el=e.currentTarget;this.follow[lane]=el.scrollHeight-el.scrollTop-el.clientHeight<100;}}>{messages.length === 0 && !this.state.partial[lane] ? <div className="pane-welcome"><div className="welcome-symbol"><Icon name={isTeach ? 'book' : 'edit'}/></div><h2>{isTeach ? '从一个问题，真正学会' : '把难题，拆成能理解的小步'}</h2><p>{isTeach ? '选一个知识点，或者直接问我。\n从为什么开始，把概念和例题连起来。' : '输入题目或指定文件、题号。\n完整参考解法之后，每个步骤都能继续学。'}</p><div className="suggestion-stack">{(isTeach ? [(this.props.course.id === 'cs3481' ? '请用中文解释 DBSCAN 的核心点' : '请用中文介绍这门课的核心知识'), '我想先看看这门课的知识地图'] : [(this.props.course.id === 'cs3481' ? '讲解 Tutorial_02_Clustering.pdf 的 Question 2' : '请结合我上传的题目说明解题步骤'), '解题时怎样判断应该用哪种方法？']).map(text => <button key={text} onClick={() => this.ask(lane, text)}>{text}<Icon name="arrow"/></button>)}</div></div> : messages.map(m => <article className={'chat-message-new ' + m.role} key={m.id}><div className="message-byline">{m.role === 'user' ? this.props.user.name : 'CourseMate'}{m.role === 'assistant' && <span>{this.props.config.provider_mode === 'test' ? '本地测试 Provider' : this.props.config.model}</span>}</div>{m.attachments?.length>0&&<div className="attachment-chips">{m.attachments.map(f=><span key={f.id}><Icon name="file"/>{f.name}</span>)}</div>}<RichText text={m.text} message={m} lane={lane} onBridge={(...a) => this.bridge(...a)}/>{m.role==='assistant'&&m.exercise&&this.renderExercise(m)}{m.citations?.length > 0 && <div className="citation-row">{m.citations.map(c => <button key={c.id} onClick={() => this.source(c)}><Icon name="file"/>{c.name} · p.{c.page}</button>)}</div>}</article>)}{this.state.partial[lane] && <article className="chat-message-new assistant"><div className="message-byline">CourseMate <span>生成中 / 未完成内容</span></div><RichText text={this.state.partial[lane]}/></article>}</div><footer className="pane-footer"><div className="generation-status" role="status">{this.state.status[lane] || ''}</div>{this.state.attachments[lane].length>0&&<div className="attachment-chips">{this.state.attachments[lane].map(f=><span key={f.id}><Icon name="file"/>{f.name}<button title="移除本次附件" onClick={()=>this.setLane('attachments',lane,this.state.attachments[lane].filter(x=>x.id!==f.id))}>×</button></span>)}</div>}<form className="chat-composer" onSubmit={e => { e.preventDefault(); this.ask(lane); }}><textarea aria-label={isTeach ? '知识学习输入' : '题目应对输入'} placeholder={isTeach ? '问一个问题，或者告诉我你想学什么…' : '输入题目，或写下文件名与题号…'} value={this.state.inputs[lane]} maxLength="6000" onChange={e => this.setLane('inputs', lane, e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
         e.preventDefault();
         this.ask(lane);
-    } }}/><div className="composer-bottom"><div className="row"><label className="attach-button" title="添加题目图片或课程文件"><Icon name="file"/><input type="file" hidden aria-label={isTeach?"知识学习附件":"题目附件"} accept=".pdf,.txt,.md,.csv,.ipynb,.png,.jpg,.jpeg,.webp,.docx,.pptx" disabled={this.state.busy[lane]||this.state.uploading[lane]} onChange={e=>this.attach(lane,e)}/></label><span className="helper-note">{this.state.uploading[lane]?"正在上传…":"Shift + Enter 换行"}</span></div>{this.state.busy[lane] ? <IconButton name="stop" title="停止生成" onClick={() => this.stop(lane)}/> : <button className="send-button" aria-label={isTeach ? '发送知识问题' : '发送题目'} disabled={!this.state.inputs[lane].trim()||this.state.uploading[lane]}><Icon name="send"/></button>}</div></form></footer></section>; }
+    } }}/><div className="composer-bottom"><div className="row"><label className="attach-button" title="添加题目图片或课程文件"><Icon name="file"/><input type="file" hidden aria-label={isTeach?"知识学习附件":"题目附件"} accept=".pdf,.txt,.md,.csv,.ipynb,.png,.jpg,.jpeg,.webp,.docx,.pptx" disabled={this.state.busy[lane]||this.state.uploading[lane]} onChange={e=>this.attach(lane,e)}/></label>{this.state.uploading[lane]&&<span className="helper-note">正在上传…</span>}{isTeach&&<span className="thinking-control"><span className="thinking-label">Thinking</span><button type="button" className={'thinking-circle'+(this.state.thinking.teach?' on':'')} aria-pressed={this.state.thinking.teach} aria-label="思考模式" onClick={()=>this.setState(s=>({thinking:{...s.thinking,teach:!s.thinking.teach}}))}><span className="thinking-dot"/></button></span>}</div><div className="row" style={{gap:8}}>{!isTeach&&<button type="button" className="do-exercise-btn" onClick={()=>this.doExercise()} disabled={this.state.busy.problem||this.state.uploading.problem}>做一题</button>}{this.state.busy[lane] ? <IconButton name="stop" title="停止生成" onClick={() => this.stop(lane)}/> : <button className="send-button" aria-label={isTeach ? '发送知识问题' : '发送题目'} disabled={!this.state.inputs[lane].trim()||this.state.uploading[lane]}><Icon name="send"/></button>}</div></div></form></footer></section>; }
     render() { return <div className={'learn-new ' + (this.state.fullscreen ? 'focus-mode' : '')}><button className="knowledge-strip" onClick={() => this.setState({ expanded: !this.state.expanded })}><span className="row"><Icon name="tree"/><strong>课程知识点树</strong><small>{this.state.nodes.length} 个节点 · 点击展开</small></span><Icon name={this.state.expanded ? 'up' : 'down'}/></button><div className="workspace-new"><header className="workspace-toolbar"><IconButton name={this.state.fullscreen ? 'collapse' : 'expand'} title={this.state.fullscreen ? '退出全屏学习' : '全屏学习'} onClick={() => this.setState({ fullscreen: !this.state.fullscreen })}/><span className="muted small">{this.props.course.code} · 学习工作台</span><span className="model-label">{this.props.config.provider_mode === 'disabled' ? '模型未连接' : this.props.config.provider_mode === 'test' ? '测试 Provider · 非真实千问' : this.props.config.model}</span></header><div className="mobile-pane-tabs"><button className={this.state.mobile === 'teach' ? 'active' : ''} onClick={() => this.setState({ mobile: 'teach' })}>知识学习</button><button className={this.state.mobile === 'problem' ? 'active' : ''} onClick={() => this.setState({ mobile: 'problem' })}>题目应对</button></div>{this.state.error && <p className="error-text">{this.state.error}</p>}<div className={'workspace-columns '+(this.state.resizing?'is-resizing':'')} ref={el => this.workspace = el} style={{ gridTemplateColumns: `minmax(0,${this.state.ratio}fr) 9px minmax(0,${1 - this.state.ratio}fr)` }}>{this.renderPane('teach')}<div className="pane-divider" role="separator" aria-label="调整学习双栏比例" aria-orientation="vertical" aria-valuemin="25" aria-valuemax="75" aria-valuenow={Math.round(this.state.ratio * 100)} tabIndex="0" onMouseDown={e => this.drag(e)} onTouchStart={e=>this.drag(e)} onKeyDown={e => { if (['ArrowLeft', 'ArrowRight'].includes(e.key)) {
         e.preventDefault();
         this.setState({ ratio: Math.max(.25, Math.min(.75, this.state.ratio + (e.key === 'ArrowLeft' ? -.025 : .025))) }, () => this.saveLayout());
-    } }}><span /></div>{this.renderPane('problem')}</div></div>{this.state.expanded && this.renderTree()}</div>; }
+    } }}><span /></div>{this.renderPane('problem')}</div></div>{this.state.expanded && this.renderTree()}{this.renderWindows()}</div>; }
 }
 class Assessment extends React.Component {
     state = { view: null, answers: {}, busy: false, error: '', finished: false };
@@ -477,38 +729,66 @@ class Assessment extends React.Component {
     renderQuestion(q, i) { const value = this.state.answers[q.id] ?? ''; const locked = this.state.view?.status !== 'IN_PROGRESS'; return <article className="assessment-question" key={q.id}><header><strong>第 {i + 1} 题</strong><small>{q.question_type}{q.marks ? ' · ' + q.marks + ' 分' : ''}</small></header><p className="assessment-prompt">{q.prompt}</p>{q.options && q.options.length ? <div className="assessment-options">{q.options.map((option, j) => <label key={j} className={'assessment-option' + (value === String(option) ? ' selected' : '')}><input type="radio" name={q.id} disabled={locked} checked={value === String(option)} onChange={() => this.setState({ answers: { ...this.state.answers, [q.id]: option } })}/><span>{option}</span></label>)}</div> : <textarea aria-label={'第 ' + (i + 1) + ' 题答案'} disabled={locked} rows={3} maxLength="12000" placeholder="在这里作答…" value={value} onChange={e => this.setState({ answers: { ...this.state.answers, [q.id]: e.target.value } })}/>}{q.review && <div className="assessment-review"><p className="helper-note">你的答案：{q.review.submitted_answer ?? '（未作答）'}</p><p className="helper-note">参考答案：{JSON.stringify(q.review.answer)}</p><p className="helper-note">得分：{q.review.awarded_marks} / {q.marks}{q.review.feedback ? ' · ' + q.review.feedback : ''}</p></div>}</article>; }
     render() { const { view, busy, error, finished } = this.state; const active = view && view.status === 'IN_PROGRESS'; return <div className="assessment-flow">{this.state.error && <p className="error-text">{this.state.error}</p>}{this.renderSummary()}{!view && !finished && <div className="row" style={{ marginTop: 16 }}><button className="btn primary" disabled={busy} onClick={() => this.start()}>{busy ? '正在准备…' : '开始测评（5 题）'}</button>{this.props.result?.status === 'GRADED' && <p className="helper-note">已有评分记录；再次测评会开启新的场次。</p>}</div>}{active && <><div className="assessment-questions">{view.questions.map((q, i) => this.renderQuestion(q, i))}</div><div className="row" style={{ marginTop: 16 }}><button className="btn primary" disabled={busy} onClick={() => this.submit()}>{busy ? '正在提交…' : '提交答案'}</button><button className="btn" disabled={busy} onClick={() => this.abandon()}>放弃本次测评</button></div></>}{view && view.status === 'GRADED' && <><p className="helper-note" style={{ marginTop: 12 }}>评阅完成。查看每题反馈后关闭即可。</p><div className="assessment-questions">{view.questions.map((q, i) => this.renderQuestion(q, i))}</div><div className="row" style={{ marginTop: 16 }}><button className="btn" onClick={() => this.setState({ view: null, finished: true })}>返回概览</button><button className="btn" onClick={() => this.start()}>再测一次</button></div></>}</div>; }
 }
-class History extends React.Component {
-    state = { rows: [], legacy: [], open: null, error: '' };
+class ExplanationWindow extends React.Component {
+    state = { x: 0, y: 0, w: 520, h: 420, followUp: '' };
+    componentDidMount() { const w = this.props.win || {}; this.setState({ x: w.x ?? 60, y: w.y ?? 60, w: w.w ?? 520, h: w.h ?? 420 }); }
+    startDrag(e) { if (e.target.closest('button') || e.target.closest('input'))
+        return; e.preventDefault(); const startX = e.touches?.[0]?.clientX ?? e.clientX, startY = e.touches?.[0]?.clientY ?? e.clientY; const { x, y } = this.state; const onMove = ev => { if (ev.cancelable)
+        ev.preventDefault(); const cx = ev.touches?.[0]?.clientX ?? ev.clientX, cy = ev.touches?.[0]?.clientY ?? ev.clientY; this.setState({ x: x + (cx - startX), y: y + (cy - startY) }); }; const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); window.removeEventListener('touchmove', onMove); window.removeEventListener('touchend', onUp); window.removeEventListener('touchcancel', onUp); }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp); window.addEventListener('touchmove', onMove, { passive: false }); window.addEventListener('touchend', onUp); window.addEventListener('touchcancel', onUp); }
+    startResize(e) { e.preventDefault(); e.stopPropagation(); const startX = e.touches?.[0]?.clientX ?? e.clientX, startY = e.touches?.[0]?.clientY ?? e.clientY; const { w, h } = this.state; const onMove = ev => { if (ev.cancelable)
+        ev.preventDefault(); const cx = ev.touches?.[0]?.clientX ?? ev.clientX, cy = ev.touches?.[0]?.clientY ?? ev.clientY; this.setState({ w: Math.max(280, w + (cx - startX)), h: Math.max(220, h + (cy - startY)) }); }; const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); window.removeEventListener('touchmove', onMove); window.removeEventListener('touchend', onUp); window.removeEventListener('touchcancel', onUp); }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp); window.addEventListener('touchmove', onMove, { passive: false }); window.addEventListener('touchend', onUp); window.addEventListener('touchcancel', onUp); }
+    submit(e) { e.preventDefault(); this.props.onFollowUp(this.state.followUp); this.setState({ followUp: '' }); }
+    render() { const { win, exp } = this.props; const { x, y, w, h, followUp } = this.state; const status = exp?.status; const generating = status === 'generating'; const messages = exp?.messages || []; const partial = exp?.partial || ''; return <div className="explain-window" style={{ left: x, top: y, width: w, height: h, zIndex: win.z }} role="dialog" aria-label={'详解 · 第 ' + win.ordinal + ' 步'} onMouseDown={() => this.props.onRaise()} onTouchStart={() => this.props.onRaise()}><div className="explain-head" onMouseDown={e => this.startDrag(e)} onTouchStart={e => this.startDrag(e)}><strong>详解 · 第 {win.ordinal} 步</strong><button type="button" className="explain-close" aria-label="关闭详解" onClick={() => this.props.onClose()}>×</button></div><div className="explain-body">{messages.map(m => <div className={'explain-bubble ' + m.role} key={m.id || m.role + m.text.slice(0, 8)}>{m.text}</div>)}{generating && <div className="explain-bubble assistant">{partial || '正在思考中…'}</div>}{status === 'completed' && messages.length === 0 && <div className="explain-bubble assistant">{exp.text}</div>}{status === 'error' && <div className="explain-status"><span className="error-text">{exp.error || '生成失败'}</span></div>}{status === 'cancelled' && <div className="explain-status">已停止，窗口可关闭。</div>}{!status && <div className="explain-status">正在加载…</div>}</div><form className="explain-foot" onSubmit={e => this.submit(e)}><input type="text" aria-label="追问" placeholder="追问这个步骤…" value={followUp} disabled={generating} onChange={e => this.setState({ followUp: e.target.value })}/>{generating ? <button type="button" className="btn" onClick={() => this.props.onCancel()}>停止</button> : <button type="submit" className="btn primary" disabled={!followUp.trim() || status === 'error'}>追问</button>}</form><div className="explain-resize" aria-label="调整窗口大小" onMouseDown={e => this.startResize(e)} onTouchStart={e => this.startResize(e)}/></div>; }
+}
+class PairHistory extends React.Component {
+    state = { rows: [], nodes: [], error: '', menu: null, picker: null, conflict: null };
     componentDidMount() { this.load(); }
     async load() { try {
-        const [rows, legacy] = await Promise.all([
-            request(`/conversations?course_id=${this.props.course}&lane=${this.props.lane}`),
-            request(`/courses/${this.props.course}/legacy-conversations`).catch(() => []),
-        ]);
-        this.setState({ rows, legacy });
+        const [rows, nodes] = await Promise.all([listPairs(this.props.course), request(`/courses/${this.props.course}/knowledge`)]);
+        this.setState({ rows, nodes, error: '' });
     }
     catch (e) {
         this.setState({ error: e.message });
     } }
-    async openLegacy(id) { try {
-        this.setState({ open: await request(`/courses/${this.props.course}/legacy-conversations/${id}`) });
-    }
-    catch (e) {
-        this.setState({ error: e.message });
-    } }
-    renderLegacy() { const { legacy, open } = this.state; if (!legacy.length)
-        return null; return <div className="legacy-history"><div className="divider"/><h3>旧版问答记录</h3><p className="helper-note" style={{ marginTop: 6 }}>这些是原问答页面的历史对话，保存在原记录里，只读，不会被复制到本页历史。</p>{legacy.map(c => <div key={c.id} className="history-line"><button className="history-item" onClick={() => this.openLegacy(c.id)}><Icon name="history"/><span>{c.title}</span><small>{formatTime(c.updated_at)} · {c.message_count} 条</small></button></div>)}{open && <div className="legacy-reader"><div className="row between"><strong>{open.title}</strong><IconButton name="close" title="关闭旧版对话" onClick={() => this.setState({ open: null })}/></div><div className="legacy-messages">{open.messages.map((m, i) => <article key={i} className={m.role === 'user' ? 'legacy-message mine' : 'legacy-message'}><small>{m.role === 'user' ? '你' : 'CourseMate'}</small><RichText text={m.text}/>{m.citations && m.citations.length > 0 && <ul className="legacy-citations">{m.citations.map((c, j) => <li key={j}>{c.filename || c.document_id || '课程资料'}</li>)}</ul>}</article>)}</div></div>}</div>; }
-    render() { return <div>{this.state.error && <p className="error-text">{this.state.error}</p>}{this.state.rows.map(c => <div key={c.id} className="history-line"><button className="history-item" onClick={() => this.props.onSelect(c.id)}><Icon name="history"/><span>{c.title}</span><small>{formatTime(c.updated_at)}</small></button><IconButton name="edit" title={'重命名 ' + c.title} onClick={async () => { const title = window.prompt('对话名称', c.title); if (title) {
-        await send('/conversations/' + c.id, { title }, 'PATCH');
+    async rename(p) { const title = window.prompt('对话名称', p.title); if (!title || title === p.title)
+        return; try {
+        await renamePair(p.id, title);
         this.load();
-    } }}/><IconButton name="trash" title={'删除对话 ' + c.title} onClick={async () => { if (window.confirm('删除这段对话？')) {
-        try {
-            await remove('/conversations/' + c.id);
-            this.props.onDelete(c.id);
-            this.load();
-        }
-        catch (e) {
+    }
+    catch (e) {
+        this.setState({ error: e.message });
+    } }
+    async remove(p) { if (!window.confirm('删除这段对话？'))
+        return; try {
+        await deletePair(p.id);
+        this.props.onDeleted(p.id, p.teach_conversation, p.problem_conversation);
+        this.load();
+    }
+    catch (e) {
+        this.setState({ error: e.message });
+    } }
+    async bindNode(nodeId) { const p = this.state.picker; if (!p)
+        return; try {
+        await bindPair(p.pairId, nodeId);
+        this.setState({ picker: null, conflict: null });
+        this.load();
+    }
+    catch (e) {
+        if (e.code === 'NODE_ALREADY_BOUND')
+            this.setState({ conflict: { node: nodeId, pair: e.detail?.pair || null } });
+        else
             this.setState({ error: e.message });
-        }
-    } }}/></div>)}{!this.state.rows.length && <p className="helper-note">还没有历史对话。发送第一个问题后，会保存在这里。</p>}{this.renderLegacy()}</div>; }
+    } }
+    async unbind(p) { try {
+        await bindPair(p.id, null);
+        this.load();
+    }
+    catch (e) {
+        this.setState({ error: e.message });
+    } }
+    renderPicker() { const p = this.state.picker; const term = (p.q || '').toLowerCase(); const filtered = term ? this.state.nodes.filter(n => (n.title || '').toLowerCase().includes(term)) : this.state.nodes; return <div className="node-picker"><div className="row between"><h3>{p.mode === 'rebind' ? '更换绑定知识点' : '绑定知识点'}</h3><IconButton name="close" title="返回" onClick={() => this.setState({ picker: null, conflict: null })}/></div>{this.state.conflict && <div className="error-text" style={{ padding: '8px 0' }}>该知识点已绑定到另一会话「{this.state.conflict.pair?.title || '未知会话'}」<button className="link" style={{ marginLeft: 8 }} onClick={() => { const id = this.state.conflict.pair?.id; if (id) {
+        this.props.onSelect(id);
+    } }}>打开</button></div>}<input className="node-picker-search" autoFocus aria-label="搜索知识点" placeholder="搜索知识点…" value={p.q || ''} onChange={e => this.setState(s => ({ picker: { ...s.picker, q: e.target.value } }))}/><div className="node-picker-list">{filtered.map(n => <button type="button" key={n.id} className="node-picker-row" onClick={() => this.bindNode(n.id)}><Icon name="book"/><span>{n.title}</span></button>)}{!filtered.length && <p className="helper-note" style={{ padding: 12 }}>没有匹配的知识点</p>}</div></div>; }
+    render() { const { rows, error, menu, picker } = this.state; if (picker)
+        return this.renderPicker(); return <div className="pair-history">{error && <p className="error-text">{error}</p>}{rows.map(p => <div key={p.id} className="history-line"><button className="history-item" onClick={() => this.props.onSelect(p.id)}><Icon name="history"/><span className="pair-title-time"><strong>{p.title}</strong><small>{formatTime(p.updated_at)}</small></span>{p.bound_node && <span className="pair-bound-tag">已绑定知识点</span>}</button><IconButton name="trash" title={'删除对话 ' + p.title} onClick={() => this.remove(p)}/><div style={{ position: 'relative' }}><IconButton name="more" title={'对话操作 ' + p.title} onClick={() => this.setState({ menu: menu === p.id ? null : p.id })}/>{menu === p.id && <div className="dropdown"><button onClick={() => this.rename(p)}>重命名</button><button onClick={() => this.setState({ picker: { pairId: p.id, mode: 'bind', q: '' }, menu: null, conflict: null })}>绑定知识点</button>{p.bound_node && <button onClick={() => this.setState({ picker: { pairId: p.id, mode: 'rebind', q: '' }, menu: null, conflict: null })}>更换绑定</button>}{p.bound_node && <button onClick={() => this.unbind(p)}>解除绑定</button>}</div>}</div></div>)}{!rows.length && <p className="helper-note">还没有历史对话。发送第一个问题后，会保存在这里。</p>}</div>; }
 }

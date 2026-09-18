@@ -165,6 +165,18 @@ class V3DomainAdapter:
     @staticmethod
     def _course_dto(row: sqlite3.Row | dict[str, Any], *, requirements: str = "") -> dict[str, Any]:
         official = row["course_type"] == "official"
+        keys = row.keys()
+        # display_type is a PRESENTATION label; access rules stay in
+        # course_type/ownership plus the independent verification flag.
+        if "display_type" in keys and row["display_type"]:
+            display_type = row["display_type"]
+        else:
+            display_type = "campus" if official else "private"
+        requires_verification = (
+            bool(row["requires_student_verification"])
+            if "requires_student_verification" in keys
+            else official
+        )
         return {
             "id": row["id"],
             "code": str(row["id"]).upper(),
@@ -175,7 +187,9 @@ class V3DomainAdapter:
             "official": bool(official),
             "owner": row["owner_user_id"],
             "course_type": row["course_type"],
-            "publication_status": row["publication_status"] if "publication_status" in row.keys() else "private",
+            "display_type": display_type,
+            "requires_student_verification": requires_verification,
+            "publication_status": row["publication_status"] if "publication_status" in keys else "private",
             "preferred_language": row["preferred_language"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
@@ -311,6 +325,29 @@ class V3DomainAdapter:
                 "WHERE id=?",
                 (requirements, _now(), row["id"]),
             )
+
+    def _create_shared_course(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Receiver-side copy of a shared course snapshot: a real V3 course
+        owned by the recipient, display_type='shared', with the snapshot's
+        verification requirement preserved independently of its display label."""
+        name = str(payload.get("name") or "共享课程")[:120]
+        description = str(payload.get("description") or "")[:1000]
+        course_id = "share-" + hashlib.sha256(
+            f"{payload.get('share_id')}:{subject}".encode()
+        ).hexdigest()[:20]
+        self.ingestion.create_course(
+            _course_create_model(course_id, name, description),
+            owner_user_id=subject,
+            is_admin=False,
+        )
+        with self.database.connect() as connection:
+            connection.execute(
+                "UPDATE courses SET display_type='shared', "
+                "requires_student_verification=? WHERE id=?",
+                (1 if payload.get("requires_student_verification") else 0, course_id),
+            )
+        _cache().courses.pop(course_id, None)
+        return self._course_dto_for(course_id, subject, write=True)
 
     def _delete_course(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
         course_id = str(payload["id"])
@@ -1251,6 +1288,8 @@ class V3DomainAdapter:
             return self._update_course(subject, payload)
         if operation == "course.delete":
             return self._delete_course(subject, payload)
+        if operation == "course.create_shared":
+            return self._create_shared_course(subject, payload)
         if operation == "file.list":
             query = str(payload.get("q") or "").strip().casefold()
             folder = payload.get("folder")
@@ -1304,6 +1343,18 @@ class V3DomainAdapter:
             return self._legacy_conversations(subject, str(payload["course"]))
         if operation == "legacy.conversation":
             return self._legacy_conversation(subject, payload)
+        if operation == "verification.grandfather_candidates":
+            # Trusted pre-enablement snapshot sources: every user id that
+            # already left ownership rows in the V3 database. Client-provided
+            # timestamps are never used.
+            with self.database.connect() as connection:
+                rows = connection.execute(
+                    "SELECT DISTINCT owner_user_id AS uid FROM courses "
+                    "WHERE owner_user_id IS NOT NULL "
+                    "UNION SELECT DISTINCT owner_user_id FROM learning_workspaces "
+                    "UNION SELECT DISTINCT owner_user_id FROM conversations"
+                ).fetchall()
+            return [row["uid"] for row in rows if row["uid"]]
         raise ApiError(
             501,
             "DOMAIN_OPERATION_UNSUPPORTED",

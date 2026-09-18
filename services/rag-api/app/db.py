@@ -20,9 +20,10 @@ V3_MIGRATIONS = (
     "022_shell_delivery_evidence.sql",
     "023_official_knowledge_draft_fingerprint.sql",
     "024_official_knowledge_generation_plans.sql",
+    "025_campus_display_and_verification.sql",
 )
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 24
+LATEST_V3_SCHEMA_VERSION = 25
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (
@@ -483,6 +484,31 @@ class Database:
                     "ON knowledge_tree_versions(course_id, corpus_fingerprint) "
                     "WHERE tree_kind = 'OFFICIAL' AND status = 'DRAFT'"
                 )
+                # Migration 025 columns are conditional ALTERs (SQLite cannot
+                # ADD COLUMN IF NOT EXISTS); ledger entry lives in the SQL file.
+                course_columns = {
+                    row["name"]
+                    for row in connection.execute("PRAGMA table_info(courses)")
+                }
+                if "display_type" not in course_columns:
+                    connection.execute(
+                        "ALTER TABLE courses ADD COLUMN display_type TEXT "
+                        "CHECK (display_type IN ('private','campus','shared'))"
+                    )
+                if "requires_student_verification" not in course_columns:
+                    connection.execute(
+                        "ALTER TABLE courses ADD COLUMN "
+                        "requires_student_verification INTEGER NOT NULL DEFAULT 0"
+                    )
+                if "display_type" not in course_columns:
+                    connection.execute(
+                        "UPDATE courses SET display_type='campus', "
+                        "requires_student_verification=1 WHERE course_type='official'"
+                    )
+                    connection.execute(
+                        "UPDATE courses SET display_type='private' "
+                        "WHERE course_type != 'official'"
+                    )
 
     def is_ready(self) -> bool:
         if not self.upload_dir.is_dir():

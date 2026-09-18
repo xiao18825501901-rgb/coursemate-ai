@@ -85,6 +85,7 @@ class RunCreate(Text):
     bridge_id: str|None=None
     node_id: str|None=None
     attachment_ids: list[str]=Field(default_factory=list,max_length=4)
+    teaching_mode: Literal['normal','thinking']='normal'
 
 class BridgeCreate(Input):
     problem_message: str
@@ -107,3 +108,39 @@ class ReceiptFinish(Input):
     lease: str=Field(min_length=20,max_length=100)
     status: Literal['completed','failed']
     result: dict=Field(default_factory=dict)
+
+class PairCreate(Input):
+    course: str
+
+class PairBind(Input):
+    node: str|None=None
+
+class ClassificationCorrection(Input):
+    template_id: str=Field(min_length=1,max_length=40)
+
+class VerificationRedeem(Input):
+    code: str=Field(pattern=r'^[0-9]{7}$')
+    request_id: str=Field(min_length=8,max_length=100)
+
+class VerificationIssue(Input):
+    count: int=Field(ge=1,le=100)
+
+class VerificationDisable(Input):
+    code: str=Field(pattern=r'^[0-9]{7}$')
+
+class ShareCreate(Input):
+    course: str
+    recipients: list[str]=Field(min_length=1,max_length=20)
+    history_scope: Literal['all','none','selected']='none'
+    selected_pair_ids: list[str]=Field(default_factory=list,max_length=50)
+    request_id: str=Field(min_length=8,max_length=100)
+
+class ExerciseCreate(Input):
+    node: str|None=None
+    request_id: str=Field(min_length=8,max_length=100)
+
+class ExplanationCreate(Input):
+    request_id: str=Field(min_length=8,max_length=100)
+
+class ExplanationMessage(Text):
+    pass

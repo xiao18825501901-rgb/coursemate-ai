@@ -252,7 +252,7 @@ def test_old_release_readiness_and_progress_on_schema_22(tmp_path: Path) -> None
         assert reviewed == "REVIEWED"
 
 
-def test_older_ui_release_refuses_schema_5_database(
+def test_older_ui_release_refuses_newer_schema_database(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from app.cm_update import db as ui_db_module
@@ -260,11 +260,11 @@ def test_older_ui_release_refuses_schema_5_database(
 
     ui_dir = tmp_path / "ui"
     current = UiDatabase(ui_dir / "ui.sqlite3")
-    current.initialize()  # writes Schema 5
-    assert current.one("SELECT value FROM cmui_meta WHERE key='schema_version'")["value"] == "5"
+    current.initialize()  # writes the current schema (6)
+    assert current.one("SELECT value FROM cmui_meta WHERE key='schema_version'")["value"] == str(ui_db_module.SCHEMA_VERSION)
 
     # Simulate the older release binary: its SCHEMA_VERSION constant is lower.
-    monkeypatch.setattr(ui_db_module, "SCHEMA_VERSION", 4)
+    monkeypatch.setattr(ui_db_module, "SCHEMA_VERSION", ui_db_module.SCHEMA_VERSION - 1)
     older = UiDatabase(ui_dir / "ui.sqlite3")
     with pytest.raises(ValueError, match="Newer UI database schema detected; do not downgrade"):
         older.initialize()

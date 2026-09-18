@@ -38,3 +38,10 @@ work/
 
 # Local Netlify folder
 .netlify
+
+# dev workspace (archive copy) artifacts
+.pnpm-store/
+.env.archived-redacted-hold
+GIT_INFO.txt
+coursemate-all-history.bundle
+

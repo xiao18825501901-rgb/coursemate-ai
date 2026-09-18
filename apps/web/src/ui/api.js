@@ -13,7 +13,14 @@ export async function request(path, options = {}) {
         catch {
             error = { detail: `请求失败 (${response.status})` };
         }
-        throw new Error(typeof error.detail === 'string' ? error.detail : JSON.stringify(error.detail));
+        const detail = error.detail;
+        const message = typeof detail === 'string' ? detail : (detail && typeof detail === 'object' && typeof detail.message === 'string' ? detail.message : (detail && typeof detail === 'object' ? JSON.stringify(detail) : `请求失败 (${response.status})`));
+        const err = new Error(message || `请求失败 (${response.status})`);
+        err.status = response.status;
+        err.code = detail && typeof detail === 'object' ? detail.code || null : null;
+        err.detail = detail;
+        err.body = error;
+        throw err;
     }
     if (options.raw)
         return response;
@@ -66,3 +73,32 @@ export async function streamEvents(run, handle, signal, after = 0) {
     try { while(true){const {done,value}=await reader.read();if(done)break;parse(decoder.decode(value,{stream:true}));}parse(decoder.decode(),true); }
     finally {reader.releaseLock();}
 }
+// Unified dual-pane sessions (pairs).
+export const listPairs = (courseId) => request(`/pairs?course_id=${encodeURIComponent(courseId)}`);
+export const getPair = (id) => request('/pairs/' + id);
+export const createPair = (course) => send('/pairs', { course });
+export const renamePair = (id, title) => send('/pairs/' + id, { title }, 'PATCH');
+export const deletePair = (id) => remove('/pairs/' + id);
+export const bindPair = (id, node) => send(`/pairs/${id}/bind`, { node });
+// Exercises (做一题) and reveals.
+export const createExercise = (courseId, node = null) => send(`/courses/${courseId}/exercises`, { request_id: key(), node });
+export const getExercise = (id) => request('/exercises/' + id);
+export const revealExercise = (id) => send(`/exercises/${id}/reveal`, {});
+// Step explanations (详解) and follow-ups.
+export const createExplanation = (exerciseId, stepId) => send(`/exercises/${exerciseId}/steps/${stepId}/explanation`, { request_id: key() });
+export const getExplanation = (id) => request('/explanations/' + id);
+export const postExplanationMessage = (id, text) => send(`/explanations/${id}/messages`, { text, request_id: key() });
+export const cancelExplanation = (id) => send(`/explanations/${id}/cancel`, {});
+// Student verification.
+export const getVerification = () => request('/me/verification');
+export const redeemVerification = (code) => send('/me/verification/redeem', { code, request_id: key() });
+// Course shares.
+export const listShares = (q) => request('/shares?q=' + encodeURIComponent(q));
+export const getShare = (id) => request('/shares/' + id);
+export const createShare = (payload, requestId) => send('/shares', { ...payload, request_id: requestId || key() });
+export const joinShare = (id) => send(`/shares/${id}/join`, {});
+// Course classification.
+export const getClassification = (courseId) => request(`/courses/${courseId}/classification`);
+export const setClassification = (courseId, templateId) => send(`/courses/${courseId}/classification`, { template_id: templateId });
+// People directory search.
+export const searchPeople = (q) => request('/people?q=' + encodeURIComponent(q));

@@ -5,29 +5,40 @@ from fastapi import Request, HTTPException
 from .db import now
 
 
-def ensure_user(db, user_id: str):
+def ensure_user(db, user_id: str, auto_verify: bool = False):
     row = db.one('SELECT * FROM cmui_users WHERE id=?',(user_id,))
+    created = False
     if not row:
         handle = 'student-' + hashlib.sha256(user_id.encode()).hexdigest()[:12]
         with db.connect(True) as c:
             c.execute('INSERT OR IGNORE INTO cmui_users(id,name,handle,created_at) VALUES (?,?,?,?)', (user_id,'CourseMate 同学',handle,now()))
         row = db.one('SELECT * FROM cmui_users WHERE id=?',(user_id,))
+        created = True
+    if auto_verify:
+        # Test/dev convenience ONLY (CMUI_AUTO_VERIFY_NEW_USERS): lets local and
+        # legacy test suites pass the campus gate without issuing real codes.
+        # Production validation forbids the flag, and this path never marks
+        # users as code-verified.
+        from . import social
+        if created or not social.verification_status(db, user_id)['verified']:
+            social.set_verified(db, user_id, 'grandfathered', 'auto-verify dev flag')
     return row
 
 
 async def current_user(request: Request):
     cfg, db = request.app.state.cfg, request.app.state.db
+    auto_verify = bool(getattr(cfg, 'auto_verify_new_users', False))
     if cfg.auth_mode == 'injected':
         subject = await request.app.state.subject_resolver(request)
         if not isinstance(subject,str) or not subject: raise HTTPException(401,'请登录')
-        return ensure_user(db,subject)
+        return ensure_user(db,subject,auto_verify)
     if cfg.auth_mode == 'development':
         # No client-supplied user IDs. This endpoint mode is forbidden by production startup gates.
         token = request.cookies.get('cmui_dev_session','')
         hashed = hashlib.sha256(token.encode()).hexdigest()
         session = db.one('SELECT owner FROM cmui_sessions WHERE token_hash=? AND expires>?',(hashed,time.time()))
         if not session: raise HTTPException(401,'请先选择本机测试账号')
-        return ensure_user(db,session['owner'])
+        return ensure_user(db,session['owner'],auto_verify)
     header=request.headers.get('authorization','')
     if not header.startswith('Bearer '): raise HTTPException(401,'请登录')
     try:
@@ -37,6 +48,6 @@ async def current_user(request: Request):
         if claims.get('azp') not in cfg.allowed_origins or claims.get('sts') == 'pending':
             raise ValueError('Invalid session origin/status')
         if not isinstance(claims['sub'],str) or not claims['sub']: raise ValueError('Invalid subject')
-        return ensure_user(db,claims['sub'])
+        return ensure_user(db,claims['sub'],auto_verify)
     except (jwt.PyJWTError,ValueError,KeyError):
         raise HTTPException(401,'登录状态无效，请重新登录') from None

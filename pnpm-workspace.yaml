@@ -1,0 +1,6 @@
+packages:
+  - apps/web
+  - services/agent-api
+
+allowBuilds:
+  esbuild: true

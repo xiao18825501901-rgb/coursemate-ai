@@ -132,6 +132,8 @@ class Course(CourseCreate):
     visibility: CourseVisibility
     publication_status: PublicationStatus
     preferred_language: LanguagePreference
+    display_type: str | None = None
+    requires_student_verification: bool = False
     document_count: int = 0
     index_status: str = "empty"
     published_at: datetime | None
