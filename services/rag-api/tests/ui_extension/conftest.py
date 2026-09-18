@@ -8,7 +8,7 @@ from app.cm_update.provider import ProviderError
 class ContractProvider:
     """Local contract fixture. Not a live Qwen model and not shipped as production default."""
     calls=[]
-    async def generate(self,course,text,profile,sources,history,lane,bridge=None):
+    async def generate(self,course,text,profile,sources,history,lane,bridge=None,**kwargs):
         self.calls.append({'text':text,'history':history,'sources':sources,'bridge':bridge,'lane':lane})
         yield {'kind':'status','status':'planning','label':'测试模型：生成 Prompt'}
         yield {'kind':'prompt','text':'本地测试：使用 CS3481 Word 的中文教学、英文术语、例题和互动检查方式；该内容不是千问实测。'}

@@ -125,7 +125,7 @@ def test_task_crud_timezone_versions_and_ownership(client):
 def test_naive_task_time_rejected(client):assert client.post(P+'/tasks',json={'title':'test','due_at':'2026-09-16T14:00:00','request_id':k()}).status_code==422
 
 def test_history_restore_new_login_and_isolation(client):
- c=convo(client);rid,r,sse,_=run(client,c['id']);assert r['status']=='completed';assert 'event: delta' in sse;assert r['generated_prompt']
+ c=convo(client);rid,r,sse,_=run(client,c['id']);assert r['status']=='completed';assert 'event: delta' in sse;assert 'generated_prompt' not in r
  login(client,'bob');assert client.get(P+'/conversations/'+c['id']).status_code==404;assert client.get(P+'/runs/'+rid).status_code==404
  login(client,'alice');rest=client.get(P+'/conversations/'+c['id']).json();assert len(rest['messages'])==2;assert rest['messages'][0]['role']=='user'
  assert client.patch(P+'/conversations/'+c['id'],json={'title':'我的复习'}).json()['title']=='我的复习'
@@ -175,7 +175,7 @@ def test_data_survives_application_restart(client,env):
   assert app2.state.db.one('PRAGMA integrity_check')['integrity_check']=='ok';assert app2.state.db.all('PRAGMA foreign_key_check')==[]
 
 def test_no_disabled_model_fake_answer(tmp_path):
- cfg=Settings(data_dir=tmp_path/'x');seed(cfg)
+ cfg=Settings(data_dir=tmp_path/'x',provider_mode='disabled');seed(cfg)
  with TestClient(create_app(cfg)) as c:
   login(c,'alice');cv=convo(c);r=c.post(P+f"/conversations/{cv['id']}/runs",json={'text':'你好','request_id':k()});assert r.status_code==503
 

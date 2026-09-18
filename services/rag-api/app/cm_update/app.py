@@ -975,21 +975,23 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             pair=pair_for_conversation(user,conv_id)
             if pair is not None:
                 if pair['bound_node']!=data.node_id:
-                    claimed=db.execute(
-                        "UPDATE cmui_pairs SET bound_node=?,updated_at=? WHERE id=? AND bound_node IS NULL",
-                        (data.node_id,now(),pair['id']))
-                    if claimed==1:
-                        if conv['lane']=='teach': teaching_mode='thinking'
-                    else:
-                        other=db.one(
-                            "SELECT id FROM cmui_pairs WHERE owner=? AND course=? AND bound_node=? AND id<>?",
-                            (user['id'],conv['course'],data.node_id,pair['id']))
-                        if other:
-                            # The node already belongs to another pair: teaching
-                            # proceeds here, but the binding stays with the
-                            # original pair (the UI opens that pair on tree
-                            # clicks; a race must not crash a valid run).
-                            pass
+                    conflict=db.one(
+                        "SELECT id FROM cmui_pairs WHERE owner=? AND course=? AND bound_node=? AND id<>?",
+                        (user['id'],conv['course'],data.node_id,pair['id']))
+                    if conflict is None:
+                        # Atomic claim for the FIRST teaching on this binding;
+                        # a concurrent loser must never crash a valid run.
+                        try:
+                            claimed=db.execute(
+                                "UPDATE cmui_pairs SET bound_node=?,updated_at=? WHERE id=? AND bound_node IS NULL",
+                                (data.node_id,now(),pair['id']))
+                        except sqlite3.IntegrityError:
+                            claimed=0
+                        if claimed==1 and conv['lane']=='teach':
+                            teaching_mode='thinking'
+                    # else: the node already belongs to another pair — teaching
+                    # proceeds here; the binding stays with the original pair
+                    # (the UI opens that pair on tree clicks).
         template_id='OTHER'
         classification=db.one('SELECT * FROM cmui_classifications WHERE course=?',(conv['course'],))
         if classification and classification['status']=='CLASSIFIED' and classification['template_id'] in templates.registry():

@@ -6,6 +6,7 @@ exercises & explanations + course sharing + student verification (DSH total-cont
 Modified project path: `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY`
 (ACTUAL_SOURCE_ROOT; original C-drive repository and all archived originals untouched).
 Pre-change git marker: branch `archive-baseline/pre-change-20260918` at `c67904b`.
+Final local commit: `ef4d02d432315a25f98dfe11009329eff23fb65b` (no push — no authorization).
 
 ## 1. What the user asked (summary) and what was there before
 
@@ -59,13 +60,14 @@ report; all texts in Chinese; no new dependencies.)
 
 ## 4. Tests run
 
-- New contract suite: `tests/test_current_change_features.py` — 11 tests (templates,
-  pairs/binding, modes + plan privacy, exercises/reveals, explanations, verification +
-  campus gate, grandfather boundary, shares, classification) — **11 passed**.
-- Updated legacy contract suites: `tests/ui_extension/test_provider.py` (rewritten to the
-  new mode contract), `test_ui_extension_schema_compat.py` (schema 6), plus legacy
-  test_api/test_upgrade/coverage updates (subagent; final counts in TEST_REPORT.md).
-- Full rag-api regression: see `docs/current-change/TEST_REPORT.md` for the final tally.
+- New contract suite: `tests/test_current_change_features.py` — 11 tests — **11 passed**.
+- Full rag-api regression: final tally in `docs/current-change/TEST_REPORT.md`
+  (legacy contract suites updated to the new defaults by a dedicated pass).
+- Web: `tsc -b && vite build` exit 0; vitest **55 passed** (13 files).
+- Agent: `tsc` exit 0; vitest **66 passed** (10 files).
+- Local HTTP smoke (standalone uvicorn + TestProvider): course "x" naming, pair,
+  normal-mode run, no-plan-leak run response, exercise/reveal/explanation,
+  verification status — all green.
 
 ## 5. Verified locally vs real model vs not run
 

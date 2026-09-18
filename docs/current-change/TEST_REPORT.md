@@ -11,16 +11,17 @@ assertions meaningful).
 | Suite | Result | Notes |
 |---|---|---|
 | `tests/test_current_change_features.py` (new, 11 tests) | **11 passed** | templates, pairs+binding, normal/thinking modes, plan privacy, exercises/reveals, explanations, verification+campus gate, grandfather boundary, shares+join, classification |
-| `tests/ui_extension/test_provider.py` (rewritten to new contract) | pending final run | two-call thinking contract, single-call normal contract, problem-lane Word prompt, billing gate, error handling, responses protocol |
-| Full rag-api regression | pending final run (last: 13 failing legacy-contract tests being updated) | stage7 env leak fixed via `.env` hold-rename; schema-6 compat test updated |
-| `tests/test_ui_extension_schema_compat.py` | updated for schema 6 | older-release refusal semantics preserved |
+| `tests/ui_extension/test_provider.py` (rewritten to new contract) | **passed** | two-call thinking contract, single-call normal contract, problem-lane Word prompt, billing gate, error handling, responses protocol |
+| Legacy contract suites updated | **passed** | conftest provider `**kwargs`, generated_prompt whitelist assertion, disabled-provider pinning, two-phase test → teaching_mode='thinking' |
+| **Full rag-api regression** | **542 passed, 0 failed** | env: CMUI_PROVIDER_MODE=test, CMUI_AUTO_VERIFY_NEW_USERS=true (new contract suite pins the flag false internally); `.env` redaction artifact moved out of the settings path |
+| Real backend bug found & fixed during regression | ✅ | run-endpoint node claim crashed on unique-index violation when the node was bound to another pair; fixed with conflict pre-check + IntegrityError guard (coverage suite now green) |
 
 ## Frontend (apps/web)
 
 | Item | Result |
 |---|---|
-| `tsc -b && vite build` | pending (frontend agent fixing JSX balance, pages.jsx:672) |
-| vitest unit tests | pending |
+| `tsc -b && vite build` | **exit 0** (dist produced: index.html + ui.html + bundles) |
+| vitest unit tests | **13 files, 55 tests passed** |
 
 ## Agent (services/agent-api)
 
@@ -29,11 +30,14 @@ assertions meaningful).
 | `tsc` build | **exit 0** |
 | vitest | **10 files, 66 tests passed** |
 
-## Local runtime smoke (browser-level)
+## Local runtime smoke (standalone cm_update app, uvicorn 127.0.0.1:8765, TestProvider)
 
-NOT_RUN this round: the deterministic browser acceptance harness used by earlier
-rounds requires a dedicated offline server build; contract tests cover the same
-state machine server-side. Listed honestly as a follow-up in the deployment round.
+Live HTTP checks performed (all green): dev login; course create with name `x`
+(displayed exactly `x`, display_type=private); pair create; normal-mode teach run
+completed; `GET /runs/{id}` contains no `generated_prompt` field; exercise run
+completed with question-only message; reveal before = 0 steps, after = 3 steps with
+stable step ids; explanation completed with cached text; verification status read.
+Smoke server stopped afterwards; scratch data under `work/current-change/smoke-data/`.
 
 ## Verification boundary
 

@@ -128,7 +128,7 @@ async def test_image_two_phase_actual_transport_contract(protocol):
             return httpx.Response(200,text='data: '+json.dumps({'type':'response.output_text.delta','delta':txt})+'\n\ndata: '+json.dumps({'type':'response.completed','response':{'status':'completed','usage':{}}})+'\n\n')
         return httpx.Response(200,text=chat(txt))
     p=QwenProvider(cfg(qwen_protocol=protocol),httpx.MockTransport(transport))
-    items=[x async for x in p.generate({'name':'x','code':'x'},'图片题',{},[],[],'problem',attachments=[image])]
+    items=[x async for x in p.generate({'name':'x','code':'x'},'图片题',{},[],[],'problem',attachments=[image],teaching_mode='thinking')]
     assert len(bodies)==2
     for body in bodies:
         parts=body['input' if protocol=='responses' else 'messages'][-1]['content']
