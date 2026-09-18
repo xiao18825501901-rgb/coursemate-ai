@@ -6,7 +6,8 @@ exercises & explanations + course sharing + student verification (DSH total-cont
 Modified project path: `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY`
 (ACTUAL_SOURCE_ROOT; original C-drive repository and all archived originals untouched).
 Pre-change git marker: branch `archive-baseline/pre-change-20260918` at `c67904b`.
-Final local commit: `ef4d02d432315a25f98dfe11009329eff23fb65b` (no push — no authorization).
+Local commits (no push — no authorization): `ef4d02d4` (features) + `f150615`
+(claim-race fix + legacy contract test updates).
 
 ## 1. What the user asked (summary) and what was there before
 
@@ -61,8 +62,9 @@ report; all texts in Chinese; no new dependencies.)
 ## 4. Tests run
 
 - New contract suite: `tests/test_current_change_features.py` — 11 tests — **11 passed**.
-- Full rag-api regression: final tally in `docs/current-change/TEST_REPORT.md`
-  (legacy contract suites updated to the new defaults by a dedicated pass).
+- **Full rag-api regression: 542 passed, 0 failed** (final run; legacy contract
+  suites updated to the new defaults; one real backend bug found and fixed —
+  see TEST_REPORT.md).
 - Web: `tsc -b && vite build` exit 0; vitest **55 passed** (13 files).
 - Agent: `tsc` exit 0; vitest **66 passed** (10 files).
 - Local HTTP smoke (standalone uvicorn + TestProvider): course "x" naming, pair,
