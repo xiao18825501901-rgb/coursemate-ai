@@ -46,10 +46,30 @@ def expected_governance_schema_objects() -> set[tuple[str, str]]:
     return objects
 
 
-def fingerprints(connection: sqlite3.Connection) -> dict[str, dict[str, object]]:
+def _fingerprint_columns(
+    connection: sqlite3.Connection,
+) -> dict[str, tuple[str, ...]]:
+    return {
+        table: tuple(
+            str(row[1])
+            for row in connection.execute(f'PRAGMA table_info("{table}")')
+        )
+        for table in TABLES
+    }
+
+
+def fingerprints(
+    connection: sqlite3.Connection,
+    columns_by_table: dict[str, tuple[str, ...]] | None = None,
+) -> dict[str, dict[str, object]]:
+    selected_columns = columns_by_table or _fingerprint_columns(connection)
     result = {}
     for table in TABLES:
-        rows = connection.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
+        columns = selected_columns[table]
+        projection = ", ".join(f'"{column}"' for column in columns)
+        rows = connection.execute(
+            f'SELECT {projection} FROM "{table}" ORDER BY rowid'
+        ).fetchall()
         result[table] = {
             "rows": len(rows),
             "sha256": hashlib.sha256(json.dumps(rows).encode()).hexdigest(),
@@ -63,7 +83,8 @@ def rehearse(source: Path, target: Path) -> dict[str, object]:
         raise ValueError("Use an existing source and a fresh isolated target directory under work")
     target.mkdir(parents=True)
     with sqlite3.connect(source.as_uri() + "?mode=ro", uri=True) as original:
-        before = fingerprints(original)
+        source_columns = _fingerprint_columns(original)
+        before = fingerprints(original, source_columns)
         with sqlite3.connect(target / "rag.sqlite3") as copied:
             original.backup(copied)
     database = Database(
@@ -76,7 +97,7 @@ def rehearse(source: Path, target: Path) -> dict[str, object]:
     database.initialize()
     database.initialize()
     with sqlite3.connect(target / "rag.sqlite3") as copied:
-        after = fingerprints(copied)
+        after = fingerprints(copied, source_columns)
         integrity = copied.execute("PRAGMA integrity_check").fetchone()[0]
         foreign_keys = copied.execute("PRAGMA foreign_key_check").fetchall()
         actual_schema_objects = {

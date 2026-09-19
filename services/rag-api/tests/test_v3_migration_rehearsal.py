@@ -68,6 +68,22 @@ def _seed_model_evidence_before_migration_21(path: Path) -> None:
         connection.execute("DELETE FROM schema_migrations WHERE version=21")
 
 
+def _downgrade_to_migration_24_with_legacy_course(path: Path) -> None:
+    """Create the production-shaped 24 -> 25 boundary that exposed the gate bug."""
+    with sqlite3.connect(path) as connection:
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute(
+            "INSERT INTO courses(id,name,course_type,visibility,publication_status) "
+            "VALUES('legacy-course','Legacy Course','official','public','published')"
+        )
+        connection.execute("DROP TABLE learning_pairs")
+        connection.execute("ALTER TABLE courses DROP COLUMN display_type")
+        connection.execute(
+            "ALTER TABLE courses DROP COLUMN requires_student_verification"
+        )
+        connection.execute("DELETE FROM schema_migrations WHERE version=25")
+
+
 def test_rehearsal_proves_model_budget_backfill_and_governance_objects(
     tmp_path: Path,
 ) -> None:
@@ -115,4 +131,34 @@ def test_rehearsal_rejects_a_missing_required_governance_object(
     assert (
         "trigger:required_missing_trigger"
         in evidence["v3_invariants"]["missing_governance_schema_objects"]
+    )
+
+
+def test_rehearsal_preserves_legacy_fields_when_migration_adds_course_columns(
+    tmp_path: Path,
+) -> None:
+    module = _load_rehearsal_module()
+    module.WORK_ROOT = tmp_path / "work"
+    source = tmp_path / "source.sqlite3"
+    target = module.WORK_ROOT / "rehearsal"
+    _initialized_v3_database(source, tmp_path / "uploads")
+    _downgrade_to_migration_24_with_legacy_course(source)
+
+    result = module.rehearse(source, target)
+
+    assert result["old_rows_unchanged"] is True
+    assert result["versions"] == list(range(1, 26))
+    with sqlite3.connect(target / "rag.sqlite3") as migrated:
+        row = migrated.execute(
+            "SELECT id,name,course_type,visibility,publication_status,display_type,"
+            "requires_student_verification FROM courses WHERE id='legacy-course'"
+        ).fetchone()
+    assert row == (
+        "legacy-course",
+        "Legacy Course",
+        "official",
+        "public",
+        "published",
+        "campus",
+        1,
     )
