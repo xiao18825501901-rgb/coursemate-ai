@@ -3,8 +3,9 @@
 
 After a publication failure, leave RESTORE_SOURCE and RESTORE_TARGET unchanged
 and explicitly set RESTORE_RESUME_PARTIAL to the reported hidden sibling path.
-Resume re-verifies the source and every staged byte before one publication
-attempt; it never repairs, overwrites, automatically retries, or deletes staging.
+Resume re-verifies the source and every staged byte before publication.
+Windows publication alone tolerates bounded transient denials; it never repairs,
+overwrites, or deletes staging.
 Keep the source, staging, and target parent private and quiescent while restoring.
 """
 
@@ -21,6 +22,7 @@ import sqlite3
 import stat
 import sys
 import tarfile
+import time
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
 
@@ -61,21 +63,33 @@ def _rename_no_replace(source: Path, target: Path) -> None:
 
 
 def _publish_partial(partial: Path, target: Path) -> Path:
-    try:
-        _rename_no_replace(partial, target)
-    except OSError as error:
+    # All application-owned DB/archive/file handles are closed before entry.
+    # WinError 5 does not identify its cause: tolerate brief denials, but do not
+    # change ACLs, kill a locker, or replace an existing target. No I/O is replayed.
+    delays = (0.1, 0.2, 0.4, 0.8)
+    for attempt in range(5):
         if os.path.lexists(target):
-            raise FileExistsError(errno.EEXIST, "Refusing existing restore target", str(target)) from error
-        if getattr(error, "winerror", None) not in {5, 32}:
-            raise
-        raise RuntimeError(
-            f"Windows refused final restore publication (WinError {error.winerror}); "
-            "an open descendant file or access permissions can cause this. "
-            f"Staging is preserved at {partial}. Resolve the lock/permissions without changing its contents, "
-            "then rerun with the same RESTORE_SOURCE and RESTORE_TARGET and "
-            f"RESTORE_RESUME_PARTIAL={partial}. No automatic retry was attempted."
-        ) from error
-    return target
+            raise FileExistsError(errno.EEXIST, "Refusing existing restore target", str(target))
+        try:
+            _rename_no_replace(partial, target)
+            if attempt:
+                print(f"Restore publication succeeded attempt={attempt + 1}", file=sys.stderr)
+            return target
+        except OSError as error:
+            if os.path.lexists(target):
+                raise FileExistsError(errno.EEXIST, "Refusing existing restore target", str(target)) from error
+            if getattr(error, "winerror", None) not in {5, 32}:
+                raise
+            print(f"Restore publication denied attempt={attempt + 1} winerror={error.winerror} "
+                  f"retry_delay_seconds={delays[attempt] if attempt < 4 else 0}", file=sys.stderr)
+            if attempt == 4:
+                raise RuntimeError(
+                    f"Windows refused final restore publication (WinError {error.winerror}); cause unknown. "
+                    f"Staging is preserved at {partial}. After resolving the cause without changing its contents, "
+                    "rerun with the same RESTORE_SOURCE and RESTORE_TARGET and "
+                    f"RESTORE_RESUME_PARTIAL={partial}. Exhausted 5 attempts / 1.5 seconds of bounded waiting."
+                ) from error
+            time.sleep(delays[attempt])
 
 
 def _plain_tree(root: Path) -> dict[str, str]:

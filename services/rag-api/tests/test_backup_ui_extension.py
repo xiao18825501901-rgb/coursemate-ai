@@ -13,6 +13,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).parents[3]
@@ -101,9 +102,8 @@ def test_backup_and_restore_include_the_refreshed_shell_unit(tmp_path: Path) -> 
     )
     assert restore.returncode == 0, restore.stderr
     restored = paths["target"]
-    assert sqlite3.connect(restored / "ui.sqlite3").execute(
-        "SELECT value FROM cmui_comments"
-    ).fetchone() == ("第一篇评论",)
+    with closing(sqlite3.connect(restored / "ui.sqlite3")) as connection:
+        assert connection.execute("SELECT value FROM cmui_comments").fetchone() == ("第一篇评论",)
     assert (restored / "ui-uploads" / "file_abc.md").read_text(encoding="utf-8") == "private"
 
 

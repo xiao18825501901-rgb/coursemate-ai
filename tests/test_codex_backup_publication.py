@@ -135,7 +135,7 @@ def test_publication_refuses_destination_created_after_initial_validation(tmp_pa
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows handle-sharing diagnostic")
 @pytest.mark.parametrize("share_delete", [False, True])
-def test_open_descendant_handle_prevents_directory_publication(tmp_path: Path, share_delete: bool) -> None:
+def test_open_descendant_handle_prevents_directory_publication(tmp_path: Path, share_delete: bool, restore_module) -> None:
     from ctypes import wintypes
 
     staging = tmp_path / ".restore.partial"
@@ -166,8 +166,10 @@ def test_open_descendant_handle_prevents_directory_publication(tmp_path: Path, s
         assert renamed.value.winerror == 5
     finally:
         assert kernel32.CloseHandle(handle)
-    # Releasing the actual cause enables publication; no sleep or retry loop.
-    staging.rename(target)
+    # Closing OUR handle does not prove every OS handle is gone. The original
+    # immediate-rename assertion failed in preserved XML. Exercise the bounded
+    # application policy after release; raw rename denial above stays unchanged.
+    restore_module._publish_partial(staging, target)
     assert not staging.exists()
     assert (target / "uploads" / "notes.txt").read_text(encoding="utf-8") == "synthetic restore data"
 
