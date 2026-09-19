@@ -397,3 +397,34 @@ test("long shared course identity stays readable or accessibly abbreviated in na
   const unchanged=await (await request.get(API+`/courses/${course.id}`,{headers:unverified})).json();
   expect({id:unchanged.id,code:unchanged.code,name:unchanged.name}).toEqual({id:course.id,code:course.code,name});
 });
+
+test("course form directly creates a legal 100 character name and opens its bounded ID",async({page,request},info)=>{
+  const name="CS3481_"+"AdvancedDataScience".repeat(5).slice(0,93);
+  expect(name).toHaveLength(100);
+  await page.goto("/app#/courses");
+  await page.getByRole("button",{name:"创建课程",exact:true}).click();
+  const form=page.getByRole("dialog",{name:"创建你的课程",exact:true});
+  const input=form.locator('input[name="name"]');
+  await expect(input).toHaveAttribute("maxlength","100");
+  await input.fill(name);await expect(input).toHaveValue(name);
+  const created=page.waitForResponse(r=>r.request().method()==="POST"&&r.url()===API+"/courses");
+  await form.getByRole("button",{name:"创建课程",exact:true}).click();
+  const response=await created;
+  expect(response.request().postDataJSON().name).toBe(name);
+  expect(response.status(),await response.text()).toBe(201);
+  const course=await response.json();
+  expect(course.name).toBe(name);
+  expect(course.id).toMatch(/^[a-z0-9][a-z0-9-]{1,49}$/);
+  await expect(form).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`#/course/${course.id}/files$`));
+  await expect(page.getByRole("heading",{name:"文件",exact:true})).toBeVisible();
+  await expect(page.locator(".course-side").getByText(name,{exact:true})).toBeVisible();
+  const detail=await request.get(API+`/courses/${course.id}`,{headers:auth});
+  expect(detail.ok()).toBeTruthy();expect((await detail.json()).name).toBe(name);
+  const listed=await (await request.get(API+"/courses",{headers:auth})).json();
+  expect(listed.find((item:any)=>item.id===course.id)).toMatchObject({name,pinned:true});
+  expect((await request.get(API+`/courses/${course.id}`,{headers:unverified})).status()).toBe(404);
+  await page.reload();
+  await expect(page.locator(".course-side").getByText(name,{exact:true})).toBeVisible();
+  await page.screenshot({path:info.outputPath("direct-long-course-created.png"),fullPage:true});
+});

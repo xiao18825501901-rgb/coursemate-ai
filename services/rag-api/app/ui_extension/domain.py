@@ -26,6 +26,7 @@ import sqlite3
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any, cast
+from uuid import uuid4
 
 import httpx
 from fastapi import HTTPException, Request
@@ -260,12 +261,19 @@ class V3DomainAdapter:
         name = str(payload.get("name") or "").strip()
         if not name:
             raise ApiError(422, "INVALID_COURSE", "A course name is required.")
-        course_id = self._new_course_id(name)
-        record = self.ingestion.create_course(
-            _course_create_model(course_id, name, str(payload.get("description") or "")),
-            owner_user_id=subject,
-            is_admin=False,
-        )
+        for attempt in range(3):
+            course_id = self._new_course_id()
+            try:
+                record = self.ingestion.create_course(
+                    _course_create_model(course_id, name, str(payload.get("description") or "")),
+                    owner_user_id=subject,
+                    is_admin=False,
+                )
+                break
+            except ApiError as exc:
+                # The transactional INSERT arbitrates collisions, not a racy pre-check.
+                if exc.code != "COURSE_EXISTS" or attempt == 2:
+                    raise
         dto = self._course_dto_for(course_id, subject, write=True)
         dto["name"] = record.name
         dto["description"] = record.description
@@ -275,14 +283,9 @@ class V3DomainAdapter:
         return dto
 
     @staticmethod
-    def _new_course_id(name: str) -> str:
-        slug = "".join(
-            character if character.isalnum() else "-" for character in name.casefold()
-        ).strip("-")
-        slug = "-".join(part for part in slug.split("-") if part)[:40]
-        if not slug or not slug[0].isalnum() or len(slug) < 2:
-            slug = ("course-" + slug)[:40]
-        return f"{slug}-{datetime.now(UTC).strftime('%y%m%d%H%M%S')}"
+    def _new_course_id() -> str:
+        # Display names are Unicode; domain IDs are independent ASCII (max 50).
+        return f"course-{uuid4().hex}"
 
     def _update_course(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
         course_id = str(payload["id"])
