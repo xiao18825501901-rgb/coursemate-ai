@@ -152,6 +152,11 @@ def create_backup() -> Path:
         ui_counts = {"fileCount": ui_file_count, "totalBytes": ui_total_bytes}
         artifacts["uiDatabase"] = UI_DATABASE_NAME
         artifacts["uiUploads"] = UI_UPLOADS_NAME
+        shares_root = ui_root / 'shares'
+        if shares_root.is_dir():
+            share_count, share_bytes = _archive_uploads(shares_root, partial_destination / 'ui-shares.tar.gz')
+            ui_counts.update(shareFileCount=share_count, shareTotalBytes=share_bytes)
+            artifacts['uiShares'] = 'ui-shares.tar.gz'
 
     check_lines: list[str] = []
     for name in checked:
@@ -179,12 +184,17 @@ def create_backup() -> Path:
     if ui_counts:
         manifest["uiUploadFileCount"] = ui_counts["fileCount"]
         manifest["uiUploadTotalBytes"] = ui_counts["totalBytes"]
+        if 'uiShares' in artifacts:
+            manifest['uiShareFileCount'] = ui_counts['shareFileCount']
+            manifest['uiShareTotalBytes'] = ui_counts['shareTotalBytes']
     (partial_destination / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     checksum_artifacts = (
         ARTIFACTS + UI_ARTIFACTS if ui_root is not None else ARTIFACTS
     )
+    if 'uiShares' in artifacts:
+        checksum_artifacts += ('ui-shares.tar.gz',)
     checksum_lines = [
         f"{_sha256(partial_destination / name)}  {name}" for name in checksum_artifacts
     ]
