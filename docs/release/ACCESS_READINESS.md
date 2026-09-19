@@ -63,6 +63,9 @@ Approval attempt record:
   `2026-09-19T18:31:33.999Z`.
 - The subsequent native permission request again returned `network: null`; effective native
   network permission was not granted.
+- Owner confirmed that no native permission dialog appeared. This is a Codex permission-channel
+  block, not an HTTP/network observation. The approved fallback is a local Owner-run invocation of
+  the already reviewed bounded script; its raw output must be returned unchanged for recording.
 - **Execution result: NOT RUN — 0 of 4 GETs attempted.** No HTTP or availability conclusion may be
   inferred. All actions other than A remain unapproved.
 
