@@ -55,6 +55,17 @@ neither a successful health check nor evidence that a site is unavailable. Once 
 the actual permission mechanism, use `scripts/production_readonly_check.mjs` once and record UTC,
 status, Content-Type and its bounded non-sensitive summary.
 
+Approval attempt record:
+
+- Owner approved only A against package `2026-09-20-prep-v1`, payload
+  `4a3d681610aa36c479f722fa73aa344bc788877a4412747da04debcdcb0719ed`, for 30 minutes.
+- Approval was recorded at `2026-09-19T18:01:33.999Z`; operational expiry is
+  `2026-09-19T18:31:33.999Z`.
+- The subsequent native permission request again returned `network: null`; effective native
+  network permission was not granted.
+- **Execution result: NOT RUN — 0 of 4 GETs attempted.** No HTTP or availability conclusion may be
+  inferred. All actions other than A remain unapproved.
+
 ## 3. Local account preparation
 
 ### GitHub
