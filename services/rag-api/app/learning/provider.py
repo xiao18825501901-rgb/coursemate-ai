@@ -186,6 +186,7 @@ class LearningProvider:
                     store=False,
                     tools=[],
                     stream=False,
+                    extra_body={"enable_thinking": False},
                 )
                 response_received = True
                 run["provider_response_id"] = response.id

@@ -11,7 +11,7 @@ class ExampleOutput(BaseModel):
     value: str
 
 
-def test_learning_provider_uses_the_configured_timeout(
+def test_learning_provider_uses_safe_model_studio_runtime_settings(
     monkeypatch: Any,
 ) -> None:
     captured: dict[str, Any] = {}
@@ -23,6 +23,7 @@ def test_learning_provider_uses_the_configured_timeout(
 
         @staticmethod
         def create(**kwargs: Any) -> SimpleNamespace:
+            captured["request"] = kwargs
             return SimpleNamespace(
                 id="response-fixture",
                 usage=SimpleNamespace(input_tokens=1, output_tokens=1),
@@ -56,3 +57,4 @@ def test_learning_provider_uses_the_configured_timeout(
     assert run["status"] == "COMPLETED"
     assert captured["timeout"] == 180
     assert captured["max_retries"] == 0
+    assert captured["request"]["extra_body"] == {"enable_thinking": False}
