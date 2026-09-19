@@ -1,8 +1,8 @@
 # CourseMate Release Approval Package
 
-Package version: **`2026-09-20-prep-v1`**  
+Package version: **`2026-09-20-prep-v2`**
 Mode: **PREPARE**  
-Approval payload SHA-256: **`4a3d681610aa36c479f722fa73aa344bc788877a4412747da04debcdcb0719ed`**  
+Approval payload SHA-256: **`637d36cf6015400fecd7231871a19f24e01e0c4c16f85e4418ede202fb12abb7`**
 Application release: **`73b7049ee3204d5c213ad70c67db9b892aa306bf`**  
 Release tooling: **`e300f0e2bdd6a983ef575efe28ad19472a641196`**
 
@@ -21,7 +21,8 @@ or chat.
 | Browser regression | VERIFIED at application SHA | 14 passed; no skip/failure/flaky; 48.2s |
 | Web / Agent / types / local build | VERIFIED at application SHA | 60 / 66 / PASS / PASS |
 | Real Clerk/model/account integration | NOT VERIFIED | No approved access or billable call |
-| Production version/deployment | NOT VERIFIED | No approved live read or publish |
+| Public routing/runtime advertisement | OWNER-RUN VERIFIED | Four bounded direct GETs returned 200; UI extension advertises integrated/Qwen and root serves the `ui` bundle |
+| Production version/deployment | NOT VERIFIED | Public GETs do not identify source SHA or deploy ID; no publish was run |
 
 Candidate source schemas are RAG migration **25**, UI schema **11**, Agent schema **1**. Actual
 production schemas are UNKNOWN. The local optimized build is not a production-configured artifact.
@@ -40,7 +41,7 @@ will be separate evidence; none is inferred from a page title.
 
 | Resource | Proposed/known locator | Approval-ready fact |
 |---|---|---|
-| Public site/API | Four exact A URLs below | Exact scope fixed; native network grant not received |
+| Public site/API | Four exact A URLs below | Owner bounded run at `2026-09-19T18:04Z`: all HTTP 200; A consumed |
 | Git | `https://github.com/xiao18825501901-rgb/coursemate-ai.git` | Local remote only; target ref/protection/automation UNKNOWN |
 | ECS candidate 1 | `admin@47.237.179.69`; fingerprint `SHA256:xrg8yao3PqVrTPP5Qx0st1pxeHt4jVR13L7CY38D8iw` | Local config/prior console match; live role UNKNOWN |
 | ECS candidate 2 | `root@47.114.34.175`; fingerprint `SHA256:TWqeYbYv83dw67sg6BWf3gv3C4LjRWeioaA5/qbq4k4` | Local config/prior console match; live role UNKNOWN |
@@ -106,11 +107,11 @@ reviewed application change is required before public billable use.
 
 ## 4. Approval ledger
 
-Every row is currently **NOT APPROVED**.
+Every row except completed action A is currently **NOT APPROVED**.
 
 | ID | Exact scope | Current state | Preconditions / output |
 |---|---|---|---|
-| A | One unauthenticated GET each: `https://qqttai.com/`, `https://rag.qqttai.com/health`, `https://rag.qqttai.com/ui-extension/health`, `https://agent.qqttai.com/health`; TLS on, no redirect follow, one attempt, 15s, no token/write | NOT APPROVED; native request returned no grant | Record UTC/status/type/bounded summary only |
+| A | One unauthenticated GET each: `https://qqttai.com/`, `https://rag.qqttai.com/health`, `https://rag.qqttai.com/ui-extension/health`, `https://agent.qqttai.com/health`; TLS on, no redirect follow, one attempt, 15s, no token/write | **COMPLETED BY OWNER; APPROVAL CONSUMED** | 4/4 HTTP 200 at `2026-09-19T18:04Z`; public routing only, not business acceptance |
 | B | SSH read-only inventory of Owner-confirmed host(s); keep host-key verification; no sudo/write/restart | NOT APPROVED | Owner confirms ECS identity/fingerprint; record services, process/ports, paths, schemas and writer topology without secrets |
 | C1 | GitHub read-only remote/ref/protection/workflow/Netlify-link inspection | NOT APPROVED | Authentication may require Owner browser/MFA |
 | D1 | Netlify read-only team/site/deploy/build context/variable-name inspection | NOT APPROVED | Authentication may require Owner browser/MFA; no variable values |
@@ -164,24 +165,20 @@ without the trailing newline. It identifies this package's present decision stat
 authorize anything.
 
 <!-- APPROVAL_PAYLOAD_START -->
-{"actions":{"A":"NOT_APPROVED","B":"NOT_APPROVED","C1":"NOT_APPROVED","C2":"NOT_APPROVED","D1":"NOT_APPROVED","DR_B":"NOT_APPROVED","E1":"NOT_APPROVED","E2":"NOT_APPROVED","EMBEDDING_EVAL":"NOT_APPROVED","EMBEDDING_REBUILD":"NOT_APPROVED","EMBEDDING_SWITCH":"NOT_APPROVED","F1":"NOT_APPROVED","F2":"NOT_APPROVED","G":"NOT_APPROVED","H":"NOT_APPROVED","I_D2":"NOT_APPROVED","J":"NOT_APPROVED","K":"NOT_APPROVED"},"application_release_sha":"73b7049ee3204d5c213ad70c67db9b892aa306bf","decisions":{"approval_window":null,"canary":{"currency":null,"include_coverage_review":null,"include_query_embedding":null,"max_cost":null,"max_output_tokens_per_call":4000,"max_provider_calls":3,"price_basis":null,"selected_case":null,"synthetic_image":null},"clerk_instance":null,"embedding_policy":null,"maintenance_window":null,"ongoing_cost_policy":null,"production_host":null,"qualification_candidate_set_sha256":null,"qualification_cutoff_iso":null,"qualification_snapshot_sha256":null,"test_accounts":null},"package_version":"2026-09-20-prep-v1","release_tooling_sha":"e300f0e2bdd6a983ef575efe28ad19472a641196"}
+{"actions":{"A":"COMPLETED_OWNER_RUN","B":"NOT_APPROVED","C1":"NOT_APPROVED","C2":"NOT_APPROVED","D1":"NOT_APPROVED","DR_B":"NOT_APPROVED","E1":"NOT_APPROVED","E2":"NOT_APPROVED","EMBEDDING_EVAL":"NOT_APPROVED","EMBEDDING_REBUILD":"NOT_APPROVED","EMBEDDING_SWITCH":"NOT_APPROVED","F1":"NOT_APPROVED","F2":"NOT_APPROVED","G":"NOT_APPROVED","H":"NOT_APPROVED","I_D2":"NOT_APPROVED","J":"NOT_APPROVED","K":"NOT_APPROVED"},"application_release_sha":"73b7049ee3204d5c213ad70c67db9b892aa306bf","decisions":{"approval_window":null,"canary":{"currency":null,"include_coverage_review":null,"include_query_embedding":null,"max_cost":null,"max_output_tokens_per_call":4000,"max_provider_calls":3,"price_basis":null,"selected_case":null,"synthetic_image":null},"clerk_instance":null,"embedding_policy":null,"maintenance_window":null,"ongoing_cost_policy":null,"production_host":null,"qualification_candidate_set_sha256":null,"qualification_cutoff_iso":null,"qualification_snapshot_sha256":null,"test_accounts":null},"evidence":{"public_get":{"observed_at":"2026-09-19T18:04:10.573Z","source":"OWNER_RUN_BOUNDED_SCRIPT","statuses":[200,200,200,200]}},"package_version":"2026-09-20-prep-v2","release_tooling_sha":"e300f0e2bdd6a983ef575efe28ad19472a641196"}
 <!-- APPROVAL_PAYLOAD_END -->
 
 ## 7. How the Owner approves
 
-First, choose only the scopes whose required fields are complete. A can be approved now because its
-targets and behavior are fixed; all other rows should wait for their listed prerequisites. Refer to
-the package version and payload hash, enumerate approved action IDs, target resources, window and
-budget, and state that every unlisted action remains prohibited.
+First, choose only scopes whose required fields are complete. A is complete and its one-run approval
+is consumed. C1/D1 can be considered next as read-only account inventory; B additionally requires
+the Owner to confirm which ECS instance(s) may be inspected. Refer to the current package version
+and payload hash, enumerate approved action IDs, target resources and UTC window, and state that
+every unlisted action remains prohibited.
 
-Example for A only (replace the bracketed window, do not add secrets):
-
-> I approve action A from `RELEASE_APPROVAL_PACKAGE.md` version
-> `2026-09-20-prep-v1`, payload SHA-256 `[hash]`, during `[UTC window]`, exactly for the four listed
-> unauthenticated GETs. No other action is approved.
-
-The native permission dialog must still grant network access. A chat sentence cannot override a
-denied or absent native permission. After read-only evidence is collected, this package will be
-updated to a new version/hash with exact live resources and remaining choices. EXECUTE begins only
+Native permission must still authorize Codex network access where available. The A fallback is
+recorded as Owner-executed because the native dialog did not appear; it grants no reusable access.
+After further read-only evidence is collected, this package will be updated to a new version/hash
+with exact live resources and remaining choices. EXECUTE begins only
 for action IDs the Owner then explicitly approves. Scope, target, candidate set, budget or automatic
 publish behavior changes invalidate that approval and require a new package version.

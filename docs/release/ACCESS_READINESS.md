@@ -1,7 +1,7 @@
 # CourseMate Release Access Readiness
 
 Status: **PREPARE ONLY — NO PRODUCTION OR BILLABLE ACTION IS AUTHORIZED**  
-Evidence cutoff: `2026-09-19T17:52:10Z`  
+Evidence cutoff: `2026-09-19T18:04:10.573Z`
 Workspace: `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY`
 
 This file records current local evidence and access gaps. An account being reachable does not
@@ -31,7 +31,7 @@ enforced on POSIX. The operator must therefore choose an owner-only directory be
 
 | Scope | Local readiness | Effective authorization | Live result |
 |---|---|---|---|
-| A — four public GETs | Existing bounded script available | **REQUESTED; native grant returned no network authorization** | NOT RUN |
+| A — four public GETs | Existing bounded script used by Owner after native dialog was unavailable | **APPROVED FOR ONE RUN; CONSUMED** | OWNER-RUN: 4/4 HTTP 200 |
 | B — SSH read-only | OpenSSH, aliases, identities and known-host fingerprints present | NOT APPROVED | NOT RUN |
 | C1 — GitHub read-only | Remote known; Git credential helper configured; `gh` absent | NOT APPROVED | NOT RUN |
 | D1 — Netlify read-only | CLI `27.4.0`; global config file present; repo not linked | NOT APPROVED | NOT RUN |
@@ -50,10 +50,11 @@ redirects not followed, 15-second timeout, no retry, no cookie/token and no writ
 3. `https://rag.qqttai.com/ui-extension/health`
 4. `https://agent.qqttai.com/health`
 
-The native permission request returned no effective network grant. No request was made. This is
-neither a successful health check nor evidence that a site is unavailable. Once A is approved by
-the actual permission mechanism, use `scripts/production_readonly_check.mjs` once and record UTC,
-status, Content-Type and its bounded non-sensitive summary.
+The native permission request returned no effective network grant, so Codex made no request. After
+the Owner confirmed that no permission dialog appeared, the Owner used the reviewed
+`scripts/production_readonly_check.mjs` fallback once inside the approved window and returned its
+complete bounded output. The following is Owner-executed evidence, not an independent Codex network
+observation.
 
 Approval attempt record:
 
@@ -62,12 +63,24 @@ Approval attempt record:
 - Approval was recorded at `2026-09-19T18:01:33.999Z`; operational expiry is
   `2026-09-19T18:31:33.999Z`.
 - The subsequent native permission request again returned `network: null`; effective native
-  network permission was not granted.
+  network permission was not granted and Codex attempted 0 GETs.
 - Owner confirmed that no native permission dialog appeared. This is a Codex permission-channel
   block, not an HTTP/network observation. The approved fallback is a local Owner-run invocation of
   the already reviewed bounded script; its raw output must be returned unchanged for recording.
-- **Execution result: NOT RUN — 0 of 4 GETs attempted.** No HTTP or availability conclusion may be
-  inferred. All actions other than A remain unapproved.
+- Owner fallback execution ran exactly once at `2026-09-19T18:04:09.737Z` through
+  `2026-09-19T18:04:10.573Z`, before expiry. **Execution result: COMPLETED — 4 of 4 direct GETs
+  returned HTTP 200.** All actions other than A remain unapproved.
+
+| UTC start | URL | Status | Content-Type | Bounded result |
+|---|---|---:|---|---|
+| `2026-09-19T18:04:09.737Z` | `https://rag.qqttai.com/health` | 200 | `application/json` | `status=ok`, `service=rag-api` |
+| `2026-09-19T18:04:10.256Z` | `https://rag.qqttai.com/ui-extension/health` | 200 | `application/json` | `status=ok`, `service=coursemate-ui-update`, `mode=integrated`, `provider=qwen` |
+| `2026-09-19T18:04:10.409Z` | `https://agent.qqttai.com/health` | 200 | `application/json; charset=utf-8` | `status=ok`, `service=agent-api` |
+| `2026-09-19T18:04:10.573Z` | `https://qqttai.com/` | 200 | `text/html; charset=UTF-8` | `title=CourseMate 学习空间`, `bundle=ui`, `shape=n/a` |
+
+These responses establish current public routing and advertised runtime mode only. They do not
+identify source SHA/deploy ID, prove a paid Qwen response, validate Clerk login or show that any
+multi-user/data-isolation workflow passes.
 
 ## 3. Local account preparation
 
