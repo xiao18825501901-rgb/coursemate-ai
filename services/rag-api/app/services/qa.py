@@ -167,6 +167,7 @@ class QaService:
             ).fetchone()
             if conversation is None:
                 raise ApiError(404, "CONVERSATION_NOT_FOUND", "The conversation was not found.")
+            self.require_course(str(conversation['course_id']),owner_user_id=owner_user_id,is_admin=False)
             messages = connection.execute(
                 """
                 SELECT id, role, content, citations_json, metadata_json, created_at
@@ -199,6 +200,7 @@ class QaService:
     def require_conversation(
         self, *, owner_user_id: str, course_id: str, conversation_id: str
     ) -> None:
+        self.require_course(course_id,owner_user_id=owner_user_id,is_admin=False)
         with self.database.connect() as connection:
             found = connection.execute(
                 """
@@ -256,6 +258,22 @@ class QaService:
         if course_id is not None:
             where += " AND course_id = ?"
             parameters.append(course_id)
+        # Titles may contain course content too. Filter before pagination/count,
+        # including the unscoped legacy history entry point.
+        with self.database.connect() as connection:
+            candidates=connection.execute('SELECT DISTINCT course_id FROM conversations WHERE owner_user_id=?',(owner_user_id,)).fetchall()
+        allowed=[]
+        for candidate in candidates:
+            try:
+                self.require_course(str(candidate['course_id']),owner_user_id=owner_user_id,is_admin=False)
+            except ApiError as error:
+                if error.status_code in (403,404): continue
+                raise
+            allowed.append(candidate['course_id'])
+        if not allowed:
+            return {'items':[],'page':page,'page_size':page_size,'total':0}
+        where+=' AND course_id IN ('+','.join('?' for _ in allowed)+')'
+        parameters.extend(allowed)
         offset = (page - 1) * page_size
         with self.database.connect() as connection:
             total = connection.execute(
@@ -287,6 +305,7 @@ class QaService:
     def rename_conversation(
         self, *, owner_user_id: str, conversation_id: str, title: str
     ) -> dict[str, object]:
+        self.get_conversation(owner_user_id=owner_user_id,conversation_id=conversation_id)
         normalized = " ".join(title.strip().split())
         with self.database.connect() as connection:
             row = connection.execute(
@@ -307,6 +326,7 @@ class QaService:
         return {**dict(row), "message_count": message_count}
 
     def delete_conversation(self, *, owner_user_id: str, conversation_id: str) -> None:
+        self.get_conversation(owner_user_id=owner_user_id,conversation_id=conversation_id)
         with self.database.connect() as connection:
             result = connection.execute(
                 "DELETE FROM conversations WHERE id = ? AND owner_user_id = ?",

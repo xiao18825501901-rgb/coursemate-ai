@@ -103,8 +103,9 @@ def test_direct_message_block(client):
  client.put(P+'/people/local-bob/block');assert client.post(P+'/messages',json={'text':'hi','recipient':'local-bob','request_id':k()}).status_code==403
  login(client,'bob');assert client.post(P+'/messages',json={'text':'hi','recipient':'local-alice','request_id':k()}).status_code==403
 
-def test_people_minimum_query_and_profile(client):
- assert client.get(P+'/people?q=林').json()==[]
+def test_people_browsing_short_query_and_profile_privacy(client):
+ assert any(row['name']=='林同学' for row in client.get(P+'/people').json())
+ assert client.get(P+'/people?q=林').json()[0]['name']=='林同学'
  assert client.get(P+'/people?q=林同').json()[0]['name']=='林同学'
  r=client.patch(P+'/me',json={'name':'新同学','handle':'new-student','timezone':'Asia/Shanghai','discoverable':False});assert r.status_code==200
  login(client,'bob');assert client.get(P+'/people?q=new-student').json()==[]

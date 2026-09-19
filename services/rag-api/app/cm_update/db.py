@@ -1,5 +1,8 @@
 """New UI state database. Never point this at the legacy rag.sqlite3 / agent.sqlite3."""
 import sqlite3
+import hashlib
+import hmac
+import re
 from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime, timezone
@@ -17,7 +20,7 @@ def uid(prefix: str = '') -> str:
 # classification, student verification, course snapshot sharing, exercises with
 # hidden answers, and step explanations. The bump is additive; initialize()
 # refuses to run against a newer version.
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 11
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS cmui_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -29,6 +32,11 @@ CREATE TABLE IF NOT EXISTS cmui_users (
 );
 CREATE TABLE IF NOT EXISTS cmui_sessions (
  token_hash TEXT PRIMARY KEY, owner TEXT NOT NULL REFERENCES cmui_users(id), expires REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS cmui_directory (
+ subject TEXT PRIMARY KEY REFERENCES cmui_users(id), public_id TEXT NOT NULL UNIQUE,
+ active INTEGER NOT NULL, updated_ms INTEGER NOT NULL, created_ms INTEGER NOT NULL,
+ avatar TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS cmui_courses (
  id TEXT PRIMARY KEY, owner TEXT REFERENCES cmui_users(id), code TEXT NOT NULL,
@@ -150,6 +158,10 @@ CREATE TABLE IF NOT EXISTS cmui_pairs (
   bound_node TEXT,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS cmui_node_starts (
+ owner TEXT NOT NULL, course TEXT NOT NULL, node TEXT NOT NULL, run TEXT NOT NULL,
+ PRIMARY KEY(owner,course,node)
+);
 CREATE UNIQUE INDEX IF NOT EXISTS cmui_pairs_node_binding
 ON cmui_pairs(owner, course, bound_node) WHERE bound_node IS NOT NULL;
 CREATE TABLE IF NOT EXISTS cmui_classifications (
@@ -206,6 +218,12 @@ CREATE TABLE IF NOT EXISTS cmui_share_files (
   mime TEXT NOT NULL, sha256 TEXT NOT NULL, archived_storage_key TEXT,
   PRIMARY KEY(share, file_id)
 );
+CREATE TABLE IF NOT EXISTS cmui_share_imports (
+ share TEXT NOT NULL REFERENCES cmui_shares(id), recipient TEXT NOT NULL REFERENCES cmui_users(id),
+ course TEXT, status TEXT NOT NULL CHECK(status IN ('IMPORTING','READY','FAILED_RETRYABLE')),
+ mapping_json TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL,
+ PRIMARY KEY(share,recipient)
+);
 CREATE TABLE IF NOT EXISTS cmui_exercises (
   id TEXT PRIMARY KEY, owner TEXT NOT NULL REFERENCES cmui_users(id),
   course TEXT NOT NULL, pair TEXT NOT NULL REFERENCES cmui_pairs(id) ON DELETE CASCADE,
@@ -216,6 +234,10 @@ CREATE TABLE IF NOT EXISTS cmui_exercises (
   verification_status TEXT NOT NULL DEFAULT 'unverified',
   generation_version TEXT NOT NULL DEFAULT 'V1',
   run TEXT, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS cmui_message_attachments (
+ message TEXT PRIMARY KEY REFERENCES cmui_messages(id) ON DELETE CASCADE,
+ attachments TEXT NOT NULL DEFAULT '[]'
 );
 CREATE TABLE IF NOT EXISTS cmui_answer_reveals (
   owner TEXT NOT NULL REFERENCES cmui_users(id),
@@ -259,7 +281,7 @@ class Database:
         finally:
             c.close()
 
-    def initialize(self):
+    def initialize(self, verification_secret: str | None = None):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as c:
             tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -308,8 +330,44 @@ class Database:
             explanation_columns = {r[1] for r in c.execute("PRAGMA table_info(cmui_step_explanations)")}
             if 'conversation' not in explanation_columns:
                 c.execute("ALTER TABLE cmui_step_explanations ADD COLUMN conversation TEXT")
+            self._migrate_verification_secrets(c, verification_secret)
             c.execute("INSERT INTO cmui_meta VALUES ('schema_version',?) ON CONFLICT(key) DO UPDATE SET value=?",(str(SCHEMA_VERSION),str(SCHEMA_VERSION)))
             self._migrate_pairs(c)
+
+    def _migrate_verification_secrets(self, c, secret):
+        """Schema 7: replace secret-bearing legacy keys transactionally.
+
+        SCHEMA remains the historical bootstrap. Never infer a production key;
+        populated legacy stores require the caller's configured HMAC secret.
+        Logical scrubbing does not erase older backups or SQLite free pages.
+        """
+        columns = {r[1] for r in c.execute('PRAGMA table_info(cmui_verification_codes)')}
+        if 'code_id' in columns:
+            return
+        codes = c.execute('SELECT * FROM cmui_verification_codes').fetchall()
+        attempts = c.execute('SELECT * FROM cmui_redemption_attempts').fetchall()
+        if (codes or attempts) and not secret:
+            raise ValueError('Configured verification secret required to migrate existing verification records')
+        def digest(value):
+            return hmac.new(secret.encode(), value.encode(), hashlib.sha256).hexdigest()
+        c.execute('SAVEPOINT verification_schema_7')
+        try:
+            c.execute("CREATE TABLE cmui_verification_codes_v7 (code_id TEXT PRIMARY KEY, secret_hash TEXT NOT NULL UNIQUE, owner TEXT, status TEXT NOT NULL CHECK(status IN ('issued','redeemed','disabled')), issued_by TEXT NOT NULL, issued_at TEXT NOT NULL, redeemed_at TEXT, audit TEXT NOT NULL DEFAULT '[]')")
+            for row in codes:
+                c.execute('INSERT INTO cmui_verification_codes_v7 VALUES(?,?,?,?,?,?,?,?)',
+                          (uid('vcode_'), digest(row['code']), row['owner'], row['status'], row['issued_by'], row['issued_at'], row['redeemed_at'], row['audit']))
+            for row in attempts:
+                c.execute('UPDATE cmui_redemption_attempts SET code=? WHERE id=?', (digest(row['code']), row['id']))
+            for row in c.execute('SELECT owner,boundary_notes FROM cmui_verification').fetchall():
+                c.execute('UPDATE cmui_verification SET boundary_notes=? WHERE owner=?',
+                          (re.sub(r'(?<!\d)\d{7}(?!\d)', '[redacted-code]', row['boundary_notes']), row['owner']))
+            c.execute('DROP TABLE cmui_verification_codes')
+            c.execute('ALTER TABLE cmui_verification_codes_v7 RENAME TO cmui_verification_codes')
+            c.execute('RELEASE verification_schema_7')
+        except BaseException:
+            c.execute('ROLLBACK TO verification_schema_7')
+            c.execute('RELEASE verification_schema_7')
+            raise
 
     def _migrate_pairs(self, c):
         """One-time Schema-6 migration of the dual-lane history into unified pairs.

@@ -32,9 +32,19 @@ from .steps import solution_steps, answer_steps_parse
 from .provider import QwenProvider, DisabledProvider, TestProvider, ProviderError
 from . import templates
 from . import social
+from . import classification as classification_state
+from .directory import resolve_recipient, project_local_ids
+from .public_events import public_event
+from .stream_lifecycle import monitored_stream
 
 User=Annotated[dict,Depends(current_user)]
 TERMINAL={'completed','failed','cancelled'}
+
+
+def classification_key(course_id, owner):
+    # Classification can contain evidence from the caller's private workspace.
+    # Keep legacy unscoped rows for audit, but never expose them to another user.
+    return 'personal:' + hashlib.sha256((owner+'\0'+course_id).encode()).hexdigest()
 
 
 def create_app(settings: Settings|None=None, *, provider=None, domain=None, subject_resolver=None) -> FastAPI:
@@ -45,10 +55,11 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
     if cfg.auth_mode=='injected' and subject_resolver is None:
         raise ValueError('Injected auth requires a verified-subject resolver')
     db=Database(cfg.data_dir/'ui.sqlite3')
-    db.initialize()
+    db.initialize(verification_secret=social._secret(cfg))
     (cfg.data_dir/'uploads').mkdir(exist_ok=True)
     model=provider or (QwenProvider(cfg) if cfg.provider_mode=='qwen' else TestProvider() if cfg.provider_mode=='test' else DisabledProvider())
     jobs: dict[str,asyncio.Task]={}
+    pending_classifications: dict[str,dict]={}
     # This instance's identity for run leases. Two processes get two ids.
     worker_id=uid('worker-')
     # A run whose heartbeat is older than this has lost its owner (process died
@@ -60,8 +71,9 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         db.execute("UPDATE cmui_runs SET lease_heartbeat=? WHERE id=? AND status IN ('queued','planning','generating')",(str(time.time()),run_id))
 
     def reclaim_orphaned_runs():
-        cutoff=str(time.time()-lease_grace_seconds)
-        db.execute("UPDATE cmui_runs SET status='failed',error='SERVER_RESTARTED',updated_at=? WHERE status IN ('queued','planning','generating') AND (lease_heartbeat IS NULL OR CAST(lease_heartbeat AS REAL)<?)",(now(),cutoff))
+        from .explanation_recovery import reclaim_and_reconcile
+        return reclaim_and_reconcile(db,now_epoch=time.time(),
+            lease_grace_seconds=lease_grace_seconds,updated_at=now())
 
     async def submit_delivery(*, run_id, user, conv, data, v3_link, spec_items, content):
         """Submit a completed teaching into the V3 evidence ledger.
@@ -167,19 +179,27 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         reclaim_orphaned_runs()
         await recover_delivery_submissions()
         # One-time grandfathered student verification for pre-existing users.
-        candidates=[u['id'] for u in db.all('SELECT id FROM cmui_users')]
-        if domain is not None:
+        if not db.one("SELECT value FROM cmui_meta WHERE key='verification_grandfather_boundary'"):
+            cutoff=db.one("SELECT value FROM cmui_meta WHERE key='verification_grandfather_cutoff'")
+            if not cutoff:
+                db.execute("INSERT OR IGNORE INTO cmui_meta(key,value) VALUES('verification_grandfather_cutoff',?)",(now(),))
+                cutoff=db.one("SELECT value FROM cmui_meta WHERE key='verification_grandfather_cutoff'")
+            candidates=[u['id'] for u in db.all('SELECT id FROM cmui_users WHERE created_at<=?',(cutoff['value'],))]
             try:
-                extra=await domain.call('verification.grandfather_candidates', '', {}, '')
-                for uid_extra in (extra or []):
-                    if uid_extra not in candidates: candidates.append(uid_extra)
+                if cfg.environment=='production':
+                    receipt=db.one("SELECT value FROM cmui_meta WHERE key='verification_grandfather_registered_snapshot'")
+                    if not receipt or json.loads(receipt['value']).get('status')!='COMPLETED':
+                        raise RuntimeError('Owner-approved registered-user snapshot required')
+                if domain is not None:
+                    extra=await domain.call('verification.grandfather_candidates', '', {'cutoff':cutoff['value']}, '')
+                    for uid_extra in (extra or []):
+                        if uid_extra not in candidates: candidates.append(uid_extra)
+                social.grandfather_existing_users(db, candidates)
+                app.state.grandfather_status='completed'
             except Exception:
-                pass
-        try:
-            social.grandfather_existing_users(db, candidates)
-        except Exception:
-            pass
+                app.state.grandfather_status='FAILED_RETRYABLE'
         yield
+        pending_classifications.clear()
         for task in list(jobs.values()): task.cancel()
         if jobs: await asyncio.gather(*jobs.values(),return_exceptions=True)
 
@@ -206,9 +226,10 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
     async def remote(operation,user,payload,request):
         return await domain.call(operation,user['id'],payload,request.headers.get('authorization',''))
 
-    async def course(user,cid,request):
-        if domain: return await remote('course.get',user,{'id':cid},request)
-        return get_course(db,user['id'],cid)
+    async def course(user,cid,request,*,metadata=False):
+        row=await remote('course.get',user,{'id':cid},request) if domain else get_course(db,user['id'],cid)
+        if not metadata: course_gate(row,user)
+        return row
 
     def rate(user,bucket,limit=60):
         window=int(time.time()//60)
@@ -227,6 +248,22 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         run=db.one('SELECT * FROM cmui_runs WHERE id=? AND owner=?',(run_id,user['id']))
         if not run: raise HTTPException(404,'生成记录不存在')
         return run
+
+    def exercise_public_text(run_id):
+        if db.one("SELECT id FROM cmui_messages WHERE run=? AND role='user'",(run_id,)):
+            return None  # User-supplied problems explicitly request a full answer.
+        exercise=db.one('SELECT question FROM cmui_exercises WHERE run=?',(run_id,))
+        if exercise: return exercise['question']
+        run=db.one('SELECT user_text FROM cmui_runs WHERE id=?',(run_id,))
+        if run and run['user_text']=='做一题' and not db.one("SELECT id FROM cmui_messages WHERE run=? AND role='user'",(run_id,)):
+            return ''
+        return None
+
+    def public_active_run(row):
+        if row:
+            question=exercise_public_text(row['id'])
+            if question is not None: row['partial_text']=question
+        return row
 
     def public_file(row):
         return {k:v for k,v in row.items() if k not in {'storage_key','sha256','owner'}}
@@ -298,11 +335,11 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         return ensure_user(db,user['id'])
 
     @r.get('/people')
-    def people(user:User,q:str=Query(default='',max_length=60)):
+    def people(user:User,q:str=Query(default='',max_length=60),limit:int=Query(20,ge=1,le=100),offset:int=Query(0,ge=0)):
         rate(user,'people',30)
-        if len(q.strip())<2: return []
+        project_local_ids(db)
         escaped=q.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
-        return db.all("SELECT id,name,handle,bio FROM cmui_users WHERE id<>? AND discoverable=1 AND (name LIKE ? ESCAPE '\\' OR handle LIKE ? ESCAPE '\\') LIMIT 20",(user['id'],'%'+escaped+'%','%'+escaped+'%'))
+        return db.all("SELECT COALESCE(d.public_id,u.id) id,u.name,u.handle,COALESCE(d.avatar,'') avatar FROM cmui_users u LEFT JOIN cmui_directory d ON d.subject=u.id WHERE u.id<>? AND u.discoverable=1 AND (d.subject IS NULL OR d.active=1) AND NOT EXISTS (SELECT 1 FROM cmui_blocks WHERE (owner=? AND blocked=u.id) OR (owner=u.id AND blocked=?)) AND (u.name LIKE ? ESCAPE '\\' OR u.handle LIKE ? ESCAPE '\\') ORDER BY u.handle,u.id LIMIT ? OFFSET ?",(user['id'],user['id'],user['id'],'%'+escaped+'%','%'+escaped+'%',limit,offset))
 
     @r.get('/courses')
     async def courses(user:User,request:Request):
@@ -330,7 +367,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         return get_course(db,user['id'],cid)
 
     @r.get('/courses/{cid}')
-    async def detail(cid:str,user:User,request:Request): return await course(user,cid,request)
+    async def detail(cid:str,user:User,request:Request): return await course(user,cid,request,metadata=True)
 
     @r.patch('/courses/{cid}')
     async def edit_course(cid:str,data:CourseUpdate,user:User,request:Request):
@@ -414,13 +451,25 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             result=await remote('file.upload',user,{'course':cid,'name':name,'folder':folder,'content':content,'mime':mime},request)
             try:
                 file_list=await remote('file.list',user,{'course':cid,'q':'','folder':None},request)
+                samples=[]
+                remaining=24000
+                for material in file_list[:40]:
+                    if remaining<=0: break
+                    parsed=await remote('file.text',user,{'course':cid,'id':material['id']},request)
+                    for page in parsed.get('pages',[])[:6]:
+                        text=str(page.get('text') or '')[:min(2000,remaining)]
+                        if text:
+                            samples.append({'document_id':material['id'],'version_id':material.get('version_id'),
+                                'page':page.get('page'),'text':text})
+                            remaining-=len(text)
+                        if remaining<=0: break
                 bundle={'course_name':course_data.get('name',cid),'course_code':course_data.get('code',''),
                     'description':course_data.get('description',''),
-                    'files':[{'name':f.get('name'),'size':f.get('size')} for f in file_list][:40],
-                    'text_samples':[],'materials_revision':social.materials_revision([{'id':f.get('id'),'sha256':f.get('sha256','')} for f in file_list])}
-                schedule_classification(cid,bundle)
+                    'files':[{k:f.get(k) for k in ('id','name','size','version_id','sha256')} for f in file_list][:40],
+                    'text_samples':samples,'materials_revision':social.materials_revision(file_list)}
+                schedule_classification(classification_key(cid,user['id']),bundle)
             except Exception:
-                pass
+                db.execute("INSERT INTO cmui_classifications(course,status,source,reason,created_at,updated_at) VALUES (?,'FAILED_RETRYABLE','auto','资料采样失败',?,?) ON CONFLICT(course) DO UPDATE SET status='FAILED_RETRYABLE',reason=excluded.reason,updated_at=excluded.updated_at WHERE source='auto'",(classification_key(cid,user['id']),now(),now()))
             return result
         digest=file_hash(content)
         old=db.one('SELECT * FROM cmui_files WHERE course=? AND owner=? AND sha256=?',(cid,user['id'],digest))
@@ -445,7 +494,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 'files':[{'name':f.get('name'),'size':f.get('size')} for f in file_list][:40],
                 'text_samples':[t['text'][:600] for t in parts[:6]],
                 'materials_revision':social.materials_revision([{'id':f.get('id'),'sha256':f.get('sha256','')} for f in file_list])}
-            schedule_classification(cid,bundle)
+            schedule_classification(classification_key(cid,user['id']),bundle)
         except Exception:
             pass
         return public_file(db.one('SELECT * FROM cmui_files WHERE id=?',(fid,)))
@@ -542,11 +591,14 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         return {'deleted':True}
 
     @r.get('/notifications')
-    async def notifications(user:User,request:Request):
-        rows=db.all('SELECT n.*,u.name actor_name FROM cmui_notifications n JOIN cmui_users u ON u.id=n.actor WHERE n.owner=? ORDER BY n.created_at DESC LIMIT 100',(user['id'],))
+    async def notifications(user:User,request:Request,limit:int=Query(100,ge=1,le=200),offset:int=Query(0,ge=0)):
+        rows=db.all('SELECT n.*,u.name actor_name FROM cmui_notifications n JOIN cmui_users u ON u.id=n.actor WHERE n.owner=? ORDER BY n.created_at DESC,n.id DESC LIMIT ? OFFSET ?',(user['id'],limit,offset))
         visible=[]
         for row in rows:
-            if row['course']:
+            if row['kind']=='course_share':
+                if not db.one('SELECT share FROM cmui_share_recipients WHERE share=? AND recipient=?',
+                              (row['ref'],user['id'])): continue
+            elif row['course']:
                 try: await course(user,row['course'],request)
                 except HTTPException: continue
             visible.append(row)
@@ -587,7 +639,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
     @r.post('/messages',status_code=201)
     def send_message(data:MessageCreate,user:User):
         rate(user,'direct-message',20)
-        peer=db.one('SELECT id FROM cmui_users WHERE id=?',(data.recipient,))
+        peer=db.one('SELECT id FROM cmui_users WHERE id=?',(resolve_recipient(db,data.recipient),))
         if not peer or peer['id']==user['id']: raise HTTPException(404,'收件人不存在')
         if db.one('SELECT owner FROM cmui_blocks WHERE (owner=? AND blocked=?) OR (owner=? AND blocked=?)',(user['id'],peer['id'],peer['id'],user['id'])):
             raise HTTPException(403,'无法向此用户发送消息')
@@ -604,11 +656,13 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
 
     @r.put('/people/{person}/block')
     def block(person:str,user:User):
+        person=resolve_recipient(db,person)
         if person==user['id'] or not db.one('SELECT id FROM cmui_users WHERE id=?',(person,)): raise HTTPException(404)
         db.execute('INSERT OR IGNORE INTO cmui_blocks VALUES (?,?)',(user['id'],person)); return {'blocked':True}
 
     @r.delete('/people/{person}/block')
     def unblock(person:str,user:User):
+        person=resolve_recipient(db,person)
         db.execute('DELETE FROM cmui_blocks WHERE owner=? AND blocked=?',(user['id'],person)); return {'blocked':False}
 
     @r.post('/agent-receipts/claim')
@@ -706,23 +760,42 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
     async def new_conversation(data:ConversationCreate,user:User,request:Request):
         await course(user,data.course,request)
         cid=uid('conv_')
-        db.execute('INSERT INTO cmui_conversations(id,owner,course,lane,title,created_at,updated_at,hidden) VALUES (?,?,?,?,?,?,?,0)',(cid,user['id'],data.course,data.lane,data.title,now(),now()))
-        # Pair-aware creation (back-compat for per-lane clients): attach the new
-        # lane to the newest pair that still misses it, creating a pair when
-        # none exists, so unified history lists the conversation immediately.
         lane_column=f"{data.lane}_conversation"
-        pair=db.one(f"SELECT * FROM cmui_pairs WHERE owner=? AND course=? AND {lane_column} IS NULL ORDER BY updated_at DESC LIMIT 1",(user['id'],data.course))
-        if pair is None:
-            pid=uid('pair_')
-            with db.connect(True) as c:
-                c.execute('INSERT INTO cmui_pairs(id,owner,course,teach_conversation,problem_conversation,title,bound_node,created_at,updated_at) VALUES (?,?,?,?,?,?,NULL,?,?)',
-                    (pid,user['id'],data.course,
-                     cid if data.lane=='teach' else None,
-                     cid if data.lane=='problem' else None,
-                     data.title,now(),now()))
-        else:
-            db.execute(f'UPDATE cmui_pairs SET {lane_column}=?,updated_at=? WHERE id=?',(cid,now(),pair['id']))
+        with db.connect(True) as c:
+            pair=None
+            if data.pair_id:
+                pair=c.execute('SELECT * FROM cmui_pairs WHERE id=? AND owner=? AND course=?',
+                    (data.pair_id,user['id'],data.course)).fetchone()
+                if pair is None: raise HTTPException(404,'双栏会话不存在')
+                if pair[lane_column]:
+                    return dict(c.execute('SELECT * FROM cmui_conversations WHERE id=?',(pair[lane_column],)).fetchone())
+            c.execute('INSERT INTO cmui_conversations(id,owner,course,lane,title,created_at,updated_at,hidden) VALUES (?,?,?,?,?,?,?,0)',
+                (cid,user['id'],data.course,data.lane,data.title,now(),now()))
+            if pair is None:
+                c.execute('INSERT INTO cmui_pairs(id,owner,course,teach_conversation,problem_conversation,title,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)',
+                    (uid('pair_'),user['id'],data.course,cid if data.lane=='teach' else None,
+                     cid if data.lane=='problem' else None,data.title,now(),now()))
+            else:
+                c.execute(f'UPDATE cmui_pairs SET {lane_column}=?,updated_at=? WHERE id=?',(cid,now(),pair['id']))
         return conversation(user,cid)
+
+    def message_attachments(message,accessible_ids):
+        row=db.one('SELECT attachments FROM cmui_message_attachments WHERE message=?',(message['id'],))
+        if row is None:
+            row=db.one('SELECT attachments FROM cmui_run_inputs WHERE run=?',(message.get('run'),))
+        if not row or message['role']!='user': return []
+        return [item if item.get('id') in accessible_ids else
+                {'available':False,'name':'原共享来源当前不可用'}
+                for item in json.loads(row['attachments'])
+                if item.get('id') in accessible_ids or (message.get('provenance') or '').startswith('share:')]
+
+    def message_exercise(message,user):
+        if not message.get('exercise'): return None
+        row=db.one('SELECT * FROM cmui_exercises WHERE id=? AND owner=?',(message['exercise'],user['id']))
+        if not row: return None
+        revealed=bool(db.one('SELECT exercise FROM cmui_answer_reveals WHERE owner=? AND exercise=?',(user['id'],row['id'])))
+        return {'id':row['id'],'revealed':revealed,'steps':json.loads(row['answer_steps']) if revealed else [],
+                'generation_version':row['generation_version'],'verification_status':row['verification_status']}
 
     @r.get('/conversations/{conv_id}')
     async def restore_conversation(conv_id:str,user:User,request:Request):
@@ -733,11 +806,14 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         accessible_ids={x['id'] for x in accessible}
         for m in messages:
             m['steps']=solution_steps(m['text']) if row['lane']=='problem' and m['role']=='assistant' else []
-            attachment_row=db.one('SELECT attachments FROM cmui_run_inputs WHERE run=?',(m['run'],))
-            m['attachments']=[x for x in json.loads(attachment_row['attachments']) if x['id'] in accessible_ids] if attachment_row and m['role']=='user' else []
-            m['citations']=[x for x in json.loads(m['citations']) if x.get('document_id') in accessible_ids]
+            m['attachments']=message_attachments(m,accessible_ids)
+            m['exercise_state']=message_exercise(m,user)
+            m['citations']=[x if x.get('document_id') in accessible_ids else
+                {'available':False,'name':'原共享来源当前不可用'}
+                for x in json.loads(m['citations'])
+                if x.get('document_id') in accessible_ids or (m.get('provenance') or '').startswith('share:')]
         row['messages']=messages
-        row['active_run']=db.one("SELECT id,status,partial_text,error FROM cmui_runs WHERE conversation=? ORDER BY created_at DESC LIMIT 1",(conv_id,))
+        row['active_run']=public_active_run(db.one("SELECT id,status,partial_text,error FROM cmui_runs WHERE conversation=? ORDER BY created_at DESC LIMIT 1",(conv_id,)))
         return row
 
     @r.patch('/conversations/{conv_id}')
@@ -927,6 +1003,17 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 claimed=c.execute("UPDATE cmui_runs SET status='completed',partial_text=?,citations=?,usage=?,updated_at=? WHERE id=? AND status IN ('queued','planning','generating')",(output,json.dumps(citations,ensure_ascii=False),json.dumps(usages),now(),run_id)).rowcount
                 if claimed==1:
                     c.execute('INSERT INTO cmui_messages(id,conversation,role,text,citations,run,created_at,provenance,exercise) VALUES (?,?,?,?,?,?,?,?,NULL)',(message_id,conv['id'],'assistant',output,json.dumps(citations,ensure_ascii=False),run_id,now(),''))
+                    if conv['lane']=='problem':
+                        steps=answer_steps_parse(output)
+                        pair=c.execute('SELECT id,bound_node FROM cmui_pairs WHERE owner=? AND course=? AND problem_conversation=?',
+                                       (user['id'],conv['course'],conv['id'])).fetchone()
+                        if steps and pair:
+                            exercise_id=uid('exercise_')
+                            c.execute('INSERT INTO cmui_exercises(id,owner,course,pair,node,question,answer_steps,references_json,generation_version,run,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                                (exercise_id,user['id'],conv['course'],pair['id'],pair['bound_node'],data.text,
+                                 json.dumps(steps,ensure_ascii=False),json.dumps(citations,ensure_ascii=False),'V1',run_id,now()))
+                            c.execute('INSERT INTO cmui_answer_reveals VALUES(?,?,?)',(user['id'],exercise_id,now()))
+                            c.execute('UPDATE cmui_messages SET exercise=? WHERE id=?',(exercise_id,message_id))
                     c.execute('UPDATE cmui_conversations SET updated_at=? WHERE id=?',(now(),conv['id']))
                 else:
                     raise asyncio.CancelledError()
@@ -993,7 +1080,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                     # proceeds here; the binding stays with the original pair
                     # (the UI opens that pair on tree clicks).
         template_id='OTHER'
-        classification=db.one('SELECT * FROM cmui_classifications WHERE course=?',(conv['course'],))
+        classification=db.one('SELECT * FROM cmui_classifications WHERE course=?',(classification_key(conv['course'],user['id']),))
         if classification and classification['status']=='CLASSIFIED' and classification['template_id'] in templates.registry():
             template_id=classification['template_id']
         history=db.all('SELECT role,text FROM cmui_messages WHERE conversation=? ORDER BY created_at DESC,rowid DESC LIMIT 12',(conv_id,))[::-1]
@@ -1050,6 +1137,10 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         rid=uid('run_')
         try:
             with db.connect(True) as c:
+                if data.node_id and conv['lane']=='teach':
+                    first=c.execute('INSERT OR IGNORE INTO cmui_node_starts(owner,course,node,run) VALUES(?,?,?,?)',
+                        (user['id'],conv['course'],data.node_id,rid)).rowcount
+                    teaching_mode='thinking' if first else data.teaching_mode
                 c.execute('INSERT INTO cmui_runs(id,owner,conversation,request_id,status,user_text,teaching_mode,lease_worker,lease_heartbeat,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',(rid,user['id'],conv_id,data.request_id,'queued',data.text,teaching_mode,worker_id,str(time.time()),now(),now()))
                 c.execute('INSERT INTO cmui_run_inputs VALUES (?,?,?)',(rid,digest,json.dumps(attachment_meta,ensure_ascii=False)))
                 c.execute('INSERT INTO cmui_messages(id,conversation,role,text,citations,run,created_at,provenance,exercise) VALUES (?,?,?,?,?,?,?,?,NULL)',(uid('message_'),conv_id,'user',data.text,'[]',rid,now(),''))
@@ -1078,7 +1169,11 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         public={k:row[k] for k in ('id','status','user_text','partial_text','citations',
             'usage','error','teaching_mode','created_at','updated_at','conversation') if k in row}
         public['citations']=json.loads(public['citations']); public['usage']=json.loads(public['usage'])
+        question=exercise_public_text(rid)
+        if question is not None: public['partial_text']=question
         public['coverage']=db.one('SELECT unit_id,journey_id,status,covered_items,error FROM cmui_delivery_submissions WHERE run=?',(rid,))
+        if public['coverage']:
+            public['coverage'].pop('error',None)
         return public
 
     @r.get('/runs/{rid}/events')
@@ -1093,7 +1188,17 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 rows=db.all('SELECT * FROM cmui_run_events WHERE run=? AND seq>? ORDER BY seq',(rid,seq))
                 for e in rows:
                     seq=e['seq']
-                    yield f'id: {seq}\nevent: {e["type"]}\ndata: {e["data"]}\n\n'
+                    try:
+                        payload=public_event(e['type'],json.loads(e['data']))
+                    except (TypeError,ValueError):
+                        payload=None
+                    if e['type']=='delta':
+                        question=exercise_public_text(rid)
+                        if question is not None:
+                            last=db.one("SELECT MAX(seq) seq FROM cmui_run_events WHERE run=? AND type='delta'",(rid,))
+                            payload={'text':question} if question and e['seq']==last['seq'] else None
+                    if payload is not None:
+                        yield f'id: {seq}\nevent: {e["type"]}\ndata: {json.dumps(payload,ensure_ascii=False)}\n\n'
                 current=db.one('SELECT status FROM cmui_runs WHERE id=?',(rid,))
                 if not current or current['status'] in TERMINAL: break
                 idle+=1
@@ -1111,44 +1216,66 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         # check stops it even when the job map is on another worker. The local
         # task cancellation only shortens the wait for same-process runs.
         db.execute("UPDATE cmui_runs SET status='cancelled',error='CANCELLED',updated_at=? WHERE id=? AND status IN ('queued','planning','generating')",(now(),rid))
+        db.execute("UPDATE cmui_step_explanations SET status='cancelled',updated_at=? WHERE run=? AND status='generating' AND EXISTS(SELECT 1 FROM cmui_runs WHERE id=? AND status='cancelled')",(now(),rid,rid))
         task=jobs.get(rid)
         if task: task.cancel()
         return {'status':'cancelled'}
 
-    async def classify_course_task(course_id, bundle):
-        """Background template classification for a course. Never overwrites a
-        manual selection; a billing-disabled provider records FAILED_RETRYABLE
-        instead of pretending to classify. One task per course at a time."""
+    async def classify_course_task(course_id, bundle, token):
         job_key=f'classify-{course_id}'
         try:
-            existing=db.one('SELECT * FROM cmui_classifications WHERE course=?',(course_id,))
-            if existing and existing['source']=='manual':
-                return
-            db.execute("INSERT INTO cmui_classifications(course,status,template_id,decision,degree_level,confidence,alternatives,reason,evidence_refs,materials_revision,model,source,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'auto',?,?) ON CONFLICT(course) DO UPDATE SET status='CLASSIFYING',updated_at=excluded.updated_at",
-                (course_id,'CLASSIFYING',None,None,None,None,'[]','','[]',bundle.get('materials_revision'),None,now(),now()))
             if cfg.provider_mode=='qwen' and not cfg.allow_billable:
-                db.execute("UPDATE cmui_classifications SET status='FAILED_RETRYABLE',reason='未授权模型调用费用',updated_at=? WHERE course=?",(now(),course_id))
+                classification_state.fail(db,course_id,token,'未授权模型调用费用')
                 return
-            raw=await model.classify_course(bundle)
-            result=json.loads(raw)
-            validated=social.validate_classification(db,result)
-            status='CLASSIFIED' if validated['decision']=='classified' else 'OTHER'
-            db.execute("UPDATE cmui_classifications SET status=?,template_id=?,decision=?,degree_level=?,confidence=?,alternatives=?,reason=?,evidence_refs=?,materials_revision=?,model=?,updated_at=? WHERE course=? AND source='auto'",
-                (status,validated['template_id'],validated['decision'],validated['degree_level'],
-                 validated['confidence'],json.dumps(validated['alternatives'],ensure_ascii=False),
-                 validated['reason'],json.dumps(validated['evidence_refs'],ensure_ascii=False),
-                 bundle.get('materials_revision'),cfg.qwen_model,now(),course_id))
+            result=json.loads(await model.classify_course(bundle))
+            classification_state.publish(db,course_id,token,bundle,result,cfg.qwen_model)
         except Exception:
-            db.execute("UPDATE cmui_classifications SET status='FAILED_RETRYABLE',updated_at=? WHERE course=? AND source='auto'",(now(),course_id))
+            classification_state.fail(db,course_id,token,'分类失败，可在资料更新后重试')
         finally:
             jobs.pop(job_key,None)
+            latest=pending_classifications.pop(course_id,None)
+            if latest is not None:
+                next_bundle,next_token=latest
+                jobs[job_key]=asyncio.create_task(classify_course_task(course_id,next_bundle,next_token))
 
     def schedule_classification(course_id, bundle):
+        token=classification_state.claim(db,course_id,bundle)
+        if token is None: return
         job_key=f'classify-{course_id}'
         if job_key not in jobs:
-            jobs[job_key]=asyncio.create_task(classify_course_task(course_id, bundle))
+            jobs[job_key]=asyncio.create_task(classify_course_task(course_id,bundle,token))
+        else:
+            pending_classifications[course_id]=(bundle,token)
 
     # ================================================================ pairs
+
+    @r.post('/courses/{cid}/nodes/{node_id}/open')
+    async def open_node(cid:str,node_id:str,user:User,request:Request):
+        await course(user,cid,request)
+        knowledge=(await remote('knowledge.tree',user,{'course':cid},request)) if domain else db.all('SELECT * FROM cmui_nodes WHERE course=?',(cid,))
+        node=next((n for n in flatten_nodes(knowledge) if n['id']==node_id),None)
+        if not node: raise HTTPException(404,'知识点不存在')
+        with db.connect(True) as c:
+            pair=c.execute('SELECT * FROM cmui_pairs WHERE owner=? AND course=? AND bound_node=?',(user['id'],cid,node_id)).fetchone()
+            if pair is None:
+                pid=uid('pair_'); conv=uid('conv_')
+                c.execute('INSERT INTO cmui_conversations(id,owner,course,lane,title,created_at,updated_at) VALUES(?,?,?,?,?,?,?)',
+                    (conv,user['id'],cid,'teach',node['title'][:100],now(),now()))
+                c.execute('INSERT INTO cmui_pairs(id,owner,course,teach_conversation,title,bound_node,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)',
+                    (pid,user['id'],cid,conv,node['title'][:100],node_id,now(),now()))
+            else:
+                pid=pair['id']; conv=pair['teach_conversation']
+                if not conv:
+                    conv=uid('conv_')
+                    c.execute('INSERT INTO cmui_conversations(id,owner,course,lane,title,created_at,updated_at) VALUES(?,?,?,?,?,?,?)',
+                        (conv,user['id'],cid,'teach',node['title'][:100],now(),now()))
+                    c.execute('UPDATE cmui_pairs SET teach_conversation=? WHERE id=?',(conv,pid))
+            started=c.execute('SELECT run FROM cmui_node_starts WHERE owner=? AND course=? AND node=?',(user['id'],cid,node_id)).fetchone()
+        if started:
+            return {'pair_id':pid,'run':started['run'],'reused':True}
+        request_id='node-open-'+hashlib.sha256(f'{user["id"]}:{cid}:{node_id}'.encode()).hexdigest()[:32]
+        result=await run(conv,RunCreate(text=f'请从零教我理解 {node["title"]}，结合课程资料与例题。',node_id=node_id,teaching_mode='thinking',request_id=request_id),user,request)
+        return {'pair_id':pid,'run':result['id'],'reused':result.get('reused',False)}
 
     @r.get('/pairs')
     async def pair_list(user:User,request:Request,course_id:str,limit:int=Query(50,ge=1,le=100),offset:int=Query(0,ge=0)):
@@ -1188,14 +1315,19 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             lane=pair[key]
             if lane is None: continue
             conv=conversation(user,lane['id'])
-            messages=db.all('SELECT id,role,text,citations,created_at,provenance,exercise FROM cmui_messages WHERE conversation=? ORDER BY created_at,rowid',(conv['id'],))
+            messages=db.all('SELECT id,role,text,citations,run,created_at,provenance,exercise FROM cmui_messages WHERE conversation=? ORDER BY created_at,rowid',(conv['id'],))
             accessible=(await remote('file.list',user,{'course':pair['course'],'q':'','folder':None},request)) if domain else file_rows(db,user['id'],pair['course'])
             accessible_ids={x['id'] for x in accessible}
             for m in messages:
                 m['steps']=solution_steps(m['text']) if key=='problem' and m['role']=='assistant' else []
-                m['citations']=[x for x in json.loads(m['citations']) if x.get('document_id') in accessible_ids]
+                m['attachments']=message_attachments(m,accessible_ids)
+                m['exercise_state']=message_exercise(m,user)
+                m['citations']=[x if x.get('document_id') in accessible_ids else
+                    {'available':False,'name':'原共享来源当前不可用'}
+                    for x in json.loads(m['citations'])
+                    if x.get('document_id') in accessible_ids or (m.get('provenance') or '').startswith('share:')]
             pair[key]={'conversation':conv,'messages':messages,
-                       'active_run':db.one("SELECT id,status,partial_text,error FROM cmui_runs WHERE conversation=? ORDER BY created_at DESC LIMIT 1",(conv['id'],))}
+                       'active_run':public_active_run(db.one("SELECT id,status,partial_text,error FROM cmui_runs WHERE conversation=? ORDER BY created_at DESC LIMIT 1",(conv['id'],)))}
         return pair
 
     @r.patch('/pairs/{pair_id}')
@@ -1232,8 +1364,10 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
     async def pair_bind(pair_id:str,data:PairBind,user:User,request:Request):
         pair=pair_payload(user,pair_id)
         await course(user,pair['course'],request)
-        if data.node is not None and not domain:
-            if not db.one('SELECT id FROM cmui_nodes WHERE id=? AND course=?',(data.node,pair['course'])): raise HTTPException(404,'知识点不存在')
+        if data.node is not None:
+            knowledge=(await remote('knowledge.tree',user,{'course':pair['course']},request)) if domain else db.all('SELECT * FROM cmui_nodes WHERE course=?',(pair['course'],))
+            if not any(n.get('id')==data.node for n in flatten_nodes(knowledge)):
+                raise HTTPException(404,'知识点不存在')
         if data.node is None:
             db.execute('UPDATE cmui_pairs SET bound_node=NULL,updated_at=? WHERE id=?',(now(),pair_id))
             return pair_payload(user,pair_id)
@@ -1253,12 +1387,14 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
     @r.get('/courses/{cid}/classification')
     async def classification_get(cid:str,user:User,request:Request):
         await course(user,cid,request)
-        row=db.one('SELECT * FROM cmui_classifications WHERE course=?',(cid,))
+        row=db.one('SELECT * FROM cmui_classifications WHERE course=?',(classification_key(cid,user['id']),))
         if not row: return {'status':'WAITING_FOR_MATERIALS','template_id':None,'decision':None,
             'degree_level':None,'confidence':None,'alternatives':[],'reason':'','evidence_refs':[],
             'materials_revision':None,'model':None,'source':'auto','manual_allowed':True}
         row['alternatives']=json.loads(row['alternatives']); row['evidence_refs']=json.loads(row['evidence_refs'])
         row['manual_allowed']=True
+        row['template_evidence']=classification_state.evidence(db,classification_key(cid,user['id']))
+        row['course']=cid
         return row
 
     @r.post('/courses/{cid}/classification')
@@ -1270,12 +1406,17 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             raise HTTPException(403,'只有课程所有者可以纠正分类')
         template_id=data.template_id if data.template_id in templates.registry() else 'OTHER'
         decision='classified' if template_id!='OTHER' else 'other'
+        source_cid=cid
+        cid=classification_key(cid,user['id'])
         db.execute('INSERT INTO cmui_classifications(course,status,template_id,decision,degree_level,confidence,alternatives,reason,evidence_refs,materials_revision,model,source,created_at,updated_at) VALUES (?,?,?,?,NULL,NULL,\'[]\',?,?,NULL,NULL,\'manual\',?,?) ON CONFLICT(course) DO UPDATE SET status=excluded.status,template_id=excluded.template_id,decision=excluded.decision,degree_level=NULL,confidence=NULL,alternatives=\'[]\',reason=excluded.reason,evidence_refs=excluded.evidence_refs,materials_revision=excluded.materials_revision,model=NULL,source=\'manual\',updated_at=excluded.updated_at',
             (cid,'CLASSIFIED' if decision=='classified' else 'OTHER',template_id,decision,
              '手动选择（课程所有者）','[]',now(),now()))
         row=db.one('SELECT * FROM cmui_classifications WHERE course=?',(cid,))
         row['alternatives']=json.loads(row['alternatives']); row['evidence_refs']=json.loads(row['evidence_refs'])
         row['manual_allowed']=True
+        classification_state.record_manual_evidence(db,cid)
+        row['template_evidence']=classification_state.evidence(db,cid)
+        row['course']=source_cid
         return row
 
     # ====================================================== student verification
@@ -1301,15 +1442,13 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
     @r.get('/admin/verification-codes')
     async def admin_list_codes(user:User):
         if not is_admin(user): raise HTTPException(403,'仅课程管理员可以查看认证码状态')
-        rows=db.all("SELECT code,status,issued_at,redeemed_at,issued_by FROM cmui_verification_codes ORDER BY issued_at DESC LIMIT 200")
-        # Codes are redacted here by policy: status is visible, plaintext never.
-        return [{'code':r['code'][:2]+'*****','status':r['status'],'issued_at':r['issued_at'],
-                 'redeemed_at':r['redeemed_at']} for r in rows]
+        return social.list_codes(db)
 
     @r.post('/admin/verification-codes/disable')
     async def admin_disable_code(data:VerificationDisable,user:User):
         if not is_admin(user): raise HTTPException(403,'仅课程管理员可以停用认证码')
-        db.execute("UPDATE cmui_verification_codes SET status='disabled' WHERE code=? AND status='issued'",(data.code,))
+        if not social.disable_code(db,data.code_id,user['id']):
+            raise HTTPException(404,'认证码不存在或不可停用')
         return {'disabled':True}
 
     # ================================================================ shares
@@ -1319,42 +1458,109 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         course_data=await course(user,data.course,request)
         course_gate(course_data,user)
         existing=db.one('SELECT * FROM cmui_shares WHERE sender=? AND request_id=?',(user['id'],data.request_id))
-        if existing: return {'id':existing['id'],'status':existing['status'],'reused':True}
+        payload=data.model_dump(exclude={'request_id'})
+        payload['recipients']=sorted(set(payload['recipients']))
+        payload['selected_pair_ids']=sorted(set(payload['selected_pair_ids']))
+        digest=hashlib.sha256(json.dumps(payload,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+        if existing:
+            if json.loads(existing['manifest_json']).get('request_hash')!=digest:
+                raise HTTPException(409,'重复请求 ID 的共享内容不同或旧回执无法核对')
+            if existing['status']=='ready':
+                return {'id':existing['id'],'status':'ready','reused':True}
+            if existing['status']!='failed':
+                raise HTTPException(503,'快照正在准备，请稍后重试')
         recipients=[]
         for rid in set(data.recipients):
+            rid=resolve_recipient(db,rid)
             if rid==user['id']: continue
             if not db.one('SELECT id FROM cmui_users WHERE id=?',(rid,)): raise HTTPException(404,'接收者不存在')
+            if db.one('SELECT owner FROM cmui_blocks WHERE (owner=? AND blocked=?) OR (owner=? AND blocked=?)',
+                      (user['id'],rid,rid,user['id'])): raise HTTPException(403,'无法向此用户共享课程')
             recipients.append(rid)
         if not recipients: raise HTTPException(422,'请选择至少一位接收者')
-        files = (await remote('file.list',user,{'course':data.course,'q':'','folder':None},request)) if domain else file_rows(db,user['id'],data.course)
-        if data.history_scope=='selected':
-            pair_ids=[p for p in set(data.selected_pair_ids) if db.one('SELECT id FROM cmui_pairs WHERE id=? AND owner=? AND course=?',(p,user['id'],data.course))]
+        if existing:
+            sid=existing['id']
+            manifest=json.loads(existing['manifest_json'])
+            files=manifest['files']
+            with db.connect(True) as connection:
+                claimed=connection.execute("UPDATE cmui_shares SET status='preparing' WHERE id=? AND status='failed'",(sid,)).rowcount
+                if claimed!=1: raise HTTPException(503,'快照正在准备，请稍后重试')
         else:
-            pair_ids=[]
-        pair_payloads=social.snapshot_pair_payload(db,user['id'],data.course,pair_ids) if data.history_scope!='none' else []
-        manifest=social.build_share_manifest(db,cfg,user['id'],course_data,files,data.history_scope,pair_payloads)
-        sid=uid('share_')
+            files = (await remote('file.list',user,{'course':data.course,'q':'','folder':None},request)) if domain else file_rows(db,user['id'],data.course)
+            if data.history_scope=='selected':
+                pair_ids=list(dict.fromkeys(data.selected_pair_ids))
+                if not pair_ids: raise HTTPException(422,'请选择要共享的对话')
+                for pid in pair_ids:
+                    selected=db.one('SELECT id,bound_node FROM cmui_pairs WHERE id=? AND owner=? AND course=?',
+                                  (pid,user['id'],data.course))
+                    if not selected:
+                        raise HTTPException(404,'选择的对话不存在或不可访问')
+                    if not selected['bound_node']:
+                        raise HTTPException(422,'选定知识点历史只支持已绑定对话；未绑定对话可选择全部历史')
+            else:
+                pair_ids=[]
+            pair_payloads=social.snapshot_pair_payload(db,user['id'],data.course,pair_ids) if data.history_scope!='none' else []
+            manifest=social.build_share_manifest(db,cfg,user['id'],course_data,files,data.history_scope,pair_payloads)
+            manifest['request_hash']=digest
+            if domain:
+                manifest['knowledge_snapshot']=await remote('snapshot.knowledge.export',user,{'course':data.course},request)
+            class_key=classification_key(data.course,user['id'])
+            manifest['classification']=db.one('SELECT * FROM cmui_classifications WHERE course=?',(class_key,))
+            manifest['classification_evidence']=classification_state.evidence(db,class_key)
+            sid=uid('share_')
+            db.execute('INSERT INTO cmui_shares(id,sender,course,snapshot_at,source_course_version,history_scope,selected_pair_ids,manifest_json,status,requires_student_verification,request_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                (sid,user['id'],data.course,now(),str(course_data.get('updated_at','') or ''),data.history_scope,
+                 json.dumps(pair_ids,ensure_ascii=False),json.dumps(manifest,ensure_ascii=False),'preparing',
+                 1 if manifest['requires_student_verification'] else 0,data.request_id,now()))
         try:
-            copied=social.copy_share_files(db,cfg,sid,[dict(f,course=data.course) for f in files])
-        except OSError:
-            raise HTTPException(503,'文件快照准备失败，本次共享未完成；不会假装“完整可加入”') from None
-        db.execute('INSERT INTO cmui_shares(id,sender,course,snapshot_at,source_course_version,history_scope,selected_pair_ids,manifest_json,status,requires_student_verification,request_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-            (sid,user['id'],data.course,now(),str(course_data.get('updated_at','') or ''),data.history_scope,
-             json.dumps(pair_ids,ensure_ascii=False),json.dumps(manifest,ensure_ascii=False),'ready',
-             1 if manifest['requires_student_verification'] else 0,data.request_id,now()))
-        for rid in recipients:
-            db.execute('INSERT OR IGNORE INTO cmui_share_recipients(share,recipient,status) VALUES (?,?,\'notified\')',(sid,rid))
-            db.execute('INSERT OR IGNORE INTO cmui_notifications(id,owner,actor,kind,ref,course,text,created_at) VALUES (?,?,?,?,?,?,?,?)',
-                (uid('notice_'),rid,user['id'],'course_share',sid,data.course,
-                 f'{user["name"]} 向你共享课程「{course_data.get("name","")}」（{len(files)} 个文件' + (f'，含历史：{data.history_scope}' if data.history_scope!='none' else '，不含历史') + '）',now()))
+            if domain:
+                archive=Path(cfg.data_dir)/'shares'/sid
+                archive.mkdir(parents=True,exist_ok=True)
+                for f in manifest['files']:
+                    archived=db.one('SELECT * FROM cmui_share_files WHERE share=? AND file_id=?',(sid,f['id']))
+                    if archived:
+                        archived_path=Path(cfg.data_dir)/archived['archived_storage_key']
+                        saved_bytes=await asyncio.to_thread(archived_path.read_bytes)
+                        saved_index=await asyncio.to_thread(Path(str(archived_path)+'.index.json').read_bytes)
+                        if (hashlib.sha256(saved_bytes).hexdigest()!=f['sha256'] or
+                                hashlib.sha256(saved_index).hexdigest()!=f.get('index_sha256')):
+                            raise ValueError('Frozen snapshot integrity failure')
+                        continue
+                    frozen=await remote('snapshot.export',user,{'course':data.course,'version_id':f['version_id']},request)
+                    if hashlib.sha256(frozen['content']).hexdigest()!=f['sha256']:
+                        raise ValueError('Snapshot source changed')
+                    index=json.dumps(frozen['index'],ensure_ascii=False).encode()
+                    f['index_sha256']=hashlib.sha256(index).hexdigest()
+                    key=f"shares/{sid}/{f['id']}"
+                    await asyncio.to_thread((Path(cfg.data_dir)/key).write_bytes,frozen['content'])
+                    await asyncio.to_thread((Path(cfg.data_dir)/(key+'.index.json')).write_bytes,index)
+                    with db.connect(True) as connection:
+                        connection.execute('INSERT INTO cmui_share_files VALUES(?,?,?,?,?,?,?)',
+                            (sid,f['id'],f['name'],f['size'],f['mime'],f['sha256'],key))
+                        connection.execute('UPDATE cmui_shares SET manifest_json=? WHERE id=?',
+                            (json.dumps(manifest,ensure_ascii=False),sid))
+                copied=len(manifest['files'])
+            else:
+                copied=social.copy_share_files(db,cfg,sid,[dict(f,course=data.course) for f in files])
+            if copied!=len(files): raise ValueError('Incomplete snapshot')
+        except (OSError,ValueError,HTTPException):
+            db.execute("UPDATE cmui_shares SET status='failed' WHERE id=?",(sid,))
+            raise HTTPException(503,'文件快照准备失败，本次共享未完成；可用原发送请求重试') from None
+        with db.connect(True) as connection:
+            connection.execute("UPDATE cmui_shares SET status='ready',manifest_json=? WHERE id=?",(json.dumps(manifest,ensure_ascii=False),sid))
+            for rid in recipients:
+                connection.execute('INSERT OR IGNORE INTO cmui_share_recipients(share,recipient,status) VALUES (?,?,\'notified\')',(sid,rid))
+                connection.execute('INSERT OR IGNORE INTO cmui_notifications(id,owner,actor,kind,ref,course,text,created_at) VALUES (?,?,?,?,?,?,?,?)',
+                    (uid('notice_'),rid,user['id'],'course_share',sid,data.course,
+                     f'{user["name"]} 向你共享课程「{course_data.get("name","")}」（{len(files)} 个文件' + (f'，含历史：{data.history_scope}' if data.history_scope!='none' else '，不含历史') + '）',now()))
         return {'id':sid,'status':'ready','files_copied':copied}
 
     @r.get('/shares')
-    async def share_list(user:User,q:str=Query(default='received',pattern='^(received|sent)$')):
+    async def share_list(user:User,q:str=Query(default='received',pattern='^(received|sent)$'),limit:int=Query(100,ge=1,le=200),offset:int=Query(0,ge=0)):
         if q=='sent':
-            rows=db.all('SELECT * FROM cmui_shares WHERE sender=? ORDER BY created_at DESC LIMIT 100',(user['id'],))
+            rows=db.all('SELECT * FROM cmui_shares WHERE sender=? ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?',(user['id'],limit,offset))
         else:
-            rows=db.all('SELECT s.*,r.status AS recipient_status,r.joined_course_id,r.joined_at FROM cmui_shares s JOIN cmui_share_recipients r ON r.share=s.id WHERE r.recipient=? ORDER BY s.created_at DESC LIMIT 100',(user['id'],))
+            rows=db.all('SELECT s.*,r.status AS recipient_status,r.joined_course_id,r.joined_at FROM cmui_shares s JOIN cmui_share_recipients r ON r.share=s.id WHERE r.recipient=? ORDER BY s.created_at DESC,s.id DESC LIMIT ? OFFSET ?',(user['id'],limit,offset))
         out=[]
         for row in rows:
             manifest=json.loads(row['manifest_json'])
@@ -1400,34 +1606,78 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 'description':course_meta.get('description') or '',
                 'requires_student_verification':row['requires_student_verification']},request)
             joined_course_id=joined['id']
+            db.execute("INSERT INTO cmui_share_imports(share,recipient,course,status,updated_at) VALUES(?,?,?,'IMPORTING',?) ON CONFLICT(share,recipient) DO UPDATE SET status='IMPORTING',updated_at=excluded.updated_at",
+                (share_id,user['id'],joined_course_id,now()))
+            mapping={}
+            try:
+                for f in manifest['files']:
+                    archived=db.one('SELECT * FROM cmui_share_files WHERE share=? AND file_id=?',(share_id,f['id']))
+                    if not archived: raise ValueError('Snapshot missing')
+                    path=Path(cfg.data_dir)/archived['archived_storage_key']
+                    content=await asyncio.to_thread(path.read_bytes)
+                    index_bytes=await asyncio.to_thread(Path(str(path)+'.index.json').read_bytes)
+                    if hashlib.sha256(content).hexdigest()!=f['sha256'] or hashlib.sha256(index_bytes).hexdigest()!=f['index_sha256']:
+                        raise ValueError('Snapshot integrity failure')
+                    imported=await remote('snapshot.import',user,{'course':joined_course_id,'content':content,'index':json.loads(index_bytes)},request)
+                    mapping[f['id']]=imported
+                    mapping[f['version_id']]={'version_id':imported['version_id']}
+                    db.execute('UPDATE cmui_share_imports SET mapping_json=?,updated_at=? WHERE share=? AND recipient=?',
+                        (json.dumps(mapping),now(),share_id,user['id']))
+                if manifest.get('knowledge_snapshot'):
+                    knowledge=await remote('snapshot.knowledge.import',user,{'course':joined_course_id,
+                        'share_id':share_id,'snapshot':manifest['knowledge_snapshot'],'mapping':mapping},request)
+                    mapping['__nodes__']=knowledge['nodes']
+                    mapping['__knowledge_status__']={'tree_status':knowledge['tree_status'],
+                        'unavailable_evidence':knowledge['unavailable_evidence']}
+                await asyncio.to_thread(social.import_share_history,db,row,user['id'],joined_course_id,mapping=mapping)
+                classification_state.import_snapshot(db,classification_key(joined_course_id,user['id']),manifest,mapping,share_id)
+                db.execute('UPDATE cmui_share_imports SET mapping_json=?,updated_at=? WHERE share=? AND recipient=?',
+                    (json.dumps(mapping),now(),share_id,user['id']))
+            except (OSError,ValueError,HTTPException):
+                db.execute("UPDATE cmui_share_imports SET status='FAILED_RETRYABLE',updated_at=? WHERE share=? AND recipient=?",(now(),share_id,user['id']))
+                raise HTTPException(503,'共享导入尚未完成，可重试；未标记为已加入') from None
+            db.execute("UPDATE cmui_share_imports SET status='READY',updated_at=? WHERE share=? AND recipient=?",(now(),share_id,user['id']))
         else:
-            joined_course_id=social.join_share(db,cfg,row,user['id'])['joined_course_id']
+            try:
+                joined_course_id=(await asyncio.to_thread(social.join_share,db,cfg,row,user['id']))['joined_course_id']
+            except (OSError,ValueError,sqlite3.Error):
+                raise HTTPException(503,'共享导入尚未完成，可重试；未标记为已加入') from None
         social.record_join(db,row,user['id'],joined_course_id)
-        social.import_share_history(db,row,user['id'],joined_course_id)
         return {'joined_course_id':joined_course_id,'reused':False}
 
     # =============================================================== exercises
 
-    def pick_exercise_node(user,course_id,knowledge):
-        """做一题 target selection: bound node first, else the earliest
-        NOT_STARTED/LEARNING atomic node in tree order, else review of the
-        first node. Never invents nodes."""
-        pair_row=db.one('SELECT bound_node FROM cmui_pairs WHERE owner=? AND course=? AND bound_node IS NOT NULL ORDER BY updated_at DESC LIMIT 1',(user['id'],course_id))
-        if pair_row: return pair_row['bound_node'],'当前绑定知识点'
-        nodes=knowledge if isinstance(knowledge,list) else []
+    def flatten_nodes(knowledge):
+        if isinstance(knowledge,dict):
+            knowledge=knowledge.get('nodes',knowledge.get('children',[]))
+        nodes=[]
+        for node in knowledge if isinstance(knowledge,list) else []:
+            if not isinstance(node,dict): continue
+            if node.get('id'): nodes.append(node)
+            nodes.extend(flatten_nodes(node.get('children',[])))
+        return nodes
+
+    def pick_exercise_node(pair,knowledge,explicit_node=None):
+        nodes=flatten_nodes(knowledge)
+        target=pair.get('bound_node') or explicit_node
+        if target:
+            node=next((n for n in nodes if n.get('id')==target),None)
+            if node is None: raise HTTPException(404,'知识点不存在')
+            return node
         for n in nodes:
             if n.get('kind')=='ATOMIC' and n.get('progress') in ('NOT_STARTED','LEARNING'):
-                return n['id'],n.get('title','')
+                return n
         for n in nodes:
             if n.get('kind')=='ATOMIC':
-                return n['id'],'复习：'+n.get('title','')
-        return None,''
+                return dict(n,review=True)
+        raise HTTPException(409,'请先准备课程知识树或选择有效知识点')
 
     async def generate_exercise_run(run_id,user,course_data,pair,node,node_title,sources):
-        visible=''; full=''; usages=[]; marker='【标准答案】'; marker_seen=False
+        full=''; usages=[]; marker='【标准答案】'
         try:
             heartbeat(run_id)
-            async for item in model.generate_exercise(course_data,node,{k:user[k] for k in ['language','timezone','bio']},sources,target_label=node_title):
+            upstream=model.generate_exercise(course_data,node,{k:user[k] for k in ['language','timezone','bio']},sources,target_label=node_title)
+            async for item in monitored_stream(upstream,is_terminal=lambda: db.one('SELECT status FROM cmui_runs WHERE id=?',(run_id,))['status'] in TERMINAL,heartbeat=lambda: heartbeat(run_id)):
                 state=db.one('SELECT status FROM cmui_runs WHERE id=?',(run_id,))
                 if state and state['status'] in TERMINAL: raise asyncio.CancelledError()
                 kind=item['kind']
@@ -1436,31 +1686,24 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                     event(run_id,'status',item)
                 elif kind=='delta':
                     full+=item['text']
-                    if not marker_seen:
-                        if marker in full:
-                            before,after=full.split(marker,1)
-                            full=before+marker+after
-                            tail=item['text']
-                            cut=tail.find(marker)
-                            piece=tail[:cut] if cut>=0 else tail
-                            marker_seen=True
-                            if piece:
-                                visible+=piece
-                                db.execute('UPDATE cmui_runs SET partial_text=?,updated_at=? WHERE id=?',(visible,now(),run_id))
-                                event(run_id,'delta',{'text':piece})
-                            continue
-                        visible+=item['text']
-                        db.execute('UPDATE cmui_runs SET partial_text=?,updated_at=? WHERE id=?',(visible,now(),run_id))
-                        event(run_id,'delta',{'text':item['text']})
+                    # The provider's output includes a private answer. Hold it
+                    # until the complete response validates; a missing, split,
+                    # duplicated or truncated delimiter must fail closed.
+                    if len(full)>200000: raise ProviderError('EXERCISE_TOO_LARGE')
                 elif kind=='usage':
                     usages.append(item)
                     db.execute('UPDATE cmui_runs SET usage=? WHERE id=?',(json.dumps(usages),run_id))
                 elif kind=='complete':
+                    # Some adapters deliver only a prefix through deltas and
+                    # the full private response in their completion event.
+                    if not item['text'].startswith(full): raise ProviderError('INCONSISTENT_EXERCISE')
                     full=item['text']
-            if not visible.strip(): raise ProviderError('EMPTY_EXERCISE')
-            question_text=full.split(marker,1)[0].strip() if marker in full else full.strip()
-            answer_text=full.split(marker,1)[1].strip() if marker in full else ''
+                    if len(full)>200000: raise ProviderError('EXERCISE_TOO_LARGE')
+            if full.count(marker)!=1: raise ProviderError('INVALID_EXERCISE_BOUNDARY')
+            question_text,answer_text=(part.strip() for part in full.split(marker,1))
+            if not question_text or not answer_text: raise ProviderError('EMPTY_EXERCISE')
             steps=answer_steps_parse(answer_text)
+            if not steps: raise ProviderError('INVALID_EXERCISE_ANSWER')
             exercise_id=uid('exercise_')
             with db.connect(True) as c:
                 claimed=c.execute("UPDATE cmui_runs SET status='completed',usage=?,updated_at=? WHERE id=? AND status IN ('queued','planning','generating')",(json.dumps(usages),now(),run_id)).rowcount
@@ -1476,6 +1719,9 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 c.execute('INSERT INTO cmui_messages(id,conversation,role,text,citations,run,created_at,provenance,exercise) VALUES (?,?,?,?,?,?,?,?,?)',
                     (message_id,conv_id,'assistant',question_text,'[]',run_id,now(),'',exercise_id))
                 c.execute('UPDATE cmui_pairs SET updated_at=? WHERE id=?',(now(),pair['id']))
+                c.execute('UPDATE cmui_runs SET partial_text=? WHERE id=?',(question_text,run_id))
+                c.execute('INSERT INTO cmui_run_events(run,type,data) VALUES (?,?,?)',
+                    (run_id,'delta',json.dumps({'text':question_text},ensure_ascii=False)))
             event(run_id,'done',{'message_id':message_id,'exercise_id':exercise_id,'step_count':len(steps),'provider_mode':cfg.provider_mode})
         except asyncio.CancelledError:
             db.execute("UPDATE cmui_runs SET status='cancelled',error=CASE WHEN status IN ('queued','planning','generating') THEN 'CANCELLED' ELSE error END,updated_at=? WHERE id=? AND status NOT IN ('completed','failed')",(now(),run_id))
@@ -1491,19 +1737,27 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         course_data=await course(user,cid,request)
         course_gate(course_data,user)
         old=db.one('SELECT * FROM cmui_runs WHERE owner=? AND request_id=?',(user['id'],data.request_id))
-        if old: return {'id':old['id'],'status':old['status'],'reused':True}
+        digest=hashlib.sha256(json.dumps({'course':cid,**data.model_dump(exclude={'request_id'})},sort_keys=True).encode()).hexdigest()
+        if old:
+            receipt=db.one('SELECT payload_hash FROM cmui_run_inputs WHERE run=?',(old['id'],))
+            if not receipt or receipt['payload_hash']!=digest: raise HTTPException(409,'重复请求 ID 的内容不同')
+            return {'id':old['id'],'status':old['status'],'reused':True}
         rate(user,'model-runs',8)
         if cfg.provider_mode=='disabled' and provider is None: raise HTTPException(503,'模型尚未配置')
         if cfg.provider_mode=='qwen' and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
-        pair=pair_for_course_open(user,cid)
+        if data.pair_id:
+            pair=db.one('SELECT * FROM cmui_pairs WHERE id=? AND owner=? AND course=?',(data.pair_id,user['id'],cid))
+            if pair is None: raise HTTPException(404,'双栏会话不存在')
+        else:
+            candidates=db.all('SELECT * FROM cmui_pairs WHERE owner=? AND course=? LIMIT 2',(user['id'],cid))
+            if len(candidates)>1: raise HTTPException(409,'请指定当前双栏会话')
+            pair=candidates[0] if candidates else None
         if pair is None: raise HTTPException(409,'请先在该课程建立对话')
-        if data.node and not domain:
-            if not db.one('SELECT id FROM cmui_nodes WHERE id=? AND course=?',(data.node,cid)): raise HTTPException(404,'知识点不存在')
         knowledge=(await remote('knowledge.tree',user,{'course':cid},request)) if domain else db.all("SELECT n.*,COALESCE(l.progress,'NOT_STARTED') progress FROM cmui_nodes n LEFT JOIN cmui_learning l ON l.node=n.id AND l.owner=? WHERE n.course=? ORDER BY n.position",(user['id'],cid))
-        node_id,node_title=pick_exercise_node(user,cid,knowledge)
-        if data.node:
-            node_id=data.node; node_title='指定知识点'
-        node={'id':node_id,'title':node_title} if node_id else None
+        if data.node and not any(n.get('id')==data.node for n in flatten_nodes(knowledge)):
+            raise HTTPException(404,'知识点不存在')
+        node=pick_exercise_node(pair,knowledge,data.node)
+        node_title=('复习：' if node.get('review') else '')+node['title']
         sources=(await remote('context.retrieve',user,{'course':cid,'query':node_title or '课程知识点','history':[]},request)) if domain else context_for(db,user['id'],cid,node_title or '课程知识点',[])
         rid=uid('run_')
         conv_id=pair['problem_conversation']
@@ -1514,6 +1768,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         with db.connect(True) as c:
             c.execute('INSERT INTO cmui_runs(id,owner,conversation,request_id,status,user_text,teaching_mode,lease_worker,lease_heartbeat,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
                 (rid,user['id'],conv_id,data.request_id,'queued','做一题','normal',worker_id,str(time.time()),now(),now()))
+            c.execute('INSERT INTO cmui_run_inputs VALUES (?,?,?)',(rid,digest,'[]'))
         event(rid,'status',{'status':'queued','label':'正在思考中'})
         task=asyncio.create_task(generate_exercise_run(rid,user,course_data,pair,node,node_title,sources))
         jobs[rid]=task
@@ -1547,17 +1802,57 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         if not row: raise HTTPException(404,'题目不存在')
         course_data=await course(user,row['course'],request)
         course_gate(course_data,user)
-        db.execute('INSERT OR IGNORE INTO cmui_answer_reveals(owner,exercise,revealed_at) VALUES (?,?,?)',(user['id'],exercise_id,now()))
+        try:
+            payload=await request.json() if await request.body() else {}
+            if not isinstance(payload,dict): raise ValueError('Object body required')
+            request_id=ExplanationCreate.model_validate(payload).request_id if payload else 'legacy-reveal-'+exercise_id
+        except (ValueError,TypeError):
+            raise HTTPException(422,'显示答案请求无效')
+        digest=hashlib.sha256(json.dumps(['reveal',exercise_id,row['generation_version'],row['answer_steps']]).encode()).hexdigest()
         steps=json.loads(row['answer_steps'])
-        return {'id':row['id'],'revealed':True,'steps':steps,'verification_status':row['verification_status']}
+        response={'id':row['id'],'revealed':True,'steps':steps,'verification_status':row['verification_status']}
+        with db.connect(True) as c:
+            replay=action_receipt(c,user['id'],request_id,digest)
+            if replay is not None: return replay
+            if c.execute('SELECT 1 FROM cmui_runs WHERE owner=? AND request_id=?',(user['id'],request_id)).fetchone():
+                raise HTTPException(409,'重复请求 ID 的内容不同')
+            c.execute('INSERT OR IGNORE INTO cmui_answer_reveals(owner,exercise,revealed_at) VALUES (?,?,?)',(user['id'],exercise_id,now()))
+            action_receipt(c,user['id'],request_id,digest,response)
+        return response
 
     # =========================================================== explanations
+
+    def action_receipt(connection,owner,request_id,digest,response=None):
+        key='action-receipt:'+hashlib.sha256(json.dumps([owner,request_id]).encode()).hexdigest()
+        old=connection.execute('SELECT value FROM cmui_meta WHERE key=?',(key,)).fetchone()
+        if old:
+            receipt=json.loads(old['value'])
+            if receipt['digest']!=digest: raise HTTPException(409,'重复请求 ID 的内容不同')
+            return receipt['response']
+        if response is not None:
+            connection.execute('INSERT INTO cmui_meta(key,value) VALUES(?,?)',(key,json.dumps({'digest':digest,'response':response},ensure_ascii=False)))
+        return None
+
+    def explanation_replay(user,request_id,digest,connection=None):
+        if connection is None:
+            with db.connect() as c: return explanation_replay(user,request_id,digest,c)
+        replay=action_receipt(connection,user['id'],request_id,digest)
+        if replay is not None: return {**replay,'reused':True}
+        old=connection.execute('SELECT * FROM cmui_runs WHERE owner=? AND request_id=?',(user['id'],request_id)).fetchone()
+        if not old: return None
+        receipt=connection.execute('SELECT payload_hash FROM cmui_run_inputs WHERE run=?',(old['id'],)).fetchone()
+        if not receipt or receipt['payload_hash']!=digest:
+            raise HTTPException(409,'重复请求 ID 的内容不同')
+        saved=connection.execute('SELECT id FROM cmui_step_explanations WHERE owner=? AND conversation=? ORDER BY created_at DESC,id DESC',(user['id'],old['conversation'])).fetchone()
+        if not saved: raise HTTPException(409,'详解回执不可恢复')
+        return {'id':saved['id'],'run':old['id'],'status':old['status'],'reused':True}
 
     async def generate_explanation_run(run_id,user,explanation,row,question_text,answer_context,step_text,course_data,sources):
         output=''; usages=[]
         try:
             heartbeat(run_id)
-            async for item in model.generate_explanation(course_data,question_text,answer_context,step_text,{k:user[k] for k in ['language','timezone','bio']},sources):
+            upstream=model.generate_explanation(course_data,question_text,answer_context,step_text,{k:user[k] for k in ['language','timezone','bio']},sources)
+            async for item in monitored_stream(upstream,is_terminal=lambda: db.one('SELECT status FROM cmui_runs WHERE id=?',(run_id,))['status'] in TERMINAL,heartbeat=lambda: heartbeat(run_id)):
                 state=db.one('SELECT status FROM cmui_runs WHERE id=?',(run_id,))
                 if state and state['status'] in TERMINAL: raise asyncio.CancelledError()
                 kind=item['kind']
@@ -1575,7 +1870,8 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             with db.connect(True) as c:
                 claimed=c.execute("UPDATE cmui_runs SET status='completed',usage=?,updated_at=? WHERE id=? AND status IN ('queued','planning','generating')",(json.dumps(usages),now(),run_id)).rowcount
                 if claimed!=1: raise asyncio.CancelledError()
-                c.execute("UPDATE cmui_step_explanations SET text=?,status='completed',updated_at=? WHERE id=?",(output,now(),explanation))
+                projected=c.execute("UPDATE cmui_step_explanations SET text=?,status='completed',updated_at=? WHERE id=? AND run=? AND status='generating'",(output,now(),explanation,run_id)).rowcount
+                if projected!=1: raise asyncio.CancelledError()
                 c.execute('INSERT INTO cmui_explanation_messages(id,explanation,role,text,run,created_at) VALUES (?,?,?,?,?,?)',(uid('message_'),explanation,'assistant',output,run_id,now()))
             event(run_id,'done',{'explanation_id':explanation,'provider_mode':cfg.provider_mode})
         except asyncio.CancelledError:
@@ -1584,9 +1880,13 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         except Exception as error:
             code=str(error) if isinstance(error,ProviderError) else 'GENERATION_FAILED'
             db.execute("UPDATE cmui_runs SET status='failed',error=?,usage=?,updated_at=? WHERE id=? AND status NOT IN ('completed','cancelled')",(code,json.dumps(usages),now(),run_id))
-            db.execute("UPDATE cmui_step_explanations SET status='failed',updated_at=? WHERE id=?",(now(),explanation))
+            db.execute("UPDATE cmui_step_explanations SET status='failed',updated_at=? WHERE id=? AND run=? AND status='generating'",(now(),explanation,run_id))
             event(run_id,'error',{'code':code,'message':'详解生成未完成；不会自动重试或重复扣费。'})
-        finally: jobs.pop(run_id,None)
+        finally:
+            # The run is authoritative even when another worker cancelled it.
+            db.execute("UPDATE cmui_step_explanations SET status=(SELECT status FROM cmui_runs WHERE id=?),updated_at=? WHERE id=? AND run=? AND status='generating' AND EXISTS(SELECT 1 FROM cmui_runs WHERE id=? AND status IN ('completed','cancelled','failed'))",
+                       (run_id,now(),explanation,run_id,run_id))
+            jobs.pop(run_id,None)
 
     @r.post('/exercises/{exercise_id}/steps/{step_id}/explanation',status_code=202)
     async def explanation_create(exercise_id:str,step_id:str,data:ExplanationCreate,user:User,request:Request):
@@ -1594,38 +1894,61 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         if not row: raise HTTPException(404,'题目不存在')
         course_data=await course(user,row['course'],request)
         course_gate(course_data,user)
+        if not db.one('SELECT revealed_at FROM cmui_answer_reveals WHERE owner=? AND exercise=?',(user['id'],exercise_id)):
+            raise HTTPException(403,'请先显示答案，再查看步骤详解')
         steps=json.loads(row['answer_steps'])
         step=next((s for s in steps if s['step_id']==step_id),None)
         if not step: raise HTTPException(404,'该步骤不存在')
-        existing=db.one("SELECT * FROM cmui_step_explanations WHERE owner=? AND exercise=? AND step_id=? AND answer_version=?",(user['id'],exercise_id,step_id,row['generation_version']))
-        if existing and existing['status']=='completed' and existing['text']:
-            return {'id':existing['id'],'status':'completed','reused':True}
-        old=db.one('SELECT * FROM cmui_runs WHERE owner=? AND request_id=?',(user['id'],data.request_id))
-        if old: return {'id':old['id'],'status':old['status'],'reused':True}
+        digest=hashlib.sha256(json.dumps(['explanation',exercise_id,step_id,row['generation_version']]).encode()).hexdigest()
+        replay=explanation_replay(user,data.request_id,digest)
+        if replay: return replay
+        def existing_explanation(c):
+            return c.execute("SELECT * FROM cmui_step_explanations WHERE owner=? AND exercise=? AND step_id=? AND answer_version=? ORDER BY created_at DESC,id DESC",(user['id'],exercise_id,step_id,row['generation_version'])).fetchone()
+
+        def reuse_explanation(c,existing):
+            reusable=existing and ((existing['status']=='completed' and existing['text']) or (existing['status']=='generating' and existing['run']))
+            if not reusable: return None
+            response={'id':existing['id'],'run':existing['run'],'status':existing['status'],'reused':True}
+            action_receipt(c,user['id'],data.request_id,digest,response)
+            return response
+
+        with db.connect(True) as c:
+            replay=explanation_replay(user,data.request_id,digest,c)
+            if replay: return replay
+            replay=reuse_explanation(c,existing_explanation(c))
+            if replay: return replay
         rate(user,'model-runs',8)
         if cfg.provider_mode=='disabled' and provider is None: raise HTTPException(503,'模型尚未配置')
         if cfg.provider_mode=='qwen' and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
-        if existing is None:
-            eid=uid('explanation_')
-            db.execute('INSERT INTO cmui_step_explanations(id,owner,exercise,step_id,answer_version,question,text,run,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,\'generating\',?,?)',
-                (eid,user['id'],exercise_id,step_id,row['generation_version'],step['title'],None,None,now(),now()))
-        else:
-            eid=existing['id']
-        conv_id=db.one('SELECT conversation FROM cmui_step_explanations WHERE id=?',(eid,))['conversation']
-        if not conv_id:
-            # A hidden conversation carries the explanation's run rows without
-            # ever appearing in the pair history list.
-            conv_id=uid('conv_')
-            db.execute('INSERT INTO cmui_conversations(id,owner,course,lane,title,created_at,updated_at,hidden) VALUES (?,?,?,?,?,?,?,1)',
-                (conv_id,user['id'],row['course'],'problem','详解：'+step['title'][:40],now(),now()))
-            db.execute('UPDATE cmui_step_explanations SET conversation=? WHERE id=?',(conv_id,eid))
         answer_context='\n\n'.join(s['text'] for s in steps)
         sources=(await remote('context.retrieve',user,{'course':row['course'],'query':step['text'][:400],'history':[]},request)) if domain else context_for(db,user['id'],row['course'],step['text'][:400],[])
         rid=uid('run_')
         with db.connect(True) as c:
+            # Retrieval yields control. Re-check the immutable request and the
+            # semantic explanation under one cross-worker write transaction.
+            replay=explanation_replay(user,data.request_id,digest,c)
+            if replay: return replay
+            existing=existing_explanation(c)
+            replay=reuse_explanation(c,existing)
+            if replay: return replay
+            if existing is None:
+                eid=uid('explanation_')
+                c.execute('INSERT INTO cmui_step_explanations(id,owner,exercise,step_id,answer_version,question,text,run,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,\'generating\',?,?)',
+                    (eid,user['id'],exercise_id,step_id,row['generation_version'],step['title'],None,None,now(),now()))
+                conv_id=None
+            else:
+                eid=existing['id']
+                conv_id=existing['conversation']
+            if not conv_id:
+                conv_id=uid('conv_')
+                c.execute('INSERT INTO cmui_conversations(id,owner,course,lane,title,created_at,updated_at,hidden) VALUES (?,?,?,?,?,?,?,1)',
+                    (conv_id,user['id'],row['course'],'problem','详解：'+step['title'][:40],now(),now()))
+                c.execute('UPDATE cmui_step_explanations SET conversation=? WHERE id=?',(conv_id,eid))
             c.execute('INSERT INTO cmui_runs(id,owner,conversation,request_id,status,user_text,teaching_mode,lease_worker,lease_heartbeat,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
                 (rid,user['id'],conv_id,data.request_id,'queued',step['title'],'normal',worker_id,str(time.time()),now(),now()))
             c.execute('UPDATE cmui_step_explanations SET run=?,status=\'generating\',updated_at=? WHERE id=?',(rid,now(),eid))
+            c.execute('INSERT INTO cmui_run_inputs VALUES(?,?,?)',(rid,digest,'[]'))
+            action_receipt(c,user['id'],data.request_id,digest,{'id':eid,'run':rid,'status':'generating'})
         event(rid,'status',{'status':'queued','label':'正在思考中'})
         task=asyncio.create_task(generate_explanation_run(rid,user,eid,row,row['question'],answer_context,step['text'],course_data,sources))
         jobs[rid]=task
@@ -1646,23 +1969,34 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
     @r.post('/explanations/{explanation_id}/messages',status_code=202)
     async def explanation_followup(explanation_id:str,data:ExplanationMessage,user:User,request:Request):
         row=db.one('SELECT * FROM cmui_step_explanations WHERE id=? AND owner=?',(explanation_id,user['id']))
-        if not row or row['status']!='completed': raise HTTPException(404,'详解尚未完成，不能追问')
+        if not row: raise HTTPException(404,'详解不存在')
         exercise=db.one('SELECT * FROM cmui_exercises WHERE id=?',(row['exercise'],))
         course_data=await course(user,exercise['course'],request)
         course_gate(course_data,user)
+        digest=hashlib.sha256(json.dumps(['explanation-followup',explanation_id,data.text],ensure_ascii=False).encode()).hexdigest()
+        replay=explanation_replay(user,data.request_id,digest)
+        if replay: return replay
+        if row['status']!='completed': raise HTTPException(409,'详解尚未完成，不能追问')
         rate(user,'model-runs',8)
         if cfg.provider_mode=='disabled' and provider is None: raise HTTPException(503,'模型尚未配置')
         if cfg.provider_mode=='qwen' and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
-        db.execute('INSERT INTO cmui_explanation_messages(id,explanation,role,text,run,created_at) VALUES (?,?,?,?,?,?)',(uid('message_'),explanation_id,'user',data.text,None,now()))
         prior='\n\n'.join(m['text'] for m in db.all('SELECT text FROM cmui_explanation_messages WHERE explanation=? ORDER BY created_at,rowid',(explanation_id,)))
+        answer_context='\n\n'.join(s['text'] for s in json.loads(exercise['answer_steps']))+'\n\n此前详解与追问：\n'+prior
         sources=(await remote('context.retrieve',user,{'course':exercise['course'],'query':data.text,'history':[]},request)) if domain else context_for(db,user['id'],exercise['course'],data.text,[])
         conv_id=row['conversation']
         rid=uid('run_')
         with db.connect(True) as c:
+            replay=explanation_replay(user,data.request_id,digest)
+            if replay: return replay
+            claimed=c.execute("UPDATE cmui_step_explanations SET run=?,status='generating',updated_at=? WHERE id=? AND status='completed'",(rid,now(),explanation_id)).rowcount
+            if claimed!=1: raise HTTPException(409,'详解已有生成任务')
             c.execute('INSERT INTO cmui_runs(id,owner,conversation,request_id,status,user_text,teaching_mode,lease_worker,lease_heartbeat,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
                 (rid,user['id'],conv_id,data.request_id,'queued',data.text,'normal',worker_id,str(time.time()),now(),now()))
+            c.execute('INSERT INTO cmui_run_inputs VALUES(?,?,?)',(rid,digest,'[]'))
+            c.execute('INSERT INTO cmui_explanation_messages(id,explanation,role,text,run,created_at) VALUES (?,?,?,?,?,?)',
+                      (uid('message_'),explanation_id,'user',data.text,rid,now()))
         event(rid,'status',{'status':'queued','label':'正在思考中'})
-        task=asyncio.create_task(generate_explanation_run(rid,user,explanation_id,row,exercise['question'],prior,data.text,course_data,sources))
+        task=asyncio.create_task(generate_explanation_run(rid,user,explanation_id,row,exercise['question'],answer_context,data.text,course_data,sources))
         jobs[rid]=task
         return {'run':rid,'status':'generating'}
 
@@ -1671,6 +2005,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         row=db.one('SELECT * FROM cmui_step_explanations WHERE id=? AND owner=?',(explanation_id,user['id']))
         if not row or not row['run']: raise HTTPException(404)
         db.execute("UPDATE cmui_runs SET status='cancelled',error='CANCELLED',updated_at=? WHERE id=? AND status IN ('queued','planning','generating')",(now(),row['run']))
+        db.execute("UPDATE cmui_step_explanations SET status='cancelled',updated_at=? WHERE id=? AND status='generating'",(now(),explanation_id))
         task=jobs.get(row['run'])
         if task: task.cancel()
         return {'status':'cancelled'}

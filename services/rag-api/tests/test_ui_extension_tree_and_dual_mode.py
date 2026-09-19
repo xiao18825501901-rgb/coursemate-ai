@@ -91,6 +91,8 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
         ui_provider=provider,
     )
     with TestClient(application) as test_client:
+        from campus_actor_fixture import authorize_synthetic_campus_users
+        authorize_synthetic_campus_users(test_client, 'user-a')
         test_client.app.state.ui_provider = provider  # type: ignore[attr-defined]
         yield test_client
 

@@ -170,6 +170,17 @@ def mount_ui_extension(
     # Exposed for tests and operational diagnostics; the adapter holds no secrets.
     host_app.state.ui_extension_adapter = adapter
     host_app.state.ui_extension_app = ui
+    from app.errors import ApiError
+    def authorize_content(course, subject, is_admin=False):
+        if is_admin or subject in settings.admin_user_id_set:
+            return
+        fields=set(course.keys())
+        required=('requires_student_verification' in fields and course['requires_student_verification']) or ('display_type' in fields and course['display_type']=='campus') or ('course_type' in fields and course['course_type']=='official')
+        if required:
+            verification=ui.state.db.one('SELECT verified FROM cmui_verification WHERE owner=?',(subject,))
+            if not verification or not verification['verified']:
+                raise ApiError(403,'STUDENT_VERIFICATION_REQUIRED','请先完成学生认证')
+    database.course_content_authorizer=authorize_content
     return ui
 
 

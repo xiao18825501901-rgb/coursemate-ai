@@ -92,6 +92,8 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
         ui_coverage_reviewer=DeterministicCoverageReviewer(),
     )
     with TestClient(application) as test_client:
+        from campus_actor_fixture import authorize_synthetic_campus_users
+        authorize_synthetic_campus_users(test_client, 'user-a', 'user-b')
         test_client.app.state.ui_provider = provider  # type: ignore[attr-defined]
         test_client.app.state.tree_ids = seed_tree(test_client)  # type: ignore[attr-defined]
         yield test_client

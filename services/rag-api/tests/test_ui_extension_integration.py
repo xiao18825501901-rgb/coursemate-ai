@@ -71,6 +71,8 @@ def make_client(tmp_path: Path) -> Iterator[TestClient]:
         auth_verifier=FakeAuthVerifier(),
     )
     with TestClient(application) as client:
+        from campus_actor_fixture import authorize_synthetic_campus_users
+        authorize_synthetic_campus_users(client, 'user-a', 'user-b')
         yield client
 
 

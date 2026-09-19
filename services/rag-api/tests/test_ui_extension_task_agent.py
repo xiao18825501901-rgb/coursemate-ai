@@ -258,6 +258,8 @@ def client(tmp_path: Path, agent: tuple[str, _TaskStore], monkeypatch) -> Iterat
         auth_verifier=FakeAuthVerifier(),
     )
     with TestClient(application) as test_client:
+        from campus_actor_fixture import authorize_synthetic_campus_users
+        authorize_synthetic_campus_users(test_client, 'user-a')
         yield test_client
 
 

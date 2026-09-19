@@ -89,6 +89,8 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
         ui_coverage_reviewer=DeterministicCoverageReviewer(),
     )
     with TestClient(application) as test_client:
+        from campus_actor_fixture import authorize_synthetic_campus_users
+        authorize_synthetic_campus_users(test_client, 'user-a', 'user-b')
         test_client.app.state.ui_provider = provider  # type: ignore[attr-defined]
         seed_course_and_node(test_client)
         yield test_client
@@ -412,6 +414,7 @@ def test_cancel_effective_during_provider_silence(client: TestClient) -> None:
         provider.calls.append({"lane": lane, "text": text})
         # Yield nothing; only an external cancel can stop this generator.
         await asyncio.Event().wait()
+        yield {"kind": "delta", "text": "unreachable: the gate is never released"}
 
     provider.generate = silent
     try:

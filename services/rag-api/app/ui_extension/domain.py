@@ -19,6 +19,7 @@ Authorisation rules that are deliberately preserved:
 from __future__ import annotations
 
 import base64
+import asyncio
 import hashlib
 import json
 import sqlite3
@@ -216,13 +217,14 @@ class V3DomainAdapter:
         custom = (row["custom_requirements"] or "").strip()
         return "\n".join(part for part in (goal, custom) if part)
 
-    def _course_row(self, course_id: str, subject: str, *, write: bool = False) -> sqlite3.Row:
+    def _course_row(self, course_id: str, subject: str, *, write: bool = False, content: bool = True) -> sqlite3.Row:
         row = require_course_access(
             self.database,
             course_id,
             owner_user_id=subject,
             is_admin=self._is_admin(subject),
             write=write,
+            content=content,
         )
         return row
 
@@ -230,7 +232,7 @@ class V3DomainAdapter:
         cached = _cache().courses.get(course_id)
         if cached is not None and not write:
             return cached
-        row = self._course_row(course_id, subject, write=write)
+        row = self._course_row(course_id, subject, write=write, content=write)
         dto = self._course_dto(row, requirements=self._requirements(course_id, subject))
         _cache().courses[course_id] = dto
         return dto
@@ -335,11 +337,20 @@ class V3DomainAdapter:
         course_id = "share-" + hashlib.sha256(
             f"{payload.get('share_id')}:{subject}".encode()
         ).hexdigest()[:20]
-        self.ingestion.create_course(
-            _course_create_model(course_id, name, description),
-            owner_user_id=subject,
-            is_admin=False,
-        )
+        with self.database.connect() as connection:
+            existing = connection.execute('SELECT owner_user_id FROM courses WHERE id=?', (course_id,)).fetchone()
+        if existing is None:
+            try:
+                self.ingestion.create_course(
+                    _course_create_model(course_id, name, description),
+                    owner_user_id=subject, is_admin=False)
+            except ApiError as error:
+                if error.code!='COURSE_EXISTS': raise
+                # Another worker can win the deterministic creation race.
+                # Re-authorize the winner instead of trusting a conflicting ID.
+                self._course_row(course_id,subject,write=True)
+        elif existing['owner_user_id'] != subject:
+            raise ApiError(404, 'COURSE_NOT_FOUND', 'Course not found.')
         with self.database.connect() as connection:
             connection.execute(
                 "UPDATE courses SET display_type='shared', "
@@ -484,6 +495,8 @@ class V3DomainAdapter:
     def _file_content(self, subject: str, payload: dict[str, Any]) -> Response:
         course_id = str(payload["course"])
         self._course_row(course_id, subject)
+        if str(payload['id']) not in {item['id'] for item in self._file_rows(course_id,subject)}:
+            raise ApiError(404,'DOCUMENT_NOT_FOUND','Document not found in this course.')
         version = current_document_version(self.database, str(payload["id"]), subject)
         path = original_path(self.database, version)
         if path is None:
@@ -512,9 +525,46 @@ class V3DomainAdapter:
             },
         )
 
+    def _snapshot_export(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Only the authenticated share service calls this internal operation."""
+        course_id = str(payload['course'])
+        self._course_row(course_id, subject)
+        allowed = {item['version_id']: item for item in self._file_rows(course_id, subject)}
+        version_id = str(payload['version_id'])
+        if version_id not in allowed:
+            raise ApiError(404, 'DOCUMENT_NOT_FOUND', 'Document not found.')
+        with self.database.connect() as connection:
+            version = dict(connection.execute('SELECT * FROM document_versions WHERE id=?', (version_id,)).fetchone())
+            document = connection.execute('SELECT status FROM documents WHERE id=?', (version['document_id'],)).fetchone()
+            chunks = [dict(row) for row in connection.execute(
+                'SELECT chunks.* FROM chunks JOIN chunk_source_versions v ON v.chunk_id=chunks.id WHERE v.document_version_id=? ORDER BY ordinal', (version_id,))]
+        path = original_path(self.database, version)
+        if path is None or document['status'] != 'ready':
+            raise ApiError(409, 'SNAPSHOT_SOURCE_NOT_READY', 'File is not ready for a complete snapshot.')
+        content = path.read_bytes()
+        if hashlib.sha256(content).hexdigest() != version['sha256']:
+            raise ApiError(409, 'SNAPSHOT_HASH_MISMATCH', 'Snapshot integrity check failed.')
+        return {'content': content, 'index': {key: version[key] for key in
+                ('document_id','id','filename','media_type','sha256','source_scope')}
+                | {'chunks': chunks, 'embedding_model': self.settings.rag_embedding_model}}
+
+    def _snapshot_import(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self._course_row(str(payload['course']), subject, write=True)
+        workspace = self._workspace_row(str(payload['course']), subject)
+        # Keep the source's two authorized corpora distinct. Equal bytes in
+        # course materials and personal notes are still distinct file entries.
+        scope=payload['index']['source_scope']
+        if scope not in {'OFFICIAL','OWNER_COURSE','WORKSPACE_PRIVATE'}:
+            raise ApiError(409,'INVALID_SNAPSHOT_SCOPE','Invalid snapshot source scope.')
+        destination=workspace['private_course_id'] if scope=='WORKSPACE_PRIVATE' else str(payload['course'])
+        return self.ingestion.import_snapshot(course_id=destination,
+            owner_user_id=subject, content=payload['content'], snapshot=payload['index'])
+
     def _file_text(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
         course_id = str(payload["course"])
         self._course_row(course_id, subject)
+        if str(payload['id']) not in {item['id'] for item in self._file_rows(course_id,subject)}:
+            raise ApiError(404,'DOCUMENT_NOT_FOUND','Document not found in this course.')
         document = document_for(self.database, str(payload["id"]), subject)
         with self.database.connect() as connection:
             rows = connection.execute(
@@ -534,6 +584,8 @@ class V3DomainAdapter:
     def _file_delete(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
         course_id = str(payload["course"])
         self._course_row(course_id, subject)
+        if str(payload['id']) not in {item['id'] for item in self._file_rows(course_id,subject)}:
+            raise ApiError(404,'DOCUMENT_NOT_FOUND','Document not found in this course.')
         document = document_for(self.database, str(payload["id"]), subject)
         if document["course_id"] == course_id:
             raise ApiError(
@@ -1275,7 +1327,7 @@ class V3DomainAdapter:
             self._course_row(str(payload["course"]), subject)
         if operation in course_operations:
             course_id = str(payload.get("course") or payload.get("id") or "")
-            if course_id and operation not in {"course.list", "course.create"}:
+            if course_id and operation not in {"course.list", "course.create", "course.get"}:
                 self._course_row(course_id, subject)
 
         if operation == "course.list":
@@ -1290,6 +1342,18 @@ class V3DomainAdapter:
             return self._delete_course(subject, payload)
         if operation == "course.create_shared":
             return self._create_shared_course(subject, payload)
+        if operation == 'snapshot.export':
+            return await asyncio.to_thread(self._snapshot_export,subject,payload)
+        if operation == 'snapshot.import':
+            return await asyncio.to_thread(self._snapshot_import,subject,payload)
+        if operation in {'snapshot.knowledge.export','snapshot.knowledge.import'}:
+            from app.learning import snapshot_transfer
+            self._course_row(str(payload['course']),subject,write=operation.endswith('import'))
+            workspace=self._workspace_row(str(payload['course']),subject)
+            if operation.endswith('export'):
+                return await asyncio.to_thread(snapshot_transfer.export_snapshot,self.learning,workspace['id'],subject)
+            return await asyncio.to_thread(snapshot_transfer.import_snapshot,self.learning,workspace['id'],subject,
+                payload['snapshot'],payload['mapping'],payload['share_id'])
         if operation == "file.list":
             query = str(payload.get("q") or "").strip().casefold()
             folder = payload.get("folder")
@@ -1350,9 +1414,10 @@ class V3DomainAdapter:
             with self.database.connect() as connection:
                 rows = connection.execute(
                     "SELECT DISTINCT owner_user_id AS uid FROM courses "
-                    "WHERE owner_user_id IS NOT NULL "
-                    "UNION SELECT DISTINCT owner_user_id FROM learning_workspaces "
-                    "UNION SELECT DISTINCT owner_user_id FROM conversations"
+                    "WHERE owner_user_id IS NOT NULL AND julianday(created_at)<=julianday(?) "
+                    "UNION SELECT DISTINCT owner_user_id FROM learning_workspaces WHERE julianday(created_at)<=julianday(?) "
+                    "UNION SELECT DISTINCT owner_user_id FROM conversations WHERE julianday(created_at)<=julianday(?)",
+                    (payload['cutoff'],payload['cutoff'],payload['cutoff'])
                 ).fetchall()
             return [row["uid"] for row in rows if row["uid"]]
         raise ApiError(

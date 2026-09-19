@@ -70,6 +70,7 @@ class TaskUpdate(Input):
 class ConversationCreate(Input):
     course: str
     lane: Literal['teach','problem']
+    pair_id: str|None=None
     title: str=Field(default='新对话',min_length=1,max_length=100)
 
 class Rename(Input):
@@ -126,7 +127,7 @@ class VerificationIssue(Input):
     count: int=Field(ge=1,le=100)
 
 class VerificationDisable(Input):
-    code: str=Field(pattern=r'^[0-9]{7}$')
+    code_id: str=Field(min_length=8,max_length=100)
 
 class ShareCreate(Input):
     course: str
@@ -136,6 +137,7 @@ class ShareCreate(Input):
     request_id: str=Field(min_length=8,max_length=100)
 
 class ExerciseCreate(Input):
+    pair_id: str|None=None
     node: str|None=None
     request_id: str=Field(min_length=8,max_length=100)
 

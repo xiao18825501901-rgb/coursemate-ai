@@ -569,6 +569,55 @@ class IngestionService:
             job=self.get_job(job_id, owner_user_id=owner_user_id, is_admin=is_admin),
         )
 
+    def import_snapshot(self, *, course_id: str, owner_user_id: str,
+                        content: bytes, snapshot: dict) -> dict:
+        """Import trusted, frozen server-side index without an embedding call.
+
+        Queueing retains the normal upload policy, storage layout, quotas and
+        version triggers. Content deduplication is also the crash/retry boundary.
+        This method is internal, never accepts index data from an HTTP caller.
+        """
+        if hashlib.sha256(content).hexdigest() != snapshot['sha256']:
+            raise ApiError(409, 'SNAPSHOT_HASH_MISMATCH', 'Snapshot integrity check failed.')
+        if snapshot['embedding_model'] != self.settings.rag_embedding_model:
+            raise ApiError(409, 'SNAPSHOT_INDEX_INCOMPATIBLE', 'Snapshot index requires an approved rebuild.')
+        self._require_course(course_id,owner_user_id=owner_user_id,is_admin=False,write=True)
+        with self.database.connect() as connection:
+            existing=connection.execute('SELECT id FROM documents WHERE course_id=? AND sha256=?',
+                                        (course_id,snapshot['sha256'])).fetchone()
+        try:
+            if existing:
+                document_id=existing['id']
+            else:
+                accepted = self.queue_document(course_id=course_id, filename=snapshot['filename'],
+                    media_type=snapshot['media_type'], content=content,
+                    owner_user_id=owner_user_id, is_admin=False)
+                document_id = accepted.document.id
+        except ApiError as error:
+            if error.code not in {'DUPLICATE_DOCUMENT','COURSE_FILE_QUOTA_EXCEEDED','USER_STORAGE_QUOTA_EXCEEDED'}:
+                raise
+            with self.database.connect() as connection:
+                existing = connection.execute('SELECT id FROM documents WHERE course_id=? AND sha256=?',
+                                              (course_id, snapshot['sha256'])).fetchone()
+                if existing is None: raise
+                document_id = existing['id']
+        chunk_map = {}
+        with self.database.connect() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            for chunk in snapshot['chunks']:
+                chunk_id = 'chk_' + hashlib.sha256(f"{document_id}:{chunk['id']}".encode()).hexdigest()[:32]
+                chunk_map[chunk['id']] = chunk_id
+                connection.execute('INSERT OR IGNORE INTO chunks(id,document_id,course_id,ordinal,content,locator_type,locator_value,section,embedding,metadata_json,parent_key) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                    (chunk_id, document_id, course_id, chunk['ordinal'], chunk['content'],
+                     chunk['locator_type'], chunk['locator_value'], chunk['section'],
+                     chunk['embedding'], chunk['metadata_json'], chunk['parent_key']))
+            connection.execute("UPDATE documents SET status='ready',chunk_count=?,error_message=NULL WHERE id=?",
+                               (len(snapshot['chunks']), document_id))
+            connection.execute("UPDATE ingestion_jobs SET status='completed',processed_chunks=?,error_message=NULL WHERE document_id=?",
+                               (len(snapshot['chunks']), document_id))
+            version = connection.execute('SELECT id FROM document_versions WHERE document_id=? ORDER BY version DESC LIMIT 1', (document_id,)).fetchone()
+        return {'document_id': document_id, 'version_id': version['id'], 'chunks': chunk_map}
+
     def process_document(self, document_id: str, job_id: str) -> None:
         try:
             with self.database.connect() as connection:

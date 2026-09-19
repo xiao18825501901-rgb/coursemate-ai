@@ -94,6 +94,11 @@ def make_course(client: TestClient) -> None:
     redeemed = client.post(f"{UI}/me/verification/redeem", headers=auth("token-a"),
                            json={"code": issued["codes"][0], "request_id": "verify-a-0001"})
     assert redeemed.status_code == 200, redeemed.text
+    # Exercise/binding contracts now require real authorized nodes rather than
+    # accepting invented IDs or generating a question from an empty tree.
+    with client.app.state.database.connect() as db:
+        for node in ('node-x','node-y'):
+            db.execute("INSERT INTO knowledge_nodes(id,course_id,owner_user_id,title,description,major,kind,status) VALUES(?,'cs3481','user-a',?,'Synthetic definition','CS','ATOMIC','PRIVATE')",(node,node))
 
 
 def collect_events(client: TestClient, run_id: str) -> list[tuple[str, dict]]:

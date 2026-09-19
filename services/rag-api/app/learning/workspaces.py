@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from app.db import Database
 from app.errors import ApiError
+from app.course_access import check_course_content_access
 
 
 def accessible_course(database: Database, course_id: str, owner: str) -> sqlite3.Row:
@@ -17,6 +18,7 @@ def accessible_course(database: Database, course_id: str, owner: str) -> sqlite3
         ).fetchone()
     if row is None:
         raise ApiError(404, "COURSE_NOT_FOUND", "The course was not found.")
+    check_course_content_access(database,row,owner)
     return cast(sqlite3.Row, row)
 
 

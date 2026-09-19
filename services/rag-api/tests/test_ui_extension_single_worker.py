@@ -107,6 +107,8 @@ def make_app(tmp_path: Path, provider: object) -> TestClient:
 
 
 def seed_course(client: TestClient) -> None:
+    from campus_actor_fixture import authorize_synthetic_campus_users
+    authorize_synthetic_campus_users(client, 'user-a')
     created = client.post(
         "/api/courses",
         headers={"Authorization": "Bearer admin-token"},
