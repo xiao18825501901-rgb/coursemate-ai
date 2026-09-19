@@ -32,6 +32,7 @@ from .steps import solution_steps, answer_steps_parse
 from .provider import QwenProvider, DisabledProvider, TestProvider, ProviderError
 from . import templates
 from . import social
+from . import share_recovery
 from . import classification as classification_state
 from .directory import resolve_recipient, project_local_ids
 from .public_events import public_event
@@ -1455,6 +1456,14 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
 
     @r.post('/shares',status_code=201)
     async def share_create(data:ShareCreate,user:User,request:Request):
+        try:
+            with share_recovery.send_lock(Path(cfg.data_dir)):
+                task=asyncio.create_task(share_create_locked(data,user,request))
+                return await share_recovery.settle(task)
+        except share_recovery.RecoveryBusy:
+            raise HTTPException(503,'快照发送或恢复正在进行，请稍后重试') from None
+
+    async def share_create_locked(data:ShareCreate,user:User,request:Request):
         course_data=await course(user,data.course,request)
         course_gate(course_data,user)
         existing=db.one('SELECT * FROM cmui_shares WHERE sender=? AND request_id=?',(user['id'],data.request_id))
@@ -1502,6 +1511,9 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             pair_payloads=social.snapshot_pair_payload(db,user['id'],data.course,pair_ids) if data.history_scope!='none' else []
             manifest=social.build_share_manifest(db,cfg,user['id'],course_data,files,data.history_scope,pair_payloads)
             manifest['request_hash']=digest
+            manifest['send_recovery']={'version':1,'integrated':bool(domain),'recipients':sorted(recipients),
+                'notice':f'{user["name"]} 向你共享课程「{course_data.get("name","")}」（{len(files)} 个文件' +
+                (f'，含历史：{data.history_scope}' if data.history_scope!='none' else '，不含历史') + '）'}
             if domain:
                 manifest['knowledge_snapshot']=await remote('snapshot.knowledge.export',user,{'course':data.course},request)
             class_key=classification_key(data.course,user['id'])
@@ -1520,8 +1532,8 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                     archived=db.one('SELECT * FROM cmui_share_files WHERE share=? AND file_id=?',(sid,f['id']))
                     if archived:
                         archived_path=Path(cfg.data_dir)/archived['archived_storage_key']
-                        saved_bytes=await asyncio.to_thread(archived_path.read_bytes)
-                        saved_index=await asyncio.to_thread(Path(str(archived_path)+'.index.json').read_bytes)
+                        saved_bytes=await share_recovery.file_io(archived_path.read_bytes)
+                        saved_index=await share_recovery.file_io(Path(str(archived_path)+'.index.json').read_bytes)
                         if (hashlib.sha256(saved_bytes).hexdigest()!=f['sha256'] or
                                 hashlib.sha256(saved_index).hexdigest()!=f.get('index_sha256')):
                             raise ValueError('Frozen snapshot integrity failure')
@@ -1532,8 +1544,8 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                     index=json.dumps(frozen['index'],ensure_ascii=False).encode()
                     f['index_sha256']=hashlib.sha256(index).hexdigest()
                     key=f"shares/{sid}/{f['id']}"
-                    await asyncio.to_thread((Path(cfg.data_dir)/key).write_bytes,frozen['content'])
-                    await asyncio.to_thread((Path(cfg.data_dir)/(key+'.index.json')).write_bytes,index)
+                    await share_recovery.file_io((Path(cfg.data_dir)/key).write_bytes,frozen['content'])
+                    await share_recovery.file_io((Path(cfg.data_dir)/(key+'.index.json')).write_bytes,index)
                     with db.connect(True) as connection:
                         connection.execute('INSERT INTO cmui_share_files VALUES(?,?,?,?,?,?,?)',
                             (sid,f['id'],f['name'],f['size'],f['mime'],f['sha256'],key))
@@ -1546,13 +1558,12 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         except (OSError,ValueError,HTTPException):
             db.execute("UPDATE cmui_shares SET status='failed' WHERE id=?",(sid,))
             raise HTTPException(503,'文件快照准备失败，本次共享未完成；可用原发送请求重试') from None
-        with db.connect(True) as connection:
-            connection.execute("UPDATE cmui_shares SET status='ready',manifest_json=? WHERE id=?",(json.dumps(manifest,ensure_ascii=False),sid))
-            for rid in recipients:
-                connection.execute('INSERT OR IGNORE INTO cmui_share_recipients(share,recipient,status) VALUES (?,?,\'notified\')',(sid,rid))
-                connection.execute('INSERT OR IGNORE INTO cmui_notifications(id,owner,actor,kind,ref,course,text,created_at) VALUES (?,?,?,?,?,?,?,?)',
-                    (uid('notice_'),rid,user['id'],'course_share',sid,data.course,
-                     f'{user["name"]} 向你共享课程「{course_data.get("name","")}」（{len(files)} 个文件' + (f'，含历史：{data.history_scope}' if data.history_scope!='none' else '，不含历史') + '）',now()))
+        if 'send_recovery' not in manifest:
+            # Old caught failures can still finish through the authenticated API;
+            # the offline recovery tool never invents a legacy recipient intent.
+            manifest['send_recovery']={'version':1,'integrated':bool(domain),'recipients':sorted(recipients),
+                'notice':f'{user["name"]} 向你共享课程「{course_data.get("name","")}」'}
+        share_recovery.publish(db,sid,manifest)
         return {'id':sid,'status':'ready','files_copied':copied}
 
     @r.get('/shares')
