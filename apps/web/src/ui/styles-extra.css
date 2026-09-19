@@ -104,3 +104,6 @@
 .course-type-badge.shared{background:#eaf3f5;color:#398096}
 .course-type-badge.private{background:#faf0f4;color:#a05570}
 .campus-hint{font-size:11px;color:#a05570;margin-top:4px}
+.course-side .side-name{font-size:17px;font-weight:600;color:var(--text);line-height:1.5;margin:0 0 8px;overflow-wrap:anywhere;white-space:normal}
+.course-side .side-code{font-size:11px;font-weight:400;line-height:1.5;margin:0 0 20px;overflow-wrap:anywhere;white-space:normal}
+.course-side .side-name:focus-visible,.course-side .side-code:focus-visible{outline:2px solid var(--accent);outline-offset:3px}

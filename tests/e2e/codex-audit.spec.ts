@@ -352,3 +352,48 @@ test("browser sender shares frozen files and recipient explicitly joins independ
     await recipientPage.screenshot({path:info.outputPath("joined-shared-files.png"),fullPage:true});
   } finally {await recipient.close();}
 });
+
+test("long shared course identity stays readable or accessibly abbreviated in narrow sidebar",async({page,request},info)=>{
+  const name="SyntheticSharedCourse_AdvancedDataScienceAndStatisticalLearning_IndependentSnapshot";
+  const source=await post(request,"/courses",{name:"Sidebar audit source"});
+  const renamed=await request.patch(API+`/courses/${source.id}`,{headers:auth,data:{name}});
+  expect(renamed.ok(),await renamed.text()).toBeTruthy();
+  const people=await (await request.get(API+"/people?q=Audit%20Unverified",{headers:auth})).json();
+  expect(people).toHaveLength(1);
+  const share=await post(request,"/shares",{course:source.id,recipients:[people[0].id],history_scope:"none",request_id:"sidebar-long-identity"});
+  const joined=await post(request,`/shares/${share.id}/join`,{},unverified);
+  const response=await request.get(API+`/courses/${joined.joined_course_id}`,{headers:unverified});
+  expect(response.ok()).toBeTruthy();const course=await response.json();
+  expect(course.name).toBe(name);expect(course.code.length).toBeGreaterThan(20);
+  await page.route(API+"/**",route=>route.continue({headers:{...route.request().headers(),authorization:unverified.Authorization}}));
+  await page.goto(`/app#/course/${course.id}/files`);
+  for(const width of [1100,768]) {
+    await page.setViewportSize({width,height:900});
+    const sidebar=page.locator(".course-side");await expect(sidebar).toBeVisible();
+    await page.screenshot({path:info.outputPath(`long-sidebar-${width}.png`),fullPage:true});
+    for(const fullText of [course.name,course.code]) {
+      const label=sidebar.getByText(fullText,{exact:true});await expect(label).toHaveCount(1);
+      const measured=await label.evaluate(element=>{
+        const el=element as HTMLElement,style=getComputedStyle(el),box=el.getBoundingClientRect();
+        const side=el.closest(".course-side")!.getBoundingClientRect();
+        return {client:el.clientWidth,scroll:el.scrollWidth,overflow:style.overflowX,ellipsis:style.textOverflow,
+          tabIndex:el.tabIndex,title:el.title,ariaLabel:el.getAttribute("aria-label"),inside:box.left>=side.left&&box.right<=side.right};
+      });
+      await info.attach(`identity-${width}-${fullText===course.code?"code":"name"}`,{body:JSON.stringify(measured),contentType:"application/json"});
+      expect.soft(measured.inside,"Identity container must stay inside the sidebar").toBe(true);
+      const clipped=measured.scroll>measured.client+1;
+      if(clipped) {
+        expect.soft(measured.ellipsis,"Overflowing identity must show an intentional ellipsis, not silent clipping").toBe("ellipsis");
+        expect.soft(["hidden","clip"].includes(measured.overflow)).toBe(true);
+        expect.soft(measured.tabIndex,"Abbreviated identity must be reachable by keyboard").toBeGreaterThanOrEqual(0);
+        expect.soft([measured.title,measured.ariaLabel].some(value=>value?.includes(fullText)),"Abbreviated identity needs its complete accessible text").toBe(true);
+        if(measured.tabIndex>=0) {await label.focus();await expect(label).toBeFocused();expect(await label.ariaSnapshot()).toContain(fullText);}
+      }
+    }
+    expect(new URL(page.url()).hash).toBe(`#/course/${course.id}/files`);
+  }
+  await page.setViewportSize({width:390,height:844});await expect(page.locator(".course-side")).toBeHidden();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+  const unchanged=await (await request.get(API+`/courses/${course.id}`,{headers:unverified})).json();
+  expect({id:unchanged.id,code:unchanged.code,name:unchanged.name}).toEqual({id:course.id,code:course.code,name});
+});
