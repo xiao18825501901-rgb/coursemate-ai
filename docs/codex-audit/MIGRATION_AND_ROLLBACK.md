@@ -1,5 +1,9 @@
 # Migration and rollback — local audit candidate
 
+## 2026-09-20 long-name fix
+
+Candidate `73b7049` adds no Schema migration. New private IDs are39-character ASCII UUIDs satisfying the old domain constraint; existing IDs and share-derived IDs are not rewritten. Code rollback preserves already-created courses/references and reintroduces the creation defect; do not regenerate IDs or delete data. This says nothing about migration requirements from the actual production version: RAG initialization happens before the UI feature flag check, so a disabled UI does not make startup read-only. Production inventory, consistent backup, isolated migration and exact rollback approval remain mandatory. See cards H/I in [PRE_DEPLOYMENT_ACCESS_AND_APPROVALS.md](PRE_DEPLOYMENT_ACCESS_AND_APPROVALS.md).
+
 ## 2026-09-20 continuation (supersedes historical recovery limits below)
 
 Implementation `dcfd322`: no new RAG/UI schema migration. New share manifests add frozen `send_recovery.version=1` recipient intent; a data-directory process-owned lock excludes sends/recovery. The CLI in `app.cm_update.share_recovery` defaults to inspect and accepts `--apply` only for explicitly chosen recovery data. Complete verified archives can finish; incomplete ones remain unannounced/failed. Old PREPARING without frozen intent is refused, not guessed. Upgrade all send workers before using the recovery CLI; an old binary does not participate in the lock. Cancellation waits for actual file I/O, not merely a cancelled task wrapper.

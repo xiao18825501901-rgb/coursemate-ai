@@ -1,5 +1,7 @@
 # Independent audit evidence matrix
 
+Latest limited change: `73b7049ee3204d5c213ad70c67db9b892aa306bf`. Legal long-course direct creation now passes mounted V3 API and real browser; the prior excluded500 finding is closed, with no display-name truncation, no ID rewrites and no new schema.19 focused tests cover name boundaries, collision exhaustion/no pins, concurrent uniqueness/ownership, file bytes and long-name snapshot join replay. Final frozen backend676 /browser14 /Web60 /Agent66 /typecheck/build pass; detailed evidence is in [LONG_COURSE_NAME_FIX.md](LONG_COURSE_NAME_FIX.md). External and historical-unknown statuses are unchanged. This does not reclassify old evidence as live acceptance.
+
 2026-09-20 recovery continuation supersedes the old recovery boundaries below:
 Windows bounded first-command restore and controlled PREPARING recovery are locally verified;
 native WSL ext47 PASS, DrvFS remains FAILED; sidebar fixed with final13 browser PASS.

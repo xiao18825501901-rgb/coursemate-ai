@@ -1,6 +1,18 @@
 # CourseMate — independent DSH audit and completion report
 
-## Recovery-gate continuation — 2026-09-20
+## Long-course-name closure — 2026-09-20 (current)
+
+Application candidate / tested code: **`73b7049ee3204d5c213ad70c67db9b892aa306bf`**, branch `fix/codex-dsh-audit-20260919`. Start HEAD `20b45fb`, clean; local commit only. The explicit long-name creation defect below is now **FIXED**, not still excluded from scope. Names retain the UI's existing validation and full display text; new private-course IDs are independent 39-character ASCII UUID identifiers with at most 3 transactional collision attempts. Existing IDs and deterministic share/recipient mappings are unchanged. No new Schema migration.
+
+Real integrated HTTP RED: 10 pass / 8 fail; real browser form RED: 500 instead of201 for100-character name. Final focused tests:19 passed, with 422 invalid inputs, concurrent same names, private isolation, bounded collisions/no leftover pins, quota propagation and long-name snapshot original/copied file bytes. Same frozen code: **676 backend passed (755.03s, 0 failures/errors/skips, 2 existing dependency deprecation warnings), 14 browser passed (48.2s, no skips/failures/flaky), Web60, Agent66, typecheck/build PASS**. These are fresh final-version executions, not borrowed historical counts.
+
+Windows bounded restore, explicit resume, new-protocol PREPARING and sidebar implementations are unchanged; native WSL ext4 evidence remains valid for unchanged code, not a new ECS/Linux execution. Original Windows attribution and historical embedding provenance stay UNKNOWN; DrvFS stays unsupported. Original failure XML and all RED runs remain intact. No new confirmed in-scope application defect is left open; this is not a fresh whole-system audit or a claim of zero possible bugs.
+
+**SOURCE IMPLEMENTED / OFFLINE CONTRACT VERIFIED / REAL LOCAL V3 INTEGRATION VERIFIED / BROWSER VERIFIED. LIVE MODEL, REAL CLERK/QUALIFICATIONS/MESSAGES/SHARES, PRODUCTION ACCESS AND DEPLOYMENT: NOT RUN / NOT AUTHORIZED.** Local build is not a production-configured publish artifact. No push, reembedding, deployment or real-account operations were performed.
+
+Full commands, SHA/doc identity and results: [LONG_COURSE_NAME_FIX.md](docs/codex-audit/LONG_COURSE_NAME_FIX.md). Separate A–K permission cards: [PRE_DEPLOYMENT_ACCESS_AND_APPROVALS.md](docs/codex-audit/PRE_DEPLOYMENT_ACCESS_AND_APPROVALS.md). Next owner decision: confirm existing domains and optionally approve **A only (fixed unauthenticated HTTPS reads)**; no secrets in chat.
+
+## Recovery-gate continuation — 2026-09-20 (prior frozen-code record)
 
 Frozen implementation: `dcfd3221ce12170521807e4b1c52fcc2003cbd0b` on the same D-drive audit branch. Local checkpoints: `3879274` Windows bounded publication/Linux tests, `bab5683` sidebar display, `dcfd322` controlled interrupted-send recovery. No push or deployment.
 

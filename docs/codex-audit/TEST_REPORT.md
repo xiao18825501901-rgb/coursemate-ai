@@ -1,5 +1,17 @@
 # Local test report — 2026-09-19
 
+## 2026-09-20 long-name continuation (current candidate)
+
+Frozen application/tested SHA `73b7049ee3204d5c213ad70c67db9b892aa306bf`. Detailed commands and raw evidence: [LONG_COURSE_NAME_FIX.md](LONG_COURSE_NAME_FIX.md).
+
+- Before fix: integrated10 pass/8 fail (`long-name-red.xml`); browser direct100-character form1 fail (HTTP500).
+- Focused final:19 pass; prior interim sharing/recovery integration35 pass.
+- Frozen browser:14 pass /0 fail/skip/flaky,48.2s (`browser-1789836865875-21196/playwright-report.json`).
+- Frozen Web60 /Agent66, typecheck and optimized local build PASS (`long-name-release-*.log`).
+- Frozen full backend: **676 passed, 0 failures/errors/skips, 755.03s, 2 existing dependency deprecation warnings**, exit0 (`long-name-release-regression.xml`/log; XML suite754.825s).
+
+No model spend, real identity synchronization, production access or publish occurred. Byte-unchanged Linux/recovery evidence below is explicitly reused; full release regression is a fresh execution. Local build is not Netlify production preflight or authenticated production acceptance.
+
 ## 2026-09-20 recovery continuation
 
 Frozen source `dcfd3221ce12170521807e4b1c52fcc2003cbd0b`; earlier runs below remain historical.

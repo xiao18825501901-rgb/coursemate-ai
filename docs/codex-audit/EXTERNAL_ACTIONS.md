@@ -1,5 +1,7 @@
 # External actions — not executed or authorized by this audit
 
+2026-09-20 current candidate `73b7049`: the separately authorized long-name500 is fixed locally. The actionable, separately scoped A–K authorization cards are now [PRE_DEPLOYMENT_ACCESS_AND_APPROVALS.md](PRE_DEPLOYMENT_ACCESS_AND_APPROVALS.md). Start with A only if Owner approves; no old budget or external access authorization is inherited. UNKNOWN historical embedding offers two explicit owner decisions: limited real retrieval acceptance before temporary use, or separately budgeted provenance-recorded reindex. There is no automatic reindex requirement or claimed lexical fallback. Exact-set grandfather approval cannot use the current auto-fetch/apply CLI without a compare-before-apply boundary; preview and writes remain separate.
+
 2026-09-20 continuation: local Windows first-command recovery, controlled PREPARING recovery and real WSL ext4 rehearsal now have evidence in RECOVERY_GATE_AND_REMAINING_STATUS.md. This does not authorize or verify an actual production filesystem. DrvFS remains unsupported; the original Windows denial's actor remains unknown. No administrator diagnostic or system installation is needed to continue the completed local path.
 
 1. **Real model:** approve exact provider/account/region/model capability test and
@@ -29,6 +31,7 @@
 Historical indexed vectors do not contain independently recorded provider/model
 provenance. Snapshot export labels the configured embedding model and rejects a
 different label on import; this is not proof that every legacy vector was created
-by that configuration. Before production rollout audit historical index lineage;
-unknown/incompatible indexes need a separately approved rebuild, never a hidden
-paid embedding call during sharing.
+by that configuration. Before production rollout retain UNKNOWN explicitly and
+ask the owner to choose limited real retrieval acceptance before temporary use,
+or a separately scoped and budgeted provenance-recorded rebuild. Failed retrieval
+cannot pass the temporary-use gate. Never make hidden paid embedding calls during sharing.

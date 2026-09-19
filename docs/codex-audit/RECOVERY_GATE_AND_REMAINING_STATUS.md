@@ -1,5 +1,13 @@
 # Recovery gate and limited remaining work
 
+## Latest limited-scope closure — long course names, 2026-09-20
+
+Application/tested code now `73b7049ee3204d5c213ad70c67db9b892aa306bf`. The long-name creation500 previously excluded under sidebar-only scope is now explicitly authorized and fixed, with independent bounded IDs, preserved display names and no new migration. Integrated focused19 passed; final frozen browser14 passed, Web60/Agent66 and typecheck/build passed. Fresh full backend regression: **676 passed, 0 failures/errors/skips, 2 existing dependency warnings, 755.03s** (`long-name-release-regression.xml`/log), not reused657.
+
+The recovery/PREPARING/sidebar code is byte-identical to `dcfd322` (verified by Git path diff); prior Windows/PREPARING/Linux evidence below is retained and not rerun merely to change its date. Linux ext47 remains an earlier real runtime result; DrvFS unsupported, historical embedding UNKNOWN, original Windows denial attribution UNKNOWN. This current continuation does not reopen those investigations.
+
+Application/source, local fake-provider integration and browser evidence are separate from live models/accounts/production, all of which remain NOT_RUN/NOT_AUTHORIZED. [LONG_COURSE_NAME_FIX.md](LONG_COURSE_NAME_FIX.md) is the current candidate/test ledger; [PRE_DEPLOYMENT_ACCESS_AND_APPROVALS.md](PRE_DEPLOYMENT_ACCESS_AND_APPROVALS.md) supplies granular A–K cards. Earlier CURRENT_CODE_SHA/657/13 fields below refer only to that prior frozen implementation.
+
 ## Baseline and execution plan
 
 2026-09-19. Source: D:/CourseMate_COMPLETE_ARCHIVE_20260918/01_SOURCE_REPOSITORY.

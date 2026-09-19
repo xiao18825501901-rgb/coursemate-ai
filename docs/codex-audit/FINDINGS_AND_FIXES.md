@@ -1,5 +1,11 @@
 # Findings and fixes — chronological evidence
 
+## 2026-09-20 — long valid course name direct-create500 closed
+
+Newly authorized scope, candidate `73b7049`. Real browser and mounted integrated API failed before fix: 40-character slug + separator +12-digit timestamp exceeded ID50; Unicode `isalnum` also admitted characters outside the ASCII domain ID regex. `domain.py:_create_course/_new_course_id` now uses independent39-character UUID IDs with bounded3 collision retries. No display-name truncation, no existing ID rewrite, no Schema migration. Long-name snapshot joins retain the existing deterministic share IDs.19 focused tests and14 final browser tests pass. Original RED and all final same-code evidence are in [LONG_COURSE_NAME_FIX.md](LONG_COURSE_NAME_FIX.md).
+
+Permission-card review also corrected two operational statements: answer reveal writes state despite not using a model; existing grandfather CLI immediately applies freshly fetched users and cannot pause to compare a pre-approved hash. Future exact-set authorization requires guarded frozen-record application, not the unguarded CLI. No eligibility tool was run or redesigned.
+
 The early sections below preserve actual RED/intermediate states. Their “pending”
 wording is historical, superseded by the continuation closure at the end and the
 current REQUIREMENT_EVIDENCE_MATRIX.md. They are not current unresolved counts.
