@@ -81,9 +81,9 @@ export const renamePair = (id, title) => send('/pairs/' + id, { title }, 'PATCH'
 export const deletePair = (id) => remove('/pairs/' + id);
 export const bindPair = (id, node) => send(`/pairs/${id}/bind`, { node });
 // Exercises (做一题) and reveals.
-export const createExercise = (courseId, node = null) => send(`/courses/${courseId}/exercises`, { request_id: key(), node });
+export const createExercise = (courseId, node = null, pairId = null) => send(`/courses/${courseId}/exercises`, { request_id: key(), node, pair_id: pairId });
 export const getExercise = (id) => request('/exercises/' + id);
-export const revealExercise = (id) => send(`/exercises/${id}/reveal`, {});
+export const revealExercise = (id) => send(`/exercises/${id}/reveal`, { request_id: key() });
 // Step explanations (详解) and follow-ups.
 export const createExplanation = (exerciseId, stepId) => send(`/exercises/${exerciseId}/steps/${stepId}/explanation`, { request_id: key() });
 export const getExplanation = (id) => request('/explanations/' + id);
@@ -93,7 +93,7 @@ export const cancelExplanation = (id) => send(`/explanations/${id}/cancel`, {});
 export const getVerification = () => request('/me/verification');
 export const redeemVerification = (code) => send('/me/verification/redeem', { code, request_id: key() });
 // Course shares.
-export const listShares = (q) => request('/shares?q=' + encodeURIComponent(q));
+export const listShares = (q,offset=0,limit=100) => request('/shares?q=' + encodeURIComponent(q)+`&offset=${offset}&limit=${limit}`);
 export const getShare = (id) => request('/shares/' + id);
 export const createShare = (payload, requestId) => send('/shares', { ...payload, request_id: requestId || key() });
 export const joinShare = (id) => send(`/shares/${id}/join`, {});
