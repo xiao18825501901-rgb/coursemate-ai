@@ -1,5 +1,8 @@
 # CourseMate Release Access Readiness
 
+> Historical PREPARE artifact. The authorized release was executed on 2026-09-20; current facts and
+> rollback anchors are in `PRODUCTION_RELEASE_EXECUTION_20260920.md`.
+
 Status: **PREPARE ONLY — NO PRODUCTION OR BILLABLE ACTION IS AUTHORIZED**  
 Evidence cutoff: `2026-09-19T18:04:10.573Z`
 Workspace: `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY`

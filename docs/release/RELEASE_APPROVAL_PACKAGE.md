@@ -1,5 +1,8 @@
 # CourseMate Release Approval Package
 
+> Historical approval package. The Owner subsequently authorized the bounded and then full release;
+> actual execution evidence is in `PRODUCTION_RELEASE_EXECUTION_20260920.md`.
+
 Package version: **`2026-09-20-prep-v2`**
 Mode: **PREPARE**  
 Approval payload SHA-256: **`637d36cf6015400fecd7231871a19f24e01e0c4c16f85e4418ede202fb12abb7`**

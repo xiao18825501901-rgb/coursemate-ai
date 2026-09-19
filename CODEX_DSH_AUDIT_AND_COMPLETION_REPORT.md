@@ -1,5 +1,15 @@
 # CourseMate — independent DSH audit and completion report
 
+## Production release closure — 2026-09-20 (current)
+
+Application SHA `aa3ffc250c2c4584f35dceea1a9ceec61123fdef` is deployed on the Hangzhou ECS;
+Cloudflare selects `47.114.34.175`, Netlify deploy `6aaef108d89499d9a5e52722` is production, and
+drained migration/restore, real Qwen canary, frozen Clerk qualification, monitoring, signed-in browser
+and CS3481 dual-pane checks have completed. Exact evidence, limitations and rollback anchors are in
+[PRODUCTION_RELEASE_EXECUTION_20260920.md](docs/release/PRODUCTION_RELEASE_EXECUTION_20260920.md).
+The migrated CS3481 official tree currently has zero published nodes, so no populated-tree claim is
+made. Historical NOT AUTHORIZED language below describes earlier checkpoints only.
+
 ## Long-course-name closure — 2026-09-20 (current)
 
 Application candidate / tested code: **`73b7049ee3204d5c213ad70c67db9b892aa306bf`**, branch `fix/codex-dsh-audit-20260919`. Start HEAD `20b45fb`, clean; local commit only. The explicit long-name creation defect below is now **FIXED**, not still excluded from scope. Names retain the UI's existing validation and full display text; new private-course IDs are independent 39-character ASCII UUID identifiers with at most 3 transactional collision attempts. Existing IDs and deterministic share/recipient mappings are unchanged. No new Schema migration.
