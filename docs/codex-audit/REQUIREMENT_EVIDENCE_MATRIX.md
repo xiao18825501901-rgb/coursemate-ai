@@ -1,5 +1,11 @@
 # Independent audit evidence matrix
 
+2026-09-20 recovery continuation supersedes the old recovery boundaries below:
+Windows bounded first-command restore and controlled PREPARING recovery are locally verified;
+native WSL ext47 PASS, DrvFS remains FAILED; sidebar fixed with final13 browser PASS.
+Frozen code `dcfd322`; full regression is recorded in RECOVERY_GATE_AND_REMAINING_STATUS.md.
+Historical 645/2 and provenance UNKNOWN are preserved, never promoted to live acceptance.
+
 Baseline `9104b5ae5cc767a57d804131b01b925728552cb5`, branch
 `fix/codex-dsh-audit-20260919`. Owner confirmed DSH stopped.
 Only the D-drive repository was modified. Original DSH reports are historical

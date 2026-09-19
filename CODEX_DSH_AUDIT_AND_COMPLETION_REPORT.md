@@ -1,5 +1,25 @@
 # CourseMate — independent DSH audit and completion report
 
+## Recovery-gate continuation — 2026-09-20
+
+Frozen implementation: `dcfd3221ce12170521807e4b1c52fcc2003cbd0b` on the same D-drive audit branch. Local checkpoints: `3879274` Windows bounded publication/Linux tests, `bab5683` sidebar display, `dcfd322` controlled interrupted-send recovery. No push or deployment.
+
+Windows fresh top-level recovery now passes local tests with bounded WinError 5/32 handling (5 attempts, 1.5 seconds total waiting, every denial logged). Persistent denial still preserves staging and requires explicit verified resume. One actual fresh invocation logged denial then success after 0.1s; application-resource closure is independently tested. **The original OS denial's cause/locker is UNKNOWN**, not proved antivirus or an external process. Original 645-pass/2-fail XML and recovered original directories remain preserved. The historical body below is not rewritten as all-green.
+
+Controlled PREPARING recovery validates frozen files/indexes/recipients under OS-owned exclusion, never re-reads latest source, publishes ready/notices atomically and refuses incomplete or unsupported legacy snapshots. Dedicated HTTP-worker abrupt exits plus repeated/all-task cancellation tests pass; only owned synthetic workers exit. No Schema migration was added. Sidebar name/code wrapping is browser-verified without ID changes.
+
+Real local Linux ext4: **7 passed**; WSL DrvFS: **4 passed / 3 failed (EINVAL)**, retained and not presented as supported. Historical embedding lineage remains UNKNOWN: read-only local main-file metadata inspection found 1,937 chunks without recorded source metadata. No live/production inference.
+
+Final same-commit browser: **13 passed in 49.6s**, zero failures/skips/flaky; Web **60 passed**, Agent **66 passed**, typechecks/builds passed. Full frozen-version backend regression: **657 passed, 0 failed, 0 skipped**, 2 dependency deprecation warnings, 596.29s (`work/codex-audit/recovery-final-regression.xml`). The final code includes the prior knowledge-export consistency fix.
+
+Disposition: **local limited-scope work complete with documented limitations; not production accepted**. No new local administrator/install action is needed. Await separately scoped external authority rather than repeatedly rerunning unchanged tests. Original Windows denial attribution and historical embedding provenance remain UNKNOWN; DrvFS and the separate long-name creation defect are not represented as fixed.
+
+Detailed commands, retained evidence, controlled recovery operator card, migrations/rollback, provenance policy and remaining boundaries: [RECOVERY_GATE_AND_REMAINING_STATUS.md](docs/codex-audit/RECOVERY_GATE_AND_REMAINING_STATUS.md).
+
+Real Qwen, Clerk sync, qualification writes, real messages/shares and production remain **NOT RUN / NOT AUTHORIZED**. Separate scope finding: direct course creation with a long accepted name can generate an overlong ID and return 500; retained as an out-of-scope defect, not hidden or called fixed.
+
+## Historical completion snapshot (retained)
+
 2026-09-19 · **Local implementation delivered; Windows first-attempt recovery gate remains open. Not production accepted.**
 
 ## Scope and factual baseline
@@ -69,7 +89,7 @@ None was performed. Historical canary budgets were not reused.
   existing safe rich-content renderer. No UI redesign or new agent framework.
 - Backups include share archives. Restore publication preserves failed staging,
   refuses overwriting, and supports explicitly verified resume. Windows directory
-  publication remains subject to an observed external lock/permission failure.
+  publication was subject to an observed denial whose original cause is unknown.
 
 ## Verification levels — do not merge these
 

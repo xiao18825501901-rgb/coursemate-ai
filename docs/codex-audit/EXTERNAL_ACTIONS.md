@@ -1,5 +1,7 @@
 # External actions — not executed or authorized by this audit
 
+2026-09-20 continuation: local Windows first-command recovery, controlled PREPARING recovery and real WSL ext4 rehearsal now have evidence in RECOVERY_GATE_AND_REMAINING_STATUS.md. This does not authorize or verify an actual production filesystem. DrvFS remains unsupported; the original Windows denial's actor remains unknown. No administrator diagnostic or system installation is needed to continue the completed local path.
+
 1. **Real model:** approve exact provider/account/region/model capability test and
    spending cap. Use normal (one work call) and Thinking (plan then work) canaries,
    exercises/reveal/explanations/cancellation; record provider receipts and actual
@@ -14,9 +16,9 @@
    silently eligible; disabled/deleted/banned records are excluded. Snapshot must
    be complete; sync alone does not grant qualification. Back up first and inspect
    the completed receipt, not just startup success.
-4. **Migration/runtime:** first resolve and rehearse Windows publication failure
-   or execute the unchanged acceptance suite on the actual supported Linux
-   staging platform. See MIGRATION_AND_ROLLBACK.md. No production paths or hosts
+4. **Migration/runtime:** local recovery evidence is available; separately approve
+   actual staging/production path inventory and a backed-up isolated rehearsal
+   on its native supported filesystem. See MIGRATION_AND_ROLLBACK.md. No production paths or hosts
    were accessed in this audit; current online version/provider are UNKNOWN.
 5. **Messaging/sharing:** only synthetic local actors were used. Actual messages,
    shares, qualification changes and Clerk data are outside this authorization.

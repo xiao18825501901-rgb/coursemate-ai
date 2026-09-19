@@ -1,5 +1,15 @@
 # Migration and rollback — local audit candidate
 
+## 2026-09-20 continuation (supersedes historical recovery limits below)
+
+Implementation `dcfd322`: no new RAG/UI schema migration. New share manifests add frozen `send_recovery.version=1` recipient intent; a data-directory process-owned lock excludes sends/recovery. The CLI in `app.cm_update.share_recovery` defaults to inspect and accepts `--apply` only for explicitly chosen recovery data. Complete verified archives can finish; incomplete ones remain unannounced/failed. Old PREPARING without frozen intent is refused, not guessed. Upgrade all send workers before using the recovery CLI; an old binary does not participate in the lock. Cancellation waits for actual file I/O, not merely a cancelled task wrapper.
+
+Windows final restore publication now allows at most 5 attempts/1.5 seconds total waiting only for WinError5/32, logging each denial. Safe staging preservation, all byte/tree/DB checks and atomic no-overwrite remain. New first-command and explicit resume tests pass. Original denial source is still UNKNOWN. Real Linux WSL ext4 tests pass; DrvFS returned EINVAL and is not a valid rehearsal filesystem. This is not production validation.
+
+Keep the complete pre-change recovery unit before real deployment. Code rollback does not revoke already committed notices, undo joined courses or erase later writes. Stop/quiesce the whole send-worker set before changing lock protocol versions; never delete an active lock file. No real database, uploads or production migration was changed in this continuation. Details and exact evidence: [RECOVERY_GATE_AND_REMAINING_STATUS.md](RECOVERY_GATE_AND_REMAINING_STATUS.md).
+
+## Historical audit state
+
 Date: 2026-09-19. No production database or unique real database was migrated.
 All executions used newly created synthetic databases under `work/codex-audit`.
 The owner confirmed DSH stopped; existing DSH commits were retained.

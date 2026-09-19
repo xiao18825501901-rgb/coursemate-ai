@@ -1,5 +1,29 @@
 # Local test report — 2026-09-19
 
+## 2026-09-20 recovery continuation
+
+Frozen source `dcfd3221ce12170521807e4b1c52fcc2003cbd0b`; earlier runs below remain historical.
+
+| New evidence | Actual result | Artifact under work/codex-audit |
+|---|---|---|
+| Independent original Windows reproduction |3 passed /1 failed |recovery-gate-baseline1.xml; staging retained |
+| Bounded policy RED |1 passed /3 failed |recovery-policy-red.xml |
+| Fresh original restore tests |4 passed |recovery-fresh-green1.xml |
+| Owned resources + real fresh CLI |32 passed /1 failed (raw immediate OS diagnostic) |recovery-resources-green.xml; actual0.1s retry logged |
+| Final application recovery tests |33 passed |recovery-root-final.xml; corrected post-close application contract, raw held-handle denials retained |
+| PREPARING abrupt exit / corruption / cancellation |9 passed |preparing-final.xml; owned-worker PID artifacts |
+| All-task shutdown cancellation RED |1 passed /1 failed |shutdown-red.xml |
+| Independent final cancellation review |3 passed /6 deselected |review-shutdown-fix.xml |
+| Real Linux ext4 |7 passed |linux-ext4-review-02/result.json; actual native renameat2 |
+| Real Linux DrvFS |4 passed /3 failed |linux-runtime-review-01; unsupported filesystem EINVAL |
+| Final browser on frozen commit |13 passed in49.6s;0 skip/failure/flaky |browser-1789833896259-8312/playwright-report.json |
+| Web / Node / typecheck / build |60 passed /66 passed /PASS /PASS |Local execution after final UI edits; no later web/Node edits |
+| Full backend on frozen commit |**657 passed**,0 failed/0 skipped,2 dependency warnings,596.29s |recovery-final-regression.xml; prior knowledge consistency fix included |
+
+Original full-regression3.xml remains645 pass/2 fail, not rewritten. Current details, exact commands, code-state boundaries and external NOT_RUN statuses are in [RECOVERY_GATE_AND_REMAINING_STATUS.md](RECOVERY_GATE_AND_REMAINING_STATUS.md). No live provider/model/account/production evidence was generated.
+
+## Historical audit runs
+
 Repository baseline `9104b5a`, audit working tree. No remote/model/production
 acceptance is implied by any result here. Every DB and upload in these executions
 was generated in a new project-owned synthetic test directory.

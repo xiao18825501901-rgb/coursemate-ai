@@ -106,3 +106,15 @@ folder/ambiguous locator or shared synthetic rate budget) are not counted as
 product defects. They were corrected without relaxing assertions or rate policy.
 Browser tests use a separate explicitly verified synthetic actor for window model
 calls, not global automatic verification. Paid model and production remain absent.
+
+## Recovery continuation — 2026-09-20
+
+- Original two Windows failures independently extracted from XML; a fresh baseline reproduced 1 failure/3 passes. Actual operation is final directory rename, not failed DB/archive validation. Original cause remains UNKNOWN. Resource tracking confirms our DB/file/tar handles are closed; an unrelated post-success test connection now closes explicitly.
+- Bounded publication tests began 3 failures/1 pass, then passed. Real fresh CLI evidence recorded WinError5 then success after0.1s within one invocation. Persistent failure, target races, tamper rejection and explicit resume retain safety assertions. Root final33 passed. Old immediate raw OS rename after closing our test handle remained unproved; that post-close diagnostic now exercises the bounded application contract, while raw held-handle denial checks and failed XML stay intact.
+- PREPARING had no controlled killed-worker recovery. Frozen recipient intent and OS-owned exclusion now support inspect/apply without source fallback or duplicate notification. Four dedicated worker-exit points pass; PID artifacts are retained. Review reproduced repeated/all-task cancellation releasing a lock before OS I/O completion; final executor-Future draining fixes both, independently reverified.
+- WSL ext4 real runtime7 PASS, not mocks. DrvFS4 PASS/3 FAIL EINVAL retained and explicitly unsupported.
+- Sidebar browser RED showed 190px code in123px width and no accessible full text. Name-first wrapping/focus/title fixes it without ID changes; final frozen-commit13 browser PASS.
+- Historical local1937 chunks lack recorded embedding provenance; UNKNOWN remains, no paid rebuild or forged metadata.
+- Scope exclusion: legal long course-name creation can generate a >50-character ID and500. Browser setup evidence is retained; sidebar test creates a short name then renames through the normal API. This separate creation defect was not folded into the limited UI fix.
+
+See RECOVERY_GATE_AND_REMAINING_STATUS.md for current final regression and operational restrictions.
