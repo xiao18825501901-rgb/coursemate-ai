@@ -262,6 +262,7 @@ def test_share_restores_exercise_answer_and_cached_explanation(client):
     assert any(n['id']==copied['node'] and n['progress']=='NOT_STARTED' for n in nodes), nodes
     assert any(n['title']=='node-y' and n['progress']=='SPEC_UNAVAILABLE' for n in nodes)
     restored=client.get(f"{UI}/exercises/{copied['id']}",headers=auth('token-b')).json()
+    assert restored['source']=='generated'
     assert restored['revealed'] and restored['steps']==reveal['steps']
     cached=client.post(f"{UI}/exercises/{copied['id']}/steps/{step}/explanation",headers=auth('token-b'),
         json={'request_id':'cached-shared-explanation'})

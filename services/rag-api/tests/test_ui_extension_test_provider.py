@@ -92,7 +92,9 @@ def test_test_provider_completes_problem_and_teach_runs(client: TestClient) -> N
     assert created.status_code == 201, created.text
 
     for lane, text, expected in (
-        ("problem", "怎么判断核心点？", ["审题与条件整理", "计算核心点"]),
+        ("problem", "怎么判断核心点？", [
+            "审题与条件整理", "计算核心点", "判断边界与噪声", "核对并作答",
+        ]),
         ("teach", "请解释核心点", "从定义出发"),
     ):
         conversation = client.post(

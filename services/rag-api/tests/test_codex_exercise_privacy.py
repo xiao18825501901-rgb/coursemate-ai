@@ -14,6 +14,65 @@ QUESTION = 'Question: calculate 2 + 3.'
 ANSWER = '## Step 1 Compute\n' + SECRET
 
 
+def structured_payload(question=QUESTION, secret=SECRET):
+    return json.dumps({
+        'question': question,
+        'answer_steps': [{'title': 'Compute', 'text': secret}],
+        'references': [],
+    }, ensure_ascii=False)
+
+
+def test_structured_exercise_v2_is_private_persistent_and_source_labelled(client, monkeypatch):
+    body = structured_payload()
+    async def upstream(self, *args, **kwargs):
+        for split in (body[:7], body[7:19], body[19:]):
+            yield {'kind': 'delta', 'text': split}
+        yield {'kind': 'complete', 'text': body}
+    monkeypatch.setattr(LocalProvider, 'generate_exercise', upstream)
+    make_course(client)
+    pair = client.post(f'{UI}/pairs', headers=auth('token-a'), json={'course': 'cs3481'}).json()
+    started = client.post(f'{UI}/courses/cs3481/exercises', headers=auth('token-a'),
+                          json={'request_id': 'structured-v2-private'}).json()
+    run = wait_terminal(client, started['id'])
+    events = collect_events(client, started['id'])
+    assert run['status'] == 'completed'
+    assert SECRET not in json.dumps(events)
+    assert SECRET not in json.dumps(run)
+    history = client.get(f"{UI}/pairs/{pair['id']}", headers=auth('token-a')).json()
+    message = next(message for message in history['problem']['messages'] if message['exercise'])
+    assert message['exercise_state']['generation_version'] == 'exercise.v2'
+    assert message['exercise_state']['source'] == 'generated'
+    assert message['exercise_state']['revealed'] is False
+    assert message['exercise_state']['steps'] == []
+    exercise = message['exercise']
+    revealed = client.post(f'{UI}/exercises/{exercise}/reveal', headers=auth('token-a'))
+    assert revealed.status_code == 200
+    assert SECRET in revealed.text
+
+
+@pytest.mark.parametrize('body', [
+    '{"question":"valid but truncated",',
+    json.dumps({'question': QUESTION, 'answer_steps': []}),
+    json.dumps({'question': QUESTION, 'answer_steps': [{'title': '', 'text': SECRET}]}),
+])
+def test_invalid_structured_exercise_v2_fails_closed(client, monkeypatch, body):
+    calls = 0
+    async def upstream(self, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        yield {'kind': 'complete', 'text': body}
+    monkeypatch.setattr(LocalProvider, 'generate_exercise', upstream)
+    make_course(client)
+    client.post(f'{UI}/pairs', headers=auth('token-a'), json={'course': 'cs3481'})
+    started = client.post(f'{UI}/courses/cs3481/exercises', headers=auth('token-a'),
+                          json={'request_id': 'invalid-v2-' + str(abs(hash(body)))}).json()
+    run = wait_terminal(client, started['id'])
+    assert run['status'] == 'failed'
+    assert calls == 1, 'invalid structured output must fail without a paid retry loop'
+    assert run['partial_text'] == ''
+    assert SECRET not in json.dumps(collect_events(client, started['id']))
+
+
 @pytest.mark.parametrize('split', range(1, len(MARKER)))
 def test_split_answer_marker_never_reaches_http(client, monkeypatch, split):
     async def upstream(self, *args, **kwargs):

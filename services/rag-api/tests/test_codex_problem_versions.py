@@ -12,6 +12,8 @@ def test_user_problem_persists_answer_steps_and_can_open_explanation(client):
     message=next(m for m in restored['messages'] if m['role']=='assistant')
     assert message['exercise'], 'Supplied problems need persistent answer versions, not only Markdown anchors'
     answer=client.get(f"{UI}/exercises/{message['exercise']}",headers=auth('token-a')).json()
+    assert answer['source']=='user_problem'
+    assert message['exercise_state']['source']=='user_problem'
     assert answer['revealed'] and answer['steps']
     opened=client.post(f"{UI}/exercises/{message['exercise']}/steps/{answer['steps'][0]['step_id']}/explanation",
         headers=auth('token-a'),json={'request_id':'supplied-problem-explanation'})

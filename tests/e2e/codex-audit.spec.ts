@@ -110,10 +110,23 @@ test("supplied problem exposes steps and opens explanation",async({page,request}
   expect(pair.problem.messages.filter((m:any)=>m.role==="assistant")).toHaveLength(1);
   expect(pair.problem.messages.find((m:any)=>m.role==="assistant").exercise).toBeTruthy();
   await expect(page.locator(".pane-problem")).toContainText("Step 1");
+  const knowledgeLinks=page.locator(".pane-problem .step-link");
+  await expect(knowledgeLinks).toHaveCount(4);
   await expect(page.locator(".pane-problem").getByRole("button",{name:"详解",exact:true}).first()).toBeVisible();
   await page.locator(".pane-problem").getByRole("button",{name:"详解",exact:true}).first().click();
   const dialog=page.getByRole("dialog",{name:/详解 · 第/});
   await expect(dialog).toContainText("本地测试详解");
+  await dialog.getByRole("button",{name:"关闭详解"}).click();
+  const bridged=page.waitForResponse(r=>r.request().method()==="POST"&&r.url().endsWith("/courses/cs3481/bridges"));
+  await knowledgeLinks.first().click();
+  expect((await bridged).ok()).toBeTruthy();
+  await expect(page.locator(".bridge-banner")).toContainText("返回原题 · 第 1 步");
+  await expect(page.locator(".pane-teach .chat-message-new.assistant")).toHaveCount(1);
+  await expect(page.getByRole("button",{name:"停止生成"})).toHaveCount(0);
+  const returned=page.waitForResponse(r=>r.request().method()==="PATCH"&&/\/bridges\/[^/]+\/return$/.test(r.url()));
+  await page.locator(".bridge-banner").click();
+  expect((await returned).ok()).toBeTruthy();
+  await expect(page.locator(".bridge-banner")).toHaveCount(0);
   await page.screenshot({path:info.outputPath("supplied-explanation.png"),fullPage:true});
 });
 
@@ -250,7 +263,7 @@ test("step windows are nonmodal draggable resizable reusable and mobile bounded"
   expect((await request.put(API+"/courses/cs3481/layout",{headers:windowAuth,data:{ratio:.5,teach_conversation:null,problem_conversation:conversation.id,active_node:null}})).ok()).toBeTruthy();
   await learn(page,request,windowAuth);
   const stepButtons=page.locator(".pane-problem").getByRole("button",{name:"详解",exact:true});
-  await expect(stepButtons).toHaveCount(2);
+  await expect(stepButtons).toHaveCount(4);
   await stepButtons.nth(0).click();
   const first=page.getByRole("dialog",{name:"详解 · 第 1 步",exact:true});
   await expect(first).toContainText("本地测试详解");

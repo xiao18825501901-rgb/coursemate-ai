@@ -29,6 +29,7 @@ from .models import (Profile, CourseCreate, CommentCreate, MessageCreate, TaskCr
 from .filesystem import parse_document, valid_filename, valid_folder, file_hash
 from .retrieval import get_course, file_rows, context_for
 from .steps import solution_steps, answer_steps_parse
+from .exercise_contract import ExerciseContractError, parse_exercise_output
 from .provider import QwenProvider, DisabledProvider, TestProvider, ProviderError
 from . import templates
 from . import social
@@ -795,7 +796,11 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         row=db.one('SELECT * FROM cmui_exercises WHERE id=? AND owner=?',(message['exercise'],user['id']))
         if not row: return None
         revealed=bool(db.one('SELECT exercise FROM cmui_answer_reveals WHERE owner=? AND exercise=?',(user['id'],row['id'])))
-        return {'id':row['id'],'revealed':revealed,'steps':json.loads(row['answer_steps']) if revealed else [],
+        run=db.one('SELECT user_text FROM cmui_runs WHERE id=?',(row['run'],))
+        source='generated' if (str(row['generation_version']).startswith('exercise.') or
+            (run and run['user_text']=='做一题') or message.get('text')==row['question']) else 'user_problem'
+        return {'id':row['id'],'source':source,'revealed':revealed,
+                'steps':json.loads(row['answer_steps']) if revealed else [],
                 'generation_version':row['generation_version'],'verification_status':row['verification_status']}
 
     @r.get('/conversations/{conv_id}')
@@ -1684,7 +1689,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         raise HTTPException(409,'请先准备课程知识树或选择有效知识点')
 
     async def generate_exercise_run(run_id,user,course_data,pair,node,node_title,sources):
-        full=''; usages=[]; marker='【标准答案】'
+        full=''; usages=[]
         try:
             heartbeat(run_id)
             upstream=model.generate_exercise(course_data,node,{k:user[k] for k in ['language','timezone','bio']},sources,target_label=node_title)
@@ -1710,18 +1715,22 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                     if not item['text'].startswith(full): raise ProviderError('INCONSISTENT_EXERCISE')
                     full=item['text']
                     if len(full)>200000: raise ProviderError('EXERCISE_TOO_LARGE')
-            if full.count(marker)!=1: raise ProviderError('INVALID_EXERCISE_BOUNDARY')
-            question_text,answer_text=(part.strip() for part in full.split(marker,1))
-            if not question_text or not answer_text: raise ProviderError('EMPTY_EXERCISE')
-            steps=answer_steps_parse(answer_text)
-            if not steps: raise ProviderError('INVALID_EXERCISE_ANSWER')
+            try:
+                parsed=parse_exercise_output(full,{source.get('id') for source in sources})
+            except ExerciseContractError as error:
+                raise ProviderError(str(error)) from None
+            question_text=parsed['question']; steps=parsed['steps']
+            reference_ids=set(parsed['references'])
+            references=[{k:v for k,v in source.items() if k!='text'}
+                        for source in sources if source.get('id') in reference_ids]
             exercise_id=uid('exercise_')
             with db.connect(True) as c:
                 claimed=c.execute("UPDATE cmui_runs SET status='completed',usage=?,updated_at=? WHERE id=? AND status IN ('queued','planning','generating')",(json.dumps(usages),now(),run_id)).rowcount
                 if claimed!=1: raise asyncio.CancelledError()
                 c.execute('INSERT INTO cmui_exercises(id,owner,course,pair,node,target_node,question,answer_steps,references_json,verification_status,generation_version,run,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
                     (exercise_id,user['id'],course_data['id'],pair['id'],(node or {}).get('id') if isinstance(node,dict) else node,
-                     node_title,question_text,json.dumps(steps,ensure_ascii=False),'[]','unverified','V1',run_id,now()))
+                     node_title,question_text,json.dumps(steps,ensure_ascii=False),
+                     json.dumps(references,ensure_ascii=False),'unverified',parsed['version'],run_id,now()))
                 message_id=uid('message_')
                 conv_id=pair['problem_conversation']
                 if not conv_id:
@@ -1802,8 +1811,12 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         course_data=await course(user,row['course'],request)
         course_gate(course_data,user)
         revealed=bool(db.one('SELECT revealed_at FROM cmui_answer_reveals WHERE owner=? AND exercise=?',(user['id'],exercise_id)))
+        run=db.one('SELECT user_text FROM cmui_runs WHERE id=?',(row['run'],))
+        message=db.one('SELECT text FROM cmui_messages WHERE exercise=?',(exercise_id,))
+        source='generated' if (str(row['generation_version']).startswith('exercise.') or
+            (run and run['user_text']=='做一题') or (message and message['text']==row['question'])) else 'user_problem'
         return {'id':row['id'],'course':row['course'],'node':row['node'],'target_node':row['target_node'],
-            'question':row['question'],'revealed':revealed,'verification_status':row['verification_status'],
+            'question':row['question'],'source':source,'revealed':revealed,'verification_status':row['verification_status'],
             'generation_version':row['generation_version'],'created_at':row['created_at'],
             'steps':json.loads(row['answer_steps']) if revealed else []}
 

@@ -19,6 +19,7 @@ from typing import AsyncIterator
 import httpx
 from .sse import events
 from . import templates
+from .exercise_contract import EXERCISE_RESPONSE_FORMAT
 
 class ProviderError(Exception):
     pass
@@ -82,12 +83,7 @@ class QwenProvider:
         """做一题: generate ONE diagnostic question for the target node, and the
         standard answer. The answer is prepared server-side and never streamed;
         the client only receives the question."""
-        instruction=templates.exercise_prompt()
-        # Implementation decision (recorded in the change docs): the Word prompt
-        # requires the answer to be prepared but hidden; the delivery format
-        # line below makes that split mechanically reliable server-side.
-        instruction+='\n\n输出格式：先输出题目正文；然后另起一行输出【标准答案】标记，'
-        '再输出使用 ## Step N 标题的分点标准答案。'
+        instruction=templates.exercise_prompt()+'\n\n'+templates.exercise_runtime_contract()
         payload={'course':course.get('name',''),'code':course.get('code',''),
                  'target_node':(node or {}).get('title','') if node else '',
                  'node_context':node or None,'course_materials':sources,
@@ -117,16 +113,22 @@ class QwenProvider:
             parts.extend({'type':'image_url','image_url':{'url':im['data_url']}} for im in images)
         messages[-1]['content']=parts
 
-    async def stream(self, messages: list, tokens: int) -> AsyncIterator[dict]:
+    async def stream(self, messages: list, tokens: int, *, response_format: dict | None = None) -> AsyncIterator[dict]:
         cfg=self.cfg
         if not cfg.allow_billable: raise ProviderError('BILLING_NOT_AUTHORIZED')
-        endpoint=cfg.qwen_base_url.rstrip('/')+('/responses' if cfg.qwen_protocol=='responses' else '/chat/completions')
-        if cfg.qwen_protocol=='responses':
+        # Alibaba documents response_format/json_schema on its OpenAI-compatible
+        # Chat Completions endpoint.  Exercise V2 therefore uses that supported
+        # endpoint even when ordinary teaching is configured for Responses.
+        protocol='chat_completions' if response_format is not None else cfg.qwen_protocol
+        endpoint=cfg.qwen_base_url.rstrip('/')+('/responses' if protocol=='responses' else '/chat/completions')
+        if protocol=='responses':
             body={'model':cfg.qwen_model,'input':messages,'stream':True,'max_output_tokens':tokens}
         else:
             body={'model':cfg.qwen_model,'messages':messages,'stream':True,'max_tokens':tokens,
                   'enable_thinking':False,'stream_options':{'include_usage':True}}
-        self.calls.append({'model':cfg.qwen_model,'stage_tokens':tokens,'protocol':cfg.qwen_protocol})
+            if response_format is not None: body['response_format']=response_format
+        self.calls.append({'model':cfg.qwen_model,'stage_tokens':tokens,'protocol':protocol,
+                           'structured':response_format is not None})
         # Zero implicit retries, no credential echo in logs or public errors.
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(cfg.timeout,connect=12),transport=self.transport,follow_redirects=False) as client:
@@ -144,7 +146,7 @@ class QwenProvider:
                             raise ProviderError('INVALID_PROVIDER_STREAM') from None
                         if not isinstance(data,dict) or data.get('error'):
                             raise ProviderError('INVALID_PROVIDER_RESPONSE')
-                        if cfg.qwen_protocol=='responses':
+                        if protocol=='responses':
                             kind=data.get('type',event_type)
                             if kind=='response.output_text.delta':
                                 value=data.get('delta','')
@@ -208,16 +210,17 @@ class QwenProvider:
             if 'usage' in item: yield {'kind':'usage','stage':'answer','value':item['usage']}
 
     async def generate_exercise(self, course, node, profile, sources, *, target_label=''):
-        """做一题: one provider call produces question + standard answer.
-        The answer is filtered out of the visible stream by the caller; only
-        the question (before the answer marker) reaches the student."""
+        """One structured call produces a public question and private answer.
+
+        No model text is exposed as a delta: the API validates the complete
+        object first and publishes only the validated question.
+        """
         yield {'kind':'status','status':'generating','label':'正在出题中'}
         messages=self.exercise_messages(course,node,profile,sources)
         buffer=''
-        async for item in self.stream(messages,self.cfg.answer_tokens):
+        async for item in self.stream(messages,self.cfg.answer_tokens,response_format=EXERCISE_RESPONSE_FORMAT):
             if 'text' in item:
                 buffer+=item['text']
-                yield {'kind':'delta','text':item['text']}
             if 'usage' in item: yield {'kind':'usage','stage':'exercise','value':item['usage']}
         if len(buffer.strip())<20: raise ProviderError('EMPTY_EXERCISE')
         yield {'kind':'complete','text':buffer}
@@ -267,7 +270,9 @@ class TestProvider:
         yield {'kind':'status','status':'generating','label':'正在输出中'}
         if lane=='problem':
             answer=('## Step 1 审题与条件整理\n先把题目条件整理成输入参数。\n\n'
-                    '## Step 2 计算核心点\n对每个点统计其 eps 邻域内的样本数，达到 MinPts 即为核心点。')
+                    '## Step 2 计算核心点\n对每个点统计其 eps 邻域内的样本数，达到 MinPts 即为核心点。\n\n'
+                    '## Step 3 判断边界与噪声\n根据核心点的邻域关系判断其余样本。\n\n'
+                    '## Step 4 核对并作答\n复核条件后写出完整结论。')
         elif bridge and bridge.get('step'):
             answer=f"这是围绕原题第 {bridge['step']} 步的教学输出，携带桥接上下文。"
         elif spec_items:
@@ -286,12 +291,13 @@ class TestProvider:
         question=(f'【诊断题 · {target}】给定二维样本点集合，请解释 DBSCAN 中核心点、'
                   '边界点与噪声点的判定条件，并指出 MinPts 对聚类结果的影响。'
                   '（依据课程知识点自编，非官方原题）')
-        yield {'kind':'delta','text':question}
-        answer=('## Step 1 核心点判定\n邻域内样本数不少于 MinPts 的点为核心点。\n\n'
-                '## Step 2 边界点与噪声点\n不是核心点但落在核心点邻域内的是边界点；其余为噪声点。\n\n'
-                '## Step 3 MinPts 的影响\nMinPts 增大，聚类更保守，噪声点倾向增多。')
+        answer=[
+            {'title':'核心点判定','text':'邻域内样本数不少于 MinPts 的点为核心点。'},
+            {'title':'边界点与噪声点','text':'不是核心点但落在核心点邻域内的是边界点；其余为噪声点。'},
+            {'title':'MinPts 的影响','text':'MinPts 增大，聚类更保守，噪声点倾向增多。'},
+        ]
         yield {'kind':'usage','stage':'exercise','value':{'output_tokens':36}}
-        yield {'kind':'complete','text':question+'\n\n【标准答案】\n'+answer}
+        yield {'kind':'complete','text':json.dumps({'question':question,'answer_steps':answer,'references':[]},ensure_ascii=False)}
 
     async def generate_explanation(self, course, question_text, answer_context, step_text, profile, sources):
         yield {'kind':'status','status':'generating','label':'正在生成详解'}

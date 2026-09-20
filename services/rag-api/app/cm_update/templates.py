@@ -40,6 +40,7 @@ _TEMPLATE_FILES: dict[str, tuple[str, str, str]] = {
 OTHER_TEMPLATE_ID = "OTHER"
 _OTHER_FILE = "15_OTHER_GENERAL_V1.txt"
 _EXERCISE_FILE = "EXERCISE_PROMPT_V1.txt"
+_EXERCISE_RUNTIME_FILE = "EXERCISE_RUNTIME_CONTRACT_V2.txt"
 _PROBLEM_FILE = "PROBLEM_PROMPT_V1.txt"
 _EXPLANATION_FILE = "EXPLANATION_PROMPT_V1.txt"
 _PLAN_WRITER_FILE = "PLAN_WRITER_INSTRUCTION_V1.txt"
@@ -94,6 +95,10 @@ def template_body(template_id: str) -> str | None:
 
 def exercise_prompt() -> str:
     return (_PROMPTS_DIR / _EXERCISE_FILE).read_text(encoding="utf-8").strip()
+
+
+def exercise_runtime_contract() -> str:
+    return (_PROMPTS_DIR / _EXERCISE_RUNTIME_FILE).read_text(encoding="utf-8").strip()
 
 
 def problem_prompt() -> str:

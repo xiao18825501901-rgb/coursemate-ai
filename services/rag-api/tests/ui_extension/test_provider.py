@@ -55,6 +55,28 @@ async def test_problem_lane_normal_mode_uses_problem_word_prompt():
  assert any(x['kind']=='delta' for x in items)
 
 @pytest.mark.asyncio
+async def test_exercise_v2_is_one_structured_call_and_never_streams_private_answer():
+ calls=[]
+ payload={'question':'Which points are core points under DBSCAN?',
+          'answer_steps':[{'title':'Count neighbours','text':'Compare each eps-neighbourhood with MinPts.'}],
+          'references':['S1']}
+ def transport(request):
+  calls.append((str(request.url),json.loads(request.content)))
+  return httpx.Response(200,text=chat(json.dumps(payload)),headers={'content-type':'text/event-stream'})
+ provider=QwenProvider(cfg(qwen_protocol='responses'),httpx.MockTransport(transport))
+ items=[item async for item in provider.generate_exercise(
+     {'name':'Data Science','code':'CS3481'},{'title':'DBSCAN'},
+     {'language':'zh-CN'},[{'id':'S1','text':'density clustering'}])]
+ assert len(calls)==1
+ url,body=calls[0]
+ assert url.endswith('/chat/completions')
+ assert body['response_format']['type']=='json_schema'
+ assert body['response_format']['json_schema']['strict'] is True
+ assert body['stream'] is True and body['enable_thinking'] is False
+ assert not any(item['kind']=='delta' for item in items)
+ assert next(item['text'] for item in items if item['kind']=='complete')==json.dumps(payload)
+
+@pytest.mark.asyncio
 async def test_budget_gate_no_outbound_request():
  c=cfg();c.allow_billable=False;n=0
  def transport(r):

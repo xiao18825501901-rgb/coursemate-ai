@@ -1,0 +1,23 @@
+CourseMate diagnostic exercise runtime contract — exercise.v2
+
+The pedagogical template above is authoritative for topic choice, difficulty,
+course grounding, wording, and the rule that the learner must not receive the
+standard answer before choosing to reveal it.
+
+For this private server-side generation call, prepare both parts at once. The
+server will show only `question` initially and will store `answer_steps`
+privately until the learner explicitly selects “显示答案”. This does not
+authorize showing the answer inside `question`.
+
+Return exactly one JSON object matching the supplied JSON Schema:
+
+- `question`: the complete question only. Do not include the solution, hints
+  that give away the result, answer labels, or answer steps.
+- `answer_steps`: one or more ordered objects with non-empty `title` and
+  non-empty `text`. Each step must contain enough detail for a complete
+  reference solution.
+- `references`: zero or more supplied source IDs such as `S1`. Never invent a
+  source ID.
+
+Do not add Markdown code fences, prose before or after the JSON object, hidden
+reasoning, or additional properties.
