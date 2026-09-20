@@ -40,13 +40,17 @@ def _owns(c, course, token, revision=None):
     return bool(state and state['source'] == 'auto' and state['materials_revision'] == data['materials_revision'])
 
 
-def publish(db, course, token, bundle, result, model):
+def publish(db, course, token, bundle, result, model, *, billing=None):
     validated = social.validate_classification(db, result)
     revision = bundle['materials_revision']
     template = templates.registry()[validated['template_id']]
     metadata = {'template_id': template['id'], 'template_version': template['version'],
                 'template_body_sha256': template['body_sha256'], 'materials_revision': revision,
                 'model': model, 'source': 'auto'}
+    if billing is not None:
+        # Pricing and usage are operation metadata only: never persist the
+        # classified course body, uploaded document text, or credential data.
+        metadata['billing'] = billing
     with db.connect(True) as c:
         if not _owns(c, course, token, revision):
             return False
@@ -67,6 +71,28 @@ def fail(db, course, token, reason):
         c.execute("UPDATE cmui_classifications SET status='FAILED_RETRYABLE',reason=?,updated_at=? WHERE course=? AND source='auto'",
                   (reason, now(), course))
     return True
+
+
+def record_billing_attempt(db, course, token, bundle, billing, outcome):
+    """Keep a non-content audit of a Qwen classification request.
+
+    A worker can lose its claim after the outbound request begins. The result
+    must then not overwrite the newer classification, but the charged or
+    unknown attempt still needs an audit record. ``token`` is a one-time claim
+    ID, so it gives each frozen attempt a stable, non-overwriting key.
+    """
+    revision = bundle.get('materials_revision')
+    if not isinstance(revision, str) or not revision:
+        raise ValueError('Classification billing requires a frozen materials revision')
+    payload = {
+        'materials_revision': revision,
+        'outcome': outcome,
+        'billing': billing,
+    }
+    db.execute(
+        'INSERT INTO cmui_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO NOTHING',
+        ('classification_billing_attempt:' + course + ':' + token, json.dumps(payload)),
+    )
 
 
 def evidence(db, course):

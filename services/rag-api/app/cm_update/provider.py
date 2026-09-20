@@ -19,6 +19,7 @@ from typing import AsyncIterator
 import httpx
 from .sse import events
 from . import templates
+from .budget import OperationEstimate, estimate_operation_cost
 from .exercise_contract import EXERCISE_RESPONSE_FORMAT
 
 class ProviderError(Exception):
@@ -107,11 +108,103 @@ class QwenProvider:
         content=messages[-1]['content']
         if self.cfg.qwen_protocol=='responses':
             parts=[{'type':'input_text','text':content}]
-            parts.extend({'type':'input_image','image_url':im['data_url']} for im in images)
+            parts.extend({'type':'input_image','image_url':im['data_url'],
+                          'max_pixels':self.cfg.image_max_pixels} for im in images)
         else:
             parts=[{'type':'text','text':content}]
-            parts.extend({'type':'image_url','image_url':{'url':im['data_url']}} for im in images)
+            parts.extend({'type':'image_url','image_url':{'url':im['data_url']},
+                          'max_pixels':self.cfg.image_max_pixels} for im in images)
         messages[-1]['content']=parts
+
+    def _estimate(self, stages: list[dict]) -> OperationEstimate:
+        return estimate_operation_cost(
+            stages=stages,
+            input_usd_per_million=self.cfg.operation_input_usd_per_million,
+            output_usd_per_million=self.cfg.operation_output_usd_per_million,
+            # Qwen3.8 visual inputs are billed as input tokens. The provider
+            # request carries this same maximum pixel setting, so the estimate
+            # reserves ceil(max_pixels / 32 / 32) + two visual delimiters.
+            image_tokens_per_input=(self.cfg.image_max_pixels + 1023) // 1024 + 2,
+        )
+
+    def _with_estimated_images(self, messages: list, attachments: list | None) -> list:
+        # Message builders return fresh objects. Do not JSON-copy multi-megabyte
+        # base64 attachments merely to count them: the estimator needs the same
+        # request shape and image count, not the image bytes themselves.
+        copied = [dict(message) for message in messages]
+        if not attachments:
+            return copied
+        content = copied[-1]['content']
+        if self.cfg.qwen_protocol == 'responses':
+            parts = [{'type': 'input_text', 'text': content}]
+            parts.extend({'type': 'input_image', 'image_url': '',
+                          'max_pixels': self.cfg.image_max_pixels} for _ in attachments)
+        else:
+            parts = [{'type': 'text', 'text': content}]
+            parts.extend({'type': 'image_url', 'image_url': {'url': ''},
+                          'max_pixels': self.cfg.image_max_pixels} for _ in attachments)
+        copied[-1]['content'] = parts
+        return copied
+
+    def estimate_generation(self, course, text, profile, sources, history, lane, bridge=None, *, attachments=None, spec_items=None, teaching_mode='normal', template_id='OTHER') -> OperationEstimate:
+        if teaching_mode == 'normal':
+            return self._estimate([{
+                'name': 'answer',
+                'messages': self._with_estimated_images(
+                    self.direct_messages(course, text, profile, sources, history, lane, bridge), attachments
+                ),
+                'max_output_tokens': self.cfg.answer_tokens,
+            }])
+        planner = self._with_estimated_images(
+            self.planner_messages(course, text, profile, sources, history, lane, bridge, spec_items, template_id),
+            attachments,
+        )
+        # The second request receives the complete first-stage prompt. Reserve
+        # its configured maximum as server-owned input, not a guessed response.
+        work = self._with_estimated_images(
+            self.work_messages('', course, text, sources, history, bridge), attachments
+        )
+        return self._estimate([
+            {'name': 'planner', 'messages': planner, 'max_output_tokens': self.cfg.prompt_tokens},
+            {'name': 'teacher', 'messages': work, 'extra_input_tokens': self.cfg.prompt_tokens,
+             'max_output_tokens': self.cfg.answer_tokens},
+        ])
+
+    def estimate_exercise(self, course, node, profile, sources) -> OperationEstimate:
+        return self._estimate([{
+            'name': 'exercise',
+            'messages': self.exercise_messages(course, node, profile, sources),
+            'max_output_tokens': self.cfg.answer_tokens,
+        }])
+
+    def estimate_explanation(self, course, question_text, answer_context, step_text, profile, sources) -> OperationEstimate:
+        return self._estimate([{
+            'name': 'explanation',
+            'messages': self.explanation_messages(
+                course, question_text, answer_context, step_text, profile, sources
+            ),
+            'max_output_tokens': self.cfg.answer_tokens,
+        }])
+
+    def classification_messages(self, bundle: dict) -> list[dict]:
+        """Build the one bounded automatic-classification request.
+
+        Keeping this builder shared by the estimator and caller prevents a
+        later classification prompt change from silently escaping preflight
+        accounting.
+        """
+        instruction = (Path(__file__).parent / 'prompts' / 'CLASSIFICATION_INSTRUCTION_V1.txt').read_text(encoding='utf-8')
+        return [
+            {'role': 'system', 'content': instruction},
+            {'role': 'user', 'content': json.dumps(bundle, ensure_ascii=False)},
+        ]
+
+    def estimate_classification(self, bundle: dict) -> OperationEstimate:
+        return self._estimate([{
+            'name': 'classification',
+            'messages': self.classification_messages(bundle),
+            'max_output_tokens': min(self.cfg.prompt_tokens, 1200),
+        }])
 
     async def stream(self, messages: list, tokens: int, *, response_format: dict | None = None) -> AsyncIterator[dict]:
         cfg=self.cfg
@@ -236,13 +329,22 @@ class QwenProvider:
     async def classify_course(self, bundle: dict) -> str:
         """Template classification: ONE provider call returning the validated
         JSON candidate. Empty returns classify as OTHER by the caller."""
-        instruction = (Path(__file__).parent / 'prompts' / 'CLASSIFICATION_INSTRUCTION_V1.txt').read_text(encoding='utf-8')
-        messages = [{'role':'system','content':instruction},
-                    {'role':'user','content':json.dumps(bundle, ensure_ascii=False)}]
+        text, _ = await self.classify_course_with_usage(bundle)
+        return text
+
+    async def classify_course_with_usage(self, bundle: dict) -> tuple[str, list[dict]]:
+        """Classify once and return provider usage for the frozen revision.
+
+        This is deliberately separate from ``classify_course`` so existing
+        offline doubles retain their compact string-returning contract.
+        """
+        messages = self.classification_messages(bundle)
         text = ''
+        usages: list[dict] = []
         async for item in self.stream(messages, min(self.cfg.prompt_tokens, 1200)):
             if 'text' in item: text += item['text']
-        return text.strip()
+            if 'usage' in item: usages.append(item['usage'])
+        return text.strip(), usages
 
 class DisabledProvider:
     async def generate(self,*args,**kwargs):

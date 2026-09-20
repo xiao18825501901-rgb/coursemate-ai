@@ -4,6 +4,8 @@ import os
 import json
 from urllib.parse import urlparse
 
+from .budget import BudgetPolicyError, parse_usd
+
 
 def flag(name: str, default: bool = False) -> bool:
     return os.getenv(name, str(default)).lower() == 'true'
@@ -30,7 +32,13 @@ class Settings:
     prompt_tokens: int = field(default_factory=lambda: int(os.getenv("CMUI_PROMPT_TOKENS", "2500")))
     answer_tokens: int = field(default_factory=lambda: int(os.getenv("CMUI_ANSWER_TOKENS", "6500")))
     operation_usd_baseline: str = field(default_factory=lambda: os.getenv('CMUI_OPERATION_USD_BASELINE', ''))
+    # Prices are explicitly configured by the deployment owner for the selected
+    # Model Studio region. The deprecated global operation estimate is retained
+    # only for safe diagnostics; production no longer uses it to price runs.
     operation_estimated_usd: str = field(default_factory=lambda: os.getenv('CMUI_OPERATION_ESTIMATED_USD', ''))
+    operation_input_usd_per_million: str = field(default_factory=lambda: os.getenv('CMUI_OPERATION_INPUT_USD_PER_MILLION', ''))
+    operation_output_usd_per_million: str = field(default_factory=lambda: os.getenv('CMUI_OPERATION_OUTPUT_USD_PER_MILLION', ''))
+    image_max_pixels: int = field(default_factory=lambda: int(os.getenv('CMUI_IMAGE_MAX_PIXELS', '2621440')))
     max_upload_bytes: int = 20 * 1024 * 1024
     max_user_bytes: int = 250 * 1024 * 1024
     max_files: int = 100
@@ -46,6 +54,7 @@ class Settings:
         if self.environment not in {'development','test','production'}: raise ValueError('Unknown environment')
         if self.provider_mode not in {'disabled','qwen','test'}: raise ValueError('Unknown provider mode')
         if not 256<=self.prompt_tokens<=12000 or not 256<=self.answer_tokens<=16000: raise ValueError('Model output bounds invalid')
+        if not 1024<=self.image_max_pixels<=16777216: raise ValueError('Image pixel bound invalid')
         if not 10<=self.timeout<=300: raise ValueError('Model timeout invalid')
         if self.auth_mode not in {'development', 'clerk', 'injected'}:
             raise ValueError('Unsupported authentication mode')
@@ -77,5 +86,27 @@ class Settings:
                 raise ValueError('An explicit HTTPS provider base URL without credentials/query/fragment is required')
             if not self.qwen_key:
                 raise ValueError('Backend Qwen credential is missing')
+            if self.environment == 'production':
+                try:
+                    parse_usd(
+                        self.operation_usd_baseline,
+                        required=True,
+                        field='CMUI_OPERATION_USD_BASELINE',
+                        missing_error=BudgetPolicyError,
+                    )
+                    parse_usd(
+                        self.operation_input_usd_per_million,
+                        required=True,
+                        field='CMUI_OPERATION_INPUT_USD_PER_MILLION',
+                        missing_error=BudgetPolicyError,
+                    )
+                    parse_usd(
+                        self.operation_output_usd_per_million,
+                        required=True,
+                        field='CMUI_OPERATION_OUTPUT_USD_PER_MILLION',
+                        missing_error=BudgetPolicyError,
+                    )
+                except BudgetPolicyError as error:
+                    raise ValueError('Production Qwen pricing configuration is required') from error
         if self.qwen_protocol not in {'chat_completions', 'responses'}:
             raise ValueError('Unknown model protocol')

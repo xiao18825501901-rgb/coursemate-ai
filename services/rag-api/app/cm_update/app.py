@@ -38,7 +38,7 @@ from . import classification as classification_state
 from .directory import resolve_recipient, project_local_ids
 from .public_events import public_event
 from .stream_lifecycle import monitored_stream
-from .budget import BudgetPolicyError, evaluate_operation_budget
+from .budget import BudgetPolicyError, OperationEstimate, evaluate_operation_budget
 
 User=Annotated[dict,Depends(current_user)]
 TERMINAL={'completed','failed','cancelled'}
@@ -69,6 +69,40 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
     # without cancellation). Bounded: startup recovery and a background reaper
     # both use it, and it must be longer than the heartbeat interval below.
     lease_grace_seconds=float(os.getenv('CMUI_RUN_LEASE_GRACE','120') or 120)
+
+    def qwen_operation_budget(
+        estimate_method: str,
+        *estimate_args,
+        strength: str,
+        **estimate_kwargs,
+    ) -> tuple[object | None, OperationEstimate | None]:
+        """Gate a billable UI operation with a server-constructed estimate.
+
+        The browser sends only the requested strength. Messages, output bounds,
+        stage count and any image bound are reconstructed here by the Qwen
+        provider. Test/disabled providers intentionally do not emulate money.
+        """
+
+        if cfg.provider_mode != 'qwen':
+            return None, None
+        estimate_builder = getattr(model, estimate_method, None)
+        if not callable(estimate_builder):
+            raise HTTPException(503, '模型预算估算器不可用')
+        try:
+            estimate = estimate_builder(*estimate_args, **estimate_kwargs)
+            budget = evaluate_operation_budget(
+                strength, cfg.operation_usd_baseline, estimate.usd
+            )
+        except BudgetPolicyError as error:
+            raise HTTPException(409, {'code': error.code, 'message': str(error)}) from None
+        return budget, estimate
+
+    def problem_strength(user: dict, course_id: str) -> str:
+        layout = db.one(
+            'SELECT problem_strength FROM cmui_layout WHERE owner=? AND course=?',
+            (user['id'], course_id),
+        )
+        return layout['problem_strength'] if layout else 'medium'
 
     def heartbeat(run_id):
         db.execute("UPDATE cmui_runs SET lease_heartbeat=? WHERE id=? AND status IN ('queued','planning','generating')",(str(time.time()),run_id))
@@ -944,8 +978,8 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         raise HTTPException(410, {'code':'CROSS_PANE_ACTION_RETIRED',
             'message':'跨栏返回模式已停用；历史桥接记录保持不变。'})
 
-    async def generate_run(run_id,user,course_data,conv,sources,history,data,bridge_data,images=None,v3_link=None,spec_items=None,teaching_mode='normal',template_id='OTHER'):
-        output=''; usages=[]; last_beat=0.0
+    async def generate_run(run_id,user,course_data,conv,sources,history,data,bridge_data,images=None,v3_link=None,spec_items=None,teaching_mode='normal',template_id='OTHER',estimate_audit=None):
+        output=''; usages=[estimate_audit] if estimate_audit else []; last_beat=0.0
         try:
             heartbeat(run_id)
             generate_kwargs={'attachments':images} if images else {}
@@ -1066,14 +1100,6 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         rate(user,'model-runs',8)
         if cfg.provider_mode=='disabled' and provider is None: raise HTTPException(503,'模型尚未配置；数据功能可用，不会返回预设答案冒充千问。')
         if cfg.provider_mode=='qwen' and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
-        try:
-            # Only actual billable provider operations enter the application USD
-            # gate. The deterministic provider is not an estimate of Qwen cost.
-            budget = (evaluate_operation_budget(data.reasoning_strength,
-                      cfg.operation_usd_baseline,cfg.operation_estimated_usd)
-                      if cfg.provider_mode=='qwen' else None)
-        except BudgetPolicyError as error:
-            raise HTTPException(409, {'code':error.code,'message':str(error)}) from None
         teaching_mode=data.teaching_mode
         # Node binding semantics: the FIRST teaching bound to a node uses the
         # Thinking flow automatically and exactly once. Later runs on the same
@@ -1157,6 +1183,32 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             # never as database authority for the model.
             v3_link=await remote('knowledge.begin_learning',user,{'course':conv['course'],'node':data.node_id},request)
             spec_items=v3_link.get('required_items') or None
+        # The first run for a teaching node is promoted to the product's
+        # plan→work workflow in the transaction below. If a competing worker
+        # claims it first, this request falls back to normal mode (a lower
+        # actual cost). Therefore an absent start is the only safe preflight
+        # signal: estimate it as Thinking before any provider request.
+        budget_teaching_mode=teaching_mode
+        if data.node_id and conv['lane']=='teach' and not db.one(
+            'SELECT 1 FROM cmui_node_starts WHERE owner=? AND course=? AND node=?',
+            (user['id'],conv['course'],data.node_id),
+        ):
+            budget_teaching_mode='thinking'
+        budget, estimate = qwen_operation_budget(
+            'estimate_generation',
+            course_data,
+            data.text,
+            {k:user[k] for k in ['language','timezone','bio']},
+            sources,
+            history,
+            conv['lane'],
+            bridge_data,
+            attachments=images,
+            spec_items=spec_items,
+            teaching_mode=budget_teaching_mode,
+            template_id=template_id,
+            strength=data.reasoning_strength,
+        )
         rid=uid('run_')
         try:
             with db.connect(True) as c:
@@ -1164,7 +1216,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                     first=c.execute('INSERT OR IGNORE INTO cmui_node_starts(owner,course,node,run) VALUES(?,?,?,?)',
                         (user['id'],conv['course'],data.node_id,rid)).rowcount
                     teaching_mode='thinking' if first else data.teaching_mode
-                c.execute('INSERT INTO cmui_runs(id,owner,conversation,request_id,status,user_text,teaching_mode,reasoning_strength,budget_baseline_usd,budget_estimate_usd,application_budget_usd,lease_worker,lease_heartbeat,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(rid,user['id'],conv_id,data.request_id,'queued',data.text,teaching_mode,data.reasoning_strength,str(budget.baseline_usd) if budget and budget.baseline_usd is not None else None,str(budget.estimated_usd) if budget and budget.estimated_usd is not None else None,str(budget.application_usd_cap) if budget and budget.application_usd_cap is not None else None,worker_id,str(time.time()),now(),now()))
+                c.execute('INSERT INTO cmui_runs(id,owner,conversation,request_id,status,user_text,teaching_mode,reasoning_strength,budget_baseline_usd,budget_estimate_usd,application_budget_usd,usage,lease_worker,lease_heartbeat,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(rid,user['id'],conv_id,data.request_id,'queued',data.text,teaching_mode,data.reasoning_strength,str(budget.baseline_usd) if budget and budget.baseline_usd is not None else None,str(budget.estimated_usd) if budget and budget.estimated_usd is not None else None,str(budget.application_usd_cap) if budget and budget.application_usd_cap is not None else None,json.dumps([estimate.audit()]) if estimate else '[]',worker_id,str(time.time()),now(),now()))
                 c.execute('INSERT INTO cmui_run_inputs VALUES (?,?,?)',(rid,digest,json.dumps(attachment_meta,ensure_ascii=False)))
                 c.execute('INSERT INTO cmui_messages(id,conversation,role,text,citations,run,created_at,provenance,exercise) VALUES (?,?,?,?,?,?,?,?,NULL)',(uid('message_'),conv_id,'user',data.text,'[]',rid,now(),''))
                 c.execute("UPDATE cmui_conversations SET title=CASE WHEN title='新对话' THEN ? ELSE title END,updated_at=? WHERE id=?",(data.text[:40],now(),conv_id))
@@ -1179,7 +1231,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                         c.execute('UPDATE cmui_bridges SET teach_run=?,journey_id=?,spec_version=? WHERE id=? AND owner=?',(rid,v3_link['journey_id'],v3_link['spec_version'],data.bridge_id,user['id']))
         except sqlite3.IntegrityError: raise HTTPException(409,'该对话已有任务正在生成，请先等待或停止') from None
         event(rid,'status',{'status':'queued','label':'正在思考中'})
-        task=asyncio.create_task(generate_run(rid,user,course_data,conv,sources,history,data,bridge_data,images,v3_link,spec_items,teaching_mode,template_id))
+        task=asyncio.create_task(generate_run(rid,user,course_data,conv,sources,history,data,bridge_data,images,v3_link,spec_items,teaching_mode,template_id,estimate.audit() if estimate else None))
         jobs[rid]=task
         return {'id':rid,'status':'queued','teaching_mode':teaching_mode,'reasoning_strength':data.reasoning_strength,
                 'application_budget_usd':str(budget.application_usd_cap) if budget and budget.application_usd_cap is not None else None}
@@ -1247,13 +1299,51 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
 
     async def classify_course_task(course_id, bundle, token):
         job_key=f'classify-{course_id}'
+        billing=None
+        outbound_attempted=False
         try:
             if cfg.provider_mode=='qwen' and not cfg.allow_billable:
                 classification_state.fail(db,course_id,token,'未授权模型调用费用')
                 return
-            result=json.loads(await model.classify_course(bundle))
-            classification_state.publish(db,course_id,token,bundle,result,cfg.qwen_model)
+            budget, estimate = qwen_operation_budget(
+                'estimate_classification', bundle, strength='medium'
+            )
+            if estimate is not None:
+                billing = {
+                    'reasoning_strength': 'medium',
+                    'baseline_usd': str(budget.baseline_usd) if budget and budget.baseline_usd is not None else None,
+                    'estimated_usd': str(estimate.usd),
+                    'application_usd_cap': str(budget.application_usd_cap) if budget and budget.application_usd_cap is not None else None,
+                    'estimate': estimate.audit(),
+                    'provider_usage': [],
+                }
+            usage=[]
+            outbound_attempted = cfg.provider_mode == 'qwen'
+            if cfg.provider_mode=='qwen' and hasattr(model, 'classify_course_with_usage'):
+                raw_result, usage = await model.classify_course_with_usage(bundle)
+            else:
+                raw_result = await model.classify_course(bundle)
+            result=json.loads(raw_result)
+            if billing is not None:
+                billing['provider_usage'] = usage
+            if billing is not None:
+                classification_state.record_billing_attempt(
+                    db, course_id, token, bundle, billing, 'completed'
+                )
+            classification_state.publish(db,course_id,token,bundle,result,cfg.qwen_model,billing=billing)
+        except HTTPException as error:
+            # Automatic classification has no client-selected strength. It is a
+            # single medium operation and fails closed when its frozen source
+            # bundle would exceed B or pricing is unavailable.
+            if error.status_code in {409, 503}:
+                classification_state.fail(db,course_id,token,'分类预算不可用或超过中档预算')
+                return
+            classification_state.fail(db,course_id,token,'分类失败，可在资料更新后重试')
         except Exception:
+            if outbound_attempted and billing is not None:
+                classification_state.record_billing_attempt(
+                    db, course_id, token, bundle, billing, 'failed_or_unknown'
+                )
             classification_state.fail(db,course_id,token,'分类失败，可在资料更新后重试')
         finally:
             jobs.pop(job_key,None)
@@ -1713,8 +1803,8 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 return dict(n,review=True)
         raise HTTPException(409,'请先准备课程知识树或选择有效知识点')
 
-    async def generate_exercise_run(run_id,user,course_data,pair,node,node_title,sources):
-        full=''; usages=[]
+    async def generate_exercise_run(run_id,user,course_data,pair,node,node_title,sources,estimate_audit=None):
+        full=''; usages=[estimate_audit] if estimate_audit else []
         try:
             heartbeat(run_id)
             upstream=model.generate_exercise(course_data,node,{k:user[k] for k in ['language','timezone','bio']},sources,target_label=node_title)
@@ -1804,6 +1894,12 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         node=pick_exercise_node(pair,knowledge,data.node)
         node_title=('复习：' if node.get('review') else '')+node['title']
         sources=(await remote('context.retrieve',user,{'course':cid,'query':node_title or '课程知识点','history':[]},request)) if domain else context_for(db,user['id'],cid,node_title or '课程知识点',[])
+        strength=problem_strength(user,cid)
+        budget, estimate = qwen_operation_budget(
+            'estimate_exercise', course_data, node,
+            {k:user[k] for k in ['language','timezone','bio']}, sources,
+            strength=strength,
+        )
         rid=uid('run_')
         conv_id=pair['problem_conversation']
         if not conv_id:
@@ -1811,11 +1907,11 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             db.execute('UPDATE cmui_pairs SET problem_conversation=? WHERE id=?',(conv_id,pair['id']))
             pair=db.one('SELECT * FROM cmui_pairs WHERE id=?',(pair['id'],))
         with db.connect(True) as c:
-            c.execute('INSERT INTO cmui_runs(id,owner,conversation,request_id,status,user_text,teaching_mode,lease_worker,lease_heartbeat,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-                (rid,user['id'],conv_id,data.request_id,'queued','做一题','normal',worker_id,str(time.time()),now(),now()))
+            c.execute('INSERT INTO cmui_runs(id,owner,conversation,request_id,status,user_text,teaching_mode,reasoning_strength,budget_baseline_usd,budget_estimate_usd,application_budget_usd,usage,lease_worker,lease_heartbeat,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                (rid,user['id'],conv_id,data.request_id,'queued','做一题','normal',strength,str(budget.baseline_usd) if budget and budget.baseline_usd is not None else None,str(budget.estimated_usd) if budget and budget.estimated_usd is not None else None,str(budget.application_usd_cap) if budget and budget.application_usd_cap is not None else None,json.dumps([estimate.audit()]) if estimate else '[]',worker_id,str(time.time()),now(),now()))
             c.execute('INSERT INTO cmui_run_inputs VALUES (?,?,?)',(rid,digest,'[]'))
         event(rid,'status',{'status':'queued','label':'正在思考中'})
-        task=asyncio.create_task(generate_exercise_run(rid,user,course_data,pair,node,node_title,sources))
+        task=asyncio.create_task(generate_exercise_run(rid,user,course_data,pair,node,node_title,sources,estimate.audit() if estimate else None))
         jobs[rid]=task
         return {'id':rid,'status':'queued'}
 
@@ -1896,8 +1992,8 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         if not saved: raise HTTPException(409,'详解回执不可恢复')
         return {'id':saved['id'],'run':old['id'],'status':old['status'],'reused':True}
 
-    async def generate_explanation_run(run_id,user,explanation,row,question_text,answer_context,step_text,course_data,sources):
-        output=''; usages=[]
+    async def generate_explanation_run(run_id,user,explanation,row,question_text,answer_context,step_text,course_data,sources,estimate_audit=None):
+        output=''; usages=[estimate_audit] if estimate_audit else []
         try:
             heartbeat(run_id)
             upstream=model.generate_explanation(course_data,question_text,answer_context,step_text,{k:user[k] for k in ['language','timezone','bio']},sources)
@@ -1971,6 +2067,12 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         if cfg.provider_mode=='qwen' and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
         answer_context='\n\n'.join(s['text'] for s in steps)
         sources=(await remote('context.retrieve',user,{'course':row['course'],'query':step['text'][:400],'history':[]},request)) if domain else context_for(db,user['id'],row['course'],step['text'][:400],[])
+        strength=problem_strength(user,row['course'])
+        budget, estimate = qwen_operation_budget(
+            'estimate_explanation', course_data, row['question'], answer_context,
+            step['text'], {k:user[k] for k in ['language','timezone','bio']}, sources,
+            strength=strength,
+        )
         rid=uid('run_')
         with db.connect(True) as c:
             # Retrieval yields control. Re-check the immutable request and the
@@ -1993,13 +2095,13 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 c.execute('INSERT INTO cmui_conversations(id,owner,course,lane,title,created_at,updated_at,hidden) VALUES (?,?,?,?,?,?,?,1)',
                     (conv_id,user['id'],row['course'],'problem','详解：'+step['title'][:40],now(),now()))
                 c.execute('UPDATE cmui_step_explanations SET conversation=? WHERE id=?',(conv_id,eid))
-            c.execute('INSERT INTO cmui_runs(id,owner,conversation,request_id,status,user_text,teaching_mode,lease_worker,lease_heartbeat,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-                (rid,user['id'],conv_id,data.request_id,'queued',step['title'],'normal',worker_id,str(time.time()),now(),now()))
+            c.execute('INSERT INTO cmui_runs(id,owner,conversation,request_id,status,user_text,teaching_mode,reasoning_strength,budget_baseline_usd,budget_estimate_usd,application_budget_usd,usage,lease_worker,lease_heartbeat,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                (rid,user['id'],conv_id,data.request_id,'queued',step['title'],'normal',strength,str(budget.baseline_usd) if budget and budget.baseline_usd is not None else None,str(budget.estimated_usd) if budget and budget.estimated_usd is not None else None,str(budget.application_usd_cap) if budget and budget.application_usd_cap is not None else None,json.dumps([estimate.audit()]) if estimate else '[]',worker_id,str(time.time()),now(),now()))
             c.execute('UPDATE cmui_step_explanations SET run=?,status=\'generating\',updated_at=? WHERE id=?',(rid,now(),eid))
             c.execute('INSERT INTO cmui_run_inputs VALUES(?,?,?)',(rid,digest,'[]'))
             action_receipt(c,user['id'],data.request_id,digest,{'id':eid,'run':rid,'status':'generating'})
         event(rid,'status',{'status':'queued','label':'正在思考中'})
-        task=asyncio.create_task(generate_explanation_run(rid,user,eid,row,row['question'],answer_context,step['text'],course_data,sources))
+        task=asyncio.create_task(generate_explanation_run(rid,user,eid,row,row['question'],answer_context,step['text'],course_data,sources,estimate.audit() if estimate else None))
         jobs[rid]=task
         return {'id':eid,'run':rid,'status':'generating'}
 
@@ -2032,6 +2134,12 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         prior='\n\n'.join(m['text'] for m in db.all('SELECT text FROM cmui_explanation_messages WHERE explanation=? ORDER BY created_at,rowid',(explanation_id,)))
         answer_context='\n\n'.join(s['text'] for s in json.loads(exercise['answer_steps']))+'\n\n此前详解与追问：\n'+prior
         sources=(await remote('context.retrieve',user,{'course':exercise['course'],'query':data.text,'history':[]},request)) if domain else context_for(db,user['id'],exercise['course'],data.text,[])
+        strength=problem_strength(user,exercise['course'])
+        budget, estimate = qwen_operation_budget(
+            'estimate_explanation', course_data, exercise['question'], answer_context,
+            data.text, {k:user[k] for k in ['language','timezone','bio']}, sources,
+            strength=strength,
+        )
         conv_id=row['conversation']
         rid=uid('run_')
         with db.connect(True) as c:
@@ -2039,13 +2147,13 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             if replay: return replay
             claimed=c.execute("UPDATE cmui_step_explanations SET run=?,status='generating',updated_at=? WHERE id=? AND status='completed'",(rid,now(),explanation_id)).rowcount
             if claimed!=1: raise HTTPException(409,'详解已有生成任务')
-            c.execute('INSERT INTO cmui_runs(id,owner,conversation,request_id,status,user_text,teaching_mode,lease_worker,lease_heartbeat,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-                (rid,user['id'],conv_id,data.request_id,'queued',data.text,'normal',worker_id,str(time.time()),now(),now()))
+            c.execute('INSERT INTO cmui_runs(id,owner,conversation,request_id,status,user_text,teaching_mode,reasoning_strength,budget_baseline_usd,budget_estimate_usd,application_budget_usd,usage,lease_worker,lease_heartbeat,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                (rid,user['id'],conv_id,data.request_id,'queued',data.text,'normal',strength,str(budget.baseline_usd) if budget and budget.baseline_usd is not None else None,str(budget.estimated_usd) if budget and budget.estimated_usd is not None else None,str(budget.application_usd_cap) if budget and budget.application_usd_cap is not None else None,json.dumps([estimate.audit()]) if estimate else '[]',worker_id,str(time.time()),now(),now()))
             c.execute('INSERT INTO cmui_run_inputs VALUES(?,?,?)',(rid,digest,'[]'))
             c.execute('INSERT INTO cmui_explanation_messages(id,explanation,role,text,run,created_at) VALUES (?,?,?,?,?,?)',
                       (uid('message_'),explanation_id,'user',data.text,rid,now()))
         event(rid,'status',{'status':'queued','label':'正在思考中'})
-        task=asyncio.create_task(generate_explanation_run(rid,user,explanation_id,row,exercise['question'],answer_context,data.text,course_data,sources))
+        task=asyncio.create_task(generate_explanation_run(rid,user,explanation_id,row,exercise['question'],answer_context,data.text,course_data,sources,estimate.audit() if estimate else None))
         jobs[rid]=task
         return {'run':rid,'status':'generating'}
 
