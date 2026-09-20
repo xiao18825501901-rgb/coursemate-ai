@@ -1,7 +1,9 @@
 # Exercise and Problem-step production hotfix
 
-Status: **SOURCE IMPLEMENTED / LOCAL VERIFIED / LIVE MODEL AND PRODUCTION PENDING**  
-Application release SHA: `6e0b8d733f26a3c588761cd1d2d402f372e413b2`  
+Status: **PRODUCTION DEPLOYED AND ACCEPTED**
+
+Application release SHA: `46415bde81df28f4dc18629219bc9ddc50e4c215`
+
 Branch: `fix/codex-dsh-audit-20260919`
 
 ## Defects
@@ -60,10 +62,14 @@ LearningBridge records, official trees, publication releases and user data remai
 - There is no global auto-verification, test provider, fixed model success or relaxed assertion in
   production code.
 
-## Release boundaries
+## Production disposition
 
-The application candidate is frozen at the SHA above. Production content is not republished by this
-hotfix. CS3481 and GE2324 official tree/release/snapshot identities must be checked before and after
-cutover. A real Qwen canary and a current recovery unit are mandatory gates before switching the
-backend and Netlify production deploy.
+The fix was deployed to `/srv/coursemate/releases/46415bd` and is the active backend. Netlify
+production deploy `6aaf951c45a27f7ea503df44` serves the same SHA. The release did not republish
+course content or change a schema. Post-cutover read-only verification confirms that the CS3481 and
+GE2324 tree, snapshot and ACTIVE release identities are unchanged.
 
+Live `qwen3.8-max` acceptance passed generated-exercise hidden/reveal/detail flows for CS3481 and
+GE2324, an ordinary four-step CS3481 Problem, saved detail rendering, a real LearningBridge teaching
+run and return to the original step. See `EXERCISE_AND_STEPS_TEST_REPORT.md` and
+`PRODUCTION_HOTFIX_EXECUTION.md` for the exact evidence and cost ledger.

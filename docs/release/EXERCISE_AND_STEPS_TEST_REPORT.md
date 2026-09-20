@@ -1,62 +1,77 @@
 # Exercise and Problem-step test report
 
-Application release SHA: `6e0b8d733f26a3c588761cd1d2d402f372e413b2`  
-Test environment: local isolated/synthetic databases; fake provider unless explicitly stated  
-Live model status: **NOT YET RUN**  
-Production status: **NOT YET DEPLOYED**
+Application release SHA: `46415bde81df28f4dc18629219bc9ddc50e4c215`
 
-## Local evidence
+Live model: **VERIFIED — qwen3.8-max**
 
-| Layer | Result | Evidence |
-| --- | ---: | --- |
-| Exercise/provider/privacy focused tests | 16 passed | strict JSON Schema request, invalid/truncated fail-closed, stream privacy, reveal, explanation gate |
-| Broader affected backend set | 76 passed | Problem/exercise/history/share/projection coverage |
-| Parser/share/problem targeted follow-up | 5 passed | compatibility and frozen-sharing paths |
-| Full RAG/backend regression | **691 passed**, 0 failed, 0 skipped | `work/exercise-hotfix-a92dc07/rag-pytest-final.xml`; 647.629 s |
-| Web unit tests | **60 passed** | frozen application SHA |
-| Agent tests | **66 passed** | frozen application SHA |
-| Web typecheck | passed | frozen application SHA |
-| Agent typecheck | passed | frozen application SHA |
-| Web production build | passed | preflight + artifact scan; `build-info.json` names the frozen SHA and production origins |
-| Agent build | passed | frozen application SHA |
-| Browser audit | **14 passed** | `work/codex-audit/browser-1789887141769-8756`; 57.8 s |
+Production: **VERIFIED — qqttai.com**
 
-The browser suite proves, with the actual React UI and integrated local backend:
+## Exact-release local evidence
 
-- generated answer hidden across run polling, SSE, Pair and exercise GET;
-- reveal persists across reload and displays the saved steps;
-- an ordinary supplied Problem displays four steps rather than an empty pane;
-- real 详解 buttons are visible and open a saved explanation;
-- a real step-link creates LearningBridge context and the return action restores the Problem step;
-- detail-window drag, resize, close and reopen keep saved state;
-- user isolation, sharing and the surrounding UI regressions remain green.
+| Layer | Result |
+| --- | ---: |
+| Full RAG/backend regression | **692 passed**, 0 failed/errors/skipped; 746.81 s |
+| Web tests | **60 passed** |
+| Agent tests | **66 passed** |
+| Web typecheck / production build | passed / passed |
+| Agent typecheck / build | passed / passed |
+| Main Playwright gate | **4 passed** |
+| Complete browser audit | **14 passed**, 56.4 s |
 
-Visual evidence for the ordinary Problem path is under
-`work/codex-audit/browser-1789887141769-8756/browser-results/`; the inspected screenshot shows all
-four solution steps and four LearningBridge knowledge actions.
+The final backend XML is
+`work/release-20260920-6e0b8d7/rag-pytest-restartfix.xml`. Its containing directory retains the
+earlier candidate name, but the run itself was made after and against application SHA `46415bd`.
+Browser evidence is under `work/codex-audit/browser-1789891592203-21556`.
 
-## Preserved failed evidence
+The final SHA includes one additional restart-safety regression and repair. Production restart
+revealed a teaching-only Pair whose Problem lane was null; migration incorrectly treated the null
+lane as missing and attempted to recreate an already-bound Pair. A production-shaped regression
+failed first, then `cm_update/db.py` was changed so a null lane is already satisfied and only
+non-null conversations participate in the existing-conversation set. The full suite above was run
+after that change.
 
-The first full run is retained at `work/exercise-hotfix-a92dc07/rag-pytest.xml`: 690 passed and one
-failed. The only failure was an old synthetic-provider assertion that still expected exactly two
-steps after the fixture was intentionally expanded to four to reproduce the production UI defect.
-The assertion was updated to the new deterministic fixture contract, the application commit was
-amended, and the complete suite was rerun against the new frozen SHA. The fresh XML above is the
-release evidence; the earlier failure was not deleted or rewritten.
+## Live model evidence
 
-An initial Playwright launch also used an evidence directory outside the harness-required
-`work/codex-audit` root. The harness rejected the environment before application tests ran. The
-suite was then run in the required isolated directory and passed 14/14; the rejected launch is not
-reported as an application pass or failure.
+The approved combined ceiling was USD 1.50. No call was retried automatically.
 
-## Gates still open
+| Run | Calls | Input tokens | Output tokens | List-price estimate |
+| --- | ---: | ---: | ---: | ---: |
+| Isolated pre-release canary | 5 | 16,191 | 5,760 | USD 0.066942 |
+| First production harness; browser JWT expired after completed calls | 2 | 6,572 | 2,280 | USD 0.026824 |
+| Successful production API canary | 5 | 16,222 | 5,287 | USD 0.064166 |
+| First browser preparation; model returned an insufficient step shape | 1 | 2,964 | 424 | USD 0.008472 |
+| Successful browser preparation: four-step Problem plus saved detail | 2 | 6,349 | 2,220 | USD 0.026018 |
+| LearningBridge teaching from the first visible Problem step | 1 | 967 | 165 | USD 0.002924 |
+| **Total** | **16** | **49,265** | **16,136** | **USD 0.195346** |
 
-The following may only be marked passed after new evidence is attached:
+The estimate uses USD 2 per million input tokens and USD 6 per million output tokens. It is not a
+provider invoice. Every failed or superseded harness attempt is included in the total.
 
-1. bounded real `qwen3.8-max` canary for CS3481 generated exercise, reveal and explanation;
-2. bounded GE2324 generated exercise and reveal;
-3. bounded ordinary multi-step Problem, visible saved steps and explanation;
-4. current production backup plus isolated restore verification;
-5. exact-SHA backend switch and Netlify production publish;
-6. public health, auth/isolation, browser and paid-model production smoke.
+The production API canary verified:
 
+- CS3481 generated exercise hidden before reveal, stable reveal and persisted explanation;
+- GE2324 generated exercise hidden before reveal and stable reveal;
+- CS3481 ordinary multi-step Problem plus saved explanation;
+- strict response contract, exact provider call counts and no implicit retry.
+
+The production browser acceptance then verified four visible Problem knowledge links, loaded the
+saved detail, created a real LearningBridge teaching run, rendered the teaching response, returned
+to the original Problem step and exposed no stored plan fields. Chrome reported one
+`net::ERR_ABORTED` after the completed run event stream was intentionally closed by the page. This
+occurred after all application assertions and screenshots passed; it was isolated from unexpected
+network failures and is recorded rather than hidden.
+
+Ignored evidence artifacts:
+
+- `work/release-20260920-46415bd/production-canary.json`
+- `work/release-20260920-46415bd/production-browser-preparation.json`
+- `work/release-20260920-46415bd/production-browser-acceptance.json`
+- `work/release-20260920-46415bd/production-ordinary-problem-steps.png`
+- `work/release-20260920-46415bd/production-learningbridge-return.png`
+
+## Production gate result
+
+The previously open gates are now closed: current backup and isolated restore passed, the exact SHA
+is active on both backend and frontend, public health and authentication boundaries pass, and the
+paid-model browser workflow passes. The complete operational record is in
+`PRODUCTION_HOTFIX_EXECUTION.md`.

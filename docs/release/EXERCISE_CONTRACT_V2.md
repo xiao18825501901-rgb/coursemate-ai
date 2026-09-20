@@ -1,7 +1,9 @@
 # Exercise runtime contract v2
 
-Status: **SOURCE IMPLEMENTED / LOCAL FAKE-PROVIDER VERIFIED**  
-Application release SHA: `6e0b8d733f26a3c588761cd1d2d402f372e413b2`  
+Status: **SOURCE, OFFLINE CONTRACT, LIVE MODEL AND PRODUCTION VERIFIED**
+
+Application release SHA: `46415bde81df28f4dc18629219bc9ddc50e4c215`
+
 Runtime identifier: `exercise.v2`
 
 This contract is the application-facing output contract for the **做一题** action. It is deliberately
@@ -81,6 +83,11 @@ Historical `exercise.v1` delimiter records remain readable through a fail-closed
 parser. Missing, duplicate, ambiguous, or stream-split markers never cause an answer to be exposed.
 All new Qwen 做一题 generation uses `exercise.v2`.
 
+Production acceptance on 2026-09-20 verified the contract with real `qwen3.8-max` calls in both
+CS3481 and GE2324. Before reveal, generated answers remained absent; reveal returned the persisted
+steps without another provider call; a saved step explanation completed. The provider invoice was
+not accessed, so recorded USD values are list-price estimates derived from returned token usage.
+
 ## Code and test anchors
 
 - Schema/validator: `services/rag-api/app/cm_update/exercise_contract.py`
@@ -89,4 +96,3 @@ All new Qwen 做一题 generation uses `exercise.v2`.
 - Persistence/public projection/reveal: `services/rag-api/app/cm_update/app.py`
 - Contract tests: `services/rag-api/tests/ui_extension/test_exercise_contract.py`
 - Privacy/API tests: `services/rag-api/tests/test_codex_exercise_privacy.py`
-

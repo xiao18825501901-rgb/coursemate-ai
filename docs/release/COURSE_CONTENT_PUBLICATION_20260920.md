@@ -1,10 +1,15 @@
 # CourseMate official course content publication — 2026-09-20
 
+> Historical activation record for application `aa3ffc2`. Its content-publication evidence remains
+> valid. Its whole-site PARTIAL FAILURE verdict was superseded after the two recorded defects were
+> repaired and production-accepted in `PRODUCTION_HOTFIX_EXECUTION.md` at application `46415bd`.
+
 ## Decision and outcome
 
 **Content publication outcome: ACCEPTED.**
 
-**Whole-site functional outcome: PARTIAL FAILURE; see `FINAL_COURSEMATE_PRODUCTION_ACCEPTANCE.md`.**
+**Whole-site functional outcome for the assessed `aa3ffc2` release: PARTIAL FAILURE; superseded by
+the current `FINAL_COURSEMATE_PRODUCTION_ACCEPTANCE.md`.**
 
 The Owner authorization was received at approximately **2026-09-20 04:56:35 CST** (attachment creation timestamp). It explicitly authorizes all current platform-managed official/campus courses, including CS3481 and GE2324, for immediate publication after structural and source validation. The decision is recorded as `OWNER_APPROVED_FOR_PUBLICATION`; it is not represented as prior per-node human review of newly generated content.
 
@@ -147,7 +152,7 @@ The machine evidence contains 55 PASS checks, 2 FAIL checks, and 1 NOT_RUN check
 - Two official-course learning workspaces and their private shadow courses for the now-deleted synthetic owner remain because referentially restricted learning evidence has no supported archive/delete API. The attempted broad deletion rolled back. Foreign keys were not disabled and no audit evidence was hand-deleted. These rows are inaccessible through active identity resolution.
 - UI learning history, runs, messages, and share audit rows under the inactive synthetic subject are likewise retained as inaccessible audit evidence.
 
-## Remaining limitations
+## Limitations observed in the historical `aa3ffc2` acceptance
 
 1. **“做一题” did not complete.** Three bounded attempts failed closed: two `INVALID_EXERCISE_BOUNDARY` and one `EMPTY_EXERCISE`. No answer steps or reveal record leaked. The current generic `EXERCISE_PROMPT_V1` conflicts with the private delimiter contract expected by the server parser.
 2. **Problem-step knowledge buttons were not visible.** The server parsed four steps, and backend LearningBridge/return worked, but the browser rendered zero `.step-link` buttons. A normal problem answer is tagged as an exercise; `pages.jsx` clears `steps` on every exercise-tagged message before `RichText` renders it.
