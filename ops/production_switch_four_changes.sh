@@ -39,11 +39,11 @@ require_dir "$FALLBACK_RELEASE"
   echo "Refusing to switch: current release is not the reviewed pre-migration release." >&2
   exit 2
 }
-[[ "$(grep -E '^SCHEMA_VERSION = ' "$NEW_RELEASE/services/rag-api/app/cm_update/db.py" | awk '{print $3}')" == "13" ]] || {
+[[ "$(grep -E '^SCHEMA_VERSION = ' "$NEW_RELEASE/services/rag-api/app/cm_update/db.py" | awk '{gsub(/\r/, ""); print $3}')" == "13" ]] || {
   echo "New runtime is not a Schema 13 runtime." >&2
   exit 2
 }
-[[ "$(grep -E '^SCHEMA_VERSION = ' "$FALLBACK_RELEASE/services/rag-api/app/cm_update/db.py" | awk '{print $3}')" == "13" ]] || {
+[[ "$(grep -E '^SCHEMA_VERSION = ' "$FALLBACK_RELEASE/services/rag-api/app/cm_update/db.py" | awk '{gsub(/\r/, ""); print $3}')" == "13" ]] || {
   echo "Fallback runtime cannot read Schema 13." >&2
   exit 2
 }
