@@ -1,12 +1,12 @@
 import React from 'react';
-import { request, send, remove, setTokenGetter, key, getVerification, redeemVerification } from './api.js';
+import { request, send, remove, setTokenGetter, key, getVerification } from './api.js';
 import { route, goto } from './utils.js';
 import { Icon, IconButton, Avatar } from './icons.jsx';
 import { CourseFiles, Discussion, Inbox, Calendar, Learn } from './pages.jsx';
 const COLORS = ['#38585b', '#756480', '#95657b', '#5b7793', '#a18b58', '#558b7a'];
-const HELPS = [['开始学习', '在“课程 → 所有课程”点加号，选择显示在控制面板的课程。首次控制面板只有创建框。'], ['创建自己的课程', '点击虚线框或所有课程顶部的“创建课程”。新课程默认私人，创建后自动加入控制面板。'], ['文件与课程资料', '点击文件名预览；行末三点菜单下载。在官方课程添加的个人文件仅自己可见。'], ['知识和题目，一起学', '左边学知识，右边解题。拖动中间分隔条调比例，左上角按钮进入页面全屏，Esc 退出。'], ['题目到知识，再返回', '在右侧答案步骤下面点击知识问题，左侧携带原题上下文讲解；“返回题目”回到原步骤。'], ['学习历史', '每个模式有独立历史入口。对话和完成的生成记录由服务器保存，刷新、退出重登后可以恢复。'], ['日历与学习计划', '日历下方有计划入口，安排保存在账户下。已完成任务会同步显示在日历和列表。'], ['评论和信息', '课程评论对能访问该课程的用户可见。别人回复你的评论会通知你。私信只有参与双方可以读取。']];
+const HELPS = [['开始学习', '在“课程 → 所有课程”点加号，选择显示在控制面板的课程。首次控制面板只有创建框。'], ['创建自己的课程', '点击虚线框或所有课程顶部的“创建课程”。新课程默认私人，创建后自动加入控制面板。'], ['文件与课程资料', '点击文件名预览；行末三点菜单下载。在官方课程添加的个人文件仅自己可见。'], ['知识和题目，一起学', '左边学知识，右边解题。拖动中间分隔条调比例，左上角按钮进入页面全屏，Esc 退出。'], ['题目详解', '题目 Pane 保持完整参考解法。每个已揭晓步骤可在独立、可拖动和缩放的“详解”窗口中继续追问，不会改变左侧学习对话。'], ['学习历史', '每个模式有独立历史入口。对话和完成的生成记录由服务器保存，刷新、退出重登后可以恢复。'], ['日历与学习计划', '日历下方有计划入口，安排保存在账户下。已完成任务会同步显示在日历和列表。'], ['评论和信息', '课程评论对能访问该课程的用户可见。别人回复你的评论会通知你。私信只有参与双方可以读取。']];
 export class App extends React.Component {
-    state = { loading: true, error: '', config: null, user: null, verification: null, courses: [], route: route(), drawer: null, modal: null, unread: 0, toast: '' };
+    state = { loading: true, error: '', config: null, user: null, verification: null, courses: [], route: route(), drawer: null, modal: null, unread: 0, toast: '', theme: 'light' };
     componentDidMount() { this.onHash = () => this.setState({ route: route(), drawer: null, modal: null }); window.addEventListener('hashchange', this.onHash); this.onEsc = e => { if (e.key === 'Escape')
         this.setState({ drawer: null, modal: null }); }; window.addEventListener('keydown', this.onEsc); this.boot(); this.timer = setInterval(() => { if (!document.hidden && this.state.user)
         this.loadUnread(); }, 15000); }
@@ -36,9 +36,10 @@ export class App extends React.Component {
                 }
             }
             const user = await request('/me');
+            const theme = await this.loadTheme(user);
             let verification = null;
             try { verification = await getVerification(); } catch { }
-            this.setState({ user, verification, loading: false });
+            this.setState({ user, verification, theme, loading: false }, () => this.applyTheme(theme));
             await this.refresh();
         }
         catch (e) {
@@ -48,7 +49,8 @@ export class App extends React.Component {
     async authChanged() { try {
         const user = await request('/me');
         if (user.id !== this.state.user?.id) {
-            this.setState({ user, verification: null, courses: [], drawer: null, modal: null, error: '', loading: false });
+            const theme = await this.loadTheme(user);
+            this.setState({ user, verification: null, courses: [], drawer: null, modal: null, error: '', loading: false, theme }, () => this.applyTheme(theme));
             await this.refresh();
             await this.loadVerification();
         }
@@ -57,6 +59,31 @@ export class App extends React.Component {
         if (this.state.user)
             this.setState({ user: null, courses: [], drawer: null, modal: null, unread: 0 });
     } }
+    themeKey = (user) => `coursemate.theme.${user.id}`;
+    applyTheme = (theme) => { document.documentElement.dataset.theme = theme; };
+    loadTheme = async (user) => {
+        let cached = null;
+        try { cached = localStorage.getItem(this.themeKey(user)); } catch { }
+        try {
+            const preference = await request('/me/preferences');
+            const theme = preference.theme === 'dark' ? 'dark' : 'light';
+            try { localStorage.setItem(this.themeKey(user), theme); } catch { }
+            return theme;
+        } catch {
+            return cached === 'dark' ? 'dark' : 'light';
+        }
+    };
+    setTheme = async (theme) => {
+        if (!this.state.user || (theme !== 'light' && theme !== 'dark')) return;
+        this.applyTheme(theme);
+        this.setState({ theme });
+        try {
+            await send('/me/preferences', { theme }, 'PUT');
+            try { localStorage.setItem(this.themeKey(this.state.user), theme); } catch { }
+        } catch (error) {
+            this.toast(`主题已临时切换；服务器保存失败：${error.message}`);
+        }
+    };
     async refresh() { try {
         const courses = await request('/courses');
         this.setState({ courses });
@@ -77,8 +104,7 @@ export class App extends React.Component {
     courseTypeClass = (c) => c.display_type === 'campus' ? 'course-type-badge campus' : c.display_type === 'shared' ? 'course-type-badge shared' : 'course-type-badge private';
     isCampusUnverified = (c) => (c.display_type === 'campus' || c.requires_student_verification) && !this.state.verification?.verified;
     loadVerification = async () => { try { const verification = await getVerification(); this.setState({ verification }); } catch { } };
-    redeemCode = async () => { const code = this.verifyCodeInput?.value || ''; if (!/^[0-9]{7}$/.test(code)) { this.toast('请输入 7 位数字认证码'); return; } try { await redeemVerification(code); await this.loadVerification(); this.toast('认证成功'); if (this.verifyCodeInput) this.verifyCodeInput.value = ''; } catch (e) { this.toast(e.message || '认证码无效'); } };
-    renderVerification() { const v = this.state.verification; const verified = !!v?.verified; const methodLabel = v?.method === 'code' ? '兑换码' : v?.method === 'grandfathered' ? '历史用户' : (v?.method || ''); return <div className="verification-box"><div className="row between"><span className="verification-status">学生认证</span>{verified ? <span className="verification-status done">已认证{methodLabel ? '（' + methodLabel + '）' : ''}</span> : <span className="verification-status">未认证</span>}</div>{!verified && <div className="row" style={{ marginTop: 10 }}><input aria-label="7 位认证码" type="text" inputMode="numeric" pattern="[0-9]{7}" maxLength="7" placeholder="7 位认证码" ref={el => this.verifyCodeInput = el} onChange={e => { e.target.value = e.target.value.replace(/[^0-9]/g, '').slice(0, 7); }} onKeyDown={e => { if (e.key === 'Enter') this.redeemCode(); }}/><button className="btn primary" onClick={() => this.redeemCode()}>兑换认证码</button></div>}{!verified && <p className="helper-note campus-hint">校园课程需要完成学生认证后才能查看内容。</p>}</div>; }
+    renderVerification() { const v = this.state.verification; const verified = !!v?.verified; const methodLabel = v?.method === 'registered' ? '注册自动开通' : v?.method === 'code' ? '兑换码' : v?.method === 'grandfathered' ? '历史用户' : (v?.method || ''); return <div className="verification-box"><div className="row between"><span className="verification-status">学生认证</span>{verified ? <span className="verification-status done">已通过{methodLabel ? '（' + methodLabel + '）' : ''}</span> : <span className="verification-status">资格不可用</span>}</div>{!verified && <p className="helper-note campus-hint">当前身份没有校园课程资格；请联系课程管理员。</p>}</div>; }
     async login(account) { try {
         await send('/dev/login', { account });
         this.setState({ error: '' });
@@ -109,7 +135,7 @@ export class App extends React.Component {
     renderNav() { const { route: r, drawer, unread, user } = this.state; return <nav className="global-nav" aria-label="主导航"><button className="brand" onClick={() => goto('dashboard')} title="CourseMate 控制面板"><Icon name="book"/><span>CourseMate</span></button><div className="nav-items">{[['account', 'user', '账户'], ['dashboard', 'dashboard', '控制面板'], ['courses', 'courses', '课程'], ['calendar', 'calendar', '日历'], ['inbox', 'inbox', '收件箱'], ['help', 'help', '帮助']].map(([id, icon, label]) => <button key={id} className={'global-item ' + ((drawer === id || r.page === id || (id === 'courses' && r.page === 'course')) ? 'active' : '')} onClick={() => ['account', 'courses', 'help'].includes(id) ? this.setState({ drawer: drawer === id ? null : id }) : goto(id)}><Icon name={icon}/><span>{label}</span>{id === 'inbox' && unread > 0 && <span className="badge">{unread > 99 ? '99+' : unread}</span>}</button>)}</div><div className="nav-bottom"><span className="demo-mark">{this.state.config?.environment === 'production' ? 'LEARN' : '本地联调'}</span></div></nav>; }
     renderDrawer() { const { drawer, courses, user } = this.state; if (!drawer)
         return null; return <><div className="drawer-backdrop" onClick={() => this.setState({ drawer: null })}/><aside className="drawer" role="dialog" aria-label={drawer === 'account' ? '账户面板' : drawer === 'courses' ? '课程面板' : '帮助面板'}><IconButton name="close" title="关闭侧栏" className="icon-btn drawer-close" onClick={() => this.setState({ drawer: null })}/>{drawer === 'account' ? <><div className="account-hero"><Avatar name={user.name}/><h2>{user.name}</h2><p>@{user.handle}</p><button className="btn small" onClick={() => this.logout()}>退出登录</button></div><div className="divider"/>{[['bell', '通知', () => goto('inbox')], ['user', '个人资料', this.profile], ['folder', '文件', () => goto('courses')], ['settings', '设置', this.profile]].map(([icon, title, fn]) => <button className="drawer-link" key={title} onClick={() => { this.setState({ drawer: null }); fn(); }}><Icon name={icon}/>{title}</button>)}{this.renderVerification()}</> : drawer === 'courses' ? <><h2 className="drawer-title">课程</h2><div className="divider"/><button className="drawer-link" onClick={() => goto('courses')}>所有课程 <Icon name="arrow"/></button><div className="divider"/>{courses.filter(c => c.pinned).map(c => <button key={c.id} className="drawer-course" onClick={() => goto(`course/${c.id}/learn`)}><strong><i className="color-dot" style={{ background: c.color }}/>{c.code} {c.name}</strong><p>已加入控制面板</p></button>)}<p className="helper-note" style={{ marginTop: 24 }}>在“所有课程”中点击加号，把希望显示的课程加入控制面板。</p></> : <><h2 className="drawer-title">帮助</h2><div className="help-art"><Icon name="book"/></div><div className="help-intro"><h3>让每一步学习，都有方向</h3><p>CourseMate 使用指南</p></div>{HELPS.map(([title, text]) => <details key={title} className="help-link"><summary>{title}</summary><p className="helper-note" style={{ marginTop: 10 }}>{text}</p></details>)}</>}</aside></>; }
-    renderDashboard() { const rows = this.state.courses.filter(c => c.pinned); return <div className="page"><header className="page-heading"><h1>控制面板</h1><p>你的课程，按你的节奏。</p></header><div className="dashboard-grid">{rows.map(c => <article className="course-card" key={c.id}><button className="course-card-menu icon-btn" title="从控制面板移除" aria-label={'移除 ' + c.code} onClick={() => this.togglePin(c)}><Icon name="more"/></button><div className="course-cover" style={{ background: c.color }} onClick={() => goto(`course/${c.id}/learn`)}><span className="cover-code">{c.code}</span></div><div className="course-card-body" onClick={() => goto(`course/${c.id}/learn`)}><h3 title={c.name}>{c.name}</h3><p><span className={this.courseTypeClass(c)}>{this.courseTypeLabel(c)}</span></p></div><div className="card-tools">{[['comment', 'comments', '评论'], ['folder', 'files', '文件'], ['book', 'learn', '学习']].map(([icon, tab, label]) => <button key={tab} className={tab === 'learn' ? 'learn-tool' : ''} title={label} aria-label={`${c.code} ${label}`} onClick={() => goto(`course/${c.id}/${tab}`)}><Icon name={icon}/>{tab === 'learn' && <span>学习</span>}</button>)}</div></article>)}<button className="add-course-card" onClick={this.createCourse}><span className="add-plus"><Icon name="plus"/></span><strong>创建自己的课程</strong><small>添加资料，开启一段新的学习旅程</small></button></div><p className="dashboard-guide">还想学习更多课程？ <button className="link" onClick={() => goto('courses')}>前往所有课程 <span>→</span></button></p></div>; }
+    renderDashboard() { const rows = this.state.courses.filter(c => c.pinned); const dark = this.state.theme === 'dark'; return <div className="page"><header className="page-heading dashboard-heading"><div><h1>控制面板</h1><p>你的课程，按你的节奏。</p></div><button type="button" className="theme-toggle" aria-label={dark ? '切换至浅色模式' : '切换至深色模式'} title={dark ? '切换至浅色模式' : '切换至深色模式'} aria-pressed={dark} onClick={() => this.setTheme(dark ? 'light' : 'dark')}><Icon name={dark ? 'sun' : 'moon'}/><span>{dark ? '浅色' : '深色'}</span></button></header><div className="dashboard-grid">{rows.map(c => <article className="course-card" key={c.id}><button className="course-card-menu icon-btn" title="从控制面板移除" aria-label={'移除 ' + c.code} onClick={() => this.togglePin(c)}><Icon name="more"/></button><div className="course-cover" style={{ background: c.color }} onClick={() => goto(`course/${c.id}/learn`)}><span className="cover-code">{c.code}</span></div><div className="course-card-body" onClick={() => goto(`course/${c.id}/learn`)}><h3 title={c.name}>{c.name}</h3><p><span className={this.courseTypeClass(c)}>{this.courseTypeLabel(c)}</span></p></div><div className="card-tools">{[['comment', 'comments', '评论'], ['folder', 'files', '文件'], ['book', 'learn', '学习']].map(([icon, tab, label]) => <button key={tab} className={tab === 'learn' ? 'learn-tool' : ''} title={label} aria-label={`${c.code} ${label}`} onClick={() => goto(`course/${c.id}/${tab}`)}><Icon name={icon}/>{tab === 'learn' && <span>学习</span>}</button>)}</div></article>)}<button className="add-course-card" onClick={this.createCourse}><span className="add-plus"><Icon name="plus"/></span><strong>创建自己的课程</strong><small>添加资料，开启一段新的学习旅程</small></button></div><p className="dashboard-guide">还想学习更多课程？ <button className="link" onClick={() => goto('courses')}>前往所有课程 <span>→</span></button></p></div>; }
     renderCourses() { return <div className="page"><header className="page-heading"><h1>所有课程</h1></header><div className="course-banner"><div className="row"><div className="banner-icon"><Icon name="plus"/></div><div><h3>让你的学习资料，成为一门课程</h3><p>创建私人课程，上传讲义和笔记，再用你喜欢的方式学习。</p></div></div><button className="btn primary" onClick={this.createCourse}><Icon name="plus"/>创建课程</button></div><div className="table-wrap"><table><thead><tr><th>课程</th><th>类型</th><th>可见性</th><th>控制面板</th></tr></thead><tbody>{this.state.courses.map(c => <tr key={c.id}><td><button className="course-name" onClick={() => goto(`course/${c.id}/learn`)}><i className="color-dot" style={{ background: c.color }}/><span><strong>{c.name}</strong><small>{c.code}{c.description ? ' · ' + c.description : ''}</small></span></button></td><td><span className={this.courseTypeClass(c)}>{this.courseTypeLabel(c)}</span></td><td><span className={'chip ' + (c.visibility === 'public' ? 'neutral' : '')}>{c.visibility === 'public' ? '公开' : '仅自己'}</span></td><td>{this.isCampusUnverified(c) && !c.pinned ? <span className="helper-note campus-hint" title="需先完成学生认证">先完成学生认证</span> : <button className={'add-toggle ' + (c.pinned ? 'added' : '')} aria-label={(c.pinned ? '移除 ' : '添加 ') + c.code} title={c.pinned ? '移出控制面板' : '添加到控制面板'} onClick={() => this.togglePin(c)}><Icon name={c.pinned ? 'check' : 'plus'}/></button>}</td></tr>)}</tbody></table></div><p className="helper-note" style={{ marginTop: 20 }}>点击加号即可把课程卡片放到控制面板。移除快捷入口不会删除课程或学习记录。</p></div>; }
     renderCourse() {
         const { cid, tab } = this.state.route;

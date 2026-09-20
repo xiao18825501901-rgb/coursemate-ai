@@ -84,9 +84,10 @@ def test_step_locator_is_server_derived_not_fake(client):
     assert finish(client,r['id'])['status']=='completed'
     m=client.get(P+f"/conversations/{c['id']}").json()['messages'][-1]
     assert [s['number'] for s in m['steps']]==[1,2]
-    assert client.post(P+'/courses/cs3481/bridges',json={'problem_message':m['id'],'step':99,'question':'fake step'}).status_code==422
-    ok=client.post(P+'/courses/cs3481/bridges',json={'problem_message':m['id'],'step':2,'question':'why'});assert ok.status_code==201
-    assert client.post(P+'/courses/cs3481/bridges',json={'problem_message':m['id'],'step':2,'question':'why'}).json()['id']==ok.json()['id']
+    # Problem steps remain server-derived, but no longer launch a cross-pane
+    # teaching action. Detail remains the independent per-step route.
+    assert client.post(P+'/courses/cs3481/bridges',json={'problem_message':m['id'],'step':99,'question':'fake step'}).status_code==410
+    assert client.post(P+'/courses/cs3481/bridges',json={'problem_message':m['id'],'step':2,'question':'why'}).status_code==410
 
 
 def test_steps_ignore_fenced_code_and_duplicate_numbers():

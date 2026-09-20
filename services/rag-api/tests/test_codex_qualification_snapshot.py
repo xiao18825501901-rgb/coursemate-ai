@@ -10,7 +10,7 @@ import pytest
 
 from app.cm_update import qualification_snapshot as snapshots
 from app.cm_update.auth import ensure_user
-from app.cm_update.db import Database
+from app.cm_update.db import Database, SCHEMA_VERSION
 from app.cm_update.social import verification_status
 
 
@@ -114,7 +114,7 @@ def test_readonly_database_preview_does_not_create_or_modify_a_database(tmp_path
 
     assert before == after
     assert preview["database"] == {
-        "schema_version": "11",
+        "schema_version": str(SCHEMA_VERSION),
         "fixed_cutoff_ms": None,
         "receipt_status": None,
         "receipt_cutoff_ms": None,

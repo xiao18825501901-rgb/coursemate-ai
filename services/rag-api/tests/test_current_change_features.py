@@ -51,8 +51,8 @@ def make_settings(tmp_path: Path) -> Settings:
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     monkeypatch.setenv("CMUI_PROVIDER_MODE", "test")
-    # The campus gate is the point of several tests: disable the dev auto-verify
-    # convenience so unverified users stay unverified here.
+    # The registration policy is exercised through the real current-user path;
+    # the old test-only auto-verify convenience remains disabled.
     monkeypatch.setenv("CMUI_AUTO_VERIFY_NEW_USERS", "false")
     application = create_app(
         settings=make_settings(tmp_path),
@@ -65,6 +65,14 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
 
 def auth(user: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {user}"}
+
+
+def disable_local_identity(client: TestClient, owner: str) -> None:
+    """Model an approved directory tombstone without calling Clerk."""
+    from app.cm_update.directory import project_local_ids
+    db = client.app.state.ui_extension_app.state.db
+    project_local_ids(db)
+    db.execute('UPDATE cmui_directory SET active=0 WHERE subject=?', (owner,))
 
 
 def wait_terminal(client: TestClient, run_id: str, timeout: float = 15.0) -> dict:
@@ -87,13 +95,8 @@ def make_course(client: TestClient) -> None:
     # ensure the two student users exist in the UI user table
     for token in ("token-a", "token-b"):
         client.get(f"{UI}/me", headers=auth(token))
-    # user-a is the verified main actor (campus-course gate passes);
-    # user-b stays unverified for the gate/share tests.
-    issued = client.post(f"{UI}/admin/verification-codes", headers=auth("admin-token"),
-                         json={"count": 1}).json()
-    redeemed = client.post(f"{UI}/me/verification/redeem", headers=auth("token-a"),
-                           json={"code": issued["codes"][0], "request_id": "verify-a-0001"})
-    assert redeemed.status_code == 200, redeemed.text
+    # Both normal active identities are now automatically qualified. Individual
+    # tests that exercise a deleted/disabled identity create a local tombstone.
     # Exercise/binding contracts now require real authorized nodes rather than
     # accepting invented IDs or generating a question from an empty tree.
     with client.app.state.database.connect() as db:
@@ -163,6 +166,29 @@ def test_pair_lifecycle_restores_both_lanes(client: TestClient) -> None:
     deleted = client.delete(f"{UI}/pairs/{pair_id}", headers=auth("token-a"))
     assert deleted.status_code == 200
     assert client.get(f"{UI}/pairs/{pair_id}", headers=auth("token-a")).status_code == 404
+
+
+def test_active_registration_is_automatically_qualified_before_first_campus_pin(client: TestClient) -> None:
+    """A normal identity must not need a code or a second request to use campus content."""
+    make_course(client)
+    status = client.get(f"{UI}/me/verification", headers=auth("token-b"))
+    assert status.status_code == 200, status.text
+    assert status.json()["verified"] is True
+    assert status.json()["method"] == "registered"
+
+    pinned = client.put(f"{UI}/courses/cs3481/pin", headers=auth("token-b"))
+    assert pinned.status_code == 200, pinned.text
+    assert client.get(f"{UI}/courses/cs3481/files", headers=auth("token-b")).status_code == 200
+
+
+def test_disabled_local_identity_is_not_requalified_or_given_campus_content(client: TestClient) -> None:
+    make_course(client)
+    disable_local_identity(client, 'user-b')
+    status = client.get(f"{UI}/me/verification", headers=auth("token-b"))
+    assert status.status_code == 200
+    assert status.json()["verified"] is False
+    assert client.put(f"{UI}/courses/cs3481/pin", headers=auth("token-b")).status_code == 403
+    assert client.get(f"{UI}/courses/cs3481/files", headers=auth("token-b")).status_code == 403
 
 
 def test_pair_node_binding_unique_and_switchable(client: TestClient) -> None:
@@ -307,16 +333,19 @@ def test_explanation_flow_and_reuse(client: TestClient) -> None:
 # --------------------------------------------------------------- verification
 
 
-def test_code_redemption_and_campus_gate(client: TestClient) -> None:
+def test_registration_qualification_and_legacy_code_audit(client: TestClient) -> None:
     make_course(client)
     issued = client.post(f"{UI}/admin/verification-codes", headers=auth("admin-token"), json={"count": 2})
     assert issued.status_code == 201
     codes = issued.json()["codes"]
     assert len(codes) == 2 and all(len(c) == 7 and c.isdigit() for c in codes)
 
-    # unverified user-b cannot read campus-course files
-    blocked = client.get(f"{UI}/courses/cs3481/files", headers=auth("token-b"))
-    assert blocked.status_code == 403
+    # A first authenticated request qualifies an active registered identity;
+    # the first course-content request works without a second login or code.
+    allowed = client.get(f"{UI}/courses/cs3481/files", headers=auth("token-b"))
+    assert allowed.status_code == 200
+    before = client.get(f"{UI}/me/verification", headers=auth("token-b")).json()
+    assert before["verified"] is True and before["method"] == "registered"
 
     redeemed = client.post(
         f"{UI}/me/verification/redeem", headers=auth("token-b"),
@@ -324,6 +353,8 @@ def test_code_redemption_and_campus_gate(client: TestClient) -> None:
     )
     assert redeemed.status_code == 200, redeemed.text
     assert redeemed.json()["verified"] is True
+    after = client.get(f"{UI}/me/verification", headers=auth("token-b")).json()
+    assert after["method"] == "registered", "legacy redemption must not overwrite qualification provenance"
 
     # same code cannot be used by another account
     second = client.post(
@@ -339,9 +370,7 @@ def test_code_redemption_and_campus_gate(client: TestClient) -> None:
     )
     assert again.status_code == 200
 
-    # now the verified user can read campus files
-    allowed = client.get(f"{UI}/courses/cs3481/files", headers=auth("token-b"))
-    assert allowed.status_code == 200
+    assert client.get(f"{UI}/courses/cs3481/files", headers=auth("token-b")).status_code == 200
 
 
 def test_grandfather_boundary_is_one_time() -> None:
@@ -388,14 +417,8 @@ def test_share_snapshot_and_join(client: TestClient) -> None:
     rows = [r for r in received.json() if r["id"] == share.json()["id"]]
     assert rows and rows[0]["requires_student_verification"] is True
 
-    # unverified recipient cannot join a campus snapshot
-    blocked = client.post(f"{UI}/shares/{share.json()['id']}/join", headers=auth("token-b"))
-    assert blocked.status_code == 403
-
-    issued = client.post(f"{UI}/admin/verification-codes", headers=auth("admin-token"), json={"count": 1}).json()
-    client.post(f"{UI}/me/verification/redeem", headers=auth("token-b"),
-                json={"code": issued["codes"][0], "request_id": "redeem-share-0001"})
-
+    # Active recipients have the same automatic qualification for campus
+    # snapshots; legacy code redemption is separately covered above.
     joined = client.post(f"{UI}/shares/{share.json()['id']}/join", headers=auth("token-b"))
     assert joined.status_code == 200, joined.text
     joined_course = joined.json()["joined_course_id"]

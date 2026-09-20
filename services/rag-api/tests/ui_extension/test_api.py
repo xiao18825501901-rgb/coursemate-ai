@@ -149,19 +149,14 @@ def test_stream_replay_after_cursor(client):
  c=convo(client);rid,r,sse,_=run(client,c['id']);ids=[int(x[4:]) for x in sse.splitlines() if x.startswith('id: ')]
  replay=client.get(P+f'/runs/{rid}/events?after={ids[-2]}').text;assert f'id: {ids[-1]}' in replay;assert f'id: {ids[0]}\n' not in replay
 
-def test_layout_pin_bridge_and_return(client,env):
+def test_layout_strengths_persist_and_cross_pane_actions_are_retired(client):
  c=convo(client,'problem');rid,r,sse,_=run(client,c['id']);message=client.get(P+'/conversations/'+c['id']).json()['messages'][-1]
  payload={'problem_message':message['id'],'step':1,'question':'为什么先判断邻域？','node':'core'}
- b=client.post(P+'/courses/cs3481/bridges',json=payload);assert b.status_code==201,b.text;b=b.json()
- assert client.post(P+'/courses/cs3481/bridges',json=payload).json()['id']==b['id']
- teach=convo(client);_,result,_,_=run(client,teach['id'],'帮我理解这一步',bridge_id=b['id'],node_id='core');assert result['status']=='completed'
- assert env[2].calls[-1]['bridge']['original_question'];assert env[2].calls[-1]['bridge']['solution_excerpt']
- layout={'ratio':.63,'teach_conversation':teach['id'],'problem_conversation':c['id'],'active_node':'core'}
+ retired=client.post(P+'/courses/cs3481/bridges',json=payload);assert retired.status_code==410,retired.text
+ layout={'ratio':.63,'problem_conversation':c['id'],'active_node':'core','teach_strength':'high','problem_strength':'max'}
  assert client.put(P+'/courses/cs3481/layout',json=layout).status_code==200
- assert client.get(P+'/courses/cs3481/layout').json()['bridge']['id']==b['id']
- nodes=client.get(P+'/courses/cs3481/knowledge').json();node=next(n for n in nodes if n['id']=='core');assert node['progress']=='LEARNING' and node['grade'] is None
- assert client.patch(P+'/bridges/'+b['id']+'/return').json()['status']=='returned'
- login(client,'bob');assert client.get(P+'/courses/cs3481/layout').json()['ratio']==.5;assert client.patch(P+'/bridges/'+b['id']+'/return').status_code==404
+ saved=client.get(P+'/courses/cs3481/layout').json();assert saved['problem_conversation']==c['id'];assert saved['teach_strength']=='high' and saved['problem_strength']=='max';assert 'bridge' not in saved
+ login(client,'bob');assert client.get(P+'/courses/cs3481/layout').json()['ratio']==.5
 
 def test_wrong_lane_layout_rejected(client):
  c=convo(client,'teach');assert client.put(P+'/courses/cs3481/layout',json={'problem_conversation':c['id']}).status_code==422

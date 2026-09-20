@@ -25,7 +25,7 @@ from .models import (Profile, CourseCreate, CommentCreate, MessageCreate, TaskCr
     TaskUpdate, ConversationCreate, Rename, Layout, RunCreate, BridgeCreate, CourseUpdate,
     ReceiptClaim, ReceiptFinish, PairCreate, PairBind, ClassificationCorrection,
     VerificationRedeem, VerificationIssue, VerificationDisable, ShareCreate,
-    ExerciseCreate, ExplanationCreate, ExplanationMessage)
+    ExerciseCreate, ExplanationCreate, ExplanationMessage, ThemePreference)
 from .filesystem import parse_document, valid_filename, valid_folder, file_hash
 from .retrieval import get_course, file_rows, context_for
 from .steps import solution_steps, answer_steps_parse
@@ -38,6 +38,7 @@ from . import classification as classification_state
 from .directory import resolve_recipient, project_local_ids
 from .public_events import public_event
 from .stream_lifecycle import monitored_stream
+from .budget import BudgetPolicyError, evaluate_operation_budget
 
 User=Annotated[dict,Depends(current_user)]
 TERMINAL={'completed','failed','cancelled'}
@@ -280,11 +281,19 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             (user['id'],conversation_id,conversation_id))
         return row
 
+    def identity_active(user):
+        # A current authenticated identity has no local projection until an
+        # approved directory job creates one. A projected tombstone, however,
+        # is authoritative and may never regain content access merely because
+        # an old local token is replayed in an integration test.
+        row = db.one('SELECT active FROM cmui_directory WHERE subject=?', (user['id'],))
+        return row is None or bool(row['active'])
+
     def verified(user):
-        return bool(social.verification_status(db,user['id'])['verified'])
+        return identity_active(user) and bool(social.verification_status(db,user['id'])['verified'])
 
     def is_admin(user):
-        return user['id'] in cfg.admin_ids
+        return identity_active(user) and user['id'] in cfg.admin_ids
 
     def course_gate(course_dto, user):
         """Campus courses require student verification for CONTENT access.
@@ -294,14 +303,15 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             return
         requires = course_dto.get('requires_student_verification') or course_dto.get('display_type')=='campus'
         if requires and not verified(user):
-            raise HTTPException(403,'此课程为校园课程：请先在账户中完成学生认证（7 位认证码）')
+            raise HTTPException(403,'此课程为校园课程：注册登录后将自动开通学生资格。')
 
     @r.get('/config')
     def config():
         return {'auth_mode':cfg.auth_mode,'environment':cfg.environment,'api_base':cfg.api_base,
             'provider_mode':cfg.provider_mode,'model':cfg.qwen_model,'integration_mode':cfg.integration_mode,
             'clerk_publishable_key':cfg.clerk_publishable_key,'clerk_issuer':cfg.clerk_issuer,
-            'max_upload_bytes':cfg.max_upload_bytes,'agent_connected':bool(domain)}
+            'max_upload_bytes':cfg.max_upload_bytes,'agent_connected':bool(domain),
+            'reasoning_strengths':['medium','high','max']}
 
     @r.post('/dev/login')
     async def dev_login(request:Request,response:Response):
@@ -327,6 +337,20 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
 
     @r.get('/me')
     def me(user:User): return user
+
+    @r.get('/me/preferences')
+    def get_preferences(user:User):
+        return db.one('SELECT theme,updated_at FROM cmui_preferences WHERE owner=?', (user['id'],)) or {
+            'theme': 'light', 'updated_at': None,
+        }
+
+    @r.put('/me/preferences')
+    def update_preferences(data:ThemePreference,user:User):
+        updated_at=now()
+        db.execute("INSERT INTO cmui_preferences(owner,theme,updated_at) VALUES(?,?,?) "
+                   "ON CONFLICT(owner) DO UPDATE SET theme=excluded.theme,updated_at=excluded.updated_at",
+                   (user['id'],data.theme,updated_at))
+        return {'theme':data.theme,'updated_at':updated_at}
 
     @r.patch('/me')
     def update_me(data:Profile,user:User):
@@ -842,8 +866,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
     @r.get('/courses/{cid}/layout')
     async def get_layout(cid:str,user:User,request:Request):
         await course(user,cid,request)
-        result=db.one('SELECT * FROM cmui_layout WHERE owner=? AND course=?',(user['id'],cid)) or {'ratio':.5,'teach_conversation':None,'problem_conversation':None,'active_node':None}
-        result['bridge']=db.one("SELECT * FROM cmui_bridges WHERE owner=? AND course=? AND status='open' ORDER BY created_at DESC LIMIT 1",(user['id'],cid))
+        result=db.one('SELECT * FROM cmui_layout WHERE owner=? AND course=?',(user['id'],cid)) or {'ratio':.5,'teach_conversation':None,'problem_conversation':None,'active_node':None,'teach_strength':'medium','problem_strength':'medium'}
         return result
 
     @r.put('/courses/{cid}/layout')
@@ -856,8 +879,8 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 if conv['course']!=cid or conv['lane']!=lane: raise HTTPException(422,'对话与面板不匹配')
         if data.active_node and not domain:
             if not db.one('SELECT id FROM cmui_nodes WHERE id=? AND course=?',(data.active_node,cid)): raise HTTPException(404,'知识点不存在')
-        db.execute('INSERT INTO cmui_layout VALUES (?,?,?,?,?,?) ON CONFLICT(owner,course) DO UPDATE SET ratio=excluded.ratio,teach_conversation=excluded.teach_conversation,problem_conversation=excluded.problem_conversation,active_node=excluded.active_node',
-            (user['id'],cid,data.ratio,data.teach_conversation,data.problem_conversation,data.active_node))
+        db.execute('INSERT INTO cmui_layout(owner,course,ratio,teach_conversation,problem_conversation,active_node,teach_strength,problem_strength) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(owner,course) DO UPDATE SET ratio=excluded.ratio,teach_conversation=excluded.teach_conversation,problem_conversation=excluded.problem_conversation,active_node=excluded.active_node,teach_strength=excluded.teach_strength,problem_strength=excluded.problem_strength',
+            (user['id'],cid,data.ratio,data.teach_conversation,data.problem_conversation,data.active_node,data.teach_strength,data.problem_strength))
         return data.model_dump()
 
     @r.get('/courses/{cid}/knowledge')
@@ -905,38 +928,21 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         await course(user,cid,request)
         return db.all('SELECT * FROM cmui_bridges WHERE owner=? AND course=? ORDER BY created_at DESC',(user['id'],cid))
 
-    @r.post('/courses/{cid}/bridges',status_code=201)
-    async def bridge(cid:str,data:BridgeCreate,user:User,request:Request):
-        await course(user,cid,request)
-        m=db.one("SELECT m.* FROM cmui_messages m JOIN cmui_conversations c ON c.id=m.conversation WHERE m.id=? AND c.owner=? AND c.course=? AND c.lane='problem' AND m.role='assistant'",(data.problem_message,user['id'],cid))
-        if not m: raise HTTPException(404,'原题解法不存在')
-        if not any(x['number']==data.step for x in solution_steps(m['text'])):
-            raise HTTPException(422,'原解法中不存在这个编号步骤')
-        if data.node and not domain and not db.one('SELECT id FROM cmui_nodes WHERE id=? AND course=?',(data.node,cid)): raise HTTPException(404)
-        old=db.one('SELECT * FROM cmui_bridges WHERE owner=? AND problem_message=? AND step=? AND question=?',(user['id'],data.problem_message,data.step,data.question))
-        if old: return old
-        # Map the completed problem run into the V3 versioned problem ledger so
-        # the bridge carries verifiable ids; failure never blocks the bridge.
-        link={}
-        if domain:
-            try:
-                original=db.one('SELECT r.user_text FROM cmui_messages m JOIN cmui_runs r ON r.id=m.run WHERE m.id=?',(data.problem_message,))
-                steps=[{'number':x['number'],'title':x['title']} for x in solution_steps(m['text'])]
-                if original:
-                    link=await remote('knowledge.record_problem',user,{'course':cid,'run_id':str(m['run']),'question':original['user_text'],'steps':steps},request)
-            except HTTPException: pass
-        bid=uid('bridge_')
-        db.execute('INSERT INTO cmui_bridges (id,owner,course,problem_message,step,question,node,status,created_at,teach_run,journey_id,spec_version,delivery_unit_id,problem_revision_id,solution_id,step_ids_json) VALUES (?,?,?,?,?,?,?,?,?,NULL,NULL,NULL,NULL,?,?,?)',
-            (bid,user['id'],cid,data.problem_message,data.step,data.question,data.node,'open',now(),link.get('problem_revision_id'),link.get('solution_id'),json.dumps(link.get('step_ids') or [],ensure_ascii=False)))
-        return db.one('SELECT * FROM cmui_bridges WHERE id=?',(bid,))
-
+    @r.post('/courses/{cid}/bridges', status_code=410)
+    async def retired_bridge_action(cid: str, data: BridgeCreate, user: User, request: Request):
+        await course(user, cid, request)
+        # Historic V3 bridge evidence remains queryable via the read-only GET
+        # route. New cross-pane actions are deliberately retired.
+        raise HTTPException(410, {
+            'code': 'CROSS_PANE_ACTION_RETIRED',
+            'message': '题目步骤不再创建跨栏教学；请使用该步骤的“详解”浮窗。',
+        })
     @r.patch('/bridges/{bid}/return')
     async def return_bridge(bid:str,user:User,request:Request):
-        b=db.one('SELECT * FROM cmui_bridges WHERE id=? AND owner=?',(bid,user['id']))
-        if not b: raise HTTPException(404)
-        await course(user,b['course'],request)
-        if not db.execute("UPDATE cmui_bridges SET status='returned' WHERE id=? AND owner=?",(bid,user['id'])): raise HTTPException(404)
-        return db.one('SELECT * FROM cmui_bridges WHERE id=?',(bid,))
+        # Do not mutate historic evidence merely because its retired UI is no
+        # longer rendered. Read-only bridge history remains available via GET.
+        raise HTTPException(410, {'code':'CROSS_PANE_ACTION_RETIRED',
+            'message':'跨栏返回模式已停用；历史桥接记录保持不变。'})
 
     async def generate_run(run_id,user,course_data,conv,sources,history,data,bridge_data,images=None,v3_link=None,spec_items=None,teaching_mode='normal',template_id='OTHER'):
         output=''; usages=[]; last_beat=0.0
@@ -1047,6 +1053,9 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         conv=conversation(user,conv_id)
         course_data=await course(user,conv['course'],request)
         course_gate(course_data,user)
+        if data.bridge_id:
+            raise HTTPException(410, {'code':'CROSS_PANE_ACTION_RETIRED',
+                'message':'题目步骤不再启动跨栏教学；请使用独立详解。'})
         digest=hashlib.sha256(json.dumps({'conv':conv_id,**data.model_dump()},sort_keys=True,ensure_ascii=False).encode()).hexdigest()
         old=db.one('SELECT * FROM cmui_runs WHERE owner=? AND request_id=?',(user['id'],data.request_id))
         if old:
@@ -1057,6 +1066,14 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         rate(user,'model-runs',8)
         if cfg.provider_mode=='disabled' and provider is None: raise HTTPException(503,'模型尚未配置；数据功能可用，不会返回预设答案冒充千问。')
         if cfg.provider_mode=='qwen' and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
+        try:
+            # Only actual billable provider operations enter the application USD
+            # gate. The deterministic provider is not an estimate of Qwen cost.
+            budget = (evaluate_operation_budget(data.reasoning_strength,
+                      cfg.operation_usd_baseline,cfg.operation_estimated_usd)
+                      if cfg.provider_mode=='qwen' else None)
+        except BudgetPolicyError as error:
+            raise HTTPException(409, {'code':error.code,'message':str(error)}) from None
         teaching_mode=data.teaching_mode
         # Node binding semantics: the FIRST teaching bound to a node uses the
         # Thinking flow automatically and exactly once. Later runs on the same
@@ -1147,7 +1164,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                     first=c.execute('INSERT OR IGNORE INTO cmui_node_starts(owner,course,node,run) VALUES(?,?,?,?)',
                         (user['id'],conv['course'],data.node_id,rid)).rowcount
                     teaching_mode='thinking' if first else data.teaching_mode
-                c.execute('INSERT INTO cmui_runs(id,owner,conversation,request_id,status,user_text,teaching_mode,lease_worker,lease_heartbeat,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',(rid,user['id'],conv_id,data.request_id,'queued',data.text,teaching_mode,worker_id,str(time.time()),now(),now()))
+                c.execute('INSERT INTO cmui_runs(id,owner,conversation,request_id,status,user_text,teaching_mode,reasoning_strength,budget_baseline_usd,budget_estimate_usd,application_budget_usd,lease_worker,lease_heartbeat,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(rid,user['id'],conv_id,data.request_id,'queued',data.text,teaching_mode,data.reasoning_strength,str(budget.baseline_usd) if budget and budget.baseline_usd is not None else None,str(budget.estimated_usd) if budget and budget.estimated_usd is not None else None,str(budget.application_usd_cap) if budget and budget.application_usd_cap is not None else None,worker_id,str(time.time()),now(),now()))
                 c.execute('INSERT INTO cmui_run_inputs VALUES (?,?,?)',(rid,digest,json.dumps(attachment_meta,ensure_ascii=False)))
                 c.execute('INSERT INTO cmui_messages(id,conversation,role,text,citations,run,created_at,provenance,exercise) VALUES (?,?,?,?,?,?,?,?,NULL)',(uid('message_'),conv_id,'user',data.text,'[]',rid,now(),''))
                 c.execute("UPDATE cmui_conversations SET title=CASE WHEN title='新对话' THEN ? ELSE title END,updated_at=? WHERE id=?",(data.text[:40],now(),conv_id))
@@ -1164,7 +1181,8 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         event(rid,'status',{'status':'queued','label':'正在思考中'})
         task=asyncio.create_task(generate_run(rid,user,course_data,conv,sources,history,data,bridge_data,images,v3_link,spec_items,teaching_mode,template_id))
         jobs[rid]=task
-        return {'id':rid,'status':'queued','teaching_mode':teaching_mode}
+        return {'id':rid,'status':'queued','teaching_mode':teaching_mode,'reasoning_strength':data.reasoning_strength,
+                'application_budget_usd':str(budget.application_usd_cap) if budget and budget.application_usd_cap is not None else None}
 
     @r.get('/runs/{rid}')
     async def get_run(rid:str,user:User,request:Request):
@@ -1173,7 +1191,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         # Response whitelist: the internal plan (generated_prompt) and worker
         # lease bookkeeping never leave the server, for old and new records alike.
         public={k:row[k] for k in ('id','status','user_text','partial_text','citations',
-            'usage','error','teaching_mode','created_at','updated_at','conversation') if k in row}
+            'usage','error','teaching_mode','reasoning_strength','created_at','updated_at','conversation') if k in row}
         public['citations']=json.loads(public['citations']); public['usage']=json.loads(public['usage'])
         question=exercise_public_text(rid)
         if question is not None: public['partial_text']=question
@@ -1280,7 +1298,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         if started:
             return {'pair_id':pid,'run':started['run'],'reused':True}
         request_id='node-open-'+hashlib.sha256(f'{user["id"]}:{cid}:{node_id}'.encode()).hexdigest()[:32]
-        result=await run(conv,RunCreate(text=f'请从零教我理解 {node["title"]}，结合课程资料与例题。',node_id=node_id,teaching_mode='thinking',request_id=request_id),user,request)
+        result=await run(conv,RunCreate(text=f'请用中文从零教我理解 {node["title"]}，结合课程资料与例题。',node_id=node_id,teaching_mode='thinking',request_id=request_id),user,request)
         return {'pair_id':pid,'run':result['id'],'reused':result.get('reused',False)}
 
     @r.get('/pairs')
@@ -1429,10 +1447,17 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
 
     @r.get('/me/verification')
     async def me_verification(user:User):
-        return social.verification_status(db,user['id'])
+        status = social.verification_status(db,user['id'])
+        if not identity_active(user):
+            # Do not destroy the audit row, but do not represent a deleted or
+            # disabled identity as currently eligible.
+            return {'verified': False, 'method': None, 'verified_at': None}
+        return status
 
     @r.post('/me/verification/redeem')
     async def me_verification_redeem(data:VerificationRedeem,user:User):
+        if not identity_active(user):
+            raise HTTPException(403, '已停用身份不能兑换学生资格')
         rate(user,'code-redeem',5)
         result=social.redeem_code(db,cfg,user['id'],data.code,data.request_id)
         if not result['ok']:

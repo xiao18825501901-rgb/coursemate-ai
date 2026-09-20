@@ -102,7 +102,9 @@ def test_failed_grandfather_snapshot_can_recover_without_losing_old_user(tmp_pat
         assert old["verified"] is True, "failed snapshot must not permanently complete an empty boundary"
         assert old["method"] == "grandfathered"
         ensure_user(recovered.state.db, "registered-after-cutoff")
-        assert verification_status(recovered.state.db, "registered-after-cutoff")["verified"] is False
+        current = verification_status(recovered.state.db, "registered-after-cutoff")
+        assert current["verified"] is True
+        assert current["method"] == "registered"
 
 
 def test_schema6_verification_upgrade_retains_tombstones_and_scrubs_secrets(tmp_path: Path) -> None:
@@ -197,7 +199,9 @@ def test_grandfather_snapshot_atomic_and_one_time(tmp_path: Path) -> None:
     assert social.verification_status(db, 'old')['method'] == 'grandfathered'
     ensure_user(db, 'new')
     social.grandfather_existing_users(db, ['old', 'new'])
-    assert social.verification_status(db, 'new')['verified'] is False
+    current = social.verification_status(db, 'new')
+    assert current['verified'] is True
+    assert current['method'] == 'registered'
 
 
 def test_public_directory_id_can_block_and_unblock_messages(client):

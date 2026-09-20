@@ -29,6 +29,8 @@ class Settings:
     timeout: float = field(default_factory=lambda: float(os.getenv("CMUI_MODEL_TIMEOUT", "180")))
     prompt_tokens: int = field(default_factory=lambda: int(os.getenv("CMUI_PROMPT_TOKENS", "2500")))
     answer_tokens: int = field(default_factory=lambda: int(os.getenv("CMUI_ANSWER_TOKENS", "6500")))
+    operation_usd_baseline: str = field(default_factory=lambda: os.getenv('CMUI_OPERATION_USD_BASELINE', ''))
+    operation_estimated_usd: str = field(default_factory=lambda: os.getenv('CMUI_OPERATION_ESTIMATED_USD', ''))
     max_upload_bytes: int = 20 * 1024 * 1024
     max_user_bytes: int = 250 * 1024 * 1024
     max_files: int = 100
@@ -37,6 +39,8 @@ class Settings:
     web_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parents[2] / 'web' / 'dist')
     verification_secret: str = field(default_factory=lambda: os.getenv('CMUI_VERIFICATION_SECRET', ''))
     auto_verify_new_users: bool = field(default_factory=lambda: flag('CMUI_AUTO_VERIFY_NEW_USERS'))
+    campus_qualification_policy: str = field(default_factory=lambda: os.getenv(
+        'CMUI_CAMPUS_QUALIFICATION_POLICY', 'registered_active'))
 
     def validate(self) -> None:
         if self.environment not in {'development','test','production'}: raise ValueError('Unknown environment')
@@ -45,6 +49,8 @@ class Settings:
         if not 10<=self.timeout<=300: raise ValueError('Model timeout invalid')
         if self.auth_mode not in {'development', 'clerk', 'injected'}:
             raise ValueError('Unsupported authentication mode')
+        if self.campus_qualification_policy not in {'registered_active'}:
+            raise ValueError('Unsupported campus qualification policy')
         if self.environment == 'production':
             marker=self.web_dir/'build-info.json'
             if marker.exists() and json.loads(

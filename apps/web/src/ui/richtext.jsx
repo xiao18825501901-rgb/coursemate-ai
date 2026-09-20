@@ -1,5 +1,4 @@
 import React from 'react';
-import { Icon } from './icons.jsx';
 
 // KaTeX produces MathML only. No HTML received from the model is ever rendered as HTML.
 function Formula({tex, display=false}) {
@@ -53,7 +52,7 @@ function BlockContent({lines}) {
     }
     return <>{result}</>;
 }
-export function RichText({text,message,lane,onBridge}){
+export function RichText({text,message}){
     const lines=String(text).split('\n'),steps=message?.steps||[],groups=[];
     let group={step:null,lines:[]};
     for(let i=0;i<lines.length;i++){
@@ -62,5 +61,7 @@ export function RichText({text,message,lane,onBridge}){
         group.lines.push(lines[i]);
     }
     if(group.lines.length)groups.push(group);
-    return <div className="rich-text">{groups.map((g,i)=><section key={i} id={g.step&&message?`step-${message.id}-${g.step.number}`:undefined}><BlockContent lines={g.lines}/>{g.step&&lane==='problem'&&message&&<button className="step-link" onClick={()=>onBridge(message,g.step.number,g.step.title)}><Icon name="book"/>为什么这一步用「{g.step.title.slice(0,38)}」？<Icon name="arrow"/></button>}</section>)}</div>;
+    // Step sections remain as stable answer anchors. They deliberately do not
+    // create a cross-pane question or mutate the teaching conversation.
+    return <div className="rich-text">{groups.map((g,i)=><section key={i} id={g.step&&message?`step-${message.id}-${g.step.number}`:undefined}><BlockContent lines={g.lines}/></section>)}</div>;
 }

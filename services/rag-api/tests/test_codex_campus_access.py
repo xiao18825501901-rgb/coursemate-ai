@@ -1,5 +1,5 @@
 import pytest
-from test_current_change_features import UI, auth, client, make_course, wait_terminal
+from test_current_change_features import UI, auth, client, disable_local_identity, make_course, wait_terminal
 
 
 def test_campus_restriction_covers_existing_histories_and_original_api(client):
@@ -9,8 +9,7 @@ def test_campus_restriction_covers_existing_histories_and_original_api(client):
     run = client.post(f"{UI}/conversations/{conv['id']}/runs", headers=auth('token-a'),
                      json={'text': 'Explain', 'request_id': 'campus-boundary-run'}).json()
     wait_terminal(client, run['id'])
-    ui = client.app.state.ui_extension_app
-    ui.state.db.execute("UPDATE cmui_verification SET verified=0 WHERE owner='user-a'")
+    disable_local_identity(client, 'user-a')
     paths = [f"{UI}/conversations/{conv['id']}",
              f'{UI}/pairs?course_id=cs3481',
              f"{UI}/runs/{run['id']}", f"{UI}/runs/{run['id']}/events",
@@ -20,8 +19,9 @@ def test_campus_restriction_covers_existing_histories_and_original_api(client):
         assert code in (403, 404), (path,code)
     assert client.get(f'{UI}/courses', headers=auth('token-a')).status_code == 200
     assert client.get(f'{UI}/courses/cs3481', headers=auth('token-a')).status_code == 200
-    private = client.post(f'{UI}/courses', headers=auth('token-a'), json={'name':'Private'}).json()
-    assert client.get(f"{UI}/courses/{private['id']}/files", headers=auth('token-a')).status_code == 200
+    # A disabled identity is stronger than the retired, code-only gate: it
+    # cannot create fresh private content either.
+    assert client.post(f'{UI}/courses', headers=auth('token-a'), json={'name':'Private'}).status_code == 403
 
 
 def test_revoked_historical_owner_cannot_read_or_write_campus_content_paths(client):
@@ -54,7 +54,7 @@ def test_revoked_historical_owner_cannot_read_or_write_campus_content_paths(clie
     assert detail.status_code == 202, detail.text
     wait_terminal(client, detail.json()['run'])
     explanation = detail.json()['id']
-    db.execute("UPDATE cmui_verification SET verified=0 WHERE owner='user-a'")
+    disable_local_identity(client, 'user-a')
     denied_detail = client.get(f'/api/conversations/{legacy_id}', headers=auth('token-a'))
     assert canary not in denied_detail.text, 'original V3 history leaked previously authorized campus answer'
     reads = [f'{UI}/courses/cs3481/files/{fid}/content', f'{UI}/courses/cs3481/files/{fid}/content?download=true',
@@ -80,10 +80,7 @@ def test_revoked_historical_owner_cannot_read_or_write_campus_content_paths(clie
     assert canary not in unfiltered.text, 'unfiltered history leaked revoked campus conversation title'
     assert client.get(f'{UI}/courses/cs3481', headers=auth('token-a')).status_code == 200
     private = client.post(f'{UI}/courses', headers=auth('token-a'), json={'name': 'CS3481', 'code': 'CS3481'})
-    assert private.status_code == 201
-    own_id = private.json()['id']
-    assert client.post(f'{UI}/courses/{own_id}/files', headers=auth('token-a'), files={'file': ('private.md', b'private content', 'text/markdown')}).status_code == 201
-    assert client.post(f'{UI}/conversations', headers=auth('token-a'), json={'course': own_id, 'lane': 'teach'}).status_code == 201
+    assert private.status_code == 403
 
 
 @pytest.mark.parametrize('operation', ['rename', 'delete'])
@@ -93,7 +90,7 @@ def test_revoked_campus_actor_cannot_mutate_legacy_history(client, operation):
     assert created.status_code == 201, created.text
     conversation_id = created.json()['id']
     original = client.get(f'/api/conversations/{conversation_id}', headers=auth('token-a')).json()
-    client.app.state.ui_extension_app.state.db.execute("UPDATE cmui_verification SET verified=0 WHERE owner='user-a'")
+    disable_local_identity(client, 'user-a')
     path = f'/api/conversations/{conversation_id}'
     if operation == 'rename':
         response = client.patch(path, headers=auth('token-a'), json={'title': 'Denied title mutation'})

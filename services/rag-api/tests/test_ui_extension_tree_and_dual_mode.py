@@ -156,10 +156,9 @@ def test_knowledge_tree_reflects_real_hierarchy_and_both_states(client: TestClie
         assert by_id[node_id]["grade"] is None
 
 
-def test_dual_mode_problem_step_bridge_teach_return_with_db_facts(client: TestClient) -> None:
+def test_dual_mode_problem_steps_stay_independent_of_teaching(client: TestClient) -> None:
     tree_ids = seed_course_and_tree(client)
 
-    # Problem lane produces a numbered step solution.
     problem_conv = new_conversation(client, "problem")
     started = client.post(
         f"{UI}/conversations/{problem_conv}/runs",
@@ -167,82 +166,37 @@ def test_dual_mode_problem_step_bridge_teach_return_with_db_facts(client: TestCl
         json={"text": "怎么判断密度可达性？", "request_id": "dual-mode-problem-000001"},
     )
     assert started.status_code == 202, started.text
-    run_row = wait_terminal(client, started.json()["id"])
-    assert run_row["status"] == "completed"
-    messages = client.get(
+    assert wait_terminal(client, started.json()["id"])["status"] == "completed"
+    assistant = next(message for message in client.get(
         f"{UI}/conversations/{problem_conv}", headers=auth("Bearer token-a")
-    ).json()["messages"]
-    assistant = next(message for message in messages if message["role"] == "assistant")
+    ).json()["messages"] if message["role"] == "assistant")
     assert [step["number"] for step in assistant["steps"]] == [1, 2]
 
-    # The bridge binds to the server-derived step and the real node.
-    bridge = client.post(
+    retired = client.post(
         f"{UI}/courses/cs3481/bridges",
         headers=auth("Bearer token-a"),
-        json={
-            "problem_message": assistant["id"],
-            "step": 1,
-            "question": "为什么先审题？",
-            "node": tree_ids["learned"],
-        },
+        json={"problem_message": assistant["id"], "step": 1,
+              "question": "为什么先审题？", "node": tree_ids["learned"]},
     )
-    assert bridge.status_code == 201, bridge.text
-    bridge_id = bridge.json()["id"]
-    assert bridge.json()["status"] == "open"
-    assert bridge.json()["step"] == 1
+    assert retired.status_code == 410
+    assert client.get(f"{UI}/courses/cs3481/layout", headers=auth("Bearer token-a")).json().get("bridge") is None
 
-    # The layout exposes the open bridge, so a refresh restores the teaching
-    # context from the server.
-    layout = client.get(f"{UI}/courses/cs3481/layout", headers=auth("Bearer token-a")).json()
-    assert layout["bridge"]["id"] == bridge_id
-
-    # Teaching with the bridge carries the original problem context into the
-    # provider and starts/continues the real V3 journey for the node.
+    # Teaching is still a normal independent run, including a selected node,
+    # but it receives no problem-step bridge payload.
     teach_conv = new_conversation(client, "teach")
     taught = client.post(
         f"{UI}/conversations/{teach_conv}/runs",
         headers=auth("Bearer token-a"),
-        json={
-            "text": "请讲清楚这一步背后的聚类概念",
-            "request_id": "dual-mode-teach-000001",
-            "bridge_id": bridge_id,
-            "node_id": tree_ids["learned"],
-        },
+        json={"text": "请讲清楚聚类概念", "request_id": "dual-mode-teach-000001",
+              "node_id": tree_ids["learned"]},
     )
     assert taught.status_code == 202, taught.text
-    wait_terminal(client, taught.json()["id"])
-
+    assert wait_terminal(client, taught.json()["id"])["status"] == "completed"
     provider: LaneProvider = client.app.state.ui_provider  # type: ignore[attr-defined]
-    teach_call = next(call for call in provider.calls if call["lane"] == "teach" and call["bridge"])
-    assert teach_call["bridge"]["id"] == bridge_id
-    assert teach_call["bridge"]["original_question"] == "怎么判断密度可达性？"
-    assert "密度可达性" in teach_call["bridge"]["solution_excerpt"]
-    assert teach_call["bridge"]["step"] == 1
-
-    ui_db = client.app.state.ui_extension_app.state.db
-    link = ui_db.one("SELECT * FROM cmui_run_v3 WHERE run=?", (taught.json()["id"],))
-    assert link is not None
-    assert link["node_id"] == tree_ids["learned"]
-    with client.app.state.database.connect() as connection:
-        journey = connection.execute(
-            "SELECT * FROM learning_journeys WHERE id=?", (link["journey_id"],)
-        ).fetchone()
-    assert journey["status"] == "LEARNED"
-    assert journey["node_id"] == tree_ids["learned"]
-
-    # Return closes the bridge; the layout no longer exposes it.
-    returned = client.patch(
-        f"{UI}/bridges/{bridge_id}/return", headers=auth("Bearer token-a")
-    )
-    assert returned.status_code == 200, returned.text
-    assert returned.json()["status"] == "returned"
-    layout_after = client.get(
-        f"{UI}/courses/cs3481/layout", headers=auth("Bearer token-a")
-    ).json()
-    assert layout_after["bridge"] is None
+    assert any(call["lane"] == "teach" and call["bridge"] is None for call in provider.calls)
 
 
-def test_bridge_rejects_a_fabricated_step_number(client: TestClient) -> None:
+def test_cross_pane_creation_returns_retired_for_any_step_number(client: TestClient) -> None:
     seed_course_and_tree(client)
     problem_conv = new_conversation(client, "problem")
     started = client.post(
@@ -250,13 +204,34 @@ def test_bridge_rejects_a_fabricated_step_number(client: TestClient) -> None:
         headers=auth("Bearer token-a"),
         json={"text": "讲讲聚类", "request_id": "dual-mode-problem-000099"},
     )
-    wait_terminal(client, started.json()["id"])
+    assert wait_terminal(client, started.json()["id"])["status"] == "completed"
+    assistant = next(message for message in client.get(
+        f"{UI}/conversations/{problem_conv}", headers=auth("Bearer token-a")
+    ).json()["messages"] if message["role"] == "assistant")
+    retired = client.post(
+        f"{UI}/courses/cs3481/bridges",
+        headers=auth("Bearer token-a"),
+        json={"problem_message": assistant["id"], "step": 99,
+              "question": "第 99 步存在吗？", "node": None},
+    )
+    assert retired.status_code == 410
+
+
+def test_retired_cross_pane_endpoint_does_not_validate_or_create_a_step(client: TestClient) -> None:
+    seed_course_and_tree(client)
+    problem_conv = new_conversation(client, "problem")
+    started = client.post(
+        f"{UI}/conversations/{problem_conv}/runs",
+        headers=auth("Bearer token-a"),
+        json={"text": "讲讲聚类", "request_id": "dual-mode-problem-000099"},
+    )
+    assert wait_terminal(client, started.json()["id"])["status"] == "completed"
     messages = client.get(
         f"{UI}/conversations/{problem_conv}", headers=auth("Bearer token-a")
     ).json()["messages"]
     assistant = next(message for message in messages if message["role"] == "assistant")
 
-    fake = client.post(
+    retired = client.post(
         f"{UI}/courses/cs3481/bridges",
         headers=auth("Bearer token-a"),
         json={
@@ -266,5 +241,4 @@ def test_bridge_rejects_a_fabricated_step_number(client: TestClient) -> None:
             "node": None,
         },
     )
-    assert fake.status_code == 422
-    assert "编号步骤" in fake.json()["detail"]
+    assert retired.status_code == 410

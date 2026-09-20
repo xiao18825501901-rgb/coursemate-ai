@@ -80,6 +80,27 @@ def set_verified(db: Database, owner: str, method: str, notes: str = "") -> None
     )
 
 
+def ensure_registered_qualification(db: Database, owner: str) -> bool:
+    """Qualify a currently active authenticated identity exactly once.
+
+    Existing `code`, `admin`, and `grandfathered` records remain their original
+    provenance. A disabled local directory subject is never changed here.
+    """
+    directory = db.one('SELECT active FROM cmui_directory WHERE subject=?', (owner,))
+    if directory is not None and not bool(directory['active']):
+        return False
+    with db.connect(True) as c:
+        result = c.execute(
+            "INSERT INTO cmui_verification(owner,verified,method,verified_at,boundary_notes,updated_at) "
+            "VALUES(?,1,'registered',?,?,?) ON CONFLICT(owner) DO UPDATE SET "
+            "verified=1,method='registered',verified_at=excluded.verified_at,"
+            "boundary_notes=excluded.boundary_notes,updated_at=excluded.updated_at "
+            "WHERE cmui_verification.verified=0",
+            (owner, now(), 'registered active identity auto qualification', now()),
+        ).rowcount
+    return result == 1
+
+
 def redeem_code(db: Database, settings, owner: str, code: str, request_id: str) -> dict[str, Any]:
     """Redeem a 7-digit code. One code binds to at most one account; the same
     account re-redeeming its own code is idempotent. Transaction + row lock
@@ -107,12 +128,17 @@ def redeem_code(db: Database, settings, owner: str, code: str, request_id: str) 
         if updated != 1:
             _attempt(c, owner, digest, request_id, 0)
             return {"ok": False, "reason": "INVALID_CODE"}
-        c.execute(
-            "INSERT INTO cmui_verification(owner,verified,method,verified_at,boundary_notes,updated_at) "
-            "VALUES(?,1,'code',?,?,?) ON CONFLICT(owner) DO UPDATE SET verified=1,"
-            "method='code',verified_at=excluded.verified_at,updated_at=excluded.updated_at",
-            (owner, now(), "redeemed " + row['code_id'], now()),
-        )
+        # Code redemption remains auditable for the legacy workflow, but it
+        # must not overwrite an existing verified provenance (for example an
+        # automatic registration, an admin grant, or a protected legacy row).
+        existing = c.execute('SELECT verified FROM cmui_verification WHERE owner=?', (owner,)).fetchone()
+        if not existing or not existing['verified']:
+            c.execute(
+                "INSERT INTO cmui_verification(owner,verified,method,verified_at,boundary_notes,updated_at) "
+                "VALUES(?,1,'code',?,?,?) ON CONFLICT(owner) DO UPDATE SET verified=1,"
+                "method='code',verified_at=excluded.verified_at,updated_at=excluded.updated_at",
+                (owner, now(), "redeemed " + row['code_id'], now()),
+            )
         _audit(c, row['code_id'], owner, "redeemed")
         _attempt(c, owner, digest, request_id, 1)
     return {"ok": True, "reason": "REDEEMED", "verified": True}

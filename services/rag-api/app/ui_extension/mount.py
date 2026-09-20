@@ -172,14 +172,22 @@ def mount_ui_extension(
     host_app.state.ui_extension_app = ui
     from app.errors import ApiError
     def authorize_content(course, subject, is_admin=False):
+        from app.cm_update import social
+        directory = ui.state.db.one('SELECT active FROM cmui_directory WHERE subject=?', (subject,))
+        active = directory is None or bool(directory['active'])
+        if not active:
+            raise ApiError(403, 'STUDENT_IDENTITY_INACTIVE', 'This account is no longer active.')
         if is_admin or subject in settings.admin_user_id_set:
             return
         fields=set(course.keys())
         required=('requires_student_verification' in fields and course['requires_student_verification']) or ('display_type' in fields and course['display_type']=='campus') or ('course_type' in fields and course['course_type']=='official')
         if required:
+            # The legacy V3 routes do not enter cm_update.current_user(), so
+            # apply exactly the same active-registration qualification here.
+            social.ensure_registered_qualification(ui.state.db, subject)
             verification=ui.state.db.one('SELECT verified FROM cmui_verification WHERE owner=?',(subject,))
             if not verification or not verification['verified']:
-                raise ApiError(403,'STUDENT_VERIFICATION_REQUIRED','请先完成学生认证')
+                raise ApiError(403,'STUDENT_VERIFICATION_REQUIRED','注册登录后将自动开通学生资格')
     database.course_content_authorizer=authorize_content
     return ui
 

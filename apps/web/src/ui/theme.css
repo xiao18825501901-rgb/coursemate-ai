@@ -1,0 +1,213 @@
+/* Theme tokens are applied at the document root so fixed portals, detached
+   explanation windows, and fullscreen learning workspaces inherit them. */
+:root[data-theme='dark'] {
+  --ink: #e7edf3;
+  --muted: #aab7c2;
+  --nav: #121a22;
+  --nav2: #202d38;
+  --accent: #e4739f;
+  --accent-soft: #3b2633;
+  --blue: #8bc8e2;
+  --line: #364653;
+  --bg: #151e26;
+  --surface: #202b35;
+  --shadow: 0 14px 42px #00000066;
+  color-scheme: dark;
+}
+
+:root[data-theme='dark'] body,
+:root[data-theme='dark'] .app,
+:root[data-theme='dark'] .page,
+:root[data-theme='dark'] .course-main,
+:root[data-theme='dark'] .course-scroll,
+:root[data-theme='dark'] .learn-new,
+:root[data-theme='dark'] .workspace-new,
+:root[data-theme='dark'] .learning-pane,
+:root[data-theme='dark'] .pane-footer,
+:root[data-theme='dark'] .workspace-toolbar,
+:root[data-theme='dark'] .knowledge-strip,
+:root[data-theme='dark'] .tree-expanded,
+:root[data-theme='dark'] .drawer,
+:root[data-theme='dark'] .modal,
+:root[data-theme='dark'] .course-side,
+:root[data-theme='dark'] .course-top,
+:root[data-theme='dark'] .course-card,
+:root[data-theme='dark'] .node-popover,
+:root[data-theme='dark'] .explain-window,
+:root[data-theme='dark'] .explain-head,
+:root[data-theme='dark'] .explain-body,
+:root[data-theme='dark'] .explain-foot,
+:root[data-theme='dark'] .calendar,
+:root[data-theme='dark'] .mail-list,
+:root[data-theme='dark'] .mail-detail,
+:root[data-theme='dark'] .file-table,
+:root[data-theme='dark'] .discussion,
+:root[data-theme='dark'] .plan-chat,
+:root[data-theme='dark'] .task-card,
+:root[data-theme='dark'] .text-preview {
+  background: var(--bg);
+  color: var(--ink);
+}
+
+:root[data-theme='dark'] .workspace-toolbar,
+:root[data-theme='dark'] .knowledge-strip,
+:root[data-theme='dark'] .pane-footer,
+:root[data-theme='dark'] .course-side,
+:root[data-theme='dark'] .course-top,
+:root[data-theme='dark'] .page-heading,
+:root[data-theme='dark'] .tree-expanded,
+:root[data-theme='dark'] .modal-header,
+:root[data-theme='dark'] .explain-head,
+:root[data-theme='dark'] .explain-foot,
+:root[data-theme='dark'] .calendar-toolbar,
+:root[data-theme='dark'] th,
+:root[data-theme='dark'] td,
+:root[data-theme='dark'] .mail-item,
+:root[data-theme='dark'] .discussion,
+:root[data-theme='dark'] .task-card,
+:root[data-theme='dark'] .course-nav-link,
+:root[data-theme='dark'] .drawer-link,
+:root[data-theme='dark'] .history-item {
+  border-color: var(--line);
+}
+
+:root[data-theme='dark'] input,
+:root[data-theme='dark'] textarea,
+:root[data-theme='dark'] select,
+:root[data-theme='dark'] .chat-composer,
+:root[data-theme='dark'] .btn,
+:root[data-theme='dark'] .add-toggle,
+:root[data-theme='dark'] .tree-node-new,
+:root[data-theme='dark'] .node-popover,
+:root[data-theme='dark'] .course-card,
+:root[data-theme='dark'] .calendar-cell,
+:root[data-theme='dark'] .dm-bubble,
+:root[data-theme='dark'] .chat-message-new.user,
+:root[data-theme='dark'] .explain-bubble,
+:root[data-theme='dark'] .text-preview,
+:root[data-theme='dark'] .rich-text pre,
+:root[data-theme='dark'] .rich-text code,
+:root[data-theme='dark'] .answer-table,
+:root[data-theme='dark'] .dropdown {
+  background: #202b35;
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+:root[data-theme='dark'] .btn:hover,
+:root[data-theme='dark'] .icon-btn:hover,
+:root[data-theme='dark'] tbody tr:hover,
+:root[data-theme='dark'] .mobile-pane-tabs,
+:root[data-theme='dark'] .pane-divider,
+:root[data-theme='dark'] .calendar-cell.out,
+:root[data-theme='dark'] .mail-item.selected,
+:root[data-theme='dark'] .person-option:hover,
+:root[data-theme='dark'] .node-popover button:hover {
+  background: #2a3946;
+}
+
+:root[data-theme='dark'] .course-banner,
+:root[data-theme='dark'] .notice,
+:root[data-theme='dark'] .help-art,
+:root[data-theme='dark'] .add-course-card,
+:root[data-theme='dark'] .pane-symbol,
+:root[data-theme='dark'] .welcome-symbol,
+:root[data-theme='dark'] .chip,
+:root[data-theme='dark'] .verification-box {
+  background: #2d2430;
+  border-color: #5b3b4d;
+  color: var(--ink);
+}
+
+:root[data-theme='dark'] .pane-problem .pane-symbol,
+:root[data-theme='dark'] .pane-problem .welcome-symbol,
+:root[data-theme='dark'] .chip.neutral {
+  background: #22343b;
+  color: #a7d6d8;
+}
+
+:root[data-theme='dark'] .focus-mode,
+:root[data-theme='dark'] .tree-expanded,
+:root[data-theme='dark'] .modal-layer,
+:root[data-theme='dark'] .drawer-backdrop {
+  background-color: #111923;
+}
+
+:root[data-theme='dark'] .image-preview,
+:root[data-theme='dark'] .real-preview,
+:root[data-theme='dark'] .pdf-frame {
+  background: #111923;
+}
+
+/* Original file bytes are intentionally not inverted or filtered. */
+:root[data-theme='dark'] .image-preview img,
+:root[data-theme='dark'] .pdf-frame {
+  filter: none;
+}
+
+:root[data-theme='dark'] .link,
+:root[data-theme='dark'] .course-name,
+:root[data-theme='dark'] .drawer-link,
+:root[data-theme='dark'] .file-name-btn,
+:root[data-theme='dark'] .help-link summary {
+  color: var(--blue);
+}
+
+:root[data-theme='dark'] .muted,
+:root[data-theme='dark'] .helper-note,
+:root[data-theme='dark'] .page-heading p,
+:root[data-theme='dark'] .side-name,
+:root[data-theme='dark'] .message-byline,
+:root[data-theme='dark'] .message-byline span {
+  color: var(--muted);
+}
+
+:root[data-theme='dark'] .theme-toggle {
+  background: #2a3946;
+  border-color: #526674;
+  color: #f6d36f;
+}
+
+.dashboard-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 8px 11px;
+  color: #566e7c;
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.theme-toggle .ico { width: 17px; height: 17px; }
+.theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Both composer controls share this real control. The native range supplies
+   mouse, touch and keyboard interaction; labelled ticks make all values
+   discoverable without relying on colour alone. */
+.reasoning-strength { position: relative; display: inline-flex; }
+.reasoning-trigger { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); cursor: pointer; font: inherit; font-size: 12px; }
+.reasoning-trigger svg { width: 16px; height: 16px; }
+.reasoning-popover { position: absolute; z-index: 260; bottom: calc(100% + 8px); left: 0; width: 218px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); background: var(--surface); color: var(--ink); }
+.reasoning-popover strong { display: block; margin-bottom: 8px; font-size: 13px; }
+.reasoning-popover input[type="range"] { display: block; width: 100%; accent-color: var(--accent); }
+.reasoning-ticks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 7px; }
+.reasoning-ticks button { display: grid; justify-items: center; gap: 2px; padding: 4px 2px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.reasoning-ticks button i { width: 16px; height: 16px; border-radius: 50%; background: var(--line); color: var(--surface); font-size: 10px; font-style: normal; line-height: 16px; }
+.reasoning-ticks button.selected { border-color: var(--accent); color: var(--ink); background: color-mix(in srgb, var(--accent) 11%, transparent); }
+.reasoning-ticks button.selected i { background: var(--accent); color: #fff; }
+.pane-footer, .chat-composer { overflow: visible; }
+
+@media (max-width: 620px) {
+  .theme-toggle span { display: none; }
+  .theme-toggle { padding: 9px; }
+}

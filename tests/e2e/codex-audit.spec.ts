@@ -66,7 +66,7 @@ test("reload preserves current Pair and generated answer stays hidden until reve
   await terminal(request,pairA.run);
   await post(request,"/courses/cs3481/nodes/e2e-tree-clustering/open");
   await learn(page,request);
-  await page.locator(".pane-teach").getByRole("button",{name:"历史对话"}).click();
+  await page.locator(".pane-teach").getByRole("button",{name:"知识历史"}).click();
   const selected=page.waitForResponse(r=>r.request().method()==="PUT"&&r.url().endsWith("/courses/cs3481/layout"));
   await page.locator(".history-item").filter({hasText:"K-means 聚类"}).click();
   expect((await selected).ok()).toBeTruthy();
@@ -110,23 +110,18 @@ test("supplied problem exposes steps and opens explanation",async({page,request}
   expect(pair.problem.messages.filter((m:any)=>m.role==="assistant")).toHaveLength(1);
   expect(pair.problem.messages.find((m:any)=>m.role==="assistant").exercise).toBeTruthy();
   await expect(page.locator(".pane-problem")).toContainText("Step 1");
-  const knowledgeLinks=page.locator(".pane-problem .step-link");
-  await expect(knowledgeLinks).toHaveCount(4);
+  // Product policy: a solution must remain in the problem pane.  It must not
+  // create a cross-pane question action, a bridge, or a teaching-side effect.
+  await expect(page.locator(".pane-problem .step-link")).toHaveCount(0);
+  await expect(page.locator(".bridge-banner")).toHaveCount(0);
   await expect(page.locator(".pane-problem").getByRole("button",{name:"详解",exact:true}).first()).toBeVisible();
   await page.locator(".pane-problem").getByRole("button",{name:"详解",exact:true}).first().click();
   const dialog=page.getByRole("dialog",{name:/详解 · 第/});
   await expect(dialog).toContainText("本地测试详解");
   await dialog.getByRole("button",{name:"关闭详解"}).click();
-  const bridged=page.waitForResponse(r=>r.request().method()==="POST"&&r.url().endsWith("/courses/cs3481/bridges"));
-  await knowledgeLinks.first().click();
-  expect((await bridged).ok()).toBeTruthy();
-  await expect(page.locator(".bridge-banner")).toContainText("返回原题 · 第 1 步");
-  await expect(page.locator(".pane-teach .chat-message-new.assistant")).toHaveCount(1);
-  await expect(page.getByRole("button",{name:"停止生成"})).toHaveCount(0);
-  const returned=page.waitForResponse(r=>r.request().method()==="PATCH"&&/\/bridges\/[^/]+\/return$/.test(r.url()));
-  await page.locator(".bridge-banner").click();
-  expect((await returned).ok()).toBeTruthy();
   await expect(page.locator(".bridge-banner")).toHaveCount(0);
+  await expect(page.locator(".pane-teach .chat-message-new.assistant")).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"停止生成"})).toHaveCount(0);
   await page.screenshot({path:info.outputPath("supplied-explanation.png"),fullPage:true});
 });
 
@@ -145,17 +140,20 @@ test("directory can be browsed and paginated before searching",async({page},info
   await page.screenshot({path:info.outputPath("directory.png"),fullPage:true});
 });
 
-test("unverified synthetic actor cannot access campus content or trigger learning",async({request})=>{
+test("active registered actor automatically accesses campus content and can start learning",async({request})=>{
   const me=await request.get(API+"/me/verification",{headers:unverified});
-  expect(me.ok()).toBeTruthy();expect((await me.json()).verified).toBe(false);
+  expect(me.ok()).toBeTruthy();expect(await me.json()).toMatchObject({verified:true,method:"registered"});
   expect((await request.get(API+"/courses/cs3481",{headers:unverified})).status()).toBe(200);
   for(const path of ["/courses/cs3481/files","/courses/cs3481/knowledge","/courses/cs3481/comments","/courses/cs3481/layout"]) {
-    const response=await request.get(API+path,{headers:unverified});expect(response.status(),path).toBe(403);
+    const response=await request.get(API+path,{headers:unverified});expect(response.status(),path).toBe(200);
   }
-  const exercise=await request.post(API+"/courses/cs3481/exercises",{headers:unverified,data:{request_id:"unverified-browser-exercise"}});
-  expect(exercise.status()).toBe(403);
   const pair=await request.post(API+"/pairs",{headers:unverified,data:{course:"cs3481"}});
-  expect(pair.status()).toBe(403);
+  expect(pair.status()).toBe(201);
+  const pairBody=await pair.json();
+  const exercise=await request.post(API+"/courses/cs3481/exercises",{headers:unverified,data:{
+    request_id:"unverified-browser-exercise",pair_id:pairBody.id,
+  }});
+  expect(exercise.status()).toBe(202);
 });
 
 test("calendar uses the integrated Node task store",async({page,request},info)=>{

@@ -6,6 +6,7 @@ import { App as CourseMateApp } from "./ui/App.jsx";
 
 import "./ui/styles.css";
 import "./ui/styles-extra.css";
+import "./ui/theme.css";
 
 /**
  * The new CourseMate shell renders KaTeX to MathML and refuses to build React

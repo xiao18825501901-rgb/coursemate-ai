@@ -205,14 +205,16 @@ def test_snapshot_import_failure_is_retryable_and_not_joined(client,monkeypatch)
     assert len(client.get(f"{UI}/courses/{receipt['course']}/files",headers=auth('token-b')).json())==3
 
 
-def test_campus_snapshot_requires_verification_before_import(client):
+def test_active_registered_recipient_is_qualified_before_campus_snapshot_import(client):
     make_course(client)
     sid=client.post(f'{UI}/shares',headers=auth('token-a'),json={
         'course':'cs3481','recipients':['user-b'],'history_scope':'none','request_id':'campus-snapshot'}).json()['id']
     assert client.get(f'{UI}/shares/{sid}',headers=auth('token-b')).status_code==200
-    assert client.post(f'{UI}/shares/{sid}/join',headers=auth('token-b')).status_code==403
+    joined=client.post(f'{UI}/shares/{sid}/join',headers=auth('token-b'))
+    assert joined.status_code==200,joined.text
     db=client.app.state.ui_extension_app.state.db
-    assert not db.one('SELECT * FROM cmui_share_imports WHERE share=?',(sid,))
+    assert db.one('SELECT status FROM cmui_share_imports WHERE share=?',(sid,))['status']=='READY'
+    assert db.one('SELECT method FROM cmui_verification WHERE owner=?',('user-b',))['method']=='registered'
 
 
 def test_share_request_id_rejects_different_payload(client):

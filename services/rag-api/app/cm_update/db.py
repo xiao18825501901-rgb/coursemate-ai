@@ -16,11 +16,10 @@ def now() -> str:
 def uid(prefix: str = '') -> str:
     return prefix + uuid4().hex
 
-# Schema 6 adds the unified dual-lane pair model (cmui_pairs), course template
-# classification, student verification, course snapshot sharing, exercises with
-# hidden answers, and step explanations. The bump is additive; initialize()
-# refuses to run against a newer version.
-SCHEMA_VERSION = 11
+# Schema 13 retains the Schema-6 dual-lane model and adds registered-user
+# verification provenance, independent reasoning-strength snapshots, and a
+# server-owned theme preference. initialize() refuses a newer database.
+SCHEMA_VERSION = 13
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS cmui_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -102,6 +101,8 @@ CREATE TABLE IF NOT EXISTS cmui_runs (
  request_id TEXT NOT NULL, status TEXT NOT NULL, user_text TEXT NOT NULL, generated_prompt TEXT,
  partial_text TEXT NOT NULL DEFAULT '', citations TEXT NOT NULL DEFAULT '[]', usage TEXT NOT NULL DEFAULT '[]',
  error TEXT, lease_worker TEXT, lease_heartbeat TEXT,
+ reasoning_strength TEXT NOT NULL DEFAULT 'medium' CHECK(reasoning_strength IN ('medium','high','max')),
+ budget_baseline_usd TEXT, budget_estimate_usd TEXT, application_budget_usd TEXT,
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(owner,request_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS cmui_one_active_run ON cmui_runs(conversation) WHERE status IN ('queued','planning','generating');
@@ -111,7 +112,15 @@ CREATE TABLE IF NOT EXISTS cmui_run_events (
 );
 CREATE TABLE IF NOT EXISTS cmui_layout (
  owner TEXT NOT NULL REFERENCES cmui_users(id), course TEXT NOT NULL, ratio REAL NOT NULL DEFAULT 0.5,
- teach_conversation TEXT, problem_conversation TEXT, active_node TEXT, PRIMARY KEY(owner,course)
+ teach_conversation TEXT, problem_conversation TEXT, active_node TEXT,
+ teach_strength TEXT NOT NULL DEFAULT 'medium' CHECK(teach_strength IN ('medium','high','max')),
+ problem_strength TEXT NOT NULL DEFAULT 'medium' CHECK(problem_strength IN ('medium','high','max')),
+ PRIMARY KEY(owner,course)
+);
+CREATE TABLE IF NOT EXISTS cmui_preferences (
+ owner TEXT PRIMARY KEY REFERENCES cmui_users(id),
+ theme TEXT NOT NULL DEFAULT 'light' CHECK(theme IN ('light','dark')),
+ updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS cmui_nodes (
  id TEXT PRIMARY KEY, course TEXT NOT NULL, parent TEXT, title TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0
@@ -177,7 +186,7 @@ CREATE TABLE IF NOT EXISTS cmui_classifications (
 CREATE TABLE IF NOT EXISTS cmui_verification (
   owner TEXT PRIMARY KEY REFERENCES cmui_users(id),
   verified INTEGER NOT NULL DEFAULT 0,
-  method TEXT CHECK(method IN ('grandfathered','code','admin')),
+  method TEXT CHECK(method IN ('grandfathered','code','admin','registered')),
   verified_at TEXT, boundary_notes TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS cmui_verification_codes (
@@ -312,6 +321,15 @@ class Database:
             if 'teaching_mode' not in run_columns:
                 c.execute("ALTER TABLE cmui_runs ADD COLUMN teaching_mode TEXT "
                           "NOT NULL DEFAULT 'normal' CHECK(teaching_mode IN ('normal','thinking'))")
+            if 'reasoning_strength' not in run_columns:
+                c.execute("ALTER TABLE cmui_runs ADD COLUMN reasoning_strength TEXT "
+                          "NOT NULL DEFAULT 'medium' CHECK(reasoning_strength IN ('medium','high','max'))")
+            if 'budget_baseline_usd' not in run_columns:
+                c.execute("ALTER TABLE cmui_runs ADD COLUMN budget_baseline_usd TEXT")
+            if 'budget_estimate_usd' not in run_columns:
+                c.execute("ALTER TABLE cmui_runs ADD COLUMN budget_estimate_usd TEXT")
+            if 'application_budget_usd' not in run_columns:
+                c.execute("ALTER TABLE cmui_runs ADD COLUMN application_budget_usd TEXT")
             course_columns = {r[1] for r in c.execute("PRAGMA table_info(cmui_courses)")}
             if 'display_type' not in course_columns:
                 c.execute("ALTER TABLE cmui_courses ADD COLUMN display_type TEXT "
@@ -330,7 +348,15 @@ class Database:
             explanation_columns = {r[1] for r in c.execute("PRAGMA table_info(cmui_step_explanations)")}
             if 'conversation' not in explanation_columns:
                 c.execute("ALTER TABLE cmui_step_explanations ADD COLUMN conversation TEXT")
+            layout_columns = {r[1] for r in c.execute("PRAGMA table_info(cmui_layout)")}
+            if 'teach_strength' not in layout_columns:
+                c.execute("ALTER TABLE cmui_layout ADD COLUMN teach_strength TEXT NOT NULL DEFAULT 'medium' "
+                          "CHECK(teach_strength IN ('medium','high','max'))")
+            if 'problem_strength' not in layout_columns:
+                c.execute("ALTER TABLE cmui_layout ADD COLUMN problem_strength TEXT NOT NULL DEFAULT 'medium' "
+                          "CHECK(problem_strength IN ('medium','high','max'))")
             self._migrate_verification_secrets(c, verification_secret)
+            self._migrate_verification_methods(c)
             c.execute("INSERT INTO cmui_meta VALUES ('schema_version',?) ON CONFLICT(key) DO UPDATE SET value=?",(str(SCHEMA_VERSION),str(SCHEMA_VERSION)))
             self._migrate_pairs(c)
 
@@ -367,6 +393,33 @@ class Database:
         except BaseException:
             c.execute('ROLLBACK TO verification_schema_7')
             c.execute('RELEASE verification_schema_7')
+            raise
+
+    def _migrate_verification_methods(self, c):
+        """Schema 12: add the explicit registered-user provenance safely.
+
+        SQLite cannot extend a CHECK constraint in place. The rebuild is
+        transactional, preserves every historical verification row verbatim,
+        and never touches verification codes or audit records.
+        """
+        sql_row = c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='cmui_verification'").fetchone()
+        if not sql_row or "'registered'" in (sql_row[0] or ''):
+            return
+        c.execute('SAVEPOINT verification_schema_12')
+        try:
+            c.execute("CREATE TABLE cmui_verification_v12 ("
+                      "owner TEXT PRIMARY KEY REFERENCES cmui_users(id),"
+                      "verified INTEGER NOT NULL DEFAULT 0,"
+                      "method TEXT CHECK(method IN ('grandfathered','code','admin','registered')),"
+                      "verified_at TEXT,boundary_notes TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL)")
+            c.execute("INSERT INTO cmui_verification_v12(owner,verified,method,verified_at,boundary_notes,updated_at) "
+                      "SELECT owner,verified,method,verified_at,boundary_notes,updated_at FROM cmui_verification")
+            c.execute('DROP TABLE cmui_verification')
+            c.execute('ALTER TABLE cmui_verification_v12 RENAME TO cmui_verification')
+            c.execute('RELEASE verification_schema_12')
+        except BaseException:
+            c.execute('ROLLBACK TO verification_schema_12')
+            c.execute('RELEASE verification_schema_12')
             raise
 
     def _migrate_pairs(self, c):

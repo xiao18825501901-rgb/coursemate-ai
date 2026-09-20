@@ -552,7 +552,7 @@ test("the knowledge tree renders the seeded hierarchy with real V3 statuses", as
   expect(byId["e2e-tree-kmeans"]?.progress).toBe("LEARNED");
 });
 
-test("a problem's steps bridge into teaching and return to the same step", async ({
+test("a problem's steps stay in the problem pane and keep the detached detail flow", async ({
   page,
   request,
 }) => {
@@ -566,49 +566,10 @@ test("a problem's steps bridge into teaching and return to the same step", async
   // live model's output would take.
   await problemPane.locator("textarea").fill(`判断核心点 ${Date.now()}`);
   await problemPane.getByRole("button", { name: "发送题目" }).click();
-  const stepLinks = problemPane.locator(".step-link");
-  await expect(stepLinks).toHaveCount(2, { timeout: 30_000 });
-  await expect(stepLinks.first()).toContainText("审题与条件整理");
-
-  // Clicking a step opens a bridge bound to that server-derived step and asks
-  // the teach lane with the carried problem context.
-  await stepLinks.first().click();
-  const banner = teachPane.locator(".bridge-banner");
-  await expect(banner).toBeVisible();
-  await expect(banner).toContainText("返回原题 · 第 1 步");
-  await expect(teachPane).toContainText("这是围绕原题第 1 步的教学输出", {
-    timeout: 30_000,
-  });
-
-  // Database fact: one open bridge, bound to step 1 of the assistant message.
-  const layoutUrl =
-    "http://127.0.0.1:8100/ui-extension/api/ui/v1/courses/cs3481/layout";
-  const openLayout = await request.get(layoutUrl, {
-    headers: { Authorization: "Bearer test-session-token" },
-  });
-  expect(openLayout.status()).toBe(200);
-  const openBridge = (await openLayout.json()).bridge as {
-    id: string;
-    step: number;
-    status: string;
-    question: string;
-  };
-  expect(openBridge.step).toBe(1);
-  expect(openBridge.status).toBe("open");
-  expect(openBridge.question).toContain("第 1 步");
-
-  // Returning closes the bridge server-side, hides the banner, and anchors the
-  // problem pane back at the same step section.
-  await banner.click();
-  await expect(banner).toHaveCount(0);
-  await expect(
-    problemPane.locator("section[id^='step-']").first(),
-  ).toBeVisible();
-  const closedLayout = await request.get(layoutUrl, {
-    headers: { Authorization: "Bearer test-session-token" },
-  });
-  expect(closedLayout.status()).toBe(200);
-  expect((await closedLayout.json()).bridge).toBeNull();
+  await expect(problemPane.locator("section[id^='step-']").first()).toBeVisible({ timeout: 30_000 });
+  await expect(problemPane.locator(".step-link")).toHaveCount(0);
+  await expect(teachPane.locator(".bridge-banner")).toHaveCount(0);
+  await expect(teachPane.locator(".chat-message-new.assistant")).toHaveCount(0);
 });
 
 test("teaching a node from the shell books reviewed coverage end-to-end", async ({
@@ -734,4 +695,92 @@ test("help covers the new surfaces and no horizontal overflow at 390px", async (
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
   expect(overflow).toBeLessThanOrEqual(1);
+});
+
+test("theme is server-persisted, spans the shell, and preserves an active learning workspace", async ({ page }, testInfo) => {
+  await page.goto("/app");
+  const toggle = page.getByRole("button", { name: /切换至(浅色|深色)模式/ });
+  if (await toggle.getAttribute("aria-pressed") === "true") await toggle.click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+  const darkSaved = page.waitForResponse((response) =>
+    response.request().method() === "PUT" && response.url().endsWith("/me/preferences"),
+  );
+  await toggle.click();
+  expect((await darkSaved).ok()).toBeTruthy();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+  // The global document root carries the setting into each shell surface.
+  for (const hash of ["#/courses", "#/calendar", "#/inbox", "#/course/cs3481/files", "#/course/cs3481/learn"]) {
+    await page.goto(`/app${hash}`);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  }
+  await expect(page.locator(".workspace-columns")).toBeVisible();
+  await expect(page.locator(".learning-pane.pane-teach")).toBeVisible();
+  await expect(page.locator(".learning-pane.pane-problem")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("dark-learning-workspace.png"), fullPage: true });
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.locator(".workspace-columns")).toBeVisible();
+
+  await page.goto("/app");
+  await page.getByRole("button", { name: "账户", exact: true }).click();
+  // The seeded account was certified before the new policy.  Automatic
+  // enrollment must not erase that provenance; it only fills a missing
+  // qualification for an otherwise active registered identity.
+  await expect(page.getByRole("dialog", { name: "账户面板" })).toContainText(/已通过（(注册自动开通|历史用户)）/);
+
+  const lightSaved = page.waitForResponse((response) =>
+    response.request().method() === "PUT" && response.url().endsWith("/me/preferences"),
+  );
+  await page.getByRole("button", { name: "关闭侧栏" }).click();
+  await page.getByRole("button", { name: "切换至浅色模式" }).click();
+  expect((await lightSaved).ok()).toBeTruthy();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+});
+
+test("each learning pane persists its own accessible reasoning strength and submits it on the next run", async ({ page }, testInfo) => {
+  await page.goto("/app#/course/cs3481/learn");
+  const teach = page.locator(".learning-pane.pane-teach");
+  const problem = page.locator(".learning-pane.pane-problem");
+  const problemTrigger = problem.locator(".reasoning-trigger");
+  const teachTrigger = teach.locator(".reasoning-trigger");
+  await expect(problemTrigger).toContainText("中");
+  await expect(teachTrigger).toContainText("中");
+
+  await problemTrigger.click();
+  const problemPopover = problem.getByRole("dialog", { name: "推理强度" });
+  await expect(problemPopover).toBeVisible();
+  const problemRange = problemPopover.getByLabel("推理强度");
+  await problemRange.focus();
+  const problemSaved = page.waitForResponse((response) =>
+    response.request().method() === "PUT" && response.url().endsWith("/courses/cs3481/layout"),
+  );
+  await page.keyboard.press("ArrowRight");
+  expect((await problemSaved).ok()).toBeTruthy();
+  await expect(problemTrigger).toContainText("高");
+  await page.keyboard.press("Escape");
+  await expect(problemPopover).toHaveCount(0);
+
+  const submitted = page.waitForRequest((request) =>
+    request.method() === "POST" && /\/conversations\/[^/]+\/runs$/.test(new URL(request.url()).pathname),
+  );
+  await problem.getByLabel("题目应对输入").fill("请用当前强度解答一个 DBSCAN 问题");
+  await problem.getByRole("button", { name: "发送题目" }).click();
+  expect((await submitted).postDataJSON()).toMatchObject({ reasoning_strength: "high" });
+
+  await teachTrigger.click();
+  const teachPopover = teach.getByRole("dialog", { name: "推理强度" });
+  const teachRange = teachPopover.getByLabel("推理强度");
+  await teachRange.focus();
+  const teachSaved = page.waitForResponse((response) =>
+    response.request().method() === "PUT" && response.url().endsWith("/courses/cs3481/layout"),
+  );
+  await page.keyboard.press("End");
+  expect((await teachSaved).ok()).toBeTruthy();
+  await expect(teachTrigger).toContainText("最高");
+  await expect(problemTrigger).toContainText("高");
+  await page.keyboard.press("Escape");
+  await page.screenshot({ path: testInfo.outputPath("independent-reasoning-strengths.png"), fullPage: true });
 });
