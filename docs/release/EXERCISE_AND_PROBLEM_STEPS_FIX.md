@@ -1,0 +1,69 @@
+# Exercise and Problem-step production hotfix
+
+Status: **SOURCE IMPLEMENTED / LOCAL VERIFIED / LIVE MODEL AND PRODUCTION PENDING**  
+Application release SHA: `6e0b8d733f26a3c588761cd1d2d402f372e413b2`  
+Branch: `fix/codex-dsh-audit-20260919`
+
+## Defects
+
+### A. 做一题 mixed public and private answer text
+
+The previous contract asked the model for a question followed by a delimiter and a private answer.
+The server attempted to split a streamed text response. That design made correctness depend on a
+delimiter being emitted exactly once and recognized across arbitrary stream boundaries.
+
+The repair replaces new generation with the strict `exercise.v2` structured contract. The provider
+stream is buffered at the trusted boundary, the whole JSON object is validated, and only the final
+question is projected into run polling, SSE and history until the user explicitly reveals the saved
+answer. Invalid or incomplete output fails closed and is never silently retried.
+
+### B. Ordinary Problem steps disappeared
+
+The server correctly parsed normal Problem answers into steps, but the React projection cleared
+`steps` whenever a message carried any exercise state. Ordinary supplied problems also receive an
+exercise record so they can reuse explanation/history machinery; treating every such record as a
+hidden generated exercise removed the visible solution and its LearningBridge buttons.
+
+The repair distinguishes the server-derived source:
+
+- generated + unrevealed: hide answer steps;
+- generated + revealed: show the persisted saved answer steps;
+- user_problem: show the ordinary parsed solution steps immediately.
+
+The two behaviors share persistence and explanation machinery without sharing their visibility
+policy.
+
+## Files changed
+
+- `services/rag-api/app/cm_update/exercise_contract.py`
+- `services/rag-api/app/cm_update/prompts/EXERCISE_RUNTIME_CONTRACT_V2.txt`
+- `services/rag-api/app/cm_update/templates.py`
+- `services/rag-api/app/cm_update/provider.py`
+- `services/rag-api/app/cm_update/app.py`
+- `apps/web/src/ui/pages.jsx`
+- focused backend/provider/privacy/share tests
+- `tests/e2e/codex-audit.spec.ts`
+
+No database schema changed. Existing course IDs, Pair IDs, messages, exercises, reveal receipts,
+LearningBridge records, official trees, publication releases and user data remain in place.
+
+## Security invariants retained
+
+- Plans and generated teaching prompts remain server-only.
+- Generated answers do not appear in partial runs, SSE, Pair history or exercise GET before reveal.
+- Explanation is forbidden before reveal.
+- Reveal is owner-scoped, idempotent and non-model.
+- Course gates, Clerk identity, campus verification and cross-user isolation are unchanged.
+- Model references are intersected with the server-authorized source set.
+- Shared frozen exercise history keeps the frozen saved answer/version instead of reading a newer
+  sender file.
+- There is no global auto-verification, test provider, fixed model success or relaxed assertion in
+  production code.
+
+## Release boundaries
+
+The application candidate is frozen at the SHA above. Production content is not republished by this
+hotfix. CS3481 and GE2324 official tree/release/snapshot identities must be checked before and after
+cutover. A real Qwen canary and a current recovery unit are mandatory gates before switching the
+backend and Netlify production deploy.
+
