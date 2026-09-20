@@ -3,8 +3,68 @@ import asyncio
 import hashlib
 import json
 import threading
+from pathlib import Path
+
+from app.cm_update.db import Database, now
 
 from test_current_change_features import UI, auth, client, make_course, wait_terminal  # noqa: F401
+
+
+def test_database_restart_keeps_existing_single_lane_bound_pair(tmp_path: Path):
+    """A normal one-lane layout must not be re-imported as a duplicate pair."""
+    database = Database(tmp_path / "ui.sqlite3")
+    database.initialize()
+    created = now()
+    with database.connect(write=True) as connection:
+        connection.execute(
+            "INSERT INTO cmui_users(id,name,handle,created_at) VALUES(?,?,?,?)",
+            ("restart-user", "Restart User", "restart-user", created),
+        )
+        connection.execute(
+            "INSERT INTO cmui_courses(id,owner,code,name,color,created_at) "
+            "VALUES(?,?,?,?,?,?)",
+            ("restart-course", "restart-user", "GE2324", "Restart Course", "#123456", created),
+        )
+        connection.execute(
+            "INSERT INTO cmui_conversations(id,owner,course,lane,title,created_at,updated_at) "
+            "VALUES(?,?,?,?,?,?,?)",
+            ("restart-teach", "restart-user", "restart-course", "teach", "Teaching", created, created),
+        )
+        connection.execute(
+            "INSERT INTO cmui_pairs(id,owner,course,teach_conversation,title,bound_node,created_at,updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (
+                "restart-pair",
+                "restart-user",
+                "restart-course",
+                "restart-teach",
+                "Teaching",
+                "restart-node",
+                created,
+                created,
+            ),
+        )
+        connection.execute(
+            "INSERT INTO cmui_layout(owner,course,teach_conversation,problem_conversation,active_node) "
+            "VALUES(?,?,?,?,?)",
+            ("restart-user", "restart-course", "restart-teach", None, "restart-node"),
+        )
+
+    database.initialize()
+
+    pairs = database.all(
+        "SELECT id,teach_conversation,problem_conversation,bound_node FROM cmui_pairs "
+        "WHERE owner=? AND course=?",
+        ("restart-user", "restart-course"),
+    )
+    assert pairs == [
+        {
+            "id": "restart-pair",
+            "teach_conversation": "restart-teach",
+            "problem_conversation": None,
+            "bound_node": "restart-node",
+        }
+    ]
 
 
 def test_legacy_lane_creation_does_not_merge_unrelated_histories(client):

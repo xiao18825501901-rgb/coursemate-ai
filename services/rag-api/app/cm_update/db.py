@@ -396,7 +396,11 @@ class Database:
             problem = layout["problem_conversation"]
             if not teach and not problem:
                 continue
-            if teach in existing and problem in existing:
+            # A unified pair can legitimately have only one lane.  Treat an
+            # absent lane as already satisfied; otherwise every restart tries
+            # to import that layout again and can collide with its bound node.
+            if ((not teach or teach in existing)
+                    and (not problem or problem in existing)):
                 continue
             title = "新对话"
             created = now()
@@ -416,8 +420,10 @@ class Database:
                 (uid("pair_"), layout["owner"], layout["course"], teach, problem,
                  title, layout["active_node"], created, now()),
             )
-            existing.add(teach)
-            existing.add(problem)
+            if teach:
+                existing.add(teach)
+            if problem:
+                existing.add(problem)
         leftovers = c.execute(
             "SELECT id, owner, course, lane, title, created_at FROM cmui_conversations "
             "ORDER BY created_at"
