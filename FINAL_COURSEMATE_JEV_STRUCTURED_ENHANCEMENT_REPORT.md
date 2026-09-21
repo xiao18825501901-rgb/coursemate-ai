@@ -62,8 +62,13 @@ pool preparation. All twelve are `shadow`.
 | F `ToolIntentCheck` | `tool_intent.py` | schema/permission, and a re-check of permission + object revision immediately before execution | `tool.intent.v1` for side-effecting calls only | receipts |
 
 **Feedback triage** (`feedback.category.v1` Choice + `feedback.severity.v1` Score) is user-initiated
-only, stores identifiers by default and a body only with explicit opt-in, and queues the report for a
-human; it has no ability to close a ticket, delete feedback, change a mark or sanction a user.
+only, stores identifiers by default and a body only with explicit opt-in, sends **one** batched call,
+and queues the report for a human; it has no ability to close a ticket, delete feedback, change a mark
+or sanction a user. Two disclosed limitations belong with that claim: the review queue is **in-memory**
+plus the existing receipt ledger (no migration was allowed in this round, so the queue is not durable
+across a restart — a persistent queue is a follow-up for the migration workstream), and the shell
+helper posts to the RAG host path `/api/feedback`, whose exact proxying under a `/ui-extension` mount
+must be confirmed by the workstream that owns that mount before release.
 
 **Catalog:** 19 definitions, every one in `shadow`. Two new ids were registered in this round's P0/P1
 work (`extraction.field_grounded.v1`, `evidence.consistency.v1`), three for P1
@@ -75,12 +80,13 @@ work (`extraction.field_grounded.v1`, `evidence.consistency.v1`), three for P1
 | Gate | Result |
 |---|---|
 | Full backend regression on `4b968e5` | **1047 passed, 0 failed**, 1322.16s, exit 0 (`work/current-change/full_run_round9.log`) |
-| Module suites (A 16, B 18, C/D 21, E/F 29) | **84 passed** |
+| Module suites (A 16, B 18, C/D 21, E/F 29, P2 17) | **101 passed** |
 | Twelve call-site suite | **16 passed** |
 | Measurement layer (dataset build, calibration, A/B/C/D/E harness) | **43 passed**; offline ablation exits 0 with verdict `NOT_INTERPRETABLE` |
 | Zero-Laya production guard | **3 passed** (and it caught a real leftover reference, which was fixed) |
 | Catalog integrity | green with 19 definitions |
 | agent-api | real `tsc --noEmit` **exit 0**, **72 tests passed** |
+| Web app (after the feedback UI entry) | real `tsc --noEmit` **exit 0**, **64 tests passed**, build **exit 0** |
 | Browser journeys (real Chrome, isolated identity) | `coursemate.spec.ts` **4 passed**, `learning.spec.ts` **3 passed**, including multi-student private isolation |
 | `ui-refresh.spec.ts` (19 journeys) | **partial**: previously unrunnable; after fixing the static server's missing `/api` proxy and building a dist with the E2E identity it runs — **2 passed**, then the legacy-deep-link journey fails on a missing `h1` and 16 stay unrun. Reported as partial, not as passing |
 | Ruff | clean on every file this round touched |
@@ -96,7 +102,7 @@ work (`extraction.field_grounded.v1`, `evidence.consistency.v1`), three for P1
 | JEV_GATEWAY | **PASS** (local) | gateway/catalog/receipts/cache/modes tested; live TypeSafe `NOT_RUN` |
 | JEV_RETRIEVAL · JEV_CITATION · JEV_CONTEXT · JEV_INTENT · JEV_PEDAGOGY · JEV_COVERAGE · JEV_ASSESSMENT · JEV_CLASSIFICATION · JEV_EXERCISE_SELECTION · JEV_PREREQUISITE · JEV_CORPUS_QUALITY | **SOURCE_IMPLEMENTED + LOCAL_INTEGRATED**, all `shadow` | call-site suite plus the module suites; authority boundaries asserted |
 | EXTRACTION_VERIFICATION · ENTITY_RESOLUTION · EVIDENCE_CONSISTENCY · CITATION_AUDIT · CAPABILITY_ROUTER · TOOL_INTENT_CHECK | **SOURCE_IMPLEMENTED + LOCAL_INTEGRATED** | 84 module tests; business wiring for B/E/F described as a one-line insertion, not yet applied |
-| USER_FEEDBACK_TRIAGE | **IN_PROGRESS** | definitions registered; module under construction |
+| USER_FEEDBACK_TRIAGE | **SOURCE_IMPLEMENTED + LOCAL_INTEGRATED** | module, backend route, shell entry, 17 tests; human review queue only |
 | LEARNING_PROGRESS · FIVE_QUESTION_ASSESSMENT | **PASS** (local) | regression suites |
 | LOCAL_REGRESSION | **PASS** | 1047 passed / 0 failed on `4b968e5` |
 | JEV_LIVE_VALIDATION · DEEPSEEK_LIVE_VALIDATION | **NOT_RUN** | no credential, no budget |
