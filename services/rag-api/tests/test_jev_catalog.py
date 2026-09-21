@@ -23,13 +23,18 @@ EXPECTED_KEYS = (
     # module constants first and are now the catalog's own definitions.
     "extraction.field_grounded.v1",
     "evidence.consistency.v1",
+    # P1 structured enhancement: course-scope entity relations (module B), teaching
+    # capability routing (module E) and side-effecting tool intent checking (module F).
+    "entity.relation.v1",
+    "teaching.capability.v1",
+    "tool.intent.v1",
 )
 
 
 def test_catalog_has_exactly_the_expected_definitions() -> None:
     catalog = load_catalog()
     assert catalog.keys() == EXPECTED_KEYS
-    assert len(catalog.definitions) == 14
+    assert len(catalog.definitions) == 17
 
 
 def test_catalog_primitive_split() -> None:
@@ -48,6 +53,10 @@ def test_catalog_primitive_split() -> None:
         # the two structured-enhancement definitions are both Choice primitives
         "extraction.field_grounded.v1",
         "evidence.consistency.v1",
+        # P1 additions: all three are Choice primitives too
+        "entity.relation.v1",
+        "teaching.capability.v1",
+        "tool.intent.v1",
         "graph.prerequisite.v1",
     }
     assert nouls == {"source.supports_claim.v1", "context.keep_segment.v1"}
