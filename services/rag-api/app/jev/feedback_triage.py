@@ -17,7 +17,7 @@ Privacy rules (pinned by tests):
 * the default stored payload is identifiers only — ``message_id``/``run_id``/
   ``course_id``/``model``/``template_version``/``app_version`` plus the reporter's
   scope; the free-text description and the question/answer body are stored only
-  when ``include_body`` is set, and a body without that flag is refused;
+  when ``attach_body`` is set, and a body without that flag is refused;
 * no mood/personality/ability inference is ever asked for or recorded;
 * there are no cross-user reads: the only inputs are the reporter's own
   identifiers and opt-in content;
@@ -129,7 +129,7 @@ class FeedbackReport:
     ``template_version``, ``app_version``) and the structured ``category_hint``/
     ``product_surface`` are the minimal payload.  The free-text/body fields
     (``report_text``, ``question_text``, ``answer_text``) are stored only when
-    ``include_body`` is True.
+    ``attach_body`` is True.
     """
 
     course_id: str
@@ -143,11 +143,11 @@ class FeedbackReport:
     report_text: str | None = None
     question_text: str | None = None
     answer_text: str | None = None
-    include_body: bool = False
+    attach_body: bool = False
 
     def body_fields(self) -> dict[str, str | None]:
         """The opt-in gated fields, present only when the user opted in."""
-        if not self.include_body:
+        if not self.attach_body:
             return {}
         return {
             "report_text": self.report_text,
@@ -511,12 +511,12 @@ class FeedbackTriage:
 
 
 def _require_opt_in(report: FeedbackReport) -> None:
-    if report.include_body:
+    if report.attach_body:
         return
     if any((report.report_text, report.question_text, report.answer_text)):
         raise FeedbackValidationError(
             "BODY_NOT_OPTED_IN",
-            "The report text and question/answer body require the include_body opt-in flag.",
+            "The report text and question/answer body require the attach_body opt-in flag.",
         )
 
 

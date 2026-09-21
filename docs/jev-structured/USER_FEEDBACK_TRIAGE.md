@@ -35,7 +35,7 @@ By default only the identifiers are stored: `message_id`, `run_id`, `course_id`,
 `model`, `template_version`, `app_version`, plus the reporter's own scope (the
 server-derived `owner_scope_hash` + `course_id`).  The free-text description
 (`report_text`) and the question/answer body (`question_text`, `answer_text`)
-are stored **only** when `include_body` is true, and a body without that flag is
+are stored **only** when `attach_body` is true, and a body without that flag is
 refused (`FeedbackValidationError` code `BODY_NOT_OPTED_IN`; the HTTP route maps
 it to a 400).  (Pinned by `test_default_payload_is_identifiers_only`,
 `test_api_refuses_body_without_opt_in`, `test_opt_in_path_stores_body`.)
@@ -109,7 +109,7 @@ report = FeedbackReport(
     report_text="the answer is wrong",
     question_text="what is 2+2",
     answer_text="4",
-    include_body=True,
+    attach_body=True,
 )
 
 triage = FeedbackTriage(service)  # SemanticDecisionService | None
@@ -138,7 +138,7 @@ genuinely-scoped `CacheScope` pattern the P1 modules (`capability_router`,
 `services/rag-api/app/api/feedback.py` adds one route:
 
 * `POST /api/feedback` (201) — auth via `require_user`; validates the opt-in
-  rule (refuses `report_text`/`question`/`answer` without `include_body`) and the
+  rule (refuses `report_text`/`question`/`answer` without `attach_body`) and the
   category enum; builds the report, runs `FeedbackTriage.submit` with the
   server-derived `user.user_id`, and returns the triage result.
 

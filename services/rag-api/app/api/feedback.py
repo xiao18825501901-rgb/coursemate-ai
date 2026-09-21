@@ -3,7 +3,7 @@
 The report is triaged (one batched Jev call) and queued for human review; the
 deterministic backend owns persistence and the human review, so this route only
 records and classifies.  A report body (free text + question/answer) is refused
-unless the caller sets ``include_body``.
+unless the caller sets ``attach_body``.
 
 There is no live Jev call here: the gateway uses the default ``SdkTransport``,
 which fails typed with ``JevNotConfiguredError`` while no TypeSafe credential
@@ -46,7 +46,7 @@ class FeedbackSubmit(BaseModel):
     report_text: str | None = None
     question: str | None = None
     answer: str | None = None
-    include_body: bool = False
+    attach_body: bool = False
 
 
 def _triage(request: Request) -> FeedbackTriage:
@@ -67,13 +67,13 @@ def submit_feedback(
     request: Request,
     user: Annotated[AuthenticatedUser, Depends(require_user)],
 ) -> dict[str, object]:
-    if not payload.include_body and any(
+    if not payload.attach_body and any(
         (payload.report_text, payload.question, payload.answer)
     ):
         raise ApiError(
             400,
             "BODY_NOT_OPTED_IN",
-            "The report text and question/answer body require include_body=true.",
+            "The report text and question/answer body require attach_body=true.",
         )
     if payload.category is not None and payload.category not in CATEGORIES:
         raise ApiError(
@@ -92,7 +92,7 @@ def submit_feedback(
         report_text=payload.report_text,
         question_text=payload.question,
         answer_text=payload.answer,
-        include_body=payload.include_body,
+        attach_body=payload.attach_body,
     )
     try:
         result = _triage(request).submit(

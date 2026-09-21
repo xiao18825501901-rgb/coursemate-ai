@@ -336,7 +336,7 @@ class ReasoningStrengthPicker extends React.Component {
 const FEEDBACK_CATEGORIES = [['ANSWER_WRONG', '答案有误'], ['CITATION_WRONG', '引用有误'], ['QUESTION_INCOMPLETE', '题目不完整'], ['IMAGE_RECOGNITION', '图片识别错误'], ['GRADING_DISPUTE', '评分争议'], ['COURSE_CLASSIFICATION', '课程分类错误'], ['SERVICE_FAULT', '页面/服务故障'], ['OTHER', '其他']];
 class FeedbackForm extends React.Component {
     state = { category: '', text: '', includeBody: false, busy: false, error: '' };
-    async submit(e) { e.preventDefault(); this.setState({ busy: true, error: '' }); const { course, config, lastMessage, lastAnswer, runId } = this.props; const payload = { course_id: course.id, message_id: lastMessage?.id || null, run_id: runId || null, model: config?.model || null, category: this.state.category || null, report_text: this.state.text.trim() || null, question: this.state.includeBody ? (lastMessage?.text || null) : null, answer: this.state.includeBody ? (lastAnswer?.text || null) : null, include_body: this.state.includeBody }; try {
+    async submit(e) { e.preventDefault(); this.setState({ busy: true, error: '' }); const { course, config, lastMessage, lastAnswer, runId } = this.props; const payload = { course_id: course.id, message_id: lastMessage?.id || null, run_id: runId || null, model: config?.model || null, category: this.state.category || null, report_text: this.state.text.trim() || null, question: this.state.includeBody ? (lastMessage?.text || null) : null, answer: this.state.includeBody ? (lastAnswer?.text || null) : null, attach_body: this.state.includeBody }; try {
         await submitFeedback(payload);
         this.props.onDone();
     }

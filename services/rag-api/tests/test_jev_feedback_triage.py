@@ -244,7 +244,7 @@ def test_opt_in_path_stores_body(tmp_path) -> None:
         report_text="the answer is wrong",
         question_text="what is 2+2",
         answer_text="4",
-        include_body=True,
+        attach_body=True,
     )
     result = triage.submit(report, owner_user_id="user-a", authorization_scope="feedback")
 
@@ -375,7 +375,7 @@ def test_no_automatic_action_callable_exists() -> None:
 
 def test_report_key_ignores_body_and_tracks_scope() -> None:
     base = make_report()
-    with_body = make_report(report_text="a different complaint", include_body=True)
+    with_body = make_report(report_text="a different complaint", attach_body=True)
 
     assert report_key(base, "hash-a") == report_key(with_body, "hash-a")
     assert report_key(base, "hash-a") != report_key(base, "hash-b")
@@ -390,7 +390,7 @@ def test_duplicate_reports_share_key_across_text(tmp_path) -> None:
         make_report(), owner_user_id="user-a", authorization_scope="feedback"
     ).report_key
     second = triage.submit(
-        make_report(report_text="a different complaint", include_body=True),
+        make_report(report_text="a different complaint", attach_body=True),
         owner_user_id="user-a",
         authorization_scope="feedback",
     ).report_key
