@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import asyncio
 import base64
 import hashlib
@@ -12,33 +13,68 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response, UploadFile, File, Form, Query
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.jev import callsites
+from app.jev.service import SemanticDecisionService, TemplateOption
+from app.learning.intent_commands import route_explicit_command
+
+from . import classification as classification_state
+from . import share_recovery, social, templates
+from .auth import current_user, ensure_user
+from .budget import BudgetPolicyError, OperationEstimate, evaluate_operation_budget
 from .config import Settings
 from .db import Database, now, uid
-from .auth import current_user, ensure_user
-from .models import (Profile, CourseCreate, CommentCreate, MessageCreate, TaskCreate,
-    TaskUpdate, ConversationCreate, Rename, Layout, RunCreate, BridgeCreate, CourseUpdate,
-    ReceiptClaim, ReceiptFinish, PairCreate, PairBind, ClassificationCorrection,
-    VerificationRedeem, VerificationIssue, VerificationDisable, ShareCreate,
-    ExerciseCreate, ExplanationCreate, ExplanationMessage, ThemePreference)
-from .filesystem import parse_document, valid_filename, valid_folder, file_hash
-from .retrieval import get_course, file_rows, context_for
-from .steps import solution_steps, answer_steps_parse
+from .directory import project_local_ids, resolve_recipient
 from .exercise_contract import ExerciseContractError, parse_exercise_output
-from .provider import QwenProvider, DeepSeekProvider, DisabledProvider, TestProvider, ProviderError
-from . import templates
-from . import social
-from . import share_recovery
-from . import classification as classification_state
-from .directory import resolve_recipient, project_local_ids
+from .filesystem import file_hash, parse_document, valid_filename, valid_folder
+from .models import (
+    BridgeCreate,
+    ClassificationCorrection,
+    CommentCreate,
+    ConversationCreate,
+    CourseCreate,
+    CourseUpdate,
+    ExerciseCreate,
+    ExplanationCreate,
+    ExplanationMessage,
+    Layout,
+    MessageCreate,
+    PairBind,
+    PairCreate,
+    Profile,
+    ReceiptClaim,
+    ReceiptFinish,
+    Rename,
+    RunCreate,
+    ShareCreate,
+    TaskCreate,
+    TaskUpdate,
+    ThemePreference,
+    VerificationDisable,
+    VerificationIssue,
+    VerificationRedeem,
+)
+from .provider import DeepSeekProvider, DisabledProvider, ProviderError, QwenProvider, TestProvider
 from .public_events import public_event
+from .retrieval import context_for, file_rows, get_course
+from .steps import answer_steps_parse, solution_steps
 from .stream_lifecycle import monitored_stream
-from .budget import BudgetPolicyError, OperationEstimate, evaluate_operation_budget
 
 User=Annotated[dict,Depends(current_user)]
 TERMINAL={'completed','failed','cancelled'}
@@ -50,7 +86,7 @@ def classification_key(course_id, owner):
     return 'personal:' + hashlib.sha256((owner+'\0'+course_id).encode()).hexdigest()
 
 
-def create_app(settings: Settings|None=None, *, provider=None, domain=None, subject_resolver=None) -> FastAPI:
+def create_app(settings: Settings|None=None, *, provider=None, domain=None, subject_resolver=None, jev: SemanticDecisionService|None=None) -> FastAPI:
     cfg=settings or Settings()
     cfg.validate()
     if cfg.integration_mode=='integrated' and domain is None:
@@ -506,6 +542,18 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             folder=valid_folder(folder)
             mime,parts,parse_error=await asyncio.to_thread(parse_document,name,content)
         except ValueError as e: raise HTTPException(422,str(e)) from None
+        # corpus.quality.v1: mark-only parse-quality flag for missing pages/stems/
+        # parameters/weak sourcing/duplicates. It never auto-deletes the user's
+        # file; the flag is advisory and the original is always retained.
+        corpus_flag=None
+        if jev is not None:
+            corpus_flag=callsites.assess_corpus_quality(
+                jev,
+                document_fragment="\n".join(str(text) for _,text in parts[:6])[:8000],
+                source_metadata={"filename":name,'mime':mime,'pages':len(parts)},
+                parse_flags=[parse_error] if parse_error else [],
+                scope=jev.scope(owner_user_id=user['id'],authorization_scope='corpus',course_id=cid),
+            )
         if domain:
             # Integration owns the real V3 upload/ingestion. Bytes stay in-process, not JSON logs.
             result=await remote('file.upload',user,{'course':cid,'name':name,'folder':folder,'content':content,'mime':mime},request)
@@ -557,7 +605,10 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             schedule_classification(classification_key(cid,user['id']),bundle)
         except Exception:
             pass
-        return public_file(db.one('SELECT * FROM cmui_files WHERE id=?',(fid,)))
+        result=public_file(db.one('SELECT * FROM cmui_files WHERE id=?',(fid,)))
+        if corpus_flag is not None:
+            result['corpus_quality']=corpus_flag
+        return result
 
     @r.get('/courses/{cid}/files/{fid}/content',operation_id='get_course_file_content')
     @r.head('/courses/{cid}/files/{fid}/content',operation_id='head_course_file_content')
@@ -798,7 +849,9 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         rate(user,'task-agent',10)
         if domain: return await remote('task.plan',user,data.model_dump(),request)
         # This is a real Node tool-agent endpoint, separately launched, not a regex pretending to be an agent.
-        import os, httpx
+        import os
+
+        import httpx
         node_url=os.getenv('CMUI_TASK_AGENT_URL','')
         if node_url not in {'http://127.0.0.1:8788','http://localhost:8788'}:
             raise HTTPException(503,'学习计划 Agent 未连接；可以先使用右侧手动安排。DSH 需接入现有 Node Task Agent。')
@@ -1195,6 +1248,34 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             if remaining<=0: break
             t=h['text'][-min(6000,remaining):]; bounded.append({'role':h['role'],'text':t}); remaining-=len(t)
         history=list(reversed(bounded))
+        # Semantic-decision layer (shadow by default, zero Jev when disabled).
+        # Explicit commands are answered by the deterministic router first and
+        # never spend a Jev call; only ambiguous phrasing reaches intent.next_action.v1.
+        # context.keep_segment.v1 only ever inspects the FILTERABLE history window,
+        # never the current question or a fixed anchor. Both are advisory here.
+        jev_scope=jev.scope(owner_user_id=user['id'],authorization_scope='intent',course_id=conv['course']) if jev is not None else None
+        explicit_action=route_explicit_command(data.text,current_mode=teaching_mode,active_assessment=None)
+        if jev is not None:
+            # The results are advisory (recorded in the Jev receipt ledger); in
+            # shadow mode they never change the run's routing or the user's choices.
+            if explicit_action is None:
+                callsites.route_next_action(
+                    jev,message=data.text,fixed_anchor={'course':conv['course'],'node':data.node_id},
+                    current_mode=teaching_mode,active_assessment=None,scope=jev_scope,
+                )
+            callsites.select_pedagogy_method(
+                jev,learner_request=data.text,known_prior_evidence=[],
+                topic=conv.get('title') or conv['course'],template_profile={'template_id':template_id},
+                current_step='teaching',scope=jev_scope,
+            )
+            for turn in history:
+                if turn['role']=='user':
+                    continue  # original user turns are fixed anchors, never offered
+                callsites.keep_history_segment(
+                    jev,segment=str(turn.get('text') or '')[:2000],
+                    current_task=data.text,fixed_anchor={'course':conv['course']},
+                    remaining_scope=template_id,scope=jev_scope,
+                )
         sources=(await remote('context.retrieve',user,{'course':conv['course'],'query':data.text,'history':history},request)) if domain else context_for(db,user['id'],conv['course'],data.text,history)
         images=[]; attachment_meta=[]
         if data.attachment_ids:
@@ -1381,6 +1462,33 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             else:
                 raw_result = await model.classify_course(bundle)
             result=json.loads(raw_result)
+            # template.match.v1: a non-authoritative hierarchical (degree ->
+            # template) signal layered on the DeepSeek classification. Input is the
+            # real course name / body samples / revision, never filename+size alone;
+            # insufficient evidence returns OTHER and never infers the learner's
+            # degree. The DeepSeek classification remains authoritative.
+            if jev is not None:
+                options=[
+                    TemplateOption(id=str(entry["id"]),label=str(entry["professional"]),level=str(entry["level"]))
+                    for entry in templates.registry().values()
+                    if entry.get("id") != templates.OTHER_TEMPLATE_ID and str(entry.get("level")) != "unknown"
+                ]
+                jev_template=callsites.match_template(
+                    jev, options,
+                    state={
+                        "course_title":str(bundle.get("course_name") or ""),
+                        "curriculum_samples":bundle.get("text_samples") or [],
+                        "materials_revision":str(bundle.get("materials_revision") or ""),
+                        "known_course_level":str(bundle.get("course_level") or "unknown"),
+                    },
+                    scope=jev.scope(
+                        owner_user_id=str(course_id),
+                        authorization_scope="template",
+                        course_id=str(course_id),
+                    ),
+                )
+                if isinstance(result,dict):
+                    result["jev_template_id"]=jev_template
             if billing is not None:
                 billing['provider_usage'] = usage
             if billing is not None:
@@ -1866,6 +1974,19 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
 
     async def generate_exercise_run(run_id,user,course_data,pair,node,node_title,sources,estimate_audit=None):
         full=''; usages=[estimate_audit] if estimate_audit else []
+        # exercise.prototype.v1: choose among the authorized source/prototype
+        # candidates already retrieved for the current node (advisory). It never
+        # sees a hidden answer and never invents an official source; the
+        # deterministic fallback keeps the existing generation unchanged.
+        if jev is not None:
+            callsites.select_exercise_prototype(
+                jev,
+                node=(node or {}).get('id') if isinstance(node,dict) else node,
+                eligible_prototypes=[str(s.get('id')) for s in sources if s.get('id')],
+                recent_exposures=[],
+                learning_evidence=[],
+                scope=jev.scope(owner_user_id=user['id'],authorization_scope='exercise',course_id=course_data['id']),
+            )
         try:
             heartbeat(run_id)
             upstream=model.generate_exercise(course_data,node,{k:user[k] for k in ['language','timezone','bio']},sources,target_label=node_title)

@@ -7,6 +7,8 @@ from uuid import uuid4
 
 from app.db import Database
 from app.errors import ApiError
+from app.jev import callsites
+from app.jev.service import SemanticDecisionService
 from app.learning.models import PersonalPlanInput, TreeMembershipInput
 from app.learning.workspaces import workspace_for
 
@@ -99,8 +101,53 @@ class KnowledgeService:
     writes Assessment results or copies node progress into a personalized tree.
     """
 
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, jev: SemanticDecisionService | None = None) -> None:
         self.database = database
+        # Non-authoritative semantic-decision layer; None (default) disables it.
+        self.jev = jev
+
+    def select_repair_prerequisite(
+        self,
+        connection: sqlite3.Connection,
+        workspace: sqlite3.Row,
+        current_node_id: str,
+        error: str,
+    ) -> str | None:
+        """graph.prerequisite.v1: choose a legal predecessor to review, never a new node.
+
+        The candidates are ONLY the legal predecessor nodes already published in
+        the active personalized tree for this workspace; Jev may select one, and
+        the deterministic fallback is the published prerequisite order (first
+        legal predecessor). This method never creates or publishes a knowledge
+        node and never crosses course scope.
+        """
+        rows = connection.execute(
+            "SELECT edge.prerequisite_node_id FROM knowledge_prerequisite_edges AS edge "
+            "JOIN knowledge_tree_versions AS tree ON tree.id=edge.tree_version_id "
+            "WHERE tree.workspace_id=? AND tree.tree_kind='PERSONALIZED' AND tree.status='ACTIVE' "
+            "AND edge.node_id=? ORDER BY edge.prerequisite_node_id",
+            (workspace["id"], current_node_id),
+        ).fetchall()
+        legal = [str(row["prerequisite_node_id"]) for row in rows]
+        if not legal:
+            return None
+        if self.jev is None:
+            return legal[0]
+        scope = self.jev.scope(
+            owner_user_id=str(workspace["owner_user_id"]),
+            authorization_scope="prerequisite",
+            course_id=str(workspace["course_id"]),
+            workspace_id=str(workspace["id"]),
+            node_id=current_node_id,
+        )
+        chosen = callsites.select_prerequisite(
+            self.jev,
+            current_node=current_node_id,
+            error=error,
+            allowed_predecessor_nodes=legal,
+            scope=scope,
+        )
+        return chosen if chosen != "NONE" else legal[0]
 
     @staticmethod
     def _accessible_nodes(

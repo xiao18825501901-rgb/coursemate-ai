@@ -1,0 +1,1067 @@
+{
+  "split_version": "1",
+  "grouping": [
+    "document_id",
+    "node_id",
+    "question_family"
+  ],
+  "splits": {
+    "train": {
+      "count": 196,
+      "sample_ids": [
+        "jev-0001",
+        "jev-0002",
+        "jev-0003",
+        "jev-0004",
+        "jev-0005",
+        "jev-0006",
+        "jev-0007",
+        "jev-0008",
+        "jev-0009",
+        "jev-0010",
+        "jev-0021",
+        "jev-0022",
+        "jev-0023",
+        "jev-0024",
+        "jev-0025",
+        "jev-0026",
+        "jev-0027",
+        "jev-0028",
+        "jev-0029",
+        "jev-0030",
+        "jev-0031",
+        "jev-0032",
+        "jev-0033",
+        "jev-0034",
+        "jev-0035",
+        "jev-0041",
+        "jev-0042",
+        "jev-0043",
+        "jev-0044",
+        "jev-0045",
+        "jev-0051",
+        "jev-0052",
+        "jev-0053",
+        "jev-0054",
+        "jev-0057",
+        "jev-0058",
+        "jev-0059",
+        "jev-0060",
+        "jev-0061",
+        "jev-0062",
+        "jev-0063",
+        "jev-0064",
+        "jev-0065",
+        "jev-0066",
+        "jev-0067",
+        "jev-0068",
+        "jev-0069",
+        "jev-0071",
+        "jev-0072",
+        "jev-0074",
+        "jev-0077",
+        "jev-0078",
+        "jev-0079",
+        "jev-0081",
+        "jev-0082",
+        "jev-0083",
+        "jev-0090",
+        "jev-0093",
+        "jev-0094",
+        "jev-0096",
+        "jev-0098",
+        "jev-0104",
+        "jev-0105",
+        "jev-0107",
+        "jev-0108",
+        "jev-0109",
+        "jev-0111",
+        "jev-0112",
+        "jev-0115",
+        "jev-0116",
+        "jev-0117",
+        "jev-0118",
+        "jev-0119",
+        "jev-0120",
+        "jev-0121",
+        "jev-0122",
+        "jev-0123",
+        "jev-0124",
+        "jev-0125",
+        "jev-0127",
+        "jev-0129",
+        "jev-0131",
+        "jev-0132",
+        "jev-0134",
+        "jev-0135",
+        "jev-0137",
+        "jev-0138",
+        "jev-0139",
+        "jev-0140",
+        "jev-0141",
+        "jev-0142",
+        "jev-0143",
+        "jev-0144",
+        "jev-0145",
+        "jev-0146",
+        "jev-0147",
+        "jev-0152",
+        "jev-0153",
+        "jev-0154",
+        "jev-0155",
+        "jev-0156",
+        "jev-0157",
+        "jev-0158",
+        "jev-0160",
+        "jev-0161",
+        "jev-0162",
+        "jev-0163",
+        "jev-0165",
+        "jev-0166",
+        "jev-0167",
+        "jev-0168",
+        "jev-0170",
+        "jev-0171",
+        "jev-0172",
+        "jev-0173",
+        "jev-0174",
+        "jev-0175",
+        "jev-0176",
+        "jev-0177",
+        "jev-0178",
+        "jev-0179",
+        "jev-0180",
+        "jev-0186",
+        "jev-0187",
+        "jev-0196",
+        "jev-0197",
+        "jev-0198",
+        "jev-0199",
+        "jev-0200",
+        "jev-0201",
+        "jev-0202",
+        "jev-0203",
+        "jev-0207",
+        "jev-0208",
+        "jev-0209",
+        "jev-0212",
+        "jev-0213",
+        "jev-0214",
+        "jev-0215",
+        "jev-0216",
+        "jev-0217",
+        "jev-0218",
+        "jev-0219",
+        "jev-0220",
+        "jev-0221",
+        "jev-0222",
+        "jev-0223",
+        "jev-0228",
+        "jev-0231",
+        "jev-0234",
+        "jev-0235",
+        "jev-0238",
+        "jev-0239",
+        "jev-0240",
+        "jev-0241",
+        "jev-0244",
+        "jev-0245",
+        "jev-0250",
+        "jev-0251",
+        "jev-0254",
+        "jev-0255",
+        "jev-0258",
+        "jev-0260",
+        "jev-0261",
+        "jev-0262",
+        "jev-0263",
+        "jev-0264",
+        "jev-0266",
+        "jev-0267",
+        "jev-0269",
+        "jev-0270",
+        "jev-0271",
+        "jev-0272",
+        "jev-0273",
+        "jev-0274",
+        "jev-0275",
+        "jev-0279",
+        "jev-0281",
+        "jev-0283",
+        "jev-0284",
+        "jev-0287",
+        "jev-0290",
+        "jev-0293",
+        "jev-0295",
+        "jev-0297",
+        "jev-0298",
+        "jev-0300",
+        "jev-0301",
+        "jev-0302",
+        "jev-0303",
+        "jev-0304",
+        "jev-0305",
+        "jev-0306",
+        "jev-0307",
+        "jev-0308",
+        "jev-0310"
+      ]
+    },
+    "calibration": {
+      "count": 47,
+      "sample_ids": [
+        "jev-0073",
+        "jev-0085",
+        "jev-0086",
+        "jev-0091",
+        "jev-0092",
+        "jev-0095",
+        "jev-0099",
+        "jev-0103",
+        "jev-0106",
+        "jev-0113",
+        "jev-0126",
+        "jev-0128",
+        "jev-0130",
+        "jev-0148",
+        "jev-0149",
+        "jev-0159",
+        "jev-0164",
+        "jev-0169",
+        "jev-0181",
+        "jev-0188",
+        "jev-0192",
+        "jev-0193",
+        "jev-0194",
+        "jev-0195",
+        "jev-0204",
+        "jev-0205",
+        "jev-0206",
+        "jev-0226",
+        "jev-0232",
+        "jev-0236",
+        "jev-0242",
+        "jev-0243",
+        "jev-0248",
+        "jev-0249",
+        "jev-0256",
+        "jev-0265",
+        "jev-0268",
+        "jev-0276",
+        "jev-0278",
+        "jev-0280",
+        "jev-0282",
+        "jev-0285",
+        "jev-0286",
+        "jev-0288",
+        "jev-0292",
+        "jev-0294",
+        "jev-0309"
+      ]
+    },
+    "test": {
+      "count": 67,
+      "sample_ids": [
+        "jev-0011",
+        "jev-0012",
+        "jev-0013",
+        "jev-0014",
+        "jev-0015",
+        "jev-0016",
+        "jev-0017",
+        "jev-0018",
+        "jev-0019",
+        "jev-0020",
+        "jev-0036",
+        "jev-0037",
+        "jev-0038",
+        "jev-0039",
+        "jev-0040",
+        "jev-0046",
+        "jev-0047",
+        "jev-0048",
+        "jev-0049",
+        "jev-0050",
+        "jev-0055",
+        "jev-0056",
+        "jev-0070",
+        "jev-0075",
+        "jev-0076",
+        "jev-0080",
+        "jev-0084",
+        "jev-0087",
+        "jev-0088",
+        "jev-0089",
+        "jev-0097",
+        "jev-0100",
+        "jev-0101",
+        "jev-0102",
+        "jev-0110",
+        "jev-0114",
+        "jev-0133",
+        "jev-0136",
+        "jev-0150",
+        "jev-0151",
+        "jev-0182",
+        "jev-0183",
+        "jev-0184",
+        "jev-0185",
+        "jev-0189",
+        "jev-0190",
+        "jev-0191",
+        "jev-0210",
+        "jev-0211",
+        "jev-0224",
+        "jev-0225",
+        "jev-0227",
+        "jev-0229",
+        "jev-0230",
+        "jev-0233",
+        "jev-0237",
+        "jev-0246",
+        "jev-0247",
+        "jev-0252",
+        "jev-0253",
+        "jev-0257",
+        "jev-0259",
+        "jev-0277",
+        "jev-0289",
+        "jev-0291",
+        "jev-0296",
+        "jev-0299"
+      ]
+    }
+  },
+  "group_keys": {
+    "doc-context|node-bst|context": [
+      "jev-0144",
+      "jev-0145"
+    ],
+    "doc-context|node-centrality|context": [
+      "jev-0148",
+      "jev-0149"
+    ],
+    "doc-context|node-correlation|context": [
+      "jev-0146",
+      "jev-0147"
+    ],
+    "doc-context|node-dbscan|context": [
+      "jev-0139",
+      "jev-0140",
+      "jev-0141"
+    ],
+    "doc-context|node-gougu|context": [
+      "jev-0150",
+      "jev-0151"
+    ],
+    "doc-context|node-kmeans|context": [
+      "jev-0142",
+      "jev-0143"
+    ],
+    "doc-context|node-niudun|context": [
+      "jev-0154",
+      "jev-0155"
+    ],
+    "doc-context|node-tiaojian|context": [
+      "jev-0156",
+      "jev-0157"
+    ],
+    "doc-context|node-yiyuan|context": [
+      "jev-0152",
+      "jev-0153"
+    ],
+    "doc-corpus-quality|doc-good-zh1|corpus_quality": [
+      "jev-0274"
+    ],
+    "doc-corpus-quality|doc-good-zh2|corpus_quality": [
+      "jev-0275"
+    ],
+    "doc-corpus-quality|doc-good1|corpus_quality": [
+      "jev-0264"
+    ],
+    "doc-corpus-quality|doc-good2|corpus_quality": [
+      "jev-0265"
+    ],
+    "doc-corpus-quality|doc-good3-zh|corpus_quality": [
+      "jev-0284"
+    ],
+    "doc-corpus-quality|doc-good3|corpus_quality": [
+      "jev-0280"
+    ],
+    "doc-corpus-quality|doc-minor-zh1|corpus_quality": [
+      "jev-0276"
+    ],
+    "doc-corpus-quality|doc-minor1|corpus_quality": [
+      "jev-0266"
+    ],
+    "doc-corpus-quality|doc-minor2|corpus_quality": [
+      "jev-0267"
+    ],
+    "doc-corpus-quality|doc-minor3-zh|corpus_quality": [
+      "jev-0285"
+    ],
+    "doc-corpus-quality|doc-minor3|corpus_quality": [
+      "jev-0281"
+    ],
+    "doc-corpus-quality|doc-missing-source-zh|corpus_quality": [
+      "jev-0277"
+    ],
+    "doc-corpus-quality|doc-missing-source1|corpus_quality": [
+      "jev-0268"
+    ],
+    "doc-corpus-quality|doc-missing-source2|corpus_quality": [
+      "jev-0269"
+    ],
+    "doc-corpus-quality|doc-omissions-zh|corpus_quality": [
+      "jev-0278"
+    ],
+    "doc-corpus-quality|doc-omissions1|corpus_quality": [
+      "jev-0270"
+    ],
+    "doc-corpus-quality|doc-omissions2|corpus_quality": [
+      "jev-0271"
+    ],
+    "doc-corpus-quality|doc-omissions3-zh|corpus_quality": [
+      "jev-0286"
+    ],
+    "doc-corpus-quality|doc-omissions3|corpus_quality": [
+      "jev-0282"
+    ],
+    "doc-corpus-quality|doc-unusable-zh|corpus_quality": [
+      "jev-0279"
+    ],
+    "doc-corpus-quality|doc-unusable1|corpus_quality": [
+      "jev-0272"
+    ],
+    "doc-corpus-quality|doc-unusable2|corpus_quality": [
+      "jev-0273"
+    ],
+    "doc-corpus-quality|doc-unusable3-zh|corpus_quality": [
+      "jev-0287"
+    ],
+    "doc-corpus-quality|doc-unusable3|corpus_quality": [
+      "jev-0283"
+    ],
+    "doc-coverage|node-bst|coverage": [
+      "jev-0186",
+      "jev-0187"
+    ],
+    "doc-coverage|node-centrality|coverage": [
+      "jev-0189",
+      "jev-0190"
+    ],
+    "doc-coverage|node-correlation|coverage": [
+      "jev-0188"
+    ],
+    "doc-coverage|node-dbscan|coverage": [
+      "jev-0182",
+      "jev-0183"
+    ],
+    "doc-coverage|node-gougu|coverage": [
+      "jev-0192",
+      "jev-0193"
+    ],
+    "doc-coverage|node-juzhen|coverage": [
+      "jev-0198",
+      "jev-0199"
+    ],
+    "doc-coverage|node-kmeans|coverage": [
+      "jev-0184",
+      "jev-0185",
+      "jev-0191"
+    ],
+    "doc-coverage|node-niudun|coverage": [
+      "jev-0196",
+      "jev-0197"
+    ],
+    "doc-coverage|node-yiyuan|coverage": [
+      "jev-0194",
+      "jev-0195"
+    ],
+    "doc-criterion|node-centrality|criterion": [
+      "jev-0206"
+    ],
+    "doc-criterion|node-correlation|criterion": [
+      "jev-0204",
+      "jev-0205"
+    ],
+    "doc-criterion|node-dbscan|criterion": [
+      "jev-0200",
+      "jev-0201"
+    ],
+    "doc-criterion|node-gougu|criterion": [
+      "jev-0208",
+      "jev-0209",
+      "jev-0220",
+      "jev-0221"
+    ],
+    "doc-criterion|node-hypothesis|criterion": [
+      "jev-0207",
+      "jev-0216",
+      "jev-0217"
+    ],
+    "doc-criterion|node-juzhen|criterion": [
+      "jev-0222",
+      "jev-0223"
+    ],
+    "doc-criterion|node-kmeans|criterion": [
+      "jev-0202",
+      "jev-0203"
+    ],
+    "doc-criterion|node-linearreg|criterion": [
+      "jev-0218",
+      "jev-0219"
+    ],
+    "doc-criterion|node-niudun|criterion": [
+      "jev-0212",
+      "jev-0213"
+    ],
+    "doc-criterion|node-tiaojian|criterion": [
+      "jev-0214",
+      "jev-0215"
+    ],
+    "doc-criterion|node-yiyuan|criterion": [
+      "jev-0210",
+      "jev-0211"
+    ],
+    "doc-cs3481-association|node-lift-def|citation": [
+      "jev-0093"
+    ],
+    "doc-cs3481-association|node-support-def|citation": [
+      "jev-0084"
+    ],
+    "doc-cs3481-clustering|node-dbscan-core|retrieval": [
+      "jev-0001",
+      "jev-0002",
+      "jev-0003",
+      "jev-0004",
+      "jev-0005"
+    ],
+    "doc-cs3481-clustering|node-dbscan-density|citation": [
+      "jev-0083"
+    ],
+    "doc-cs3481-clustering|node-dbscan-neg|span_selection": [
+      "jev-0111"
+    ],
+    "doc-cs3481-clustering|node-dbscan-params|citation": [
+      "jev-0059",
+      "jev-0060"
+    ],
+    "doc-cs3481-clustering|node-dbscan-params|span_selection": [
+      "jev-0099"
+    ],
+    "doc-cs3481-clustering|node-kmeans-centroid|retrieval": [
+      "jev-0006",
+      "jev-0007",
+      "jev-0008",
+      "jev-0009",
+      "jev-0010"
+    ],
+    "doc-cs3481-clustering|node-kmeans-color|citation": [
+      "jev-0089"
+    ],
+    "doc-cs3481-confidence|node-ci-meaning|citation": [
+      "jev-0070"
+    ],
+    "doc-cs3481-confidence|node-ci-parameter|span_selection": [
+      "jev-0105"
+    ],
+    "doc-cs3481-correlation|node-pearson-causation|citation": [
+      "jev-0067"
+    ],
+    "doc-cs3481-correlation|node-pearson-one|citation": [
+      "jev-0068"
+    ],
+    "doc-cs3481-correlation|node-pearson-range|citation": [
+      "jev-0066"
+    ],
+    "doc-cs3481-correlation|node-pearson-range|retrieval": [
+      "jev-0021",
+      "jev-0022",
+      "jev-0023",
+      "jev-0024",
+      "jev-0025"
+    ],
+    "doc-cs3481-correlation|node-pearson-range|span_selection": [
+      "jev-0103"
+    ],
+    "doc-cs3481-decisiontree|node-info-gain|citation": [
+      "jev-0085"
+    ],
+    "doc-cs3481-eval|node-accuracy-def|citation": [
+      "jev-0094"
+    ],
+    "doc-cs3481-hypothesis|node-hypothesis-zh|citation": [
+      "jev-0091"
+    ],
+    "doc-cs3481-hypothesis|node-pvalue-def|citation": [
+      "jev-0069"
+    ],
+    "doc-cs3481-hypothesis|node-pvalue-null|span_selection": [
+      "jev-0104"
+    ],
+    "doc-cs3481-kmeans|node-kmeans-centroid|span_selection": [
+      "jev-0100"
+    ],
+    "doc-cs3481-kmeans|node-kmeans-k|citation": [
+      "jev-0062"
+    ],
+    "doc-cs3481-kmeans|node-kmeans-local|citation": [
+      "jev-0061"
+    ],
+    "doc-cs3481-linearreg|node-linreg-goal|citation": [
+      "jev-0087"
+    ],
+    "doc-cs3481-linearreg|node-linreg-sq|span_selection": [
+      "jev-0106"
+    ],
+    "doc-cs3481-naivebayes|node-nb-assumption|citation": [
+      "jev-0086"
+    ],
+    "doc-cs3481-trees|node-bst-order|citation": [
+      "jev-0063"
+    ],
+    "doc-cs3481-trees|node-bst-rotation|retrieval": [
+      "jev-0011",
+      "jev-0012",
+      "jev-0013",
+      "jev-0014",
+      "jev-0015"
+    ],
+    "doc-cs3481-trees|node-bst-rotation|span_selection": [
+      "jev-0101"
+    ],
+    "doc-cs3481-trees|node-decision-split|citation": [
+      "jev-0064"
+    ],
+    "doc-disputed|node-d1|citation": [
+      "jev-0308"
+    ],
+    "doc-disputed|node-d2|citation": [
+      "jev-0309"
+    ],
+    "doc-disputed|node-d3|intent": [
+      "jev-0310"
+    ],
+    "doc-exercise|node-bst|exercise": [
+      "jev-0242",
+      "jev-0243"
+    ],
+    "doc-exercise|node-centrality|exercise": [
+      "jev-0245"
+    ],
+    "doc-exercise|node-correlation|exercise": [
+      "jev-0244"
+    ],
+    "doc-exercise|node-dbscan|exercise": [
+      "jev-0240"
+    ],
+    "doc-exercise|node-gougu|exercise": [
+      "jev-0246"
+    ],
+    "doc-exercise|node-juzhen|exercise": [
+      "jev-0250"
+    ],
+    "doc-exercise|node-kmeans|exercise": [
+      "jev-0241"
+    ],
+    "doc-exercise|node-niudun|exercise": [
+      "jev-0248",
+      "jev-0249"
+    ],
+    "doc-exercise|node-tiaojian|exercise": [
+      "jev-0251"
+    ],
+    "doc-exercise|node-yiyuan|exercise": [
+      "jev-0247"
+    ],
+    "doc-ge2324-assignment|node-car-price|citation": [
+      "jev-0092"
+    ],
+    "doc-ge2324-centrality|node-betweenness|citation": [
+      "jev-0088"
+    ],
+    "doc-ge2324-centrality|node-centrality-zh|citation": [
+      "jev-0090"
+    ],
+    "doc-ge2324-centrality|node-degree-centrality|retrieval": [
+      "jev-0016",
+      "jev-0017",
+      "jev-0018",
+      "jev-0019",
+      "jev-0020"
+    ],
+    "doc-ge2324-centrality|node-degree-formula|citation": [
+      "jev-0065"
+    ],
+    "doc-ge2324-centrality|node-degree-formula|span_selection": [
+      "jev-0102"
+    ],
+    "doc-ge2324-centrality|node-degree-neg|span_selection": [
+      "jev-0112"
+    ],
+    "doc-ge2324-lsh|node-lsh-band|citation": [
+      "jev-0095"
+    ],
+    "doc-ge2324-lsh|node-lsh-similar|citation": [
+      "jev-0071"
+    ],
+    "doc-image-transcription|node-ge2324-assignment2|image": [
+      "jev-0300",
+      "jev-0301",
+      "jev-0302",
+      "jev-0303",
+      "jev-0304",
+      "jev-0305",
+      "jev-0306",
+      "jev-0307"
+    ],
+    "doc-intent-answer-only|node-3|intent": [
+      "jev-0117"
+    ],
+    "doc-intent-answer-only|node-9|intent": [
+      "jev-0125"
+    ],
+    "doc-intent-answer-resume2|node-18|intent": [
+      "jev-0122"
+    ],
+    "doc-intent-answer-resume2|node-20|intent": [
+      "jev-0130"
+    ],
+    "doc-intent-answer-resume|node-12|intent": [
+      "jev-0128"
+    ],
+    "doc-intent-answer-resume|node-6|intent": [
+      "jev-0120"
+    ],
+    "doc-intent-continue|node-1|intent": [
+      "jev-0115"
+    ],
+    "doc-intent-continue|node-7|intent": [
+      "jev-0123"
+    ],
+    "doc-intent-detour|node-13|intent": [
+      "jev-0131"
+    ],
+    "doc-intent-detour|node-21|intent": [
+      "jev-0135"
+    ],
+    "doc-intent-mainline|node-17|intent": [
+      "jev-0121"
+    ],
+    "doc-intent-mainline|node-19|intent": [
+      "jev-0129"
+    ],
+    "doc-intent-other|node-22|intent": [
+      "jev-0136"
+    ],
+    "doc-intent-pause|node-2|intent": [
+      "jev-0116"
+    ],
+    "doc-intent-pause|node-8|intent": [
+      "jev-0124"
+    ],
+    "doc-intent-quiz|node-10|intent": [
+      "jev-0126"
+    ],
+    "doc-intent-quiz|node-4|intent": [
+      "jev-0118"
+    ],
+    "doc-intent-repair|node-14|intent": [
+      "jev-0132"
+    ],
+    "doc-intent-solution|node-15|intent": [
+      "jev-0133"
+    ],
+    "doc-intent-submit|node-11|intent": [
+      "jev-0127"
+    ],
+    "doc-intent-submit|node-5|intent": [
+      "jev-0119"
+    ],
+    "doc-intent-uncertain|node-23|intent": [
+      "jev-0137"
+    ],
+    "doc-intent-variety|node-16|intent": [
+      "jev-0134"
+    ],
+    "doc-intent-variety|node-24|intent": [
+      "jev-0138"
+    ],
+    "doc-locator|node-loc-1|locator": [
+      "jev-0051",
+      "jev-0052"
+    ],
+    "doc-locator|node-loc-2|locator": [
+      "jev-0053",
+      "jev-0054"
+    ],
+    "doc-locator|node-loc-3|locator": [
+      "jev-0055",
+      "jev-0056"
+    ],
+    "doc-locator|node-loc-4|locator": [
+      "jev-0057",
+      "jev-0058"
+    ],
+    "doc-pedagogy|node-bst|pedagogy": [
+      "jev-0160",
+      "jev-0165"
+    ],
+    "doc-pedagogy|node-centrality|pedagogy": [
+      "jev-0162",
+      "jev-0175",
+      "jev-0179"
+    ],
+    "doc-pedagogy|node-correlation|pedagogy": [
+      "jev-0161",
+      "jev-0174",
+      "jev-0177"
+    ],
+    "doc-pedagogy|node-dbscan|pedagogy": [
+      "jev-0158",
+      "jev-0163"
+    ],
+    "doc-pedagogy|node-gougu|pedagogy": [
+      "jev-0166",
+      "jev-0170"
+    ],
+    "doc-pedagogy|node-hypothesis|pedagogy": [
+      "jev-0176",
+      "jev-0178"
+    ],
+    "doc-pedagogy|node-juzhen|pedagogy": [
+      "jev-0172",
+      "jev-0180"
+    ],
+    "doc-pedagogy|node-kmeans|pedagogy": [
+      "jev-0159",
+      "jev-0164"
+    ],
+    "doc-pedagogy|node-niudun|pedagogy": [
+      "jev-0168",
+      "jev-0171"
+    ],
+    "doc-pedagogy|node-tiaojian|pedagogy": [
+      "jev-0169",
+      "jev-0181"
+    ],
+    "doc-pedagogy|node-yiyuan|pedagogy": [
+      "jev-0167",
+      "jev-0173"
+    ],
+    "doc-prerequisite|node-bst|prerequisite": [
+      "jev-0254",
+      "jev-0255"
+    ],
+    "doc-prerequisite|node-centrality|prerequisite": [
+      "jev-0257"
+    ],
+    "doc-prerequisite|node-correlation|prerequisite": [
+      "jev-0256"
+    ],
+    "doc-prerequisite|node-dbscan|prerequisite": [
+      "jev-0252"
+    ],
+    "doc-prerequisite|node-gougu|prerequisite": [
+      "jev-0258"
+    ],
+    "doc-prerequisite|node-juzhen|prerequisite": [
+      "jev-0262"
+    ],
+    "doc-prerequisite|node-kmeans|prerequisite": [
+      "jev-0253"
+    ],
+    "doc-prerequisite|node-niudun|prerequisite": [
+      "jev-0260",
+      "jev-0261"
+    ],
+    "doc-prerequisite|node-tiaojian|prerequisite": [
+      "jev-0263"
+    ],
+    "doc-prerequisite|node-yiyuan|prerequisite": [
+      "jev-0259"
+    ],
+    "doc-template|node-applied-machine-learning|classification": [
+      "jev-0236"
+    ],
+    "doc-template|node-applied-probability|classification": [
+      "jev-0229"
+    ],
+    "doc-template|node-data-mining-and-machine-|classification": [
+      "jev-0224"
+    ],
+    "doc-template|node-data-visualisation-and-d|classification": [
+      "jev-0237"
+    ],
+    "doc-template|node-introductory-statistics|classification": [
+      "jev-0226"
+    ],
+    "doc-template|node-mixed-applied-data-scien|classification": [
+      "jev-0227"
+    ],
+    "doc-template|node-network-science-and-grap|classification": [
+      "jev-0225"
+    ],
+    "doc-template|node-statistical-learning|classification": [
+      "jev-0228"
+    ],
+    "doc-template|node-入门统计学|classification": [
+      "jev-0232"
+    ],
+    "doc-template|node-带代码的应用机器学习|classification": [
+      "jev-0238"
+    ],
+    "doc-template|node-应用概率|classification": [
+      "jev-0235"
+    ],
+    "doc-template|node-数据可视化与仪表盘|classification": [
+      "jev-0239"
+    ],
+    "doc-template|node-数据挖掘与机器学习|classification": [
+      "jev-0230"
+    ],
+    "doc-template|node-统计学习|classification": [
+      "jev-0234"
+    ],
+    "doc-template|node-网络科学与图分析|classification": [
+      "jev-0231"
+    ],
+    "doc-template|node-跨领域应用数据科学|classification": [
+      "jev-0233"
+    ],
+    "doc-trajectory|node-t10|trajectory": [
+      "jev-0298"
+    ],
+    "doc-trajectory|node-t11|trajectory": [
+      "jev-0293"
+    ],
+    "doc-trajectory|node-t12|trajectory": [
+      "jev-0299"
+    ],
+    "doc-trajectory|node-t1|trajectory": [
+      "jev-0288"
+    ],
+    "doc-trajectory|node-t2|trajectory": [
+      "jev-0289"
+    ],
+    "doc-trajectory|node-t3|trajectory": [
+      "jev-0290"
+    ],
+    "doc-trajectory|node-t4|trajectory": [
+      "jev-0291"
+    ],
+    "doc-trajectory|node-t5|trajectory": [
+      "jev-0292"
+    ],
+    "doc-trajectory|node-t6|trajectory": [
+      "jev-0294"
+    ],
+    "doc-trajectory|node-t7|trajectory": [
+      "jev-0295"
+    ],
+    "doc-trajectory|node-t8|trajectory": [
+      "jev-0296"
+    ],
+    "doc-trajectory|node-t9|trajectory": [
+      "jev-0297"
+    ],
+    "doc-zh-matrix|node-commutative|citation": [
+      "jev-0082"
+    ],
+    "doc-zh-matrix|node-juzhen-rule|span_selection": [
+      "jev-0110"
+    ],
+    "doc-zh-matrix|node-juzhen|retrieval": [
+      "jev-0046",
+      "jev-0047",
+      "jev-0048",
+      "jev-0049",
+      "jev-0050"
+    ],
+    "doc-zh-newton|node-f-ma-neg|citation": [
+      "jev-0079"
+    ],
+    "doc-zh-newton|node-f-ma|citation": [
+      "jev-0078"
+    ],
+    "doc-zh-newton|node-f-ma|span_selection": [
+      "jev-0109"
+    ],
+    "doc-zh-newton|node-niudun-three|citation": [
+      "jev-0097"
+    ],
+    "doc-zh-newton|node-niudun|retrieval": [
+      "jev-0036",
+      "jev-0037",
+      "jev-0038",
+      "jev-0039",
+      "jev-0040"
+    ],
+    "doc-zh-probability|node-bayes-intuition|citation": [
+      "jev-0096"
+    ],
+    "doc-zh-probability|node-cond-formula|citation": [
+      "jev-0080"
+    ],
+    "doc-zh-probability|node-cond-neg|span_selection": [
+      "jev-0113"
+    ],
+    "doc-zh-probability|node-cond-zero|citation": [
+      "jev-0081"
+    ],
+    "doc-zh-probability|node-indep|citation": [
+      "jev-0098"
+    ],
+    "doc-zh-probability|node-tiaojian|retrieval": [
+      "jev-0041",
+      "jev-0042",
+      "jev-0043",
+      "jev-0044",
+      "jev-0045"
+    ],
+    "doc-zh-pythagoras|node-gougu-all|citation": [
+      "jev-0073"
+    ],
+    "doc-zh-pythagoras|node-gougu-formula|citation": [
+      "jev-0072"
+    ],
+    "doc-zh-pythagoras|node-gougu-formula|span_selection": [
+      "jev-0107"
+    ],
+    "doc-zh-pythagoras|node-gougu|retrieval": [
+      "jev-0026",
+      "jev-0027",
+      "jev-0028",
+      "jev-0029",
+      "jev-0030"
+    ],
+    "doc-zh-quadratic|node-panbie-negative|citation": [
+      "jev-0077"
+    ],
+    "doc-zh-quadratic|node-panbie-positive|citation": [
+      "jev-0075"
+    ],
+    "doc-zh-quadratic|node-panbie-positive|span_selection": [
+      "jev-0108"
+    ],
+    "doc-zh-quadratic|node-panbie-zero-neg|span_selection": [
+      "jev-0114"
+    ],
+    "doc-zh-quadratic|node-panbie-zero|citation": [
+      "jev-0076"
+    ],
+    "doc-zh-quadratic|node-yiyuan|retrieval": [
+      "jev-0031",
+      "jev-0032",
+      "jev-0033",
+      "jev-0034",
+      "jev-0035"
+    ],
+    "doc-zh-triangle|node-neijiaohe|citation": [
+      "jev-0074"
+    ]
+  },
+  "content_hash": "2af0f40d1d1e89c6f7a8092cb846258f2b36b208c58f0211932344a32d33c10d",
+  "note": "Splits are assigned by (document_id, node_id, question_family) group, never by row: the same underlying question with different numbers shares one group and therefore one split. A fitted temperature is only valid against this exact content_hash."
+}

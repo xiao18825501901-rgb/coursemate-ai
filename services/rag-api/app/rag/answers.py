@@ -1,11 +1,51 @@
 import re
-from collections.abc import Iterator
-from typing import Protocol
+from collections.abc import Iterator, Sequence
+from typing import Any, Protocol
 
 from openai import OpenAI
 
 from app.evaluation.deepseek_contract import REASONING_DISABLED
 from app.evaluation.provider_safety import validate_deepseek_base_url
+from app.jev import callsites
+from app.jev.service import SemanticDecisionService
+
+
+def evidence_bundle_support(
+    service: SemanticDecisionService | None,
+    *,
+    claim: str,
+    spans: Sequence[dict[str, str]],
+    scope: Any,
+) -> dict[str, str]:
+    """Pre-DeepSeek evidence-bundle check (source.supports_claim.v1 +
+    source.select_span.v1) for grounded answers.
+
+    The backend supplies the claim, the span ids and the actual source text; Jev
+    may only judge the supplied candidates and never authors a citation. The
+    result is an annotation only — ``selected_span`` (or ``NO_SUPPORT``) and the
+    support verdict for that span — and every supplied source is always handed
+    to DeepSeek unchanged, so insufficient/uncertain evidence is never
+    auto-deleted.
+    """
+    if service is None or not spans:
+        return {"selected_span": "NO_SUPPORT", "support": callsites.UNVERIFIED}
+    span_ids = [str(span["id"]) for span in spans]
+    by_id = {str(span["id"]): span for span in spans}
+    selected = callsites.select_citation_span(
+        service, claim=claim, candidate_spans=span_ids, scope=scope
+    )
+    span = by_id.get(selected)
+    if span is None:
+        return {"selected_span": selected, "support": callsites.UNVERIFIED}
+    support = callsites.citation_support(
+        service,
+        claim=claim,
+        source_span=str(span.get("text", ""))[:4000],
+        source_version=str(span.get("version", "")),
+        task_scope=str(span.get("scope", "qa")),
+        scope=scope,
+    )
+    return {"selected_span": selected, "support": support}
 
 
 class AnswerProvider(Protocol):

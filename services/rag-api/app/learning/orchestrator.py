@@ -7,9 +7,12 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
+from app.cm_update.templates import explanation_prompt
 from app.config import Settings
 from app.db import Database
 from app.errors import ApiError
+from app.jev import callsites
+from app.jev.service import SemanticDecisionService
 from app.learning.assessments import AssessmentService
 from app.learning.compiler import (
     TEMPLATE_VERSION,
@@ -57,7 +60,6 @@ from app.learning.provider import LearningProvider, ProviderCallFailure, Provide
 from app.learning.workspaces import document_version_for, original_path, workspace_for
 from app.rag.retrieval import HybridRetriever
 from app.repositories.chunks import RetrievalAccess
-from app.cm_update.templates import explanation_prompt
 
 
 def encode(value: Any) -> str:
@@ -72,15 +74,24 @@ Output = TypeVar("Output", bound=BaseModel)
 
 
 class LearningOrchestrator:
-    def __init__(self, database: Database, settings: Settings, retriever: HybridRetriever) -> None:
+    def __init__(
+        self,
+        database: Database,
+        settings: Settings,
+        retriever: HybridRetriever,
+        jev: SemanticDecisionService | None = None,
+    ) -> None:
         self.db = database
         self.settings = settings
         self.retriever = retriever
         self.provider = LearningProvider(settings)
-        self.knowledge = KnowledgeService(database)
+        # Non-authoritative semantic-decision layer; None (default) disables Jev
+        # entirely so the deterministic path is byte-identical to before.
+        self.jev = jev
+        self.knowledge = KnowledgeService(database, jev)
         self.plans = TeachingPlanRepository(database)
         self.problems = ProblemRepository(database)
-        self.assessments = AssessmentService(database)
+        self.assessments = AssessmentService(database, jev)
 
     def problem_index(
         self,
@@ -1952,6 +1963,38 @@ class LearningOrchestrator:
             bridge_data = json.loads(bridge["snapshot_json"]) if bridge else None
             if bridge_data:
                 self.check_evidence(workspace, set(bridge_data["evidence_ids"]))
+            # Non-authoritative Jev decisions layered on the deterministic plan
+            # (shadow by default). The chosen pedagogy method is written into the
+            # teaching context the plan->work step consumes; a remediation run may
+            # record a legal prerequisite to review. Neither ever removes REQUIRED
+            # template content, creates a node, or changes the user's choices.
+            jev_scope = (
+                self.jev.scope(
+                    owner_user_id=str(workspace["owner_user_id"]),
+                    authorization_scope="pedagogy",
+                    course_id=str(workspace["course_id"]),
+                    workspace_id=str(workspace["id"]),
+                    node_id=node["id"],
+                    spec_version=journey["spec_version"],
+                )
+                if self.jev is not None
+                else None
+            )
+            jev_pedagogy_method = callsites.select_pedagogy_method(
+                self.jev,
+                learner_request=str(node["title"]),
+                known_prior_evidence=sorted(covered),
+                topic=str(node["title"]),
+                template_profile={"major": node["major"], "spec_version": journey["spec_version"]},
+                current_step="remediation" if replan_triggers else "planning",
+                scope=jev_scope,
+            )
+            jev_prerequisite_review: str | None = None
+            if self.jev is not None and replan_triggers:
+                with self.db.connect() as db:
+                    jev_prerequisite_review = self.knowledge.select_repair_prerequisite(
+                        db, workspace, node["id"], "remediation"
+                    )
             context = {
                 "node_id": node["id"],
                 "knowledge_node": node,
@@ -1983,6 +2026,8 @@ class LearningOrchestrator:
                 "bridge_id": request.bridge_id,
                 "bridge": bridge_data,
                 "output_budget": self.settings.v3_max_output_tokens,
+                "jev_pedagogy_method": jev_pedagogy_method,
+                "jev_prerequisite_review": jev_prerequisite_review,
             }
             plan_row, plan, plan_reused = self.resolve_plan(
                 workspace=workspace,

@@ -24,9 +24,16 @@ from app.jev.gateway import (
     SdkTransport,
 )
 from app.jev.models import CacheScope
-from app.jev.service import DecisionResult, SemanticDecisionService
+from app.jev.service import (
+    BudgetProvenance,
+    DecisionResult,
+    InputBudgetExceeded,
+    SemanticDecisionService,
+    TemplateOption,
+)
 
 __all__ = [
+    "BudgetProvenance",
     "CacheScope",
     "Catalog",
     "Decision",
@@ -35,6 +42,7 @@ __all__ = [
     "DecisionResult",
     "FakeTransport",
     "GatewayBounds",
+    "InputBudgetExceeded",
     "JevError",
     "JevGateway",
     "JevInvalidResponseError",
@@ -45,5 +53,6 @@ __all__ = [
     "Receipt",
     "SdkTransport",
     "SemanticDecisionService",
+    "TemplateOption",
     "load_catalog",
 ]

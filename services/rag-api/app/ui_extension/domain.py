@@ -18,8 +18,8 @@ Authorisation rules that are deliberately preserved:
 
 from __future__ import annotations
 
-import base64
 import asyncio
+import base64
 import hashlib
 import json
 import sqlite3
@@ -36,11 +36,9 @@ from app.config import Settings
 from app.course_access import require_course_access
 from app.db import Database
 from app.errors import ApiError
-from app.learning.coverage_review import NullCoverageReviewer, CoverageReviewer
-from app.learning.orchestrator import LearningOrchestrator
-from app.learning.shell_delivery import submit_shell_delivery
-from app.learning.shell_problems import record_shell_problem
+from app.jev import callsites
 from app.jev.service import SemanticDecisionService
+from app.learning.coverage_review import CoverageReviewer, NullCoverageReviewer
 from app.learning.models import (
     AssessmentAbandonInput,
     AssessmentAnswer,
@@ -51,6 +49,7 @@ from app.learning.models import (
     AssessmentStartInput,
     AssessmentSubmitInput,
 )
+from app.learning.orchestrator import LearningOrchestrator
 from app.learning.previews import IMAGE_MEDIA_TYPES
 from app.learning.problems import ProblemRepository
 from app.learning.retrieval_orchestrator import (
@@ -60,17 +59,20 @@ from app.learning.retrieval_orchestrator import (
     exact_targets_from_query,
     fuse_scoped_candidates,
 )
+from app.learning.shell_delivery import submit_shell_delivery
+from app.learning.shell_problems import record_shell_problem
 from app.learning.workspaces import (
     current_document_version,
     document_for,
     join_course,
     original_path,
 )
+from app.rag.answers import evidence_bundle_support
 from app.rag.retrieval import HybridRetriever
 from app.repositories.chunks import RetrievalAccess
+from app.services.ingestion import IngestionService
 from app.tutor.references import parse_query_reference
 from app.tutor.rewrite import rewrite_retrieval_query
-from app.services.ingestion import IngestionService
 
 # The UI palette is a presentation concern; V3 courses have no colour column, so
 # a stable value is derived from the course id instead of inventing a schema field.
@@ -751,11 +753,11 @@ class V3DomainAdapter:
         # file/page/question target keeps its slot and is never added or dropped.
         # off/shadow/failed all return the deterministic fused order unchanged.
         if self.jev is not None:
-            fused = self.jev.rerank_retrieval(
+            fused = callsites.rerank_retrieval(
+                self.jev,
                 fused,
                 query=query,
-                caller_role="retrieval",
-                cache_scope=self.jev.scope(
+                scope=self.jev.scope(
                     owner_user_id=subject,
                     authorization_scope="retrieval",
                     course_id=course_id,
@@ -764,21 +766,62 @@ class V3DomainAdapter:
                 ),
             )
         budget = max(0, int(self.settings.max_context_chars)) // max(len(fused), 1)
+        # Pre-DeepSeek evidence-bundle check (source.supports_claim.v1 /
+        # source.select_span.v1): Jev may only judge the supplied candidates and
+        # never author a citation; insufficient/uncertain keeps every source.
+        citation = self._annotate_evidence(subject, course_id, query, fused, workspace)
         sources: list[dict[str, Any]] = []
         for index, entry in enumerate(fused, start=1):
             hit = entry.hit
-            sources.append(
-                {
-                    "id": citation_id(index),
-                    "document_id": hit.document_id,
-                    "name": hit.filename,
-                    "page": _page_number(hit.locator_type, hit.locator_value),
-                    "locator": f"{hit.locator_type}:{hit.locator_value}",
-                    "section": hit.section,
-                    "text": budget_text(str(hit.content or ""), budget),
-                }
-            )
+            source = {
+                "id": citation_id(index),
+                "document_id": hit.document_id,
+                "name": hit.filename,
+                "page": _page_number(hit.locator_type, hit.locator_value),
+                "locator": f"{hit.locator_type}:{hit.locator_value}",
+                "section": hit.section,
+                "text": budget_text(str(hit.content or ""), budget),
+            }
+            if citation:
+                source["jev_citation_support"] = citation["support"]
+                source["jev_selected_span"] = citation["selected_span"] == source["id"]
+            sources.append(source)
         return sources
+
+    def _annotate_evidence(
+        self,
+        subject: str,
+        course_id: str,
+        query: str,
+        fused: list[Any],
+        workspace: sqlite3.Row | None,
+    ) -> dict[str, str] | None:
+        """source.select_span.v1 + source.supports_claim.v1 pre-DeepSeek check.
+
+        Two Jev calls total (select one span, then judge that span against the
+        claim). The result is an annotation only: it never drops, adds or
+        reorders a source, so an insufficient/uncertain answer keeps the existing
+        evidence and hands it to DeepSeek unchanged.
+        """
+        if self.jev is None or not fused:
+            return None
+        scope = self.jev.scope(
+            owner_user_id=subject,
+            authorization_scope="citation",
+            course_id=course_id,
+            workspace_id=str(workspace["id"]) if workspace is not None else None,
+            material_revision=str(workspace["revision"]) if workspace is not None else None,
+        )
+        spans = [
+            {
+                "id": citation_id(index),
+                "text": str(getattr(entry.hit, "content", "") or ""),
+                "version": str(getattr(entry.hit, "document_id", "") or ""),
+                "scope": course_id,
+            }
+            for index, entry in enumerate(fused, start=1)
+        ]
+        return evidence_bundle_support(self.jev, claim=query, spans=spans, scope=scope)
 
     def _attachments(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
         course_id = str(payload["course"])
@@ -961,7 +1004,7 @@ class V3DomainAdapter:
 
     def _task_update(self, credential: str, payload: dict[str, Any]) -> dict[str, Any]:
         task_id = str(payload["id"])
-        current = self._agent_request("GET", f"/api/tasks?page=1&pageSize=100", credential)
+        current = self._agent_request("GET", "/api/tasks?page=1&pageSize=100", credential)
         existing = _find_task(current, task_id)
         if existing is None:
             raise ApiError(404, "TASK_NOT_FOUND", "The task was not found.")
@@ -1270,12 +1313,12 @@ class V3DomainAdapter:
         }
         if self.jev is not None:
             required = [item for item in items if item.get("requirement") == "REQUIRED"]
-            provenance["jev_item_support"] = self.jev.item_support(
+            provenance["jev_item_support"] = callsites.coverage_item_support(
+                self.jev,
                 required,
                 content=content,
                 spec_version=spec_version,
-                caller_role="coverage",
-                cache_scope=self.jev.scope(
+                scope=self.jev.scope(
                     owner_user_id=subject,
                     authorization_scope="coverage",
                     course_id=course_id,

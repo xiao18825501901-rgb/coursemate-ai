@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from app.db import Database
 from app.errors import ApiError
+from app.jev import callsites
+from app.jev.service import SemanticDecisionService
 from app.learning.models import (
     AssessmentAnswer,
     AssessmentGradeProposal,
@@ -49,8 +51,11 @@ def digest(value: object) -> str:
 class AssessmentService:
     """Owns frozen assessment facts and emits only learner-safe projections."""
 
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, jev: SemanticDecisionService | None = None) -> None:
         self.db = database
+        # Non-authoritative semantic-decision layer. None (default) disables Jev
+        # entirely; the deterministic grading path is byte-identical to before.
+        self.jev = jev
 
     @staticmethod
     def _atomic_node(
@@ -1289,6 +1294,55 @@ class AssessmentService:
             return normalized in accepted
         raise ValueError("The question requires a structured grader proposal")
 
+    def _apply_jev_criterion_review(
+        self,
+        workspace: sqlite3.Row,
+        question: dict[str, Any],
+        criterion: sqlite3.Row | dict[str, Any],
+        fraction: float,
+        needs_review: bool,
+    ) -> bool:
+        """Consult assessment.criterion_review.v1; only a real Jev verdict flags review.
+
+        The backend owns the mark range, weights, total, grade version and final
+        write: this method can only set ``needs_review`` (uncertainty or a
+        contradiction with the grader), never ``fraction``, so a Jev failure can
+        never score a question zero.
+        """
+        if self.jev is None:
+            return needs_review
+        scope = self.jev.scope(
+            owner_user_id=str(workspace["owner_user_id"]),
+            authorization_scope="assessment",
+            course_id=str(workspace["course_id"]),
+            workspace_id=str(workspace["id"]),
+            node_id=str(criterion["node_id"]),
+            spec_version=criterion["spec_version"],
+        )
+        result = callsites.review_criterion(
+            self.jev,
+            frozen_question={
+                "prompt": str(question.get("prompt_text") or ""),
+                "question_type": str(question.get("question_type") or ""),
+            },
+            criterion=dict(criterion),
+            reference_solution=json.dumps(question.get("answer_key") or {}, ensure_ascii=False),
+            student_answer=str(question.get("student_answer") or ""),
+            deterministic_verification="",
+            candidate_answer_spans=[str(question.get("student_answer") or "")[:2000]],
+            scope=scope,
+        )
+        if not result.used_jev:
+            return needs_review
+        verdict = result.value
+        if verdict == "NEEDS_REVIEW":
+            return True  # uncertainty routes to the existing review path
+        if verdict == "NOT_SATISFIED" and fraction >= 0.5:
+            return True  # contradiction with a satisfied/partial grader proposal
+        if verdict in {"SATISFIED", "PARTIAL"} and fraction < 0.5:
+            return True  # contradiction with a weak grader proposal
+        return needs_review
+
     @staticmethod
     def _proposal_map(
         proposal: AssessmentGradeProposal | None,
@@ -1431,6 +1485,13 @@ class AssessmentService:
                     confidence = float(proposed["confidence"])
                     answer_evidence = str(proposed["answer_evidence"])
                     feedback = str(proposed["feedback"])
+                    # Non-authoritative Jev criterion signal (assessment.
+                    # criterion_review.v1). It can only FLAG a review (uncertainty
+                    # or a contradiction with the grader) — it never changes the
+                    # mark, never zeroes a question, and a fallback changes nothing.
+                    needs_review = self._apply_jev_criterion_review(
+                        workspace, question, criterion, fraction, needs_review
+                    )
                 maximum = (
                     float(question["marks"]) * float(criterion["max_fraction"]) / 100
                 )
