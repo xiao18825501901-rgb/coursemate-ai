@@ -1,0 +1,45 @@
+# CourseMate private Laya inference service — production runtime pins.
+#
+# Every pin is exact on purpose: this is a private, single-model service and the
+# owner wants byte-for-byte reproducible installs. Do NOT float these.
+#
+# Torch is installed as the CPU-only wheel (the node has no GPU). Install order
+# matters: torch first, so transformers/laya resolve against the CPU build.
+#   python -m venv .venv
+#   .venv/bin/pip install --upgrade pip
+#   .venv/bin/pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+#   .venv/bin/pip install -r requirements.txt
+#
+# Rationale per pin:
+#  * laya==0.3.4        — the SDK rev the owner standardised on; provides
+#                         laya.load(...). Pinned so a future SDK rev cannot change
+#                         the answer contract under us. (Apache-2.0, PyPI.)
+#  * torch==2.5.1       — CPU-only wheel pinned for the 8 vCPU node; avoids the
+#                         multi-GB CUDA default wheel. Exact patch pinned for
+#                         reproducibility (see manifest for install-verification caveat).
+#  * transformers        — model + tokenizer runtime (ModernBertForMaskedLM encoder,
+#                         mmBERT tokenizer). Pin below; version chosen for
+#                         compatibility with the encoder config (see manifest UNKNOWN note).
+#  * numpy               — transitive for torch/laya; pinned to keep the runtime stable.
+#  * safetensors         — weight loading format used by the checkpoint.
+#  * fastapi / uvicorn   — the HTTP shell; same versions the repo RAG service already
+#                         pins, so the two services share a known-good ASGI surface.
+#  * pydantic            — request/response validation; matches the repo RAG service.
+#  * pydantic-settings   — env-driven Settings (LAYA_* prefix).
+
+laya==0.3.4
+# The versions below are the combination PROVEN to load and serve the pinned
+# multilingual snapshot on CPU (evidence: work/laya-recon/REAL_LAYA_BRINGUP.json).
+# The encoder config records `transformers_version: 5.0.0`, and transformers 5.x
+# loaded it with no error and no pin gymnastics. The earlier guessed pins
+# (torch 2.5.1 / transformers 4.52.3 / numpy 2.1.3 / safetensors 0.5.3 /
+# huggingface_hub 0.34.3) were never executed against the checkpoint.
+torch==2.14.0
+transformers==5.17.0
+numpy==2.5.3
+safetensors==0.8.0
+fastapi==0.141.1
+uvicorn[standard]==0.52.1
+pydantic==2.13.5
+pydantic-settings==2.15.0
+huggingface_hub==1.32.0

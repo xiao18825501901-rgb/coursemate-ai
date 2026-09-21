@@ -1,0 +1,54 @@
+# CourseMate Laya — private reverse proxy with mutual TLS (SKETCH).
+#
+# This is a configuration sketch for the owner's Aliyun VPC. The Laya service
+# itself listens only on 127.0.0.1:8105 and is never exposed publicly; this
+# nginx listener is the ONLY mTLS termination point, bound to a PRIVATE VPC IP
+# and reachable only from CourseMate's backend security group.
+#
+# Replace every CAPITALISED placeholder before use. Do NOT bind 0.0.0.0/443 here.
+
+# Client certificates: only CourseMate's backend is granted a client cert. The
+# CA below is the private CA that signed it; the CRL is optional but recommended.
+#   ssl_client_certificate  /etc/coursemate/tls/laya-client-ca.crt;
+#   ssl_crl                 /etc/coursemate/tls/laya-client.crl;
+#   ssl_verify_client       on;
+
+server {
+    listen PRIVATE_VPC_IP:8443 ssl;
+    server_name laya.internal.coursemate.local;
+
+    # --- mTLS ------------------------------------------------------------
+    ssl_certificate     /etc/coursemate/tls/laya-server.crt;
+    ssl_certificate_key /etc/coursemate/tls/laya-server.key;
+    ssl_protocols       TLSv1.3 TLSv1.2;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    ssl_client_certificate  /etc/coursemate/tls/laya-client-ca.crt;
+    ssl_verify_client       on;
+    ssl_verify_depth        2;
+
+    # --- network policy --------------------------------------------------
+    # Only the CourseMate backend security group may connect. Anything else is
+    # dropped before it reaches the upstream.
+    allow  COURSEMATE_BACKEND_SECURITY_GROUP_CIDR;
+    deny   all;
+
+    # --- upstream --------------------------------------------------------
+    location / {
+        proxy_pass http://127.0.0.1:8105;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+
+        # No buffering surprises for long CPU decisions; bounded client timeouts.
+        proxy_buffering off;
+        proxy_read_timeout 35s;
+        proxy_send_timeout 35s;
+
+        # Never cache a decision or the model-info payload.
+        add_header Cache-Control "private, no-store" always;
+    }
+
+    # Never allow file/URL-fetching upstream; only the four service routes exist.
+    location ~* \.(git|env|json|safetensors)$ { return 404; }
+}

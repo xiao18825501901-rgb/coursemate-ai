@@ -1,0 +1,54 @@
+[Unit]
+Description=CourseMate Laya inference service (private, single-model)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=coursemate
+Group=coursemate
+WorkingDirectory=/srv/coursemate/current/services/laya-inference
+EnvironmentFile=/etc/coursemate/laya.env
+Environment=PYTHONUNBUFFERED=1
+Environment=HF_HUB_OFFLINE=1
+# One worker. NEVER raise this: each uvicorn worker would load a second copy of
+# the model (an extra ~1 GB+ RSS and a second resident checkpoint).
+ExecStart=/srv/coursemate/runtime/laya/bin/uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8105 --workers 1
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=90s
+UMask=0027
+LimitNOFILE=65536
+
+# Resource budget for the 8 vCPU / 16 GiB node. MemoryMax leaves headroom for
+# the OS page cache and the nginx sidecar; CPUQuota caps the process at the
+# 8 vCPUs so a runaway cannot starve the box.
+MemoryMax=12G
+MemorySwapMax=0
+CPUQuota=800%
+TasksMax=512
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectClock=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+RemoveIPC=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+# The model snapshot and definitions registry are read-only to the service.
+ReadOnlyPaths=/srv/coursemate/laya /etc/coursemate/laya-definitions.json
+
+[Install]
+WantedBy=multi-user.target

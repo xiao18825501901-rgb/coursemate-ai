@@ -1,0 +1,83 @@
+"""Laya input compiler package.
+
+This workstream owns :mod:`app.laya.compiler` and :mod:`app.laya.budget`.
+``adapter.py`` / ``models.py`` / ``errors.py`` are owned by a different workstream
+and are intentionally not imported here so this package stays importable before
+they land.
+"""
+
+from .budget import (
+    CLS_TOKEN_ID,
+    MASK_TOKEN,
+    MASK_TOKEN_ID,
+    PAD_TOKEN_ID,
+    QTYPES,
+    SEP_TOKEN_ID,
+    TEXT_ID_FLOOR,
+    VOCAB_SIZE,
+    AutoTokenizerAdapter,
+    BudgetConfig,
+    BudgetPlan,
+    OfflineTokenizer,
+    TokenizerProtocol,
+    build_sequence,
+    compute_budget_plan,
+    render_options,
+    serialize_state,
+)
+from .compiler import (
+    ALLOWED_STATE_KEYS,
+    COMPILER_VERSION,
+    PLAN_LIKE_STATE_KEYS,
+    CompiledDecision,
+    CompilePolicy,
+    EvidenceWindow,
+    HierarchicalDecision,
+    InputTooLongError,
+    InsufficientContextError,
+    LayaCompileError,
+    Provenance,
+    TemplateOption,
+    build_evidence_window,
+    build_hierarchical_template_decision,
+    build_single_local_relation,
+    compile_decision,
+    content_hash,
+)
+
+__all__ = [
+    "ALLOWED_STATE_KEYS",
+    "COMPILER_VERSION",
+    "CLS_TOKEN_ID",
+    "MASK_TOKEN",
+    "MASK_TOKEN_ID",
+    "PAD_TOKEN_ID",
+    "PLAN_LIKE_STATE_KEYS",
+    "SEP_TOKEN_ID",
+    "TEXT_ID_FLOOR",
+    "VOCAB_SIZE",
+    "AutoTokenizerAdapter",
+    "BudgetConfig",
+    "BudgetPlan",
+    "CompiledDecision",
+    "CompilePolicy",
+    "EvidenceWindow",
+    "HierarchicalDecision",
+    "InputTooLongError",
+    "InsufficientContextError",
+    "LayaCompileError",
+    "OfflineTokenizer",
+    "Provenance",
+    "QTYPES",
+    "TemplateOption",
+    "TokenizerProtocol",
+    "build_evidence_window",
+    "build_hierarchical_template_decision",
+    "build_sequence",
+    "build_single_local_relation",
+    "compile_decision",
+    "compute_budget_plan",
+    "content_hash",
+    "render_options",
+    "serialize_state",
+]

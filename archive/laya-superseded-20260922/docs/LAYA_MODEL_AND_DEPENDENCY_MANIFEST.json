@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "name": "CourseMate Laya inference — model and dependency manifest",
+  "generated_by_workstream": "private Laya inference service (source + packaging + docs)",
+  "workstream_status": {
+    "REAL_LAYA_INFERENCE": "NOT_RUN",
+    "model_download": "NOT_RUN (delegated to a separate download agent)",
+    "per_file_sha256": "UNKNOWN (hashes require the actual snapshot download)",
+    "service_unit_tests": "RUN — 51 passed with the fake agent (no torch, no network)",
+    "service_smoke_test": "RUN — fake agent on 127.0.0.1:8105",
+    "ruff_check": "RUN — clean"
+  },
+
+  "model": {
+    "repo_id": "convaiinnovations/laya",
+    "subfolder": "multilingual",
+    "revision": "1c5edc17a7acd8701df6fc341c0d179f1c62c982",
+    "revision_status": "pinned (never 'latest')",
+    "license": "Apache-2.0",
+    "model_name": "laya-multilingual",
+    "encoder": "jhu-clsp/mmBERT-base",
+    "encoder_architectures": ["ModernBertForMaskedLM"],
+    "params": "322M (per upstream model card; NOT independently measured here)",
+    "approx_download_size_bytes": 647000000,
+    "approx_download_size_status": "from upstream model card (~647 MB); NOT measured here",
+    "max_len": 1024,
+    "head_max_len": 256,
+    "amp_dtype": "bf16",
+    "amp_runtime_note": "CPU runs FP32; autocast is enabled only on CUDA by the official code",
+    "vocab_size": 256000,
+    "num_hidden_layers": 22,
+    "hidden_size": 768,
+    "num_attention_heads": 12,
+    "intermediate_size": 1152,
+    "local_attention": 128,
+    "max_position_embeddings": 8192,
+    "layer_types": [
+      "full_attention", "sliding_attention", "sliding_attention",
+      "full_attention", "sliding_attention", "sliding_attention",
+      "full_attention", "sliding_attention", "sliding_attention",
+      "full_attention", "sliding_attention", "sliding_attention",
+      "full_attention", "sliding_attention", "sliding_attention",
+      "full_attention", "sliding_attention", "sliding_attention",
+      "full_attention", "sliding_attention", "sliding_attention",
+      "full_attention"
+    ],
+    "expected_files_inferred_from_recon": [
+      "rl_agent_config.json",
+      "tokenizer/tokenizer_config.json",
+      "encoder/config.json",
+      "model.safetensors"
+    ],
+    "expected_files_status": "INFERRED from work/laya-recon (ml_* files are the renamed snapshot files); exact layout (e.g. sharded vs single safetensors) UNVERIFIED until the download agent confirms",
+    "per_file_sha256": "UNKNOWN"
+  },
+
+  "tokenizer": {
+    "tokenizer_class": "PreTrainedTokenizerFast",
+    "model_max_length": 8192,
+    "cls_token": "<bos>",
+    "sep_token": "<eos>",
+    "pad_token": "<pad>",
+    "mask_token": "<mask>",
+    "unk_token": "<unk>",
+    "special_token_ids": {
+      "pad_token_id": 0,
+      "cls_token_id": 1,
+      "eos_token_id": 1,
+      "sep_token_id": 1,
+      "bos_token_id": 2,
+      "mask_token_id": 4
+    },
+    "tokenizer_revision": "UNKNOWN (not derivable offline)"
+  },
+
+  "rl_agent_config_multilingual": {
+    "encoder": "jhu-clsp/mmBERT-base",
+    "head_layers": 2,
+    "max_len": 1024,
+    "head_max_len": 256,
+    "max_prefixes": 6,
+    "act_costs": {"escalate": 0.5},
+    "cost_wrong_act": 3.0,
+    "amp_dtype": "bf16",
+    "model_name": "rl-agent",
+    "temperature": [1.0, 1.0, 1.0],
+    "temperature_by_options": {},
+    "calibration_status": "NO fitted temperatures (multilingual ships uncalibrated/over-confident per model card)"
+  },
+
+  "sdk_and_dependencies": {
+    "laya": "==0.3.4 (pinned in requirements.txt; NOT installed/verified in this workstream)",
+    "torch": "==2.5.1 CPU-only wheel (pinned; install via the PyTorch CPU index)",
+    "torch_status": "exact CPU build compatibility with laya 0.3.4 UNVERIFIED offline",
+    "transformers": "==4.52.3 (pinned; compatibility with the encoder config UNVERIFIED offline)",
+    "numpy": "==2.1.3 (pinned)",
+    "safetensors": "==0.5.3 (pinned)",
+    "fastapi": "==0.141.1 (matches the repo RAG service, verified present in the repo venv)",
+    "uvicorn": "==0.52.1 (matches the repo RAG service)",
+    "pydantic": "==2.13.5 (matches the repo RAG service)",
+    "pydantic_settings": "==2.15.0 (matches the repo RAG service)",
+    "huggingface_hub": "==0.34.3 (pinned for snapshot_download; exact rev UNVERIFIED offline)"
+  },
+
+  "verified_from": [
+    "work/laya-recon/rl_agent_api.py",
+    "work/laya-recon/rl_common.py",
+    "work/laya-recon/ml_rl_agent_config.json",
+    "work/laya-recon/ml_encoder_config.json",
+    "work/laya-recon/ml_tokenizer_config.json",
+    "work/laya-recon/root_rl_agent_config.json",
+    "work/laya-recon/gh_readme.md",
+    "work/laya-recon/hf_readme.md"
+  ],
+
+  "explicitly_unverified": {
+    "per_file_sha256": "UNKNOWN — no snapshot downloaded in this workstream",
+    "model_actual_file_layout": "UNVERIFIED — inferred from recon file naming",
+    "torch_cpu_wheel_exact_build": "UNVERIFIED",
+    "transformers_exact_compatible_version": "UNVERIFIED",
+    "tokenizer_revision": "UNKNOWN",
+    "sdk_version_at_runtime": "UNKNOWN — laya 0.3.4 pinned but not installed here",
+    "router_used": "NEVER — we serve one resident multilingual checkpoint",
+    "gpu_latency_33ms": "NOT_APPLICABLE — that figure is GPU (T4); our CPU node is 193–464 ms per the model card and must not be quoted as our measurement"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "definitions": [
+    {
+      "decision_definition_id": "course-triage",
+      "definition_version": "1",
+      "compiler_versions": ["1.0.0"],
+      "max_questions": 10,
+      "max_options_per_question": 20,
+      "questions": {
+        "department": {
+          "type": "choice",
+          "instructions": "Which department?",
+          "criteria": {
+            "billing": "payments, refunds",
+            "technical": "bugs, outages"
+          }
+        },
+        "churn": {
+          "type": "noul",
+          "instructions": "Does the user threaten to cancel?"
+        }
+      }
+    }
+  ]
+}
