@@ -23,12 +23,13 @@ The single consolidated request is `MINIMAL_OWNER_ACTION_CARD.md`.
 |---|---|
 | ARCHIVE_SHA (package-declared source) | `c309219ef7fbaa28ce203ef21e3fe02d3eee716f` |
 | WORKTREE_SHA (implementation baseline = `HEAD`) | `b05fd29417bf306e3615e2cb6e9117ab85e333cb` |
-| Branch | `fix/codex-dsh-audit-20260919` |
+| Implementation commit of this round | **`bdb1aa7`** — 92 files (38 modified, 54 added); the report and doc updates following it are a documentation-only commit |
+| Branch | `fix/codex-dsh-audit-20260919` (not pushed; no remote write was authorized) |
 | APPLICATION_SHA (package's reported run) | `4ef50642c0b2336e64c384752ea262901a32d81d` |
 | PRODUCTION_SHA (live release) | `5ba6a3a` — **not re-verified this round** (no production access) |
 | Schema after this round | RAG **28**, UI **13**, Agent **1** |
 | Work tree | `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY` (single tree used by all workstreams) |
-| Change size | 38 tracked files modified (**+2795 / −280**), 77 new files |
+| Change size | 38 tracked files modified (**+2795 / −280**), 54 files added (92 files in the commit) |
 
 The implementation pack under
 `D:\UserData\Downloads\CourseMate_Jev_DeepSeek_DSH_Implementation_Pack\CourseMate_Jev_DeepSeek_DSH_Plan\`
