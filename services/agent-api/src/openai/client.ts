@@ -25,13 +25,15 @@ export interface AgentModelClient {
   create(request: AgentModelRequest): Promise<AgentModelResponse>;
 }
 
+export const DEEPSEEK_BASE_URL = "https://api.deepseek.com";
+
 export class OpenAIResponsesClient implements AgentModelClient {
   private readonly client: OpenAI;
 
   constructor(apiKey: string, client?: OpenAI, baseURL?: string) {
     this.client = client ?? new OpenAI({
       apiKey,
-      ...(baseURL ? { baseURL } : {}),
+      baseURL: baseURL || DEEPSEEK_BASE_URL,
       maxRetries: 0,
       timeout: 90_000,
     });
@@ -48,6 +50,10 @@ export class OpenAIResponsesClient implements AgentModelClient {
         parallel_tool_calls: request.parallelToolCalls,
         max_output_tokens: 1_200,
         store: false,
+        // DeepSeek Responses: native thinking explicitly off so the agent only
+        // projects output_text / function_call items (no reasoning chain). This
+        // is a documented DeepSeek field; Qwen-only fields are never emitted.
+        reasoning: { effort: "none" },
       });
     } catch {
       throw new AgentError(

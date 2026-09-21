@@ -18,9 +18,9 @@ from app.errors import ApiError
 from app.learning.orchestrator import LearningOrchestrator
 from app.rag.answers import (
     AnswerProvider,
+    DeepSeekAnswerProvider,
     ExtractiveAnswerProvider,
     MissingAnswerProvider,
-    OpenAIAnswerProvider,
 )
 from app.rag.embeddings import (
     DeterministicEmbeddingProvider,
@@ -65,8 +65,10 @@ def create_app(
     database.initialize()
     embedding_secret = resolved_settings.rag_embedding_api_key
     embedding_api_key = embedding_secret.get_secret_value() if embedding_secret else ""
-    chat_secret = resolved_settings.rag_chat_api_key
-    chat_api_key = chat_secret.get_secret_value() if chat_secret else ""
+    deepseek_chat_secret = resolved_settings.deepseek_chat_api_key
+    deepseek_chat_api_key = (
+        deepseek_chat_secret.get_secret_value() if deepseek_chat_secret else ""
+    )
     if embedding_provider is None:
         if resolved_settings.rag_provider_mode == "deterministic":
             embedding_provider = DeterministicEmbeddingProvider()
@@ -84,13 +86,15 @@ def create_app(
         if resolved_settings.rag_provider_mode == "deterministic":
             answer_provider = ExtractiveAnswerProvider()
         else:
+            # Grounded QA uses DeepSeek explicitly.  There is no OpenAI/Qwen
+            # fallback: without a DeepSeek credential the role stays missing.
             answer_provider = (
-                OpenAIAnswerProvider(
-                    api_key=chat_api_key,
-                    model=resolved_settings.rag_chat_model,
-                    base_url=resolved_settings.rag_chat_base_url,
+                DeepSeekAnswerProvider(
+                    api_key=deepseek_chat_api_key,
+                    model=resolved_settings.deepseek_chat_model,
+                    base_url=resolved_settings.deepseek_chat_base_url,
                 )
-                if chat_api_key
+                if deepseek_chat_api_key
                 else MissingAnswerProvider()
             )
 

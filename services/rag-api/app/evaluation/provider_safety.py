@@ -81,3 +81,39 @@ def validate_model_studio_base_url(value: str | None) -> str:
     except ValueError as error:
         raise ValueError("Model Studio base URL is invalid or outside the V3 allowlist.") from error
     return validated
+
+
+# Source: https://api-docs.deepseek.com/ (base_url for the OpenAI-compatible
+# Chat Completions and Responses endpoints).  DeepSeek exposes no per-region
+# workspace hosts, so the allowlist is a single explicit host.
+DEEPSEEK_API_HOSTS = frozenset({"api.deepseek.com"})
+
+
+def validate_deepseek_base_url(value: str | None) -> str:
+    """Validate the exact HTTPS DeepSeek API base URL accepted by generation roles.
+
+    This rule sits ALONGSIDE ``validate_model_studio_base_url``; it does not
+    loosen the shared HTTPS/credential/query/fragment checks and it does not turn
+    the app into an arbitrary-URL proxy.  The host must be the official
+    ``api.deepseek.com`` and the path must be empty (or ``/``); a ``/v1`` or
+    region-style path is rejected so a misconfigured base URL fails loudly.
+    """
+    try:
+        validated = validate_provider_base_url(
+            value,
+            allow_insecure_loopback=False,
+        )
+        if validated is None:
+            raise ValueError
+        parsed = urlsplit(validated)
+        hostname = parsed.hostname or ""
+        path = parsed.path.rstrip("/")
+        if (
+            hostname not in DEEPSEEK_API_HOSTS
+            or parsed.port not in (None, 443)
+            or path not in ("",)
+        ):
+            raise ValueError
+    except ValueError as error:
+        raise ValueError("DeepSeek base URL is invalid or outside the DeepSeek allowlist.") from error
+    return validated

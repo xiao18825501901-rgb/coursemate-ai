@@ -25,6 +25,10 @@ def assessment_template() -> tuple[str, str]:
     return template("assessment"), "assessment-v3.2"
 
 
+def preparation_template() -> tuple[str, str]:
+    return template("preparation"), "preparation-v3.2"
+
+
 def validate_plan(
     plan: TeachingPlan,
     *,

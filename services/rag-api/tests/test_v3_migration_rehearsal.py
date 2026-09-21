@@ -9,7 +9,7 @@ from types import ModuleType
 import pytest
 
 from app.config import Settings
-from app.db import Database
+from app.db import LATEST_V3_SCHEMA_VERSION, Database
 
 REPOSITORY_ROOT = Path(__file__).parents[3]
 REHEARSAL_SCRIPT = REPOSITORY_ROOT / "scripts" / "rehearse_v3_migration.py"
@@ -84,6 +84,74 @@ def _downgrade_to_migration_24_with_legacy_course(path: Path) -> None:
         connection.execute("DELETE FROM schema_migrations WHERE version=25")
 
 
+_REBUILD_SENSITIVE_OBJECTS = (
+    # Migration 027 rebuilds four tables under <name>_new, drops the originals
+    # and renames. SQLite rewrites every trigger that references a renamed
+    # table, so all ten triggers below - including the four defined on tables
+    # other than assessment_question_revisions - must be dropped first and
+    # recreated verbatim. The first cut of 027 lost them and broke every
+    # database-backed test; this pins the fix.
+    "immutable_assessment_question_content",
+    "immutable_assessment_question_delete",
+    "revoke_assessment_question_sources_only",
+    "validate_assessment_rubric_context",
+    "validate_assessment_blueprint_item",
+    "immutable_frozen_assessment_blueprint_item_update",
+    "immutable_assessment_blueprint_item_delete",
+    "freeze_valid_assessment_blueprint",
+    "validate_assessment_question_attempt",
+    "validate_performance_evidence_context",
+)
+
+
+def test_fresh_initialize_applies_every_migration_without_rebuild_artifacts(
+    tmp_path: Path,
+) -> None:
+    module = _load_rehearsal_module()
+    database = Database(
+        Settings(
+            app_env="test",
+            database_path=tmp_path / "rag.sqlite3",
+            upload_dir=tmp_path / "uploads",
+            v3_enabled=True,
+        )
+    )
+    database.initialize()
+    database.initialize()  # replaying every migration must be idempotent
+
+    with database.connect() as connection:
+        versions = [
+            row[0]
+            for row in connection.execute(
+                "SELECT version FROM schema_migrations ORDER BY version"
+            )
+        ]
+        assert versions == list(range(1, LATEST_V3_SCHEMA_VERSION + 1))
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        objects = {
+            (row[0], row[1])
+            for row in connection.execute("SELECT type,name FROM sqlite_master")
+        }
+    leftovers = sorted(
+        name
+        for _kind, name in objects
+        if name.endswith("_new") or name.endswith("_old")
+    )
+    assert leftovers == [], "table rebuild left transient objects behind"
+    missing = sorted(
+        f"{kind}:{name}"
+        for kind, name in module.expected_governance_schema_objects()
+        if (kind, name) not in objects
+    )
+    assert missing == []
+    assert [
+        name
+        for name in _REBUILD_SENSITIVE_OBJECTS
+        if ("trigger", name) not in objects
+    ] == []
+
+
 def test_rehearsal_proves_model_budget_backfill_and_governance_objects(
     tmp_path: Path,
 ) -> None:
@@ -147,7 +215,12 @@ def test_rehearsal_preserves_legacy_fields_when_migration_adds_course_columns(
     result = module.rehearse(source, target)
 
     assert result["old_rows_unchanged"] is True
-    assert result["versions"] == list(range(1, 26))
+    # Every declared migration must apply to a legacy database, including the
+    # ones added after 25 (learning start facts, assessment preparation,
+    # Jev decision receipts). Derive the ceiling from the declared schema
+    # version instead of freezing the count in the test.
+    assert result["versions"] == list(range(1, LATEST_V3_SCHEMA_VERSION + 1))
+    assert max(result["versions"]) >= 26
     with sqlite3.connect(target / "rag.sqlite3") as migrated:
         row = migrated.execute(
             "SELECT id,name,course_type,visibility,publication_status,display_type,"

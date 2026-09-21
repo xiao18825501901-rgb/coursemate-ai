@@ -4,10 +4,12 @@ the semantics forbid it, stay visibly honest about what it does not write.
 Two directions are covered with real database assertions:
 
 1. A teach run that targets a knowledge node starts the caller's V3 learning
-   journey (the same `learning_journeys` row V3 teach() creates) and records the
-   cross-reference in the UI database. It NEVER claims REQUIRED-item coverage:
-   coverage stays exclusively owned by V3 teach()/teaching_delivery_evidence, so
-   the node's progress remains NOT_STARTED until real evidence exists.
+   journey (the same `learning_journeys` row V3 teach() creates), records the
+   cross-reference in the UI database, AND records the accepted learning-start
+   fact (schema 26) — so the node is LEARNING as soon as the learner really
+   started. It NEVER claims REQUIRED-item coverage: coverage stays exclusively
+   owned by V3 teach()/teaching_delivery_evidence, so `covered_required` stays
+   0 and LEARNED is only reachable through real evidence.
 
 2. The assessment entry point is no longer read-only: a real V3 session can be
    started, viewed (questions visible, answers hidden), submitted with five
@@ -181,8 +183,11 @@ def test_teach_run_starts_the_v3_journey_without_claiming_coverage(client: TestC
 
     tree = client.get(f"{UI}/courses/cs3481/knowledge", headers=auth("Bearer token-a")).json()
     node = next(row for row in tree if row["id"] == node_id)
-    # Progress stays honest: NOT_STARTED until real V3 coverage exists.
-    assert node["progress"] == "NOT_STARTED"
+    # The accepted run recorded a real learning start (schema 26): the node reads
+    # LEARNING immediately, while coverage stays zero until accepted evidence.
+    assert node["progress"] == "LEARNING"
+    assert node["learning"]["started"] is True
+    assert node["learning"]["covered_required"] == 0
 
     # A second teach run on the same node reuses the same journey - idempotent.
     second = client.post(

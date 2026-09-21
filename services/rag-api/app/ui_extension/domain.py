@@ -40,9 +40,14 @@ from app.learning.coverage_review import NullCoverageReviewer, CoverageReviewer
 from app.learning.orchestrator import LearningOrchestrator
 from app.learning.shell_delivery import submit_shell_delivery
 from app.learning.shell_problems import record_shell_problem
+from app.jev.service import SemanticDecisionService
 from app.learning.models import (
     AssessmentAbandonInput,
     AssessmentAnswer,
+    AssessmentAttachment,
+    AssessmentDraftInput,
+    AssessmentExplanationInput,
+    AssessmentPreparationStartInput,
     AssessmentStartInput,
     AssessmentSubmitInput,
 )
@@ -157,6 +162,7 @@ class V3DomainAdapter:
         task_agent_timeout: float = 60.0,
         task_agent_credential: str = "",
         coverage_reviewer: CoverageReviewer | None = None,
+        jev: SemanticDecisionService | None = None,
     ) -> None:
         self.database = database
         self.settings = settings
@@ -168,6 +174,9 @@ class V3DomainAdapter:
         self.task_agent_timeout = task_agent_timeout
         self.task_agent_credential = task_agent_credential
         self.coverage_reviewer = coverage_reviewer or NullCoverageReviewer()
+        # Non-authoritative semantic-decision layer. None (the default) disables
+        # Jev entirely; the deterministic path is byte-identical to before.
+        self.jev = jev
 
     # ------------------------------------------------------------------ helpers
 
@@ -668,7 +677,14 @@ class V3DomainAdapter:
         query = raw_query
         if history:
             try:
-                query = rewrite_retrieval_query(raw_query, history) or raw_query
+                # `rewrite_retrieval_query` returns a RewriteResult (see
+                # app/services/qa.py), not a bare string.
+                rewritten = rewrite_retrieval_query(raw_query, history)
+                candidate_query = getattr(rewritten, "query", None) or (
+                    rewritten if isinstance(rewritten, str) else None
+                )
+                if isinstance(candidate_query, str) and candidate_query.strip():
+                    query = candidate_query.strip()
             except Exception:  # pragma: no cover - rewrite is best effort
                 query = raw_query
         workspace = self._workspace_row(course_id, subject)
@@ -731,6 +747,22 @@ class V3DomainAdapter:
             exact_targets=exact_targets_from_query(raw_query),
             max_candidates=candidates,
         )
+        # Jev may only REORDER the already-authorized fused candidates; an exact
+        # file/page/question target keeps its slot and is never added or dropped.
+        # off/shadow/failed all return the deterministic fused order unchanged.
+        if self.jev is not None:
+            fused = self.jev.rerank_retrieval(
+                fused,
+                query=query,
+                caller_role="retrieval",
+                cache_scope=self.jev.scope(
+                    owner_user_id=subject,
+                    authorization_scope="retrieval",
+                    course_id=course_id,
+                    workspace_id=str(workspace["id"]) if workspace is not None else None,
+                    material_revision=str(workspace["revision"]) if workspace is not None else None,
+                ),
+            )
         budget = max(0, int(self.settings.max_context_chars)) // max(len(fused), 1)
         sources: list[dict[str, Any]] = []
         for index, entry in enumerate(fused, start=1):
@@ -1224,6 +1256,35 @@ class V3DomainAdapter:
                 (node_id, spec_version),
             ).fetchone()
         items = json.loads(spec["content_json"]) if spec is not None else []
+        # Non-authoritative Jev item-support signal, recorded in provenance only:
+        # the reviewer + server quote/hash validation still decide coverage, so a
+        # Jev result can never claim coverage, drop it, or write a grade.
+        provenance = {
+            "run_id": run_id,
+            "bridge_id": payload.get("bridge_id"),
+            "course_id": course_id,
+            "student_question": str(payload.get("question") or "")[:2000],
+            "reviewer": getattr(
+                self.coverage_reviewer, "__class__", type(self.coverage_reviewer)
+            ).__name__,
+        }
+        if self.jev is not None:
+            required = [item for item in items if item.get("requirement") == "REQUIRED"]
+            provenance["jev_item_support"] = self.jev.item_support(
+                required,
+                content=content,
+                spec_version=spec_version,
+                caller_role="coverage",
+                cache_scope=self.jev.scope(
+                    owner_user_id=subject,
+                    authorization_scope="coverage",
+                    course_id=course_id,
+                    workspace_id=workspace["id"],
+                    node_id=node_id,
+                    spec_version=spec_version,
+                    material_revision=str(workspace["revision"]) if "revision" in workspace.keys() else None,
+                ),
+            )
         return await submit_shell_delivery(
             self.database,
             workspace_id=workspace["id"],
@@ -1233,15 +1294,7 @@ class V3DomainAdapter:
             items=items,
             content=content,
             operation_id=run_id,
-            provenance={
-                "run_id": run_id,
-                "bridge_id": payload.get("bridge_id"),
-                "course_id": course_id,
-                "student_question": str(payload.get("question") or "")[:2000],
-                "reviewer": getattr(
-                    self.coverage_reviewer, "__class__", type(self.coverage_reviewer)
-                ).__name__,
-            },
+            provenance=provenance,
             reviewer=self.coverage_reviewer,
         )
 
@@ -1310,7 +1363,18 @@ class V3DomainAdapter:
         workspace = self._workspace_for_node(course_id, subject)
         answers = [AssessmentAnswer(**item) for item in (payload.get("answers") or [])]
         request = AssessmentSubmitInput(
-            operation_id=str(payload["request_id"]), revision=0, answers=answers
+            operation_id=str(payload["request_id"]),
+            revision=0,
+            answers=answers,
+            unified_answer=payload.get("unified_answer"),
+            attachments=[
+                AssessmentAttachment(**item) for item in (payload.get("attachments") or [])
+            ],
+            transcription=payload.get("transcription"),
+            submission_revision=payload.get("submission_revision"),
+            submission_hash=payload.get("submission_hash"),
+            draft=bool(payload.get("draft", False)),
+            confirm_unanswered=payload.get("confirm_unanswered") or [],
         )
         # The optimistic revision is read right before the call. On a concurrent
         # edit the V3 engine raises REVISION_CONFLICT; retry once with the fresh
@@ -1325,6 +1389,79 @@ class V3DomainAdapter:
                 if error.code != "REVISION_CONFLICT" or attempt == 1:
                     raise
         raise ApiError(409, "REVISION_CONFLICT", "The workspace changed while submitting.")
+
+    def _assessment_draft_save(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.learning is None:
+            raise ApiError(503, "V3_DISABLED", "The V3 learning engine is disabled.")
+        course_id = str(payload["course"])
+        self._course_row(course_id, subject)
+        workspace = self._workspace_for_node(course_id, subject)
+        request = AssessmentDraftInput(
+            operation_id=str(payload["request_id"]),
+            revision=self._workspace_revision(workspace["id"]),
+            unified_answer=payload.get("unified_answer"),
+            attachments=[
+                AssessmentAttachment(**item) for item in (payload.get("attachments") or [])
+            ],
+        )
+        return self.learning.save_assessment_draft(
+            workspace["id"], subject, str(payload["session"]), request
+        )
+
+    def _assessment_draft_load(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.learning is None:
+            raise ApiError(503, "V3_DISABLED", "The V3 learning engine is disabled.")
+        course_id = str(payload["course"])
+        self._course_row(course_id, subject)
+        workspace = self._workspace_for_node(course_id, subject)
+        return self.learning.load_assessment_draft(
+            workspace["id"], subject, str(payload["session"])
+        )
+
+    def _assessment_prepare_cancel(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.learning is None:
+            raise ApiError(503, "V3_DISABLED", "The V3 learning engine is disabled.")
+        course_id = str(payload["course"])
+        self._course_row(course_id, subject)
+        workspace = self._workspace_for_node(course_id, subject)
+        from app.learning.models import AssessmentAbandonInput as _Op
+
+        request = _Op(
+            operation_id=str(payload["request_id"]),
+            revision=self._workspace_revision(workspace["id"]),
+        )
+        return self.learning.cancel_pool_preparation(
+            workspace["id"], subject, request, str(payload["job"])
+        )
+
+    def _assessment_prepare_resume(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.learning is None:
+            raise ApiError(503, "V3_DISABLED", "The V3 learning engine is disabled.")
+        course_id = str(payload["course"])
+        self._course_row(course_id, subject)
+        workspace = self._workspace_for_node(course_id, subject)
+        request = AssessmentPreparationStartInput(
+            operation_id=str(payload["request_id"]),
+            revision=self._workspace_revision(workspace["id"]),
+            node_id=str(payload["node"]),
+        )
+        return self.learning.resume_pool_preparation(workspace["id"], subject, request)
+
+    def _assessment_explain(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.learning is None:
+            raise ApiError(503, "V3_DISABLED", "The V3 learning engine is disabled.")
+        course_id = str(payload["course"])
+        self._course_row(course_id, subject)
+        workspace = self._workspace_for_node(course_id, subject)
+        request = AssessmentExplanationInput(
+            operation_id=str(payload["request_id"]),
+            revision=self._workspace_revision(workspace["id"]),
+            blueprint_item_id=str(payload["blueprint_item"]),
+            step_id=str(payload["step"]),
+        )
+        return self.learning.explain_assessment_step(
+            workspace["id"], subject, str(payload["session"]), request
+        )
 
     def _assessment_abandon(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
         if self.learning is None:
@@ -1457,6 +1594,11 @@ class V3DomainAdapter:
             "knowledge.assessment.view",
             "knowledge.assessment.submit",
             "knowledge.assessment.abandon",
+            "knowledge.assessment.draft.save",
+            "knowledge.assessment.draft.load",
+            "knowledge.assessment.prepare.cancel",
+            "knowledge.assessment.prepare.resume",
+            "knowledge.assessment.explain",
             "knowledge.submit_delivery",
             "knowledge.record_problem",
         }
@@ -1542,6 +1684,16 @@ class V3DomainAdapter:
             return self._assessment_submit(subject, payload)
         if operation == "knowledge.assessment.abandon":
             return self._assessment_abandon(subject, payload)
+        if operation == "knowledge.assessment.draft.save":
+            return self._assessment_draft_save(subject, payload)
+        if operation == "knowledge.assessment.draft.load":
+            return self._assessment_draft_load(subject, payload)
+        if operation == "knowledge.assessment.prepare.cancel":
+            return self._assessment_prepare_cancel(subject, payload)
+        if operation == "knowledge.assessment.prepare.resume":
+            return self._assessment_prepare_resume(subject, payload)
+        if operation == "knowledge.assessment.explain":
+            return self._assessment_explain(subject, payload)
         if operation == "legacy.conversations":
             return self._legacy_conversations(subject, str(payload["course"]))
         if operation == "legacy.conversation":

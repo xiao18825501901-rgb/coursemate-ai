@@ -19,6 +19,28 @@ export interface AgentConfig {
 }
 
 const V3_PRIMARY_MODEL = "qwen3.8-max";
+const DEEPSEEK_MODEL = "deepseek-flash";
+const DEEPSEEK_BASE_URL = "https://api.deepseek.com";
+
+function isAllowedDeepSeekEndpoint(value: string): boolean {
+  if (/[\u0000-\u001f\u007f]/.test(value)) return false;
+  try {
+    const endpoint = new URL(value);
+    const path = endpoint.pathname.replace(/\/+$/, "");
+    return (
+      endpoint.protocol === "https:" &&
+      endpoint.hostname === "api.deepseek.com" &&
+      path === "" &&
+      endpoint.username === "" &&
+      endpoint.password === "" &&
+      endpoint.search === "" &&
+      endpoint.hash === "" &&
+      (endpoint.port === "" || endpoint.port === "443")
+    );
+  } catch {
+    return false;
+  }
+}
 
 function isAllowedModelStudioEndpoint(value: string): boolean {
   if (/[\u0000-\u001f\u007f]/.test(value)) return false;
@@ -85,23 +107,32 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AgentC
     throw new Error("CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY are required.");
   }
   const openaiApiKey = environment.AGENT_MODEL_API_KEY ?? environment.OPENAI_API_KEY ?? "";
-  const openaiBaseUrl =
-    environment.AGENT_MODEL_BASE_URL || environment.OPENAI_BASE_URL || undefined;
   const openaiChatModel =
-    environment.AGENT_MODEL_NAME ?? environment.OPENAI_CHAT_MODEL ?? "gpt-5.6-luna";
-  if (
-    providerMode === "openai" &&
-    openaiChatModel === V3_PRIMARY_MODEL &&
-    (
-      !environment.AGENT_MODEL_API_KEY?.trim() ||
-      !environment.AGENT_MODEL_BASE_URL ||
-      !isAllowedModelStudioEndpoint(environment.AGENT_MODEL_BASE_URL)
-    )
-  ) {
-    throw new Error(
-      "qwen3.8-max requires explicit AGENT_MODEL_API_KEY and an allowlisted " +
-      "AGENT_MODEL_BASE_URL.",
-    );
+    environment.AGENT_MODEL_NAME ?? environment.OPENAI_CHAT_MODEL ?? DEEPSEEK_MODEL;
+  const openaiBaseUrl =
+    environment.AGENT_MODEL_BASE_URL || environment.OPENAI_BASE_URL ||
+    (openaiChatModel === DEEPSEEK_MODEL ? DEEPSEEK_BASE_URL : undefined);
+  if (providerMode === "openai") {
+    if (openaiChatModel === V3_PRIMARY_MODEL) {
+      // Historical qwen3.8-max path: keep the Model Studio allowlist, no fallback.
+      if (
+        !environment.AGENT_MODEL_API_KEY?.trim() ||
+        !environment.AGENT_MODEL_BASE_URL ||
+        !isAllowedModelStudioEndpoint(environment.AGENT_MODEL_BASE_URL)
+      ) {
+        throw new Error(
+          "qwen3.8-max requires explicit AGENT_MODEL_API_KEY and an allowlisted " +
+          "AGENT_MODEL_BASE_URL.",
+        );
+      }
+    } else if (openaiChatModel === DEEPSEEK_MODEL) {
+      if (!openaiBaseUrl || !isAllowedDeepSeekEndpoint(openaiBaseUrl)) {
+        throw new Error(
+          "deepseek-flash requires the official DeepSeek base URL " +
+          "(https://api.deepseek.com).",
+        );
+      }
+    }
   }
   return {
     databasePath:

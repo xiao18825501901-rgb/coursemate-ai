@@ -322,7 +322,12 @@ def test_keyword_only_content_does_not_cover(client: TestClient) -> None:
     result = teach(client, "请讲讲这些概念", "cov-keyword-000001")
     assert result["receipt"]["status"] == "submitted"
     assert json.loads(result["receipt"]["covered_items"]) == []
-    assert knowledge_node(client)["progress"] == "NOT_STARTED"
+    # The accepted teaching run IS a learning start (schema 26), so the node is
+    # LEARNING; coverage stays at zero because keyword echoing is not evidence.
+    node = knowledge_node(client)
+    assert node["progress"] == "LEARNING"
+    assert node["learning"]["covered_required"] == 0
+    assert node["learning"]["started"] is True
     assert evidence_rows(client) == []
 
 
@@ -364,7 +369,12 @@ def test_failed_and_truncated_runs_never_cover(client: TestClient) -> None:
     finally:
         provider.generate = original
     assert evidence_rows(client) == []
-    assert knowledge_node(client)["progress"] == "NOT_STARTED"
+    # An accepted run that later failed or was cancelled still counts as a real
+    # learning start (the failure/cancel is reported on the run itself) and must
+    # never book coverage.
+    node = knowledge_node(client)
+    assert node["progress"] == "LEARNING"
+    assert node["learning"]["covered_required"] == 0
 
 
 def test_cancel_never_books_coverage(client: TestClient) -> None:
@@ -400,7 +410,12 @@ def test_cancel_never_books_coverage(client: TestClient) -> None:
     finally:
         provider.generate = original
     assert evidence_rows(client) == []
-    assert knowledge_node(client)["progress"] == "NOT_STARTED"
+    # An accepted run that later failed or was cancelled still counts as a real
+    # learning start (the failure/cancel is reported on the run itself) and must
+    # never book coverage.
+    node = knowledge_node(client)
+    assert node["progress"] == "LEARNING"
+    assert node["learning"]["covered_required"] == 0
 
 
 def test_cancel_effective_during_provider_silence(client: TestClient) -> None:

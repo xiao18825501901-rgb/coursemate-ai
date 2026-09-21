@@ -195,4 +195,121 @@ def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
             {**context, "node_draft": {"items": node["items"]}},
         )
         return {"node": node, "spec": spec}
+    if schema == "AssessmentReferenceSolutionOutput":
+        return {
+            "schema_version": "v3.2",
+            "answer": "[FAKE TEST FIXTURE] Reference answer.",
+            "steps": [
+                {
+                    "step_id": "step_1",
+                    "ordinal": 1,
+                    "operation": "Derive the reference result",
+                    "result": "[FAKE TEST FIXTURE] result",
+                    "explanation": "[FAKE TEST FIXTURE] Synthetic reference step.",
+                    "source_refs": [],
+                }
+            ],
+        }
+    if schema == "AssessmentExplanationOutput":
+        return {"text": "[FAKE TEST FIXTURE] Synthetic step explanation."}
+    if schema == "AssessmentPreparationOutput":
+        def _step(operation: str, result: str, explanation: str) -> dict[str, Any]:
+            return {
+                "step_id": "step_1",
+                "ordinal": 1,
+                "operation": operation,
+                "result": result,
+                "explanation": explanation,
+                "source_refs": [],
+            }
+
+        def _numeric(family: str, prompt: str, value: int) -> dict[str, Any]:
+            return {
+                "family_id": family,
+                "question_type": "NUMERIC",
+                "difficulty": 1,
+                "prompt": prompt,
+                "options": [],
+                "answer": {"value": value, "tolerance": 0},
+                "reference_answer": f"The result is {value}.",
+                "reference_steps": [_step("Compute", str(value), f"Result is {value}.")],
+                "criteria": [
+                    {
+                        "criterion_id": "correctness",
+                        "dimension": "CALCULATION",
+                        "max_fraction": 100,
+                        "description": "Produces the correct result.",
+                    }
+                ],
+            }
+
+        return {
+            "schema_version": "v3.2",
+            "questions": [
+                _numeric("family_prep_1", "Calculate 2 + 2.", 4),
+                {
+                    "family_id": "family_prep_2",
+                    "question_type": "MCQ_SINGLE",
+                    "difficulty": 2,
+                    "prompt": "Choose 1 + 1.",
+                    "options": ["1", "2", "3"],
+                    "answer": {"correct_option": "1"},
+                    "reference_answer": "The correct option is 2.",
+                    "reference_steps": [_step("Choose", "2", "1 + 1 = 2.")],
+                    "criteria": [
+                        {
+                            "criterion_id": "correctness",
+                            "dimension": "CALCULATION",
+                            "max_fraction": 100,
+                            "description": "Produces the correct result.",
+                        }
+                    ],
+                },
+                _numeric("family_prep_3", "Calculate 5 - 3.", 2),
+                {
+                    "family_id": "family_prep_4",
+                    "question_type": "SHORT_TEXT",
+                    "difficulty": 1,
+                    "prompt": "Write two in words.",
+                    "options": [],
+                    "answer": {"accepted": ["two"], "case_sensitive": False},
+                    "reference_answer": "two",
+                    "reference_steps": [_step("Write", "two", "The word is two.")],
+                    "criteria": [
+                        {
+                            "criterion_id": "correctness",
+                            "dimension": "CALCULATION",
+                            "max_fraction": 100,
+                            "description": "Produces the correct result.",
+                        }
+                    ],
+                },
+                {
+                    "family_id": "family_prep_5",
+                    "question_type": "EXPLANATION",
+                    "difficulty": 3,
+                    "prompt": "Explain why addition combines counts.",
+                    "options": [],
+                    "answer": {"reference_answer": "Addition combines the sizes of disjoint groups."},
+                    "reference_answer": "Addition combines the sizes of disjoint groups.",
+                    "reference_steps": [
+                        _step("Explain", "Disjoint groups combine", "Addition sums disjoint counts.")
+                    ],
+                    "criteria": [
+                        {
+                            "criterion_id": "concept",
+                            "dimension": "CONCEPT",
+                            "max_fraction": 60,
+                            "description": "States the combining concept.",
+                        },
+                        {
+                            "criterion_id": "clarity",
+                            "dimension": "CLARITY",
+                            "max_fraction": 40,
+                            "description": "Clear expression.",
+                        },
+                    ],
+                },
+            ],
+        }
     raise ValueError("Unsupported synthetic fixture schema")

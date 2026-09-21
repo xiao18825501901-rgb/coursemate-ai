@@ -12,7 +12,7 @@ independently billed model review:
   item counts only when EVERY sentence of its authored acceptance statement
   appears in the delivered content. It is rejected in production.
 * ``ModelCoverageReviewer``: one independent, default-off post-processing call
-  to the site model (qwen3.8-max) that reviews the already-saved teaching
+  to the site generation model (deepseek-flash) that reviews the already-saved teaching
   content against the frozen spec items. It never regenerates teaching, never
   decides grades, and its verdicts are only CANDIDATES: the server validates
   every confirmed item against the frozen spec and the saved body before any
@@ -25,6 +25,9 @@ import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Protocol
+
+from app.evaluation.deepseek_contract import THINKING_DISABLED
+from app.evaluation.provider_safety import validate_deepseek_base_url
 
 # Invoke signature: messages, max_tokens -> response text. Injected so contract
 # tests can use MockTransport/local fake upstreams without any billing.
@@ -289,6 +292,58 @@ def qwen_review_invoke(
     return invoke
 
 
+def deepseek_review_invoke(
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+    timeout: float,
+    allow_billable: bool,
+    transport: Any = None,
+) -> Invoke:
+    """Build the production HTTP invoke over the site's single DeepSeek credential.
+
+    DeepSeek Chat Completions: the body carries ``thinking: {"type": "disabled"}``
+    (native thinking off) and NEVER the Qwen-only ``enable_thinking`` field. The
+    billable gate is checked before any network request, with no implicit retries.
+    """
+
+    import httpx
+
+    async def invoke(messages: list[dict[str, str]], max_tokens: int) -> str:
+        if not allow_billable:
+            raise RuntimeError("BILLING_NOT_AUTHORIZED: coverage review is disabled")
+        endpoint = base_url.rstrip("/") + "/chat/completions"
+        body = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "stream": False,
+            "thinking": THINKING_DISABLED,
+        }
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(timeout, connect=12), transport=transport
+        ) as client:
+            response = await client.post(
+                endpoint, headers={"Authorization": "Bearer " + api_key}, json=body
+            )
+        if response.status_code != 200:
+            raise RuntimeError(f"PROVIDER_HTTP_{response.status_code}")
+        data = response.json()
+        choices = data.get("choices") or []
+        if not choices or not isinstance(choices[0], dict):
+            raise RuntimeError("INVALID_PROVIDER_RESPONSE")
+        choice = choices[0]
+        if choice.get("finish_reason") not in (None, "stop"):
+            raise RuntimeError("INCOMPLETE_PROVIDER_RESPONSE")
+        content = (choice.get("message") or {}).get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise RuntimeError("EMPTY_REVIEWER_RESPONSE")
+        return content
+
+    return invoke
+
+
 def resolve_coverage_reviewer(
     environment: str,
     name: str | None,
@@ -298,14 +353,17 @@ def resolve_coverage_reviewer(
     api_key: str = "",
     model: str = "",
     timeout: float = 60.0,
+    provider: str = "deepseek",
 ) -> CoverageReviewer:
     """Resolve the configured reviewer with environment guards.
 
     ``none`` (default) never claims coverage. ``deterministic`` is local/test
-    only. ``model`` is the production reviewer: it requires the same site
-    credential as the two-stage flow, and enabling it is a separate paid
-    authorization (``allow_billable``); without it the resolver refuses before
-    any request can be built.
+    only. ``model`` is the production reviewer: it requires the site credential
+    and enabling it is a separate paid authorization (``allow_billable``);
+    without it the resolver refuses before any request can be built.
+
+    ``provider`` selects the transport explicitly (``deepseek`` default, or the
+    historical ``qwen`` path); there is no silent fallback between them.
     """
 
     mode = (name or "none").strip().lower()
@@ -323,14 +381,33 @@ def resolve_coverage_reviewer(
             )
         if not base_url or not api_key or not model:
             raise ValueError("Model coverage review requires the site model credential.")
-        return ModelCoverageReviewer(
-            qwen_review_invoke(
-                base_url=base_url,
-                api_key=api_key,
+        if provider == "deepseek":
+            try:
+                base_url = validate_deepseek_base_url(base_url)
+            except ValueError as error:
+                raise ValueError(
+                    "Model coverage review requires the official DeepSeek base URL."
+                ) from error
+            return ModelCoverageReviewer(
+                deepseek_review_invoke(
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    timeout=timeout,
+                    allow_billable=allow_billable,
+                ),
                 model=model,
-                timeout=timeout,
-                allow_billable=allow_billable,
-            ),
-            model=model,
-        )
+            )
+        if provider == "qwen":
+            return ModelCoverageReviewer(
+                qwen_review_invoke(
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    timeout=timeout,
+                    allow_billable=allow_billable,
+                ),
+                model=model,
+            )
+        raise ValueError(f"Unknown coverage reviewer provider: {provider!r}")
     raise ValueError(f"Unknown coverage reviewer mode: {name!r}")

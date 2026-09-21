@@ -3,6 +3,12 @@
 Only whitespace is normalized. The 14 opening markers share their paragraph
 with copy guidance, so text following the marker is part of the source body.
 No personal source path or Word dependency is needed for subsequent CI runs.
+
+These hashes pin the **V1** bodies: they are the ones transcribed from the
+owner's Word sections, and V1 stays on disk unchanged for historical evidence.
+The registry default is now V2 (new requests), so every lookup here passes
+``version="V1"`` explicitly. V2 body parity against the owner's V2 manifest is
+pinned separately in tests/test_jev_deepseek_template_v2.py.
 """
 import hashlib
 import re
@@ -10,6 +16,9 @@ import re
 import pytest
 
 from app.cm_update import templates
+
+
+V1 = "V1"
 
 
 SOURCE_BODY_HASHES = {
@@ -35,16 +44,29 @@ SOURCE_BODY_HASHES = {
 
 @pytest.mark.parametrize('key,expected', SOURCE_BODY_HASHES.items())
 def test_complete_source_marked_body_preserved(key, expected):
-    loaders = {'EXERCISE': templates.exercise_prompt, 'PROBLEM': templates.problem_prompt,
+    loaders = {'EXERCISE': lambda: templates.exercise_prompt(V1),
+               'PROBLEM': templates.problem_prompt,
                'EXPLANATION': templates.explanation_prompt}
-    body = loaders[key]() if key in loaders else templates.template_body(key)
+    body = loaders[key]() if key in loaders else templates.template_body(key, V1)
     assert body
     normalized = re.sub(r'\s+', '', body)
     assert hashlib.sha256(normalized.encode('utf-8')).hexdigest() == expected
 
 
+def test_both_template_versions_are_served_side_by_side():
+    """V1 stays retrievable while V2 is the default, so historical
+    conversations that recorded V1 keep resolving to the body they used."""
+    v1, v2 = templates.registry(V1), templates.registry("V2")
+    assert set(v1) == set(v2)
+    assert v1['01']['version'] == 'V1'
+    assert v2['01']['version'] == 'V2'
+    assert v1['01']['file'] != v2['01']['file']
+    assert templates.template_body('01', V1) != templates.template_body('01', 'V2')
+    assert templates.exercise_prompt(V1) != templates.exercise_prompt('V2')
+
+
 def test_other_retains_full_cross_disciplinary_teaching_contract():
-    body = templates.template_body('OTHER')
+    body = templates.template_body('OTHER', V1)
     # Completeness follows the actual required clauses, not an invented length.
     for required in ('中文精讲', 'English Definition', '为什么学', '内部怎样工作',
                      '来源冲突', '二至五章', '三至五个递进检查问题', 'ciallo',

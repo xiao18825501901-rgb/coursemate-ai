@@ -12,6 +12,9 @@ from app.errors import ApiError
 from app.learning.models import (
     AssessmentAbandonInput,
     AssessmentAssistInput,
+    AssessmentDraftInput,
+    AssessmentExplanationInput,
+    AssessmentPreparationStartInput,
     AssessmentStartInput,
     AssessmentSubmitInput,
     BridgeInput,
@@ -553,6 +556,82 @@ def abandon_assessment(
         workspace_id,
         user.user_id,
         session_id,
+        payload,
+    )
+
+
+@router.post("/workspaces/{workspace_id}/assessments/{session_id}/draft")
+def save_assessment_draft(
+    workspace_id: str,
+    session_id: str,
+    payload: AssessmentDraftInput,
+    request: Request,
+    user: User,
+) -> dict[str, Any]:
+    return cast(LearningOrchestrator, request.app.state.learning).save_assessment_draft(
+        workspace_id,
+        user.user_id,
+        session_id,
+        payload,
+    )
+
+
+@router.get("/workspaces/{workspace_id}/assessments/{session_id}/draft")
+def load_assessment_draft(
+    workspace_id: str,
+    session_id: str,
+    request: Request,
+    user: User,
+) -> dict[str, Any]:
+    return cast(LearningOrchestrator, request.app.state.learning).load_assessment_draft(
+        workspace_id,
+        user.user_id,
+        session_id,
+    )
+
+
+@router.post("/workspaces/{workspace_id}/assessments/{session_id}/explain")
+def explain_assessment_step(
+    workspace_id: str,
+    session_id: str,
+    payload: AssessmentExplanationInput,
+    request: Request,
+    user: User,
+) -> dict[str, Any]:
+    return cast(LearningOrchestrator, request.app.state.learning).explain_assessment_step(
+        workspace_id,
+        user.user_id,
+        session_id,
+        payload,
+    )
+
+
+@router.post("/workspaces/{workspace_id}/assessments/prepare/{job_id}/cancel")
+def cancel_pool_preparation(
+    workspace_id: str,
+    job_id: str,
+    payload: AssessmentAbandonInput,
+    request: Request,
+    user: User,
+) -> dict[str, Any]:
+    return cast(LearningOrchestrator, request.app.state.learning).cancel_pool_preparation(
+        workspace_id,
+        user.user_id,
+        payload,
+        job_id,
+    )
+
+
+@router.post("/workspaces/{workspace_id}/assessments/prepare/resume")
+def resume_pool_preparation(
+    workspace_id: str,
+    payload: AssessmentPreparationStartInput,
+    request: Request,
+    user: User,
+) -> dict[str, Any]:
+    return cast(LearningOrchestrator, request.app.state.learning).resume_pool_preparation(
+        workspace_id,
+        user.user_id,
         payload,
     )
 

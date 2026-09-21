@@ -4,6 +4,7 @@ import os
 import json
 from urllib.parse import urlparse
 
+from app.evaluation.provider_safety import validate_deepseek_base_url
 from .budget import BudgetPolicyError, parse_usd
 
 
@@ -28,6 +29,11 @@ class Settings:
     qwen_key: str = field(default_factory=lambda: os.getenv('CMUI_QWEN_API_KEY', ''))
     qwen_model: str = field(default_factory=lambda: os.getenv('CMUI_QWEN_MODEL', 'qwen3.8-max'))
     qwen_protocol: str = field(default_factory=lambda: os.getenv('CMUI_QWEN_PROTOCOL', 'chat_completions'))
+    # DeepSeek generation path (default model deepseek-flash / DeepSeek-V4.1-Flash).
+    deepseek_base_url: str = field(default_factory=lambda: os.getenv('CMUI_DEEPSEEK_BASE_URL', 'https://api.deepseek.com'))
+    deepseek_key: str = field(default_factory=lambda: os.getenv('CMUI_DEEPSEEK_API_KEY', ''))
+    deepseek_model: str = field(default_factory=lambda: os.getenv('CMUI_DEEPSEEK_MODEL', 'deepseek-flash'))
+    deepseek_protocol: str = field(default_factory=lambda: os.getenv('CMUI_DEEPSEEK_PROTOCOL', 'responses'))
     timeout: float = field(default_factory=lambda: float(os.getenv("CMUI_MODEL_TIMEOUT", "180")))
     prompt_tokens: int = field(default_factory=lambda: int(os.getenv("CMUI_PROMPT_TOKENS", "2500")))
     answer_tokens: int = field(default_factory=lambda: int(os.getenv("CMUI_ANSWER_TOKENS", "6500")))
@@ -52,7 +58,7 @@ class Settings:
 
     def validate(self) -> None:
         if self.environment not in {'development','test','production'}: raise ValueError('Unknown environment')
-        if self.provider_mode not in {'disabled','qwen','test'}: raise ValueError('Unknown provider mode')
+        if self.provider_mode not in {'disabled','qwen','deepseek','test'}: raise ValueError('Unknown provider mode')
         if not 256<=self.prompt_tokens<=12000 or not 256<=self.answer_tokens<=16000: raise ValueError('Model output bounds invalid')
         if not 1024<=self.image_max_pixels<=16777216: raise ValueError('Image pixel bound invalid')
         if not 10<=self.timeout<=300: raise ValueError('Model timeout invalid')
@@ -108,5 +114,40 @@ class Settings:
                     )
                 except BudgetPolicyError as error:
                     raise ValueError('Production Qwen pricing configuration is required') from error
+        if self.provider_mode == 'deepseek':
+            # Dedicated DeepSeek host/path policy alongside the Model Studio
+            # validator above; it never loosens the HTTPS/credential checks.
+            try:
+                validate_deepseek_base_url(self.deepseek_base_url)
+            except ValueError as error:
+                raise ValueError('An explicit HTTPS DeepSeek base URL (api.deepseek.com) is required') from error
+            if not self.deepseek_key:
+                raise ValueError('Backend DeepSeek credential is missing')
+            if self.deepseek_model != 'deepseek-flash':
+                raise ValueError('Only the verified deepseek-flash model is accepted for generation')
+            if self.environment == 'production':
+                try:
+                    parse_usd(
+                        self.operation_usd_baseline,
+                        required=True,
+                        field='CMUI_OPERATION_USD_BASELINE',
+                        missing_error=BudgetPolicyError,
+                    )
+                    parse_usd(
+                        self.operation_input_usd_per_million,
+                        required=True,
+                        field='CMUI_OPERATION_INPUT_USD_PER_MILLION',
+                        missing_error=BudgetPolicyError,
+                    )
+                    parse_usd(
+                        self.operation_output_usd_per_million,
+                        required=True,
+                        field='CMUI_OPERATION_OUTPUT_USD_PER_MILLION',
+                        missing_error=BudgetPolicyError,
+                    )
+                except BudgetPolicyError as error:
+                    raise ValueError('Production DeepSeek pricing configuration is required') from error
         if self.qwen_protocol not in {'chat_completions', 'responses'}:
             raise ValueError('Unknown model protocol')
+        if self.deepseek_protocol not in {'chat_completions', 'responses'}:
+            raise ValueError('Unknown DeepSeek protocol')

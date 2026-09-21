@@ -1,4 +1,4 @@
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
@@ -368,15 +368,120 @@ class AssessmentAnswer(Contract):
     answer: str = Field(max_length=12_000)
 
 
+class AssessmentAttachment(Contract):
+    id: Identifier
+    kind: Literal["image", "document"] = "image"
+
+
 class AssessmentSubmitInput(OperationInput):
-    answers: list[AssessmentAnswer] = Field(min_length=5, max_length=5)
+    """Backward-compatible unified submission.
+
+    ``answers`` keeps the existing exactly-five contract. The new optional fields
+    (``unified_answer``, ``attachments``, ``transcription``, ``submission_revision``
+    / ``submission_hash``, ``draft``) let a single composer payload be mapped to
+    the five stable blueprint ids server-side without breaking old clients.
+    """
+
+    answers: list[AssessmentAnswer] = Field(default_factory=list, max_length=5)
+    unified_answer: str | None = Field(default=None, max_length=60_000)
+    attachments: list[AssessmentAttachment] = Field(default_factory=list, max_length=12)
+    transcription: str | None = Field(default=None, max_length=30_000)
+    submission_revision: int | None = Field(default=None, ge=1)
+    submission_hash: str | None = Field(default=None, max_length=64)
+    draft: bool = False
+    confirm_unanswered: list[Identifier] = Field(default_factory=list, max_length=5)
 
     @model_validator(mode="after")
-    def exactly_one_answer_per_item(self) -> "AssessmentSubmitInput":
+    def valid_submission(self) -> "AssessmentSubmitInput":
         item_ids = [answer.blueprint_item_id for answer in self.answers]
         if len(item_ids) != len(set(item_ids)):
             raise ValueError("Each frozen Assessment item needs exactly one answer")
+        if not self.answers and not self.unified_answer and not self.attachments:
+            raise ValueError("Provide five answers, a unified answer, or attachments")
         return self
+
+
+class AssessmentSolutionStep(Contract):
+    step_id: Identifier
+    ordinal: int = Field(ge=1)
+    operation: Text
+    result: Text
+    explanation: Text
+    source_refs: list[Identifier] = Field(default_factory=list, max_length=10)
+
+
+class AssessmentReferenceSolutionOutput(Contract):
+    """Point-by-point reference solution compiled from the frozen 题目 prompt."""
+
+    schema_version: Literal["v3.2"]
+    answer: Text
+    steps: list[AssessmentSolutionStep] = Field(min_length=1, max_length=12)
+
+
+class AssessmentCandidateCriterion(Contract):
+    criterion_id: Identifier
+    dimension: Literal[
+        "CONCEPT",
+        "TERMINOLOGY",
+        "METHOD_REASONING",
+        "CALCULATION",
+        "DERIVATION",
+        "CODE_APPLICATION",
+        "CLARITY",
+    ]
+    max_fraction: int = Field(ge=1, le=100)
+    description: Text
+
+
+class AssessmentCandidateQuestion(Contract):
+    family_id: Identifier
+    question_type: Literal["MCQ_SINGLE", "NUMERIC", "SHORT_TEXT", "EXPLANATION", "CODE"]
+    difficulty: int = Field(ge=1, le=5)
+    prompt: Text
+    options: list[str] = Field(default_factory=list, max_length=10)
+    answer: dict[str, Any]
+    reference_answer: Text | None = None
+    reference_steps: list[AssessmentSolutionStep] = Field(default_factory=list, max_length=12)
+    criteria: list[AssessmentCandidateCriterion] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def criteria_sum_to_100(self) -> "AssessmentCandidateQuestion":
+        total = sum(criterion.max_fraction for criterion in self.criteria)
+        if total != 100:
+            raise ValueError("Assessment rubric criteria must total 100 within a question")
+        return self
+
+
+class AssessmentPreparationOutput(Contract):
+    """Candidate question set with server-private answers, reference solutions and rubric."""
+
+    schema_version: Literal["v3.2"]
+    questions: list[AssessmentCandidateQuestion] = Field(min_length=5, max_length=5)
+
+    @model_validator(mode="after")
+    def five_distinct_families(self) -> "AssessmentPreparationOutput":
+        families = [question.family_id for question in self.questions]
+        if len(families) != len(set(families)):
+            raise ValueError("Assessment candidate questions need five distinct families")
+        return self
+
+
+class AssessmentDraftInput(OperationInput):
+    unified_answer: str | None = Field(default=None, max_length=60_000)
+    attachments: list[AssessmentAttachment] = Field(default_factory=list, max_length=12)
+
+
+class AssessmentPreparationStartInput(OperationInput):
+    node_id: Identifier
+
+
+class AssessmentExplanationInput(OperationInput):
+    blueprint_item_id: Identifier
+    step_id: Identifier
+
+
+class AssessmentExplanationOutput(Contract):
+    text: Text
 
 
 class AssessmentAssistInput(OperationInput):

@@ -153,7 +153,7 @@ def test_injected_clients_remain_unchanged() -> None:
     assert answer_provider.client is client
 
 
-def test_application_passes_base_url_to_both_rag_providers(
+def test_application_wires_deepseek_answer_and_independent_embedding(
     monkeypatch: Any,
     tmp_path: Path,
 ) -> None:
@@ -180,70 +180,16 @@ def test_application_passes_base_url_to_both_rag_providers(
             return "user-a"
 
     monkeypatch.setattr(main_module, "OpenAIEmbeddingProvider", embedding_factory)
-    monkeypatch.setattr(main_module, "OpenAIAnswerProvider", answer_factory)
-    for variable in (
-        "RAG_CHAT_API_KEY",
-        "RAG_CHAT_BASE_URL",
-        "RAG_CHAT_MODEL",
-        "RAG_EMBEDDING_API_KEY",
-        "RAG_EMBEDDING_BASE_URL",
-        "RAG_EMBEDDING_MODEL",
-    ):
-        monkeypatch.delenv(variable, raising=False)
-    endpoint = "https://workspace.example.com/compatible-mode/v1"
-
-    create_app(
-        settings=Settings(
-            _env_file=None,
-            database_path=tmp_path / "rag.sqlite3",
-            upload_dir=tmp_path / "uploads",
-            openai_api_key="placeholder-key",
-            openai_base_url=endpoint,
-        ),
-        auth_verifier=AuthStub(),
-    )
-
-    assert calls["embedding"]["base_url"] == endpoint
-    assert calls["answer"]["base_url"] == endpoint
-
-
-def test_application_wires_independent_rag_provider_credentials(
-    monkeypatch: Any,
-    tmp_path: Path,
-) -> None:
-    import app.main as main_module
-
-    calls: dict[str, dict[str, str | None]] = {}
-
-    def embedding_factory(**kwargs: str | None) -> DeterministicEmbeddingProvider:
-        calls["embedding"] = kwargs
-        return DeterministicEmbeddingProvider()
-
-    class AnswerStub:
-        def stream_answer(
-            self, *, question: str, context: str, instructions: str
-        ) -> Any:
-            yield "answer"
-
-    def answer_factory(**kwargs: str | None) -> AnswerStub:
-        calls["answer"] = kwargs
-        return AnswerStub()
-
-    class AuthStub:
-        def authenticate(self, request: Any) -> str:
-            return "user-a"
-
-    monkeypatch.setattr(main_module, "OpenAIEmbeddingProvider", embedding_factory)
-    monkeypatch.setattr(main_module, "OpenAIAnswerProvider", answer_factory)
+    monkeypatch.setattr(main_module, "DeepSeekAnswerProvider", answer_factory)
     create_app(
         settings=Settings(
             _env_file=None,
             openai_api_key=None,
             database_path=tmp_path / "rag.sqlite3",
             upload_dir=tmp_path / "uploads",
-            rag_chat_api_key="chat-key",
-            rag_chat_base_url="https://chat.example/v1",
-            rag_chat_model="chat-model",
+            deepseek_chat_api_key="deepseek-key",
+            deepseek_chat_base_url="https://api.deepseek.com",
+            deepseek_chat_model="deepseek-flash",
             rag_embedding_api_key="embedding-key",
             rag_embedding_base_url="https://embedding.example/v1",
             rag_embedding_model="embedding-model",
@@ -252,12 +198,64 @@ def test_application_wires_independent_rag_provider_credentials(
     )
 
     assert calls["answer"] == {
-        "api_key": "chat-key",
-        "model": "chat-model",
-        "base_url": "https://chat.example/v1",
+        "api_key": "deepseek-key",
+        "model": "deepseek-flash",
+        "base_url": "https://api.deepseek.com",
     }
     assert calls["embedding"] == {
         "api_key": "embedding-key",
         "model": "embedding-model",
         "base_url": "https://embedding.example/v1",
     }
+
+
+def test_application_answer_role_never_falls_back_to_openai(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    import app.main as main_module
+
+    calls: dict[str, dict[str, str | None]] = {}
+
+    def embedding_factory(**kwargs: str | None) -> DeterministicEmbeddingProvider:
+        calls["embedding"] = kwargs
+        return DeterministicEmbeddingProvider()
+
+    class AnswerStub:
+        def stream_answer(
+            self, *, question: str, context: str, instructions: str
+        ) -> Any:
+            yield "answer"
+
+    def answer_factory(**kwargs: str | None) -> AnswerStub:
+        calls["answer"] = kwargs
+        return AnswerStub()
+
+    class AuthStub:
+        def authenticate(self, request: Any) -> str:
+            return "user-a"
+
+    monkeypatch.setattr(main_module, "OpenAIEmbeddingProvider", embedding_factory)
+    monkeypatch.setattr(main_module, "DeepSeekAnswerProvider", answer_factory)
+    # Only the legacy OpenAI variables are set; the DeepSeek credential is absent.
+    for variable in (
+        "DEEPSEEK_CHAT_API_KEY",
+        "DEEPSEEK_CHAT_BASE_URL",
+        "DEEPSEEK_CHAT_MODEL",
+    ):
+        monkeypatch.delenv(variable, raising=False)
+    application = create_app(
+        settings=Settings(
+            _env_file=None,
+            database_path=tmp_path / "rag.sqlite3",
+            upload_dir=tmp_path / "uploads",
+            openai_api_key="legacy-key",
+            openai_base_url="https://legacy.example/v1",
+            openai_chat_model="legacy-chat",
+        ),
+        auth_verifier=AuthStub(),
+    )
+    assert "answer" not in calls  # OpenAI fallback was NOT consulted
+    from app.rag.answers import MissingAnswerProvider
+
+    assert isinstance(application.state.qa_service.answer_provider, MissingAnswerProvider)

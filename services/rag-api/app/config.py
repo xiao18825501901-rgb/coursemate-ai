@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     rag_chat_api_key: SecretStr | None = None
     rag_chat_base_url: str | None = None
     rag_chat_model: str = ""
+    # DeepSeek generation path for the grounded QA role (deepseek-flash).
+    # Explicit per role; the QA answerer never falls back to OpenAI or Qwen.
+    deepseek_chat_api_key: SecretStr | None = None
+    deepseek_chat_base_url: str = "https://api.deepseek.com"
+    deepseek_chat_model: str = "deepseek-flash"
     rag_embedding_api_key: SecretStr | None = None
     rag_embedding_base_url: str | None = None
     rag_embedding_model: str = ""
@@ -34,7 +39,11 @@ class Settings(BaseSettings):
     app_env: Literal["development", "test", "production"] = "production"
     auth_test_user_id: str | None = None
     v3_enabled: bool = False
-    v3_model: Literal["qwen3.8-max"] = "qwen3.8-max"
+    # Generation model.  deepseek-flash is the verified default; qwen3.8-max is
+    # retained ONLY as an explicitly configured historical path (reading old
+    # records / the legacy Model Studio canary) - a new request never defaults
+    # to it and there is no silent fallback between the two.
+    v3_model: Literal["deepseek-flash", "qwen3.8-max"] = "deepseek-flash"
     v3_model_api_key: SecretStr | None = None
     v3_model_base_url: str | None = None
     v3_max_output_tokens: int = Field(default=4000, ge=500, le=8000)

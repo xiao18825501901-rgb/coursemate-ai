@@ -4,6 +4,9 @@ from typing import Protocol
 
 from openai import OpenAI
 
+from app.evaluation.deepseek_contract import REASONING_DISABLED
+from app.evaluation.provider_safety import validate_deepseek_base_url
+
 
 class AnswerProvider(Protocol):
     def stream_answer(
@@ -48,6 +51,48 @@ class OpenAIAnswerProvider:
                 yield event.delta
             elif event.type == "response.failed":
                 raise RuntimeError("OpenAI response failed")
+
+
+class DeepSeekAnswerProvider:
+    """Stream grounded text from DeepSeek's Responses API (deepseek-flash).
+
+    The base URL is pinned to ``api.deepseek.com`` by the settings validator; this
+    class never rewrites the host or falls back to OpenAI/Qwen. Native thinking is
+    explicitly disabled so only ``output_text.delta`` is projected (no reasoning
+    chain is ever yielded).
+    """
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str = "deepseek-flash",
+        client: OpenAI | None = None,
+        base_url: str = "https://api.deepseek.com",
+        max_output_tokens: int = 1_200,
+    ) -> None:
+        validate_deepseek_base_url(base_url)
+        self.client = client or OpenAI(api_key=api_key, base_url=base_url)
+        self.model = model
+        self.max_output_tokens = max_output_tokens
+
+    def stream_answer(
+        self, *, question: str, context: str, instructions: str
+    ) -> Iterator[str]:
+        stream = self.client.responses.create(
+            model=self.model,
+            instructions=instructions,
+            input=f"Question:\n{question}\n\n{context}",
+            max_output_tokens=self.max_output_tokens,
+            store=False,
+            stream=True,
+            extra_body={"reasoning": REASONING_DISABLED},
+        )
+        for event in stream:
+            if event.type == "response.output_text.delta":
+                yield event.delta
+            elif event.type == "response.failed":
+                raise RuntimeError("DeepSeek response failed")
 
 
 class MissingAnswerProvider:

@@ -8,3 +8,9 @@ python-multipart==0.0.32
 python-pptx==1.0.2
 tzdata==2025.2
 uvicorn[standard]==0.52.1
+
+# Optional, not installed by default: only needed to enable the live TypeSafe Jev
+# path. The gateway imports it lazily and raises JEV_NOT_CONFIGURED without it,
+# so the service runs unchanged in off/shadow mode. Install it (MIT, PyPI) only
+# after the owner supplies TypeSafe access:
+#   typesafe-sdk==0.7.0

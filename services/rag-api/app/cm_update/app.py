@@ -30,7 +30,7 @@ from .filesystem import parse_document, valid_filename, valid_folder, file_hash
 from .retrieval import get_course, file_rows, context_for
 from .steps import solution_steps, answer_steps_parse
 from .exercise_contract import ExerciseContractError, parse_exercise_output
-from .provider import QwenProvider, DisabledProvider, TestProvider, ProviderError
+from .provider import QwenProvider, DeepSeekProvider, DisabledProvider, TestProvider, ProviderError
 from . import templates
 from . import social
 from . import share_recovery
@@ -60,7 +60,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
     db=Database(cfg.data_dir/'ui.sqlite3')
     db.initialize(verification_secret=social._secret(cfg))
     (cfg.data_dir/'uploads').mkdir(exist_ok=True)
-    model=provider or (QwenProvider(cfg) if cfg.provider_mode=='qwen' else TestProvider() if cfg.provider_mode=='test' else DisabledProvider())
+    model=provider or (DeepSeekProvider(cfg) if cfg.provider_mode=='deepseek' else QwenProvider(cfg) if cfg.provider_mode=='qwen' else TestProvider() if cfg.provider_mode=='test' else DisabledProvider())
     jobs: dict[str,asyncio.Task]={}
     pending_classifications: dict[str,dict]={}
     # This instance's identity for run leases. Two processes get two ids.
@@ -83,7 +83,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         provider. Test/disabled providers intentionally do not emulate money.
         """
 
-        if cfg.provider_mode != 'qwen':
+        if cfg.provider_mode not in {'qwen', 'deepseek'}:
             return None, None
         estimate_builder = getattr(model, estimate_method, None)
         if not callable(estimate_builder):
@@ -342,7 +342,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
     @r.get('/config')
     def config():
         return {'auth_mode':cfg.auth_mode,'environment':cfg.environment,'api_base':cfg.api_base,
-            'provider_mode':cfg.provider_mode,'model':cfg.qwen_model,'integration_mode':cfg.integration_mode,
+            'provider_mode':cfg.provider_mode,'model':cfg.deepseek_model if cfg.provider_mode=='deepseek' else cfg.qwen_model,'integration_mode':cfg.integration_mode,
             'clerk_publishable_key':cfg.clerk_publishable_key,'clerk_issuer':cfg.clerk_issuer,
             'max_upload_bytes':cfg.max_upload_bytes,'agent_connected':bool(domain),
             'reasoning_strengths':['medium','high','max']}
@@ -948,7 +948,17 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         await course(user,cid,request)
         if not domain: raise HTTPException(501,'正式测评沿用 V3 评分引擎；本更新包不伪造 GPA。')
         body=await request.json()
-        return await remote('knowledge.assessment.submit',user,{'course':cid,'session':session_id,'request_id':str(body.get('request_id','')),'answers':body.get('answers') or []},request)
+        return await remote('knowledge.assessment.submit',user,{
+            'course':cid,'session':session_id,'request_id':str(body.get('request_id','')),
+            'answers':body.get('answers') or [],
+            'unified_answer':body.get('unified_answer'),
+            'attachments':body.get('attachments') or [],
+            'transcription':body.get('transcription'),
+            'submission_revision':body.get('submission_revision'),
+            'submission_hash':body.get('submission_hash'),
+            'draft':bool(body.get('draft',False)),
+            'confirm_unanswered':body.get('confirm_unanswered') or [],
+        },request)
 
     @r.post('/courses/{cid}/knowledge/assessment/{session_id}/abandon')
     async def assessment_abandon(cid:str,session_id:str,user:User,request:Request):
@@ -956,6 +966,53 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         if not domain: raise HTTPException(501,'正式测评沿用 V3 评分引擎；本更新包不伪造 GPA。')
         body=await request.json()
         return await remote('knowledge.assessment.abandon',user,{'course':cid,'session':session_id,'request_id':str(body.get('request_id',''))},request)
+
+    @r.post('/courses/{cid}/knowledge/assessment/{session_id}/draft')
+    async def assessment_draft_save(cid:str,session_id:str,user:User,request:Request):
+        await course(user,cid,request)
+        if not domain: raise HTTPException(501,'正式测评沿用 V3 评分引擎；本更新包不伪造 GPA。')
+        body=await request.json()
+        return await remote('knowledge.assessment.draft.save',user,{
+            'course':cid,'session':session_id,'request_id':str(body.get('request_id','')),
+            'unified_answer':body.get('unified_answer'),
+            'attachments':body.get('attachments') or [],
+        },request)
+
+    @r.get('/courses/{cid}/knowledge/assessment/{session_id}/draft')
+    async def assessment_draft_load(cid:str,session_id:str,user:User,request:Request):
+        await course(user,cid,request)
+        if not domain: raise HTTPException(501,'正式测评沿用 V3 评分引擎；本更新包不伪造 GPA。')
+        return await remote('knowledge.assessment.draft.load',user,{'course':cid,'session':session_id},request)
+
+    @r.post('/courses/{cid}/knowledge/assessment/{session_id}/explain')
+    async def assessment_explain(cid:str,session_id:str,user:User,request:Request):
+        await course(user,cid,request)
+        if not domain: raise HTTPException(501,'正式测评沿用 V3 评分引擎；本更新包不伪造 GPA。')
+        body=await request.json()
+        return await remote('knowledge.assessment.explain',user,{
+            'course':cid,'session':session_id,'request_id':str(body.get('request_id','')),
+            'blueprint_item':str(body.get('blueprint_item','')),
+            'step':str(body.get('step','')),
+        },request)
+
+    @r.post('/courses/{cid}/knowledge/{node_id}/assessment/prepare/cancel')
+    async def assessment_prepare_cancel(cid:str,node_id:str,user:User,request:Request):
+        await course(user,cid,request)
+        if not domain: raise HTTPException(501,'正式测评沿用 V3 评分引擎；本更新包不伪造 GPA。')
+        body=await request.json()
+        return await remote('knowledge.assessment.prepare.cancel',user,{
+            'course':cid,'node':node_id,'request_id':str(body.get('request_id','')),
+            'job':str(body.get('job','')),
+        },request)
+
+    @r.post('/courses/{cid}/knowledge/{node_id}/assessment/prepare/resume')
+    async def assessment_prepare_resume(cid:str,node_id:str,user:User,request:Request):
+        await course(user,cid,request)
+        if not domain: raise HTTPException(501,'正式测评沿用 V3 评分引擎；本更新包不伪造 GPA。')
+        body=await request.json()
+        return await remote('knowledge.assessment.prepare.resume',user,{
+            'course':cid,'node':node_id,'request_id':str(body.get('request_id','')),
+        },request)
 
     @r.get('/courses/{cid}/bridges')
     async def bridges(cid:str,user:User,request:Request):
@@ -1098,8 +1155,8 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             if recorded and recorded['payload_hash']!=digest: raise HTTPException(409,'重复请求 ID 的附件或上下文不同')
             return {'id':old['id'],'status':old['status'],'reused':True}
         rate(user,'model-runs',8)
-        if cfg.provider_mode=='disabled' and provider is None: raise HTTPException(503,'模型尚未配置；数据功能可用，不会返回预设答案冒充千问。')
-        if cfg.provider_mode=='qwen' and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
+        if cfg.provider_mode=='disabled' and provider is None: raise HTTPException(503,'模型尚未配置；数据功能可用，不会返回预设答案冒充模型生成。')
+        if cfg.provider_mode in {'qwen','deepseek'} and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
         teaching_mode=data.teaching_mode
         # Node binding semantics: the FIRST teaching bound to a node uses the
         # Thinking flow automatically and exactly once. Later runs on the same
@@ -1302,7 +1359,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         billing=None
         outbound_attempted=False
         try:
-            if cfg.provider_mode=='qwen' and not cfg.allow_billable:
+            if cfg.provider_mode in {'qwen','deepseek'} and not cfg.allow_billable:
                 classification_state.fail(db,course_id,token,'未授权模型调用费用')
                 return
             budget, estimate = qwen_operation_budget(
@@ -1318,8 +1375,8 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                     'provider_usage': [],
                 }
             usage=[]
-            outbound_attempted = cfg.provider_mode == 'qwen'
-            if cfg.provider_mode=='qwen' and hasattr(model, 'classify_course_with_usage'):
+            outbound_attempted = cfg.provider_mode in {'qwen', 'deepseek'}
+            if cfg.provider_mode in {'qwen','deepseek'} and hasattr(model, 'classify_course_with_usage'):
                 raw_result, usage = await model.classify_course_with_usage(bundle)
             else:
                 raw_result = await model.classify_course(bundle)
@@ -1330,7 +1387,11 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 classification_state.record_billing_attempt(
                     db, course_id, token, bundle, billing, 'completed'
                 )
-            classification_state.publish(db,course_id,token,bundle,result,cfg.qwen_model,billing=billing)
+            classification_state.publish(
+                db, course_id, token, bundle, result,
+                cfg.deepseek_model if cfg.provider_mode=='deepseek' else cfg.qwen_model,
+                billing=billing,
+            )
         except HTTPException as error:
             # Automatic classification has no client-selected strength. It is a
             # single medium operation and fails closed when its frozen source
@@ -1879,7 +1940,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             return {'id':old['id'],'status':old['status'],'reused':True}
         rate(user,'model-runs',8)
         if cfg.provider_mode=='disabled' and provider is None: raise HTTPException(503,'模型尚未配置')
-        if cfg.provider_mode=='qwen' and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
+        if cfg.provider_mode in {'qwen','deepseek'} and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
         if data.pair_id:
             pair=db.one('SELECT * FROM cmui_pairs WHERE id=? AND owner=? AND course=?',(data.pair_id,user['id'],cid))
             if pair is None: raise HTTPException(404,'双栏会话不存在')
@@ -2064,7 +2125,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             if replay: return replay
         rate(user,'model-runs',8)
         if cfg.provider_mode=='disabled' and provider is None: raise HTTPException(503,'模型尚未配置')
-        if cfg.provider_mode=='qwen' and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
+        if cfg.provider_mode in {'qwen','deepseek'} and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
         answer_context='\n\n'.join(s['text'] for s in steps)
         sources=(await remote('context.retrieve',user,{'course':row['course'],'query':step['text'][:400],'history':[]},request)) if domain else context_for(db,user['id'],row['course'],step['text'][:400],[])
         strength=problem_strength(user,row['course'])
@@ -2130,7 +2191,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         if row['status']!='completed': raise HTTPException(409,'详解尚未完成，不能追问')
         rate(user,'model-runs',8)
         if cfg.provider_mode=='disabled' and provider is None: raise HTTPException(503,'模型尚未配置')
-        if cfg.provider_mode=='qwen' and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
+        if cfg.provider_mode in {'qwen','deepseek'} and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
         prior='\n\n'.join(m['text'] for m in db.all('SELECT text FROM cmui_explanation_messages WHERE explanation=? ORDER BY created_at,rowid',(explanation_id,)))
         answer_context='\n\n'.join(s['text'] for s in json.loads(exercise['answer_steps']))+'\n\n此前详解与追问：\n'+prior
         sources=(await remote('context.retrieve',user,{'course':exercise['course'],'query':data.text,'history':[]},request)) if domain else context_for(db,user['id'],exercise['course'],data.text,[])

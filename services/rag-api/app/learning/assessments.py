@@ -1,6 +1,7 @@
 import hashlib
 import json
 import math
+import re
 import sqlite3
 from collections import defaultdict
 from typing import Any, cast
@@ -11,6 +12,9 @@ from app.errors import ApiError
 from app.learning.models import (
     AssessmentAnswer,
     AssessmentGradeProposal,
+    AssessmentPreparationOutput,
+    AssessmentReferenceSolutionOutput,
+    AssessmentSolutionStep,
     GradePolicyDraftInput,
 )
 from app.learning.workspaces import workspace_for
@@ -22,7 +26,7 @@ SOURCE_ORDER = (
     "MODEL_GENERATED",
     "EXTERNAL_INSPIRED",
 )
-DETERMINISTIC_TYPES = {"MCQ_SINGLE", "NUMERIC", "SHORT_TEXT"}
+DETERMINISTIC_TYPES = {"MCQ_SINGLE", "NUMERIC"}
 
 
 def encode(value: object) -> str:
@@ -90,6 +94,37 @@ class AssessmentService:
         if not rows or sum(int(row["max_fraction"]) for row in rows) != 100:
             return []
         return list(rows)
+
+    @staticmethod
+    def _is_deterministic(question: dict[str, Any]) -> bool:
+        """A question grades deterministically only when its frozen answer key is a
+        finite standard: MCQ/NUMERIC always, and SHORT_TEXT only for an explicit
+        enumeration (``accepted`` list). Concept/definition short answers without a
+        provable enumeration fall through to the semantic rubric grader."""
+        question_type = question["question_type"]
+        if question_type in {"MCQ_SINGLE", "NUMERIC"}:
+            return True
+        if question_type == "SHORT_TEXT":
+            answer = question.get("answer_key") or question.get("answer") or {}
+            accepted = answer.get("accepted")
+            return isinstance(accepted, list) and bool(accepted)
+        return False
+
+    def distinct_families(
+        self,
+        connection: sqlite3.Connection,
+        workspace: sqlite3.Row,
+        node: sqlite3.Row,
+    ) -> set[str]:
+        return {str(row["family_id"]) for row in self._eligible_pool(connection, workspace, node)}
+
+    def select(
+        self,
+        connection: sqlite3.Connection,
+        workspace: sqlite3.Row,
+        node: sqlite3.Row,
+    ) -> list[sqlite3.Row]:
+        return self._select_questions(self._eligible_pool(connection, workspace, node))
 
     def _eligible_pool(
         self,
@@ -226,9 +261,7 @@ class AssessmentService:
                 "ASSESSMENT_ALREADY_ACTIVE",
                 "Resume or abandon the active Assessment before starting another.",
             )
-        selected = self._select_questions(
-            self._eligible_pool(connection, workspace, node)
-        )
+        selected = self.select(connection, workspace, node)
         policy, mapping_status = self._grade_policy(
             connection,
             str(workspace["course_id"]),
@@ -441,6 +474,7 @@ class AssessmentService:
                     str(session["node_id"]),
                     int(session["spec_version"]),
                 )
+                reference = self.reference_solution(connection, str(row["question_revision_id"]))
                 question["review"] = {
                     "submitted_answer": (
                         json.loads(row["submitted_answer_json"])["answer"]
@@ -459,6 +493,16 @@ class AssessmentService:
                         }
                         for criterion in rubric
                     ],
+                    "reference_solution": (
+                        {
+                            "solution_revision": reference["solution_revision"],
+                            "answer": json.loads(reference["answer_json"]),
+                            "steps": json.loads(reference["steps_json"]),
+                            "source_refs": json.loads(reference["source_refs_json"]),
+                        }
+                        if reference is not None
+                        else None
+                    ),
                 }
             questions.append(question)
         evidence = [
@@ -625,6 +669,558 @@ class AssessmentService:
             )
         return {"session": dict(session), "questions": questions}
 
+    # ------------------------------------------------------------------ drafts
+    def save_draft(
+        self,
+        connection: sqlite3.Connection,
+        workspace: sqlite3.Row,
+        session_id: str,
+        unified_answer: str | None,
+        attachments: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        session = connection.execute(
+            "SELECT * FROM assessment_sessions WHERE id=? AND workspace_id=? "
+            "AND owner_user_id=? AND status='IN_PROGRESS'",
+            (session_id, workspace["id"], workspace["owner_user_id"]),
+        ).fetchone()
+        if session is None:
+            raise ApiError(409, "ASSESSMENT_NOT_ACTIVE", "Only an in-progress Assessment has a draft.")
+        payload = encode({"unified_answer": unified_answer or "", "attachments": attachments})
+        connection.execute(
+            "INSERT INTO assessment_answer_drafts(id,session_id,owner_user_id,unified_answer_json) "
+            "VALUES(?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET "
+            "unified_answer_json=excluded.unified_answer_json,updated_at="
+            "strftime('%Y-%m-%dT%H:%M:%fZ','now')",
+            (identifier(), session_id, workspace["owner_user_id"], payload),
+        )
+        return {"session_id": session_id, "saved": True, "unified_answer": unified_answer or ""}
+
+    def load_draft(
+        self,
+        connection: sqlite3.Connection,
+        workspace: sqlite3.Row,
+        session_id: str,
+    ) -> dict[str, Any] | None:
+        row = connection.execute(
+            "SELECT unified_answer_json FROM assessment_answer_drafts "
+            "WHERE session_id=? AND owner_user_id=?",
+            (session_id, workspace["owner_user_id"]),
+        ).fetchone()
+        if row is None:
+            return None
+        return json.loads(row["unified_answer_json"])
+
+    # ----------------------------------------------------- unified answer mapping
+    @staticmethod
+    def _parse_unified_markers(text: str) -> dict[int, str]:
+        pattern = re.compile(
+            r"(?:^|\n)\s*(?:第\s*([1-5])\s*[题问]|([1-5])\s*[.)、:：]|[Qq]\s*([1-5])\s*[:：.])"
+        )
+        matches = list(pattern.finditer(text))
+        result: dict[int, str] = {}
+        for index, match in enumerate(matches):
+            ordinal = int(next(group for group in match.groups() if group is not None))
+            start = match.end()
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+            answer = text[start:end].strip()
+            if answer:
+                result.setdefault(ordinal, answer)
+        return result
+
+    def map_unified_answers(
+        self,
+        connection: sqlite3.Connection,
+        session_id: str,
+        unified_answer: str | None,
+        confirm_unanswered: list[str],
+    ) -> list[AssessmentAnswer]:
+        """Map ONE unified answer payload to the 5 stable blueprint ids.
+
+        Deterministic 1-5 markers are parsed first; explicitly confirmed-unanswered
+        items become blank answers; anything still unmapped raises for confirmation
+        rather than silently guessing.
+        """
+        rows = connection.execute(
+            "SELECT item.*,question.question_type FROM assessment_blueprint_items AS item "
+            "JOIN assessment_question_revisions AS question "
+            "ON question.id=item.question_revision_id "
+            "JOIN assessment_sessions AS session ON session.blueprint_id=item.blueprint_id "
+            "WHERE session.id=? ORDER BY item.ordinal",
+            (session_id,),
+        ).fetchall()
+        by_ordinal = {int(row["ordinal"]): row for row in rows}
+        markers = self._parse_unified_markers(unified_answer or "")
+        confirmed = set(confirm_unanswered or [])
+        mapped: dict[int, str] = {}
+        for ordinal, answer in markers.items():
+            if ordinal in by_ordinal:
+                mapped[ordinal] = answer
+        unanswered: list[int] = []
+        for ordinal in range(1, 6):
+            if ordinal in mapped:
+                continue
+            row = by_ordinal[ordinal]
+            if str(row["id"]) in confirmed:
+                mapped[ordinal] = ""
+            else:
+                unanswered.append(ordinal)
+        if unanswered:
+            raise ApiError(
+                422,
+                "ASSESSMENT_ANSWERS_NEED_CONFIRMATION",
+                "Unmapped answers need explicit confirmation before submission; "
+                "the server never guesses a question mapping.",
+            )
+        return [
+            AssessmentAnswer(blueprint_item_id=str(by_ordinal[ordinal]["id"]), answer=mapped[ordinal])
+            for ordinal in range(1, 6)
+        ]
+
+    # ---------------------------------------------------- submission revisions
+    @staticmethod
+    def _record_submission_revision(
+        connection: sqlite3.Connection,
+        session_id: str,
+        answers: list[AssessmentAnswer],
+    ) -> int:
+        revision = int(
+            connection.execute(
+                "SELECT COALESCE(MAX(submission_revision),0)+1 "
+                "FROM assessment_submission_revisions WHERE session_id=?",
+                (session_id,),
+            ).fetchone()[0]
+        )
+        mapped = [
+            {"blueprint_item_id": answer.blueprint_item_id, "answer": answer.answer}
+            for answer in answers
+        ]
+        connection.execute(
+            "INSERT INTO assessment_submission_revisions("
+            "id,session_id,submission_revision,content_hash,mapped_answers_json) "
+            "VALUES(?,?,?,?,?)",
+            (
+                identifier(),
+                session_id,
+                revision,
+                digest({"session_id": session_id, "answers": mapped}),
+                encode(mapped),
+            ),
+        )
+        return revision
+
+    def save_submission_review_needed(
+        self,
+        connection: sqlite3.Connection,
+        workspace: sqlite3.Row,
+        session_id: str,
+        answers: list[AssessmentAnswer],
+    ) -> dict[str, Any]:
+        """Grading failed: keep the previous valid result and mark NEEDS_REVIEW.
+
+        No performance evidence or grade snapshot is written, so a failed grader can
+        never turn a learner's answer into 0 marks or overwrite a previous result.
+        """
+        prepared = self._submission_context(connection, workspace, session_id, answers)
+        revision = self._record_submission_revision(connection, session_id, answers)
+        grader_input = self.grader_context(prepared)
+        grader_input_hash = digest(grader_input) if grader_input is not None else None
+        if grader_input_hash is not None:
+            connection.execute(
+                "INSERT OR IGNORE INTO assessment_grading_receipts("
+                "id,session_id,submission_revision,grader_input_hash,grade_proposal_json) "
+                "VALUES(?,?,?,?,NULL)",
+                (identifier(), session_id, revision, grader_input_hash),
+            )
+        connection.execute(
+            "UPDATE assessment_sessions SET status='SUBMITTED',submitted_at="
+            "strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND status='IN_PROGRESS'",
+            (session_id,),
+        )
+        result = self._session_view(connection, workspace, session_id)
+        result["needs_review"] = True
+        return result
+
+    # -------------------------------------------------------- pool preparation
+    def preparation_job(
+        self,
+        connection: sqlite3.Connection,
+        workspace: sqlite3.Row,
+        node_id: str,
+        spec_version: int,
+    ) -> sqlite3.Row | None:
+        return connection.execute(
+            "SELECT * FROM assessment_preparation_jobs "
+            "WHERE workspace_id=? AND node_id=? AND spec_version=?",
+            (workspace["id"], node_id, spec_version),
+        ).fetchone()
+
+    def ensure_preparation_job(
+        self,
+        connection: sqlite3.Connection,
+        workspace: sqlite3.Row,
+        node: sqlite3.Row,
+    ) -> sqlite3.Row:
+        spec_version = int(node["spec_version"])
+        existing = self.preparation_job(connection, workspace, node["id"], spec_version)
+        if existing is not None:
+            return existing
+        connection.execute(
+            "INSERT OR IGNORE INTO assessment_preparation_jobs("
+            "id,workspace_id,owner_user_id,course_id,node_id,spec_version,status,channel) "
+            "VALUES(?,?,?,?,?,?,'PREPARING','VALIDATED')",
+            (
+                identifier(),
+                workspace["id"],
+                workspace["owner_user_id"],
+                workspace["course_id"],
+                node["id"],
+                spec_version,
+            ),
+        )
+        row = connection.execute(
+            "SELECT * FROM assessment_preparation_jobs "
+            "WHERE workspace_id=? AND node_id=? AND spec_version=?",
+            (workspace["id"], node["id"], spec_version),
+        ).fetchone()
+        return cast(sqlite3.Row, row)
+
+    @staticmethod
+    def mark_preparation_job(
+        connection: sqlite3.Connection,
+        job_id: str,
+        status: str,
+        *,
+        channel: str = "VALIDATED",
+        error_code: str | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        connection.execute(
+            "UPDATE assessment_preparation_jobs SET status=?,channel=?,error_code=?,"
+            "error_message=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),"
+            "completed_at=CASE WHEN ? IN ('READY','BLOCKED') THEN "
+            "strftime('%Y-%m-%dT%H:%M:%fZ','now') ELSE completed_at END WHERE id=?",
+            (status, channel, error_code, error_message, status, job_id),
+        )
+
+    def cancel_preparation_job(
+        self,
+        connection: sqlite3.Connection,
+        workspace: sqlite3.Row,
+        job_id: str,
+    ) -> dict[str, Any]:
+        updated = connection.execute(
+            "UPDATE assessment_preparation_jobs SET status='CANCELLED',"
+            "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+            "WHERE id=? AND workspace_id=? AND status='PREPARING'",
+            (job_id, workspace["id"]),
+        )
+        if updated.rowcount != 1:
+            row = connection.execute(
+                "SELECT * FROM assessment_preparation_jobs WHERE id=? AND workspace_id=?",
+                (job_id, workspace["id"]),
+            ).fetchone()
+            if row is None:
+                raise ApiError(404, "PREPARATION_JOB_NOT_FOUND", "The preparation job was not found.")
+            raise ApiError(
+                409,
+                "PREPARATION_JOB_NOT_CANCELLABLE",
+                "Only a PREPARING job can be cancelled.",
+            )
+        row = connection.execute("SELECT * FROM assessment_preparation_jobs WHERE id=?", (job_id,)).fetchone()
+        return dict(cast(sqlite3.Row, row))
+
+    @staticmethod
+    def _verify_candidate(question: Any) -> str:
+        """Deterministic verification level for a prepared candidate.
+
+        MCQ/NUMERIC with a structurally valid answer, and SHORT_TEXT with a finite
+        accepted enumeration, enter the VALIDATED channel as DETERMINISTIC.
+        Concept/open questions with no provable external standard are marked
+        AI_REVIEWED (diagnostic) — never VALIDATED.
+        """
+        if question.question_type == "MCQ_SINGLE":
+            correct = question.answer.get("correct_option")
+            if correct is not None and question.options:
+                return "DETERMINISTIC"
+        if question.question_type == "NUMERIC":
+            value = question.answer.get("value")
+            if isinstance(value, (int, float)):
+                return "DETERMINISTIC"
+        if question.question_type == "SHORT_TEXT":
+            accepted = question.answer.get("accepted")
+            if isinstance(accepted, list) and accepted:
+                return "DETERMINISTIC"
+        return "AI_REVIEWED"
+
+    @staticmethod
+    def _first_required_item(connection: sqlite3.Connection, node: sqlite3.Row) -> str:
+        row = connection.execute(
+            "SELECT item_id FROM teaching_items WHERE node_id=? AND spec_version=? "
+            "AND requirement='REQUIRED' ORDER BY item_id LIMIT 1",
+            (node["id"], int(node["spec_version"])),
+        ).fetchone()
+        if row is None:
+            raise ApiError(
+                409,
+                "ASSESSMENT_SPEC_NO_ITEMS",
+                "The node has no REQUIRED Teaching Item to bind a rubric.",
+            )
+        return str(row["item_id"])
+
+    def store_candidates(
+        self,
+        connection: sqlite3.Connection,
+        workspace: sqlite3.Row,
+        node: sqlite3.Row,
+        output: AssessmentPreparationOutput,
+        evidence_ids: list[str],
+    ) -> list[dict[str, str]]:
+        existing_families = {
+            str(row["family_id"])
+            for row in connection.execute(
+                "SELECT family_id FROM assessment_question_revisions "
+                "WHERE course_id=? AND (owner_user_id IS NULL OR owner_user_id=?)",
+                (workspace["course_id"], workspace["owner_user_id"]),
+            )
+        }
+        item_id = self._first_required_item(connection, node)
+        stored: list[dict[str, str]] = []
+        for question in output.questions:
+            if question.family_id in existing_families:
+                raise ValueError("Duplicate candidate question family")
+            if any(
+                ref not in evidence_ids
+                for step in question.reference_steps
+                for ref in step.source_refs
+            ):
+                raise ValueError("Candidate reference source is outside authorized evidence")
+            verification_method = self._verify_candidate(question)
+            question_id = identifier()
+            content = {
+                "prompt": question.prompt,
+                "options": question.options,
+                "answer": question.answer,
+            }
+            connection.execute(
+                "INSERT INTO assessment_question_revisions("
+                "id,course_id,owner_user_id,family_id,revision,source_kind,question_type,"
+                "difficulty,prompt_text,options_json,answer_json,validation_status,"
+                "verification_method,content_hash,created_by_user_id) "
+                "VALUES(?,?,?,?,1,'MODEL_GENERATED',?,?,?,?,?,'VALIDATED',?,?,?)",
+                (
+                    question_id,
+                    workspace["course_id"],
+                    workspace["owner_user_id"],
+                    question.family_id,
+                    question.question_type,
+                    question.difficulty,
+                    question.prompt,
+                    encode(question.options),
+                    encode(question.answer),
+                    verification_method,
+                    digest(content),
+                    workspace["owner_user_id"],
+                ),
+            )
+            for criterion in question.criteria:
+                connection.execute(
+                    "INSERT INTO assessment_rubric_criteria("
+                    "question_revision_id,criterion_id,node_id,spec_version,item_id,"
+                    "dimension,max_fraction,description,deterministic_rule_json) "
+                    "VALUES(?,?,?,?,?,?,?,?,'{}')",
+                    (
+                        question_id,
+                        criterion.criterion_id,
+                        node["id"],
+                        int(node["spec_version"]),
+                        item_id,
+                        criterion.dimension,
+                        criterion.max_fraction,
+                        criterion.description,
+                    ),
+                )
+            self._store_reference_solution(
+                connection,
+                question_id,
+                None,
+                question.reference_answer or "",
+                question.reference_steps,
+            )
+            stored.append({"question_revision_id": question_id, "family_id": question.family_id,
+                           "verification_method": verification_method})
+        return stored
+
+    # -------------------------------------------------------- reference solutions
+    @staticmethod
+    def has_reference_solution(
+        connection: sqlite3.Connection,
+        question_revision_id: str,
+    ) -> bool:
+        return (
+            connection.execute(
+                "SELECT 1 FROM assessment_reference_solutions WHERE question_revision_id=?",
+                (question_revision_id,),
+            ).fetchone()
+            is not None
+        )
+
+    @staticmethod
+    def synthesize_deterministic_reference(
+        question: dict[str, Any],
+    ) -> AssessmentReferenceSolutionOutput:
+        """A deterministic question's reference is derived from its frozen answer
+        key with no model call, so it can never drift from the stored standard."""
+        answer_key = question.get("answer_key") or {}
+        if question["question_type"] == "MCQ_SINGLE":
+            answer = f"The correct option is {answer_key.get('correct_option')}."
+        elif question["question_type"] == "NUMERIC":
+            answer = f"The result is {answer_key.get('value')}."
+        else:
+            accepted = answer_key.get("accepted") or []
+            answer = "One accepted answer is " + (str(accepted[0]) if accepted else "—") + "."
+        step = AssessmentSolutionStep(
+            step_id="step_1",
+            ordinal=1,
+            operation="Identify the correct result",
+            result=answer,
+            explanation=answer,
+            source_refs=[],
+        )
+        return AssessmentReferenceSolutionOutput(schema_version="v3.2", answer=answer, steps=[step])
+
+    def _store_reference_solution(
+        self,
+        connection: sqlite3.Connection,
+        question_revision_id: str,
+        blueprint_item_id: str | None,
+        answer: str,
+        steps: list[Any],
+    ) -> None:
+        steps_json = [step.model_dump() for step in steps]
+        source_refs = sorted({ref for step in steps for ref in step.source_refs})
+        content = {"answer": answer, "steps": steps_json, "source_refs": source_refs}
+        connection.execute(
+            "INSERT OR IGNORE INTO assessment_reference_solutions("
+            "id,question_revision_id,blueprint_item_id,solution_revision,steps_json,"
+            "answer_json,source_refs_json,prompt_version,content_hash) "
+            "VALUES(?,?,?,1,?,?,?,?,?)",
+            (
+                identifier(),
+                question_revision_id,
+                blueprint_item_id,
+                encode(steps_json),
+                encode(answer),
+                encode(source_refs),
+                "problem-v3.2",
+                digest(content),
+            ),
+        )
+
+    def store_reference_solutions(
+        self,
+        connection: sqlite3.Connection,
+        solutions: dict[str, Any],
+    ) -> None:
+        for question_revision_id, solution in solutions.items():
+            if not self.has_reference_solution(connection, question_revision_id):
+                self._store_reference_solution(
+                    connection,
+                    question_revision_id,
+                    None,
+                    solution.answer,
+                    solution.steps,
+                )
+
+    def reference_solution(
+        self,
+        connection: sqlite3.Connection,
+        question_revision_id: str,
+    ) -> sqlite3.Row | None:
+        return connection.execute(
+            "SELECT * FROM assessment_reference_solutions WHERE question_revision_id=? "
+            "ORDER BY solution_revision DESC LIMIT 1",
+            (question_revision_id,),
+        ).fetchone()
+
+    def explanation_context(
+        self,
+        connection: sqlite3.Connection,
+        workspace: sqlite3.Row,
+        session_id: str,
+        blueprint_item_id: str,
+        step_id: str,
+    ) -> dict[str, Any]:
+        """Resolve the 详解 context by assessment_id + blueprint_item_id +
+        solution_revision + step_id. Never fakes a cmui_exercises id and never
+        reveals a reference step before grading."""
+        session = connection.execute(
+            "SELECT * FROM assessment_sessions WHERE id=? AND workspace_id=? AND owner_user_id=?",
+            (session_id, workspace["id"], workspace["owner_user_id"]),
+        ).fetchone()
+        if session is None:
+            raise ApiError(404, "ASSESSMENT_NOT_FOUND", "The Assessment was not found.")
+        if session["status"] not in {"SUBMITTED", "GRADED"}:
+            raise ApiError(
+                409,
+                "ASSESSMENT_NOT_GRADED",
+                "Reference step explanations are available only after grading.",
+            )
+        item = connection.execute(
+            "SELECT question_revision_id FROM assessment_blueprint_items WHERE id=?",
+            (blueprint_item_id,),
+        ).fetchone()
+        if item is None:
+            raise ApiError(404, "ASSESSMENT_ITEM_NOT_FOUND", "The frozen Assessment question was not found.")
+        reference = self.reference_solution(connection, str(item["question_revision_id"]))
+        if reference is None:
+            raise ApiError(404, "REFERENCE_SOLUTION_NOT_FOUND", "No frozen reference solution exists.")
+        steps = json.loads(reference["steps_json"])
+        if not any(str(step.get("step_id")) == step_id for step in steps):
+            raise ApiError(404, "REFERENCE_STEP_NOT_FOUND", "The reference step was not found.")
+        solution_revision = int(reference["solution_revision"])
+        existing = connection.execute(
+            "SELECT * FROM assessment_explanation_contexts WHERE assessment_session_id=? "
+            "AND blueprint_item_id=? AND solution_revision=? AND step_id=?",
+            (session_id, blueprint_item_id, solution_revision, step_id),
+        ).fetchone()
+        if existing is None:
+            context_id = identifier()
+            connection.execute(
+                "INSERT INTO assessment_explanation_contexts("
+                "id,assessment_session_id,blueprint_item_id,solution_revision,step_id,"
+                "owner_user_id) VALUES(?,?,?,?,?,?)",
+                (
+                    context_id,
+                    session_id,
+                    blueprint_item_id,
+                    solution_revision,
+                    step_id,
+                    workspace["owner_user_id"],
+                ),
+            )
+            existing = connection.execute(
+                "SELECT * FROM assessment_explanation_contexts WHERE id=?", (context_id,)
+            ).fetchone()
+        return {
+            "id": existing["id"],
+            "assessment_session_id": session_id,
+            "blueprint_item_id": blueprint_item_id,
+            "solution_revision": solution_revision,
+            "step_id": step_id,
+            "content": json.loads(existing["content_json"]) if existing["content_json"] else None,
+        }
+
+    @staticmethod
+    def store_explanation_content(
+        connection: sqlite3.Connection,
+        context_id: str,
+        content: str,
+    ) -> None:
+        connection.execute(
+            "UPDATE assessment_explanation_contexts SET content_json=? WHERE id=?",
+            (encode({"text": content}), context_id),
+        )
+
     def prepare_submission(
         self,
         workspace: sqlite3.Row,
@@ -654,7 +1250,7 @@ class AssessmentService:
                 ],
             }
             for question in prepared["questions"]
-            if question["question_type"] not in DETERMINISTIC_TYPES
+            if not AssessmentService._is_deterministic(question)
         ]
         if not questions:
             return None
@@ -769,10 +1365,28 @@ class AssessmentService:
         open_item_ids = {
             str(question["id"])
             for question in prepared["questions"]
-            if question["question_type"] not in DETERMINISTIC_TYPES
+            if not self._is_deterministic(question)
         }
         if set(proposals) != open_item_ids:
             raise ValueError("The grader proposal does not match the open-response questions")
+        submission_revision = self._record_submission_revision(
+            connection, session_id, answers
+        )
+        grader_input = self.grader_context(prepared)
+        grader_input_hash = digest(grader_input) if grader_input is not None else None
+        if grader_input_hash is not None:
+            connection.execute(
+                "INSERT OR IGNORE INTO assessment_grading_receipts("
+                "id,session_id,submission_revision,grader_input_hash,grade_proposal_json) "
+                "VALUES(?,?,?,?,?)",
+                (
+                    identifier(),
+                    session_id,
+                    submission_revision,
+                    grader_input_hash,
+                    encode(proposal.model_dump()) if proposal is not None else None,
+                ),
+            )
         independent = session["mode"] == "INDEPENDENT"
         total = 0.0
         any_needs_review = False
@@ -793,14 +1407,14 @@ class AssessmentService:
                 raise ValueError("The grader proposal does not match the frozen rubric")
             correct = (
                 self._deterministic_correct(question)
-                if question["question_type"] in DETERMINISTIC_TYPES
+                if self._is_deterministic(question)
                 else False
             )
             question_total = 0.0
             feedback_parts: list[str] = []
             question_needs_review = False
             for criterion in question["rubric"]:
-                if question["question_type"] in DETERMINISTIC_TYPES:
+                if self._is_deterministic(question):
                     fraction = 1.0 if correct else 0.0
                     needs_review = False
                     confidence = 1.0

@@ -554,6 +554,9 @@ def test_abandoned_or_unsubmitted_assessment_is_not_zero_or_failure(
             "status": "NOT_ASSESSED",
             "raw_score": None,
             "grade_label": None,
+            "active_session": None,
+            "latest_result": None,
+            "latest_independent_result": None,
         }
         with client.app.state.database.connect() as connection:
             assert connection.execute("SELECT COUNT(*) FROM grade_snapshots").fetchone()[0] == 0

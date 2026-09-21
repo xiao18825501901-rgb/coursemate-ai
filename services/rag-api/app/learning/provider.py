@@ -12,7 +12,14 @@ from pydantic import BaseModel
 
 from app.config import Settings
 from app.errors import ApiError
-from app.evaluation.provider_safety import validate_model_studio_base_url
+from app.evaluation.deepseek_contract import (
+    REASONING_DISABLED,
+    json_schema_text_format,
+)
+from app.evaluation.provider_safety import (
+    validate_deepseek_base_url,
+    validate_model_studio_base_url,
+)
 
 Output = TypeVar("Output", bound=BaseModel)
 
@@ -44,6 +51,7 @@ class LearningProvider:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.model = settings.v3_model
+        self.is_deepseek = self.model == "deepseek-flash"
         self.client: OpenAI | None = None
 
     @property
@@ -63,6 +71,8 @@ class LearningProvider:
         if self.settings.app_env == "test" and self.settings.rag_provider_mode == "deterministic":
             return "LOCAL_TEST"
         host = urlsplit(self.settings.v3_model_base_url or "").hostname or ""
+        if host == "api.deepseek.com":
+            return "ENDPOINT_DEEPSEEK"
         if host == "dashscope-intl.aliyuncs.com":
             return "ENDPOINT_INTL"
         if host == "dashscope.aliyuncs.com":
@@ -111,6 +121,8 @@ class LearningProvider:
             "provider": (
                 "deterministic"
                 if self.cache_protocol == "fixture"
+                else "DEEPSEEK_API"
+                if self.is_deepseek
                 else "ALIBABA_MODEL_STUDIO_COMPATIBLE"
             ),
             "protocol": self.cache_protocol,
@@ -138,20 +150,37 @@ class LearningProvider:
 
                 output = schema.model_validate(fixture_output(schema.__name__, context))
             else:
-                if not settings.v3_model_api_key or not settings.v3_model_base_url:
+                if not settings.v3_model_api_key:
                     raise ApiError(
                         503,
                         "MODEL_LIVE_BLOCKED",
-                        "Configure the explicit V3 Model Studio endpoint and key.",
+                        "Configure the explicit model endpoint key.",
                     )
-                try:
-                    base_url = validate_model_studio_base_url(settings.v3_model_base_url)
-                except ValueError:
-                    raise ApiError(
-                        503,
-                        "MODEL_ENDPOINT_INVALID",
-                        "Use an explicit Model Studio compatible-mode endpoint.",
-                    ) from None
+                if self.is_deepseek:
+                    raw_base_url = settings.v3_model_base_url or "https://api.deepseek.com"
+                    try:
+                        base_url = validate_deepseek_base_url(raw_base_url)
+                    except ValueError:
+                        raise ApiError(
+                            503,
+                            "MODEL_ENDPOINT_INVALID",
+                            "Use the official DeepSeek base URL (https://api.deepseek.com).",
+                        ) from None
+                else:
+                    if not settings.v3_model_base_url:
+                        raise ApiError(
+                            503,
+                            "MODEL_LIVE_BLOCKED",
+                            "Configure the explicit V3 Model Studio endpoint.",
+                        )
+                    try:
+                        base_url = validate_model_studio_base_url(settings.v3_model_base_url)
+                    except ValueError:
+                        raise ApiError(
+                            503,
+                            "MODEL_ENDPOINT_INVALID",
+                            "Use an explicit Model Studio compatible-mode endpoint.",
+                        ) from None
                 if len(serialized) > 60000:
                     raise ApiError(422, "CONTEXT_BUDGET", "The bounded unit context is too large.")
                 if self.client is None:
@@ -177,17 +206,39 @@ class LearningProvider:
                         for item in safe_images
                     )
                     provider_input = [{"role": "user", "content": content}]
-                response = self.client.responses.create(
-                    model=self.model,
-                    instructions=instructions
-                    + "\nReturn only one valid JSON object matching the supplied schema.",
-                    input=provider_input,
-                    max_output_tokens=settings.v3_max_output_tokens,
-                    store=False,
-                    tools=[],
-                    stream=False,
-                    extra_body={"enable_thinking": False},
-                )
+                if self.is_deepseek:
+                    # Structured output via the documented Responses text.format
+                    # json_schema; native thinking explicitly off.  NO Qwen-only
+                    # fields (enable_thinking, max_pixels) are ever emitted.
+                    response = self.client.responses.create(
+                        model=self.model,
+                        instructions=instructions,
+                        input=provider_input,
+                        max_output_tokens=settings.v3_max_output_tokens,
+                        store=False,
+                        tools=[],
+                        stream=False,
+                        extra_body={
+                            "reasoning": REASONING_DISABLED,
+                            "text": {
+                                "format": json_schema_text_format(
+                                    schema.__name__, schema.model_json_schema()
+                                )
+                            },
+                        },
+                    )
+                else:
+                    response = self.client.responses.create(
+                        model=self.model,
+                        instructions=instructions
+                        + "\nReturn only one valid JSON object matching the supplied schema.",
+                        input=provider_input,
+                        max_output_tokens=settings.v3_max_output_tokens,
+                        store=False,
+                        tools=[],
+                        stream=False,
+                        extra_body={"enable_thinking": False},
+                    )
                 response_received = True
                 run["provider_response_id"] = response.id
                 usage = response.usage

@@ -24,5 +24,33 @@ CREATE TABLE IF NOT EXISTS learning_start_events (
 CREATE INDEX IF NOT EXISTS idx_learning_start_scope
 ON learning_start_events(workspace_id, node_id, spec_version, accepted_at);
 
+-- Backfill for learning that started BEFORE this table existed. Only journeys
+-- that carry a real accepted artifact are converted: a delivered teaching unit,
+-- coverage, delivery evidence, or a LEARNED status. A bare journey row is
+-- deliberately NOT backfilled — failed/cancelled/rejected submissions can leave
+-- an empty shell behind and an empty shell is not a start. Idempotent: the
+-- primary key and UNIQUE(workspace,node,spec,operation) make replays no-ops.
+INSERT OR IGNORE INTO learning_start_events
+    (id, workspace_id, node_id, spec_version, operation_id, source, accepted_at)
+SELECT
+    'start-bf-' || journey.id,
+    journey.workspace_id,
+    journey.node_id,
+    journey.spec_version,
+    'legacy-journey:' || journey.id,
+    'BACKFILL',
+    COALESCE(
+        (SELECT MIN(unit.created_at) FROM teaching_units AS unit
+         WHERE unit.journey_id = journey.id),
+        (SELECT MIN(ev.created_at) FROM teaching_delivery_evidence AS ev
+         WHERE ev.journey_id = journey.id),
+        strftime('%Y-%m-%dT%H:%M:%fZ','now')
+    )
+FROM learning_journeys AS journey
+WHERE journey.status = 'LEARNED'
+   OR EXISTS(SELECT 1 FROM teaching_units AS unit WHERE unit.journey_id = journey.id)
+   OR EXISTS(SELECT 1 FROM learning_coverage AS cov WHERE cov.journey_id = journey.id)
+   OR EXISTS(SELECT 1 FROM teaching_delivery_evidence AS ev WHERE ev.journey_id = journey.id);
+
 INSERT OR IGNORE INTO schema_migrations(version, name)
 VALUES(26, 'learning start events');

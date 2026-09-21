@@ -1,7 +1,7 @@
 import { RichText } from './richtext.jsx';
 import { DirectoryPicker } from './DirectoryPicker.jsx';
 import React from 'react';
-import { request, send, remove, download, key, streamEvents, listPairs, getPair, createPair, renamePair, deletePair, bindPair, createExercise, revealExercise, createExplanation, getExplanation, postExplanationMessage, cancelExplanation, searchPeople, listShares, getShare, createShare, joinShare } from './api.js';
+import { request, send, remove, download, key, streamEvents, listPairs, getPair, createPair, renamePair, deletePair, bindPair, createExercise, revealExercise, createExplanation, getExplanation, postExplanationMessage, cancelExplanation, searchPeople, listShares, getShare, createShare, joinShare, getAssessment, startAssessment, getAssessmentSession, submitAssessment, abandonAssessment, saveAssessmentDraft, loadAssessmentDraft, cancelPreparation, resumePreparation, createAssessmentExplanation } from './api.js';
 import { dateKey, zonedParts, wallTimeToISO, formatBytes, formatTime, goto } from './utils.js';
 import { Icon, IconButton, Avatar } from './icons.jsx';
 export class CourseFiles extends React.Component {
@@ -334,7 +334,7 @@ class ReasoningStrengthPicker extends React.Component {
     render() { const values = ['medium', 'high', 'max'], labels = { medium: '中', high: '高', max: '最高' }, index = values.indexOf(this.props.value); return <span className="reasoning-strength" ref={el => this.root = el}><button ref={el => this.button = el} type="button" className="reasoning-trigger" aria-label={`${this.props.lane === 'teach' ? '知识学习' : '题目应对'}推理强度：${labels[this.props.value]}`} aria-haspopup="dialog" aria-expanded={this.state.open} disabled={this.props.disabled} onClick={() => this.setState(s => ({ open: !s.open }))}><Icon name="gauge"/><span>{labels[this.props.value]}</span></button>{this.state.open && <div className="reasoning-popover" role="dialog" aria-label="推理强度" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); this.close(); } }}><strong>推理强度</strong><input aria-label="推理强度" type="range" min="0" max="2" step="1" value={index} onChange={event => this.props.onChange(values[Number(event.target.value)])}/><div className="reasoning-ticks">{values.map((value, tick) => <button type="button" key={value} className={this.props.value === value ? 'selected' : ''} aria-pressed={this.props.value === value} onClick={() => this.choose(value)}><i>{tick + 1}</i>{labels[value]}</button>)}</div></div>}</span>; }
 }
 export class Learn extends React.Component {
-    state = { attachments:{teach:[],problem:[]}, uploading:{teach:false,problem:false}, nodes: [], expanded: false, hover: null, ratio: .5, fullscreen: false, mobile: 'teach', conv: { teach: null, problem: null }, messages: { teach: [], problem: [] }, inputs: { teach: '', problem: '' }, run: { teach: null, problem: null }, partial: { teach: '', problem: '' }, status: { teach: '', problem: '' }, activeNode: null, error: '', busy: { teach: false, problem: false }, thinking: { teach: false }, strength: { teach: 'medium', problem: 'medium' }, exercises: {}, explanations: {}, windows: {}, pair: null };
+    state = { attachments:{teach:[],problem:[]}, uploading:{teach:false,problem:false}, nodes: [], expanded: false, hover: null, ratio: .5, fullscreen: false, mobile: 'teach', conv: { teach: null, problem: null }, messages: { teach: [], problem: [] }, inputs: { teach: '', problem: '' }, run: { teach: null, problem: null }, partial: { teach: '', problem: '' }, status: { teach: '', problem: '' }, activeNode: null, error: '', busy: { teach: false, problem: false }, thinking: { teach: false }, strength: { teach: 'medium', problem: 'medium' }, exercises: {}, explanations: {}, windows: {}, pair: null, assessment: null, assessPicker: null };
     controllers = {};
     explanationControllers = {};
     follow = {teach:true,problem:true};
@@ -685,13 +685,25 @@ export class Learn extends React.Component {
             await this.restorePair(opened.pair_id);
         } catch (error) { this.props.toast(error.message); }
     }
-    async assess(node) { try {
-        const result = await request(`/courses/${this.props.course.id}/knowledge/${node.id}/assessment`);
-        this.props.modal(node.title + ' · 测评', <Assessment course={this.props.course} node={node} result={result} onDone={() => this.load()}/>);
+    atomicDescendants(nodeId) { const result = [];
+        const stack = [nodeId];
+        while (stack.length) { const id = stack.pop(); for (const n of this.state.nodes.filter(x => x.parent === id)) { if (n.kind === 'ATOMIC')
+            result.push(n);
+        else
+            stack.push(n.id); } }
+        return result; }
+    assess(node) { if (node.kind === 'COMPOSITE') { const children = this.atomicDescendants(node.id); if (!children.length) {
+            this.props.toast('该综合节点暂无可测评的原子子知识点，无法代测。');
+            return;
+        }
+        this.setState({ assessPicker: { parent: node, children }, hover: null });
+        return;
     }
-    catch (e) {
-        this.props.modal(node.title + ' · 测评', <div><p>{e.message}</p><p className="helper-note" style={{ marginTop: 12 }}>学习进度和测评结果是两个独立状态。没有真实测评时不显示虚构分数。</p></div>);
-    } }
+        this.openAssessment(node); }
+    openAssessment(node) { this.setState({ assessment: node, expanded: false, hover: null, assessPicker: null }); }
+    closeAssessment() { this.setState({ assessment: null, assessPicker: null }); this.load(); }
+    renderAssessPicker() { const picker = this.state.assessPicker; if (!picker)
+        return null; return <div className="assessment-overlay"><div className="assessment-workspace assess-picker"><header className="assessment-topbar"><div><h2>选择要测评的子知识点</h2><p className="muted">{picker.parent.title} · 综合节点不直接出题</p></div><button className="btn" onClick={() => this.setState({ assessPicker: null })}>取消</button></header><div className="assessment-picker-list">{picker.children.map(child => <button key={child.id} className="node-picker-row" onClick={() => this.openAssessment(child)}><Icon name="book"/><span>{child.title}</span><small className="muted">{child.assessment_display || '未测评'}</small></button>)}</div></div></div>; }
     async source(c) { try {
         const rows = await request(`/courses/${this.props.course.id}/files`);
         const f = rows.find(x => x.id === c.document_id);
@@ -702,8 +714,8 @@ export class Learn extends React.Component {
     catch (e) {
         this.props.toast(e.message);
     } }
-    renderTree() { const groups = this.state.nodes.filter(n => !n.parent); return <div className="tree-expanded"><div className="row between"><div><h2>课程知识点树</h2><p className="helper-note" style={{ marginTop: 5 }}>选择节点，分别查看学习进度与测评结果。</p></div><IconButton name="close" title="收起知识树" onClick={() => this.setState({ expanded: false })}/></div><div className="tree-columns">{groups.map(root => { const children = this.state.nodes.filter(n => n.parent === root.id); return <div className="tree-group" key={root.id}>{children.length ? <div className="tree-group-title">{root.title}</div> : null}{children.length ? this.renderNodes(root.id, 0) : this.renderNodeRow(root, 0)}</div>; })}</div>{!groups.length && <div className="empty-state"><Icon name="tree"/><h3>还没有课程知识树</h3><p>上传资料后，需由现有 V3 知识引擎生成。此更新包不会伪造节点和学习状态。</p></div>}</div>; }
-    renderNodeRow(n, depth) { return <div key={n.id} style={{ marginLeft: depth * 14 }}><div className={'tree-node-new ' + (this.state.activeNode === n.id ? 'selected' : '')} tabIndex="0" onMouseEnter={() => this.setState({ hover: n.id })} onFocus={() => this.setState({ hover: n.id })} onMouseLeave={() => this.setState({ hover: null })} onClick={() => this.setState({ hover: n.id })}><Icon name="book"/><span>{n.title}</span><Icon name="arrow"/>{this.state.hover === n.id && <div className="node-popover" onClick={e => e.stopPropagation()}><strong>{n.title}</strong><button onClick={() => this.learnNode(n)}><span>学习进度</span><b>{n.progress === 'LEARNED' ? '教学已完成' : n.progress === 'LEARNING' ? '学习中' : '未开始'}</b><Icon name="arrow"/></button><button onClick={() => this.assess(n)}><span>测评结果</span><b>{n.grade || '未测评'}</b><Icon name="arrow"/></button></div>}</div>{this.renderNodes(n.id, depth + 1)}</div>; }
+    renderTree() { const groups = this.state.nodes.filter(n => !n.parent); return <div className="tree-expanded"><div className="row between"><div><h2>课程知识点</h2><p className="helper-note" style={{ marginTop: 5 }}>选择节点，分别查看学习进度与测评结果。</p></div><IconButton name="close" title="收起知识树" onClick={() => this.setState({ expanded: false })}/></div><div className="tree-columns">{groups.map(root => { const children = this.state.nodes.filter(n => n.parent === root.id); return <div className="tree-group" key={root.id}>{children.length ? <div className="tree-group-title">{root.title}</div> : null}{children.length ? this.renderNodes(root.id, 0) : this.renderNodeRow(root, 0)}</div>; })}</div>{!groups.length && <div className="empty-state"><Icon name="tree"/><h3>还没有课程知识树</h3><p>上传资料后，需由现有 V3 知识引擎生成。此更新包不会伪造节点和学习状态。</p></div>}</div>; }
+    renderNodeRow(n, depth) { const progressLabel = n.progress === 'LEARNED' ? '已完成' : n.progress === 'LEARNING' ? '学习中' : n.progress === 'SPEC_UNAVAILABLE' ? '暂不可用' : '未学习'; return <div key={n.id} style={{ marginLeft: depth * 14 }}><div className={'tree-node-new ' + (this.state.activeNode === n.id ? 'selected' : '')} tabIndex="0" onMouseEnter={() => this.setState({ hover: n.id })} onFocus={() => this.setState({ hover: n.id })} onMouseLeave={() => this.setState({ hover: null })} onClick={() => this.setState({ hover: n.id })}><Icon name="book"/><span>{n.title}</span><Icon name="arrow"/>{this.state.hover === n.id && <div className="node-popover" onClick={e => e.stopPropagation()}><strong>{n.title}</strong><button onClick={() => this.learnNode(n)}><span>学习进度</span><b>{progressLabel}</b><Icon name="arrow"/></button><button onClick={() => this.assess(n)}><span>测评结果</span><b>{n.assessment_display || '未测评'}</b><Icon name="arrow"/></button><button className="start-assessment" onClick={() => this.assess(n)}><span>开始测评</span><Icon name="arrow"/></button></div>}</div>{this.renderNodes(n.id, depth + 1)}</div>; }
     renderNodes(parent, depth) { return this.state.nodes.filter(n => n.parent === parent).map(n => this.renderNodeRow(n, depth)); }
     renderPane(lane) {
         const isTeach = lane === 'teach', messages = this.state.messages[lane];
@@ -720,18 +732,36 @@ export class Learn extends React.Component {
             <footer className="pane-footer"><div className="generation-status" role="status">{this.state.status[lane] || ''}</div>{this.state.attachments[lane].length > 0 && <div className="attachment-chips">{this.state.attachments[lane].map(f => <span key={f.id}><Icon name="file"/>{f.name}<button title="移除本次附件" onClick={() => this.setLane('attachments', lane, this.state.attachments[lane].filter(x => x.id !== f.id))}>×</button></span>)}</div>}<form className="chat-composer" onSubmit={e => { e.preventDefault(); this.ask(lane); }}><textarea aria-label={isTeach ? '知识学习输入' : '题目应对输入'} placeholder={isTeach ? '问一个问题，或者告诉我你想学什么…' : '输入题目，或写下文件名与题号…'} value={this.state.inputs[lane]} maxLength="6000" onChange={e => this.setLane('inputs', lane, e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); this.ask(lane); } }}/><div className="composer-bottom"><div className="row"><label className="attach-button" role="button" tabIndex={this.state.busy[lane] || this.state.uploading[lane] ? -1 : 0} aria-label={isTeach ? '添加知识学习附件' : '添加题目附件'} title="添加题目图片或课程文件" onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.querySelector('input')?.click(); } }}><Icon name="file"/><input type="file" hidden aria-label={isTeach ? '知识学习附件' : '题目附件'} accept=".pdf,.txt,.md,.csv,.ipynb,.png,.jpg,.jpeg,.webp,.docx,.pptx" disabled={this.state.busy[lane] || this.state.uploading[lane]} onChange={e => this.attach(lane, e)}/></label>{this.state.uploading[lane] && <span className="helper-note">正在上传…</span>}<ReasoningStrengthPicker lane={lane} value={this.state.strength[lane]} disabled={this.state.busy[lane] || this.state.uploading[lane]} onChange={strength => this.setStrength(lane, strength)}/>{isTeach && <span className="thinking-control"><span className="thinking-label">Thinking</span><button type="button" className={'thinking-circle' + (this.state.thinking.teach ? ' on' : '')} aria-pressed={this.state.thinking.teach} aria-label="思考模式" onClick={() => this.setState(s => ({thinking: {...s.thinking, teach: !s.thinking.teach}}))}><span className="thinking-dot"/></button></span>}</div><div className="row" style={{gap: 8}}>{!isTeach && <button type="button" className="do-exercise-btn" onClick={() => this.doExercise()} disabled={this.state.busy.problem || this.state.uploading.problem}>做一题</button>}{this.state.busy[lane] ? <IconButton name="stop" title="停止生成" onClick={() => this.stop(lane)}/> : <button className="send-button" aria-label={isTeach ? '发送知识问题' : '发送题目'} disabled={!this.state.inputs[lane].trim() || this.state.uploading[lane]}><Icon name="send"/></button>}</div></div></form></footer>
         </section>;
     }
-    render() { return <div className={'learn-new ' + (this.state.fullscreen ? 'focus-mode' : '')}><button className="knowledge-strip" onClick={() => this.setState({ expanded: !this.state.expanded })}><span className="row"><Icon name="tree"/><strong>课程知识点树</strong><small>{this.state.nodes.length} 个节点 · 点击展开</small></span><Icon name={this.state.expanded ? 'up' : 'down'}/></button><div className="workspace-new"><header className="workspace-toolbar"><IconButton name={this.state.fullscreen ? 'collapse' : 'expand'} title={this.state.fullscreen ? '退出全屏学习' : '全屏学习'} onClick={() => this.setState({ fullscreen: !this.state.fullscreen })}/><span className="muted small">{this.props.course.code} · 学习工作台</span><span className="model-label">{this.props.config.provider_mode === 'disabled' ? '模型未连接' : this.props.config.provider_mode === 'test' ? '测试 Provider · 非真实千问' : this.props.config.model}</span></header><div className="mobile-pane-tabs"><button className={this.state.mobile === 'teach' ? 'active' : ''} onClick={() => this.setState({ mobile: 'teach' })}>知识学习</button><button className={this.state.mobile === 'problem' ? 'active' : ''} onClick={() => this.setState({ mobile: 'problem' })}>题目应对</button></div>{this.state.error && <p className="error-text">{this.state.error}</p>}<div className={'workspace-columns '+(this.state.resizing?'is-resizing':'')} ref={el => this.workspace = el} style={{ gridTemplateColumns: `minmax(0,${this.state.ratio}fr) 9px minmax(0,${1 - this.state.ratio}fr)` }}>{this.renderPane('teach')}<div className="pane-divider" role="separator" aria-label="调整学习双栏比例" aria-orientation="vertical" aria-valuemin="25" aria-valuemax="75" aria-valuenow={Math.round(this.state.ratio * 100)} tabIndex="0" onMouseDown={e => this.drag(e)} onTouchStart={e=>this.drag(e)} onKeyDown={e => { if (['ArrowLeft', 'ArrowRight'].includes(e.key)) {
+    render() { return <div className={'learn-new ' + (this.state.fullscreen ? 'focus-mode' : '')}><button className="knowledge-strip" onClick={() => this.setState({ expanded: !this.state.expanded })}><span className="row"><Icon name="tree"/><strong>课程知识点</strong><small>{this.state.nodes.length} 个节点 · 点击展开</small></span><Icon name={this.state.expanded ? 'up' : 'down'}/></button><div className="workspace-new"><header className="workspace-toolbar"><IconButton name={this.state.fullscreen ? 'collapse' : 'expand'} title={this.state.fullscreen ? '退出全屏学习' : '全屏学习'} onClick={() => this.setState({ fullscreen: !this.state.fullscreen })}/><span className="muted small">{this.props.course.code} · 学习工作台</span><span className="model-label">{this.props.config.provider_mode === 'disabled' ? '模型未连接' : this.props.config.provider_mode === 'test' ? '测试 Provider · 非真实千问' : this.props.config.model}</span></header><div className="mobile-pane-tabs"><button className={this.state.mobile === 'teach' ? 'active' : ''} onClick={() => this.setState({ mobile: 'teach' })}>知识学习</button><button className={this.state.mobile === 'problem' ? 'active' : ''} onClick={() => this.setState({ mobile: 'problem' })}>题目应对</button></div>{this.state.error && <p className="error-text">{this.state.error}</p>}<div className={'workspace-columns '+(this.state.resizing?'is-resizing':'')} ref={el => this.workspace = el} style={{ gridTemplateColumns: `minmax(0,${this.state.ratio}fr) 9px minmax(0,${1 - this.state.ratio}fr)` }}>{this.renderPane('teach')}<div className="pane-divider" role="separator" aria-label="调整学习双栏比例" aria-orientation="vertical" aria-valuemin="25" aria-valuemax="75" aria-valuenow={Math.round(this.state.ratio * 100)} tabIndex="0" onMouseDown={e => this.drag(e)} onTouchStart={e=>this.drag(e)} onKeyDown={e => { if (['ArrowLeft', 'ArrowRight'].includes(e.key)) {
         e.preventDefault();
         this.setState({ ratio: Math.max(.25, Math.min(.75, this.state.ratio + (e.key === 'ArrowLeft' ? -.025 : .025))) }, () => this.saveLayout());
-    } }}><span /></div>{this.renderPane('problem')}</div></div>{this.state.expanded && this.renderTree()}{this.renderWindows()}</div>; }
+    } }}><span /></div>{this.renderPane('problem')}</div></div>{this.state.expanded && this.renderTree()}{this.renderAssessPicker()}{this.state.assessment && <AssessmentWorkspace course={this.props.course} node={this.state.assessment} toast={this.props.toast} onExit={() => this.closeAssessment()}/>}{this.renderWindows()}</div>; }
 }
-class Assessment extends React.Component {
-    state = { view: null, answers: {}, busy: false, error: '', finished: false };
-    componentDidMount() { const s = this.props.result || {}; if (s.status === 'IN_PROGRESS' && s.session)
-        this.open(s.session); }
-    base = () => `/courses/${this.props.course.id}/knowledge`;
+export class AssessmentWorkspace extends React.Component {
+    state = { view: null, summary: null, busy: false, error: '', preparing: null, answer: '', attachments: [], confirmUnanswered: false, windows: {}, explanations: {} };
+    winZ = 0;
+    winCount = 0;
+    componentDidMount() { this.loadSummary(); this.keyHandler = e => { if (e.key === 'Escape')
+        this.props.onExit(); }; window.addEventListener('keydown', this.keyHandler); }
+    componentWillUnmount() { window.removeEventListener('keydown', this.keyHandler); }
+    async loadSummary() { try {
+        const summary = await getAssessment(this.props.course.id, this.props.node.id);
+        this.setState({ summary });
+        if (summary.status === 'IN_PROGRESS' && summary.session)
+            await this.open(summary.session);
+    }
+    catch (e) {
+        this.setState({ error: e.message });
+    } }
     async open(session) { this.setState({ busy: true, error: '' }); try {
-        this.setState({ view: await request(this.base() + '/assessment/' + session) });
+        const view = await getAssessmentSession(this.props.course.id, session);
+        this.setState({ view, preparing: null });
+        try {
+            const draft = await loadAssessmentDraft(this.props.course.id, session);
+            if (draft?.draft?.unified_answer)
+                this.setState({ answer: draft.draft.unified_answer });
+        }
+        catch { }
     }
     catch (e) {
         this.setState({ error: e.message });
@@ -739,23 +769,62 @@ class Assessment extends React.Component {
     finally {
         this.setState({ busy: false });
     } }
-    async start() { this.setState({ busy: true, error: '' }); try {
-        const started = await send(this.base() + '/' + this.props.node.id + '/assessment/session', { request_id: key() });
-        this.setState({ view: await request(this.base() + '/assessment/' + started.id), finished: false });
+    async start() { this.setState({ busy: true, error: '', preparing: null }); try {
+        const started = await startAssessment(this.props.course.id, this.props.node.id);
+        await this.handleStart(started);
     }
     catch (e) {
         this.setState({ error: e.message });
     }
     finally {
         this.setState({ busy: false });
+    } }
+    async handleStart(started) { if (started.preparation_job_id) {
+        this.setState({ preparing: started });
+        if (started.status === 'READY') {
+            const retry = await startAssessment(this.props.course.id, this.props.node.id);
+            if (retry.preparation_job_id)
+                return this.setState({ preparing: retry });
+            await this.open(retry.id);
+        }
+        return;
+    }
+        await this.open(started.id); }
+    async retryPreparation() { const retry = await resumePreparation(this.props.course.id, this.props.node.id); this.setState({ preparing: retry }); if (retry.status === 'READY') {
+        const started = await startAssessment(this.props.course.id, this.props.node.id);
+        if (!started.preparation_job_id)
+            await this.open(started.id);
+    } }
+    async cancelPreparation() { const job = this.state.preparing; if (!job?.preparation_job_id)
+        return; await cancelPreparation(this.props.course.id, this.props.node.id, job.preparation_job_id); this.setState({ preparing: { ...job, status: 'CANCELLED' } }); }
+    async attach(e) { const input = e.currentTarget; const file = input.files[0]; if (!file)
+        return; try {
+        const data = new FormData();
+        data.append('file', file);
+        data.append('folder', '我的题目');
+        const saved = await request(`/courses/${this.props.course.id}/files`, { method: 'POST', body: data });
+        this.setState(s => ({ attachments: [...s.attachments, saved] }));
+    }
+    catch (error) {
+        this.props.toast(error.message);
+    }
+    finally {
+        input.value = '';
+    } }
+    async saveDraft() { const view = this.state.view; if (!view)
+        return; try {
+        await saveAssessmentDraft(this.props.course.id, view.id, { unified_answer: this.state.answer, attachments: this.state.attachments.map(a => ({ id: a.id, kind: 'image' })) });
+        this.props.toast('草稿已保存。');
+    }
+    catch (e) {
+        this.props.toast(e.message);
     } }
     async submit() { const view = this.state.view; if (!view || view.status !== 'IN_PROGRESS')
-        return; const answers = view.questions.map(q => ({ blueprint_item_id: q.id, answer: String(this.state.answers[q.id] ?? '').trim() })); if (answers.some(a => !a.answer))
-        return this.setState({ error: '请回答全部题目后再提交。' }); this.setState({ busy: true, error: '' }); try {
-        await send(this.base() + '/assessment/' + view.id + '/submit', { request_id: key(), answers });
-        const graded = await request(this.base() + '/assessment/' + view.id);
-        this.setState({ view: graded, finished: true });
-        this.props.onDone?.();
+        return; if (!this.state.answer.trim() && !this.state.attachments.length && !window.confirm('尚未填写任何答案，确认按未作答提交？'))
+        return; this.setState({ busy: true, error: '' }); try {
+        await submitAssessment(this.props.course.id, view.id, { unified_answer: this.state.answer, attachments: this.state.attachments.map(a => ({ id: a.id, kind: 'image' })), confirm_unanswered: this.state.confirmUnanswered ? view.questions.map(q => q.id) : [] });
+        const graded = await getAssessmentSession(this.props.course.id, view.id);
+        this.setState({ view: graded, preparing: null });
     }
     catch (e) {
         this.setState({ error: e.message });
@@ -764,20 +833,48 @@ class Assessment extends React.Component {
         this.setState({ busy: false });
     } }
     async abandon() { const view = this.state.view; if (!view)
-        return; this.setState({ busy: true }); try {
-        await send(this.base() + '/assessment/' + view.id + '/abandon', { request_id: key() });
-        this.setState({ view: null, finished: true });
-        this.props.onDone?.();
+        return; if (!window.confirm('放弃本次测评？未提交的答案将按草稿保留。'))
+        return; await this.saveDraft(); try {
+        await abandonAssessment(this.props.course.id, view.id);
+        this.setState({ view: null, preparing: null });
+        this.props.onExit();
     }
     catch (e) {
-        this.setState({ error: e.message });
-    }
-    finally {
-        this.setState({ busy: false });
+        this.props.toast(e.message);
     } }
-    renderSummary() { const view = this.state.view; const r = view ? { status: view.status, grade: view.grade?.label || null, score: view.raw_score, session: view.id, mode: view.mode, assistance: view.assistance_status, source: 'V3 assessment engine' } : (this.props.result || {}); const status = r.status || 'NOT_ASSESSED'; const scored = status === 'GRADED' || typeof r.score === 'number'; return <div><dl className="assessment-grid"><dt>状态</dt><dd>{status === 'GRADED' ? '已评阅' : status === 'IN_PROGRESS' ? '进行中' : status === 'SUBMITTED' ? '已提交' : status === 'NOT_ASSESSED' ? '未测评' : status}</dd><dt>成绩</dt><dd>{r.grade || '未出具'}</dd><dt>原始分</dt><dd>{typeof r.score === 'number' ? r.score : '—'}</dd>{r.session && <><dt>测评场次</dt><dd className="mono">{r.session}</dd></>}{r.mode && <><dt>模式</dt><dd>{r.mode === 'INDEPENDENT' ? '独立完成' : r.mode === 'PRACTICE' ? '练习' : r.mode}</dd></>}{r.assistance && <><dt>协助状态</dt><dd>{r.assistance === 'UNASSISTED' ? '无协助' : r.assistance === 'ASSISTED' ? '有提示' : r.assistance === 'ANSWER_EXPOSED' ? '已看过答案' : r.assistance}</dd></>}</dl>{r.source && <p className="helper-note" style={{ marginTop: 12 }}>来源：{r.source}</p>}{!scored && status !== 'IN_PROGRESS' && <p className="helper-note" style={{ marginTop: 12 }}>还没有真实测评成绩。学习进度和测评结果是两个独立状态，这里不显示虚构分数。</p>}</div>; }
-    renderQuestion(q, i) { const value = this.state.answers[q.id] ?? ''; const locked = this.state.view?.status !== 'IN_PROGRESS'; return <article className="assessment-question" key={q.id}><header><strong>第 {i + 1} 题</strong><small>{q.question_type}{q.marks ? ' · ' + q.marks + ' 分' : ''}</small></header><p className="assessment-prompt">{q.prompt}</p>{q.options && q.options.length ? <div className="assessment-options">{q.options.map((option, j) => <label key={j} className={'assessment-option' + (value === String(option) ? ' selected' : '')}><input type="radio" name={q.id} disabled={locked} checked={value === String(option)} onChange={() => this.setState({ answers: { ...this.state.answers, [q.id]: option } })}/><span>{option}</span></label>)}</div> : <textarea aria-label={'第 ' + (i + 1) + ' 题答案'} disabled={locked} rows={3} maxLength="12000" placeholder="在这里作答…" value={value} onChange={e => this.setState({ answers: { ...this.state.answers, [q.id]: e.target.value } })}/>}{q.review && <div className="assessment-review"><p className="helper-note">你的答案：{q.review.submitted_answer ?? '（未作答）'}</p><p className="helper-note">参考答案：{JSON.stringify(q.review.answer)}</p><p className="helper-note">得分：{q.review.awarded_marks} / {q.marks}{q.review.feedback ? ' · ' + q.review.feedback : ''}</p></div>}</article>; }
-    render() { const { view, busy, error, finished } = this.state; const active = view && view.status === 'IN_PROGRESS'; return <div className="assessment-flow">{this.state.error && <p className="error-text">{this.state.error}</p>}{this.renderSummary()}{!view && !finished && <div className="row" style={{ marginTop: 16 }}><button className="btn primary" disabled={busy} onClick={() => this.start()}>{busy ? '正在准备…' : '开始测评（5 题）'}</button>{this.props.result?.status === 'GRADED' && <p className="helper-note">已有评分记录；再次测评会开启新的场次。</p>}</div>}{active && <><div className="assessment-questions">{view.questions.map((q, i) => this.renderQuestion(q, i))}</div><div className="row" style={{ marginTop: 16 }}><button className="btn primary" disabled={busy} onClick={() => this.submit()}>{busy ? '正在提交…' : '提交答案'}</button><button className="btn" disabled={busy} onClick={() => this.abandon()}>放弃本次测评</button></div></>}{view && view.status === 'GRADED' && <><p className="helper-note" style={{ marginTop: 12 }}>评阅完成。查看每题反馈后关闭即可。</p><div className="assessment-questions">{view.questions.map((q, i) => this.renderQuestion(q, i))}</div><div className="row" style={{ marginTop: 16 }}><button className="btn" onClick={() => this.setState({ view: null, finished: true })}>返回概览</button><button className="btn" onClick={() => this.start()}>再测一次</button></div></>}</div>; }
+    openStepExplanation(q, step) { const key = q.id + ':' + step.step_id; if (this.state.windows[key]) {
+        this.closeExplanation(key);
+        return;
+    }
+        const n = this.winCount++, z = ++this.winZ;
+        this.setState(s => ({ windows: { ...s.windows, [key]: { ordinal: step.ordinal, title: step.operation, x: 90 + n * 24, y: 70 + n * 24, w: 520, h: 420, z } } }));
+        this.ensureExplanation(key, q.id, step.step_id); }
+    closeExplanation(key) { this.setState(s => { const w = { ...s.windows };
+        delete w[key];
+        return { windows: w }; }); }
+    raiseExplanation(key) { const z = ++this.winZ; this.setState(s => ({ windows: { ...s.windows, [key]: { ...(s.windows[key] || {}), z } } })); }
+    async ensureExplanation(key, blueprintItemId, stepId) { try {
+        const created = await createAssessmentExplanation(this.props.course.id, this.state.view.id, blueprintItemId, stepId);
+        this.setState(s => ({ explanations: { ...s.explanations, [key]: { status: 'completed', text: created.content?.text || '暂无详解', messages: [] } } }));
+    }
+    catch (e) {
+        this.setState(s => ({ explanations: { ...s.explanations, [key]: { status: 'error', error: e.message } } }));
+    } }
+    renderWindows() { const keys = Object.keys(this.state.windows); if (!keys.length)
+        return null; return keys.map(key => <ExplanationWindow key={key} win={this.state.windows[key]} exp={this.state.explanations[key]} onClose={() => this.closeExplanation(key)} onRaise={() => this.raiseExplanation(key)} onFollowUp={() => this.props.toast('测评详解暂不支持追问。')} onCancel={() => { }}/>); }
+    statusLabel() { const { view, preparing } = this.state; if (preparing)
+        return preparing.status === 'READY' ? '题库已就绪' : preparing.status === 'BLOCKED' ? '题库准备受阻' : preparing.status === 'CANCELLED' ? '已取消' : '正在准备题库'; if (!view)
+            return '未开始'; if (view.status === 'IN_PROGRESS')
+            return '测评进行中'; if (view.status === 'SUBMITTED')
+            return '待复核'; if (view.status === 'GRADED')
+            return '已评阅'; return view.status; }
+    renderPreparing() { const p = this.state.preparing; return <div className="assessment-preparing"><p>{p.error_message || '题池不足，正在准备五道测评题。'}（已找到 {p.eligible_families || 0} 个不同题族）</p>{p.status === 'BLOCKED' && <p className="error-text">准备受阻：{p.error_code || '缺少预算或提供方'}。未生成任何题目。</p>}<div className="row" style={{ marginTop: 12 }}><button className="btn" disabled={this.state.busy} onClick={() => this.retryPreparation()}>重试准备</button>{p.status === 'PREPARING' && <button className="btn" onClick={() => this.cancelPreparation()}>取消准备</button>}</div></div>; }
+    renderStart() { return <div className="assessment-start"><p className="helper-note">固定五题、总 100 分。参考解与评分依据在提交前不会显示。</p><button className="btn primary" disabled={this.state.busy} onClick={() => this.start()}>{this.state.busy ? '正在准备…' : '开始测评（5 题）'}</button></div>; }
+    renderQuestion(q, i) { return <article className="assessment-question" key={q.id}><header><strong>第 {i + 1} 题</strong><small>{q.question_type}{q.marks ? ' · ' + q.marks + ' 分' : ''}{q.verification_method === 'AI_REVIEWED' ? ' · AI参考自测' : ''}</small></header><p className="assessment-prompt">{q.prompt}</p>{q.options && q.options.length ? <div className="assessment-options">{q.options.map((option, j) => <span key={j} className="assessment-option-readonly">{option}</span>)}</div> : null}</article>; }
+    renderReview(q, i) { const review = q.review; if (!review)
+        return null; return <div className="assessment-review"><p className="helper-note">你的答案：{review.submitted_answer ?? '（未作答）'}</p><p className="helper-note">得分：{review.awarded_marks ?? '—'} / {q.marks}</p>{review.rubric?.length ? <ul className="assessment-rubric">{review.rubric.map(c => <li key={c.criterion_id}>{c.dimension}：{c.description}</li>)}</ul> : null}{review.feedback ? <p className="helper-note">{review.feedback}</p> : null}{review.reference_solution ? <div className="reference-solution"><strong>参考解（分步）</strong>{review.reference_solution.answer ? <p>{review.reference_solution.answer}</p> : null}{(review.reference_solution.steps || []).map(step => <div className="reference-step" key={step.step_id}><span>{step.ordinal}. {step.operation} → {step.result}</span><button className="step-explain-link" onClick={() => this.openStepExplanation(q, step)}>详解</button></div>)}{(review.reference_solution.source_refs || []).length ? <p className="muted">来源：{review.reference_solution.source_refs.join(', ')}</p> : null}</div> : null}</div>; }
+    render() { const { view, busy, error } = this.state; const active = view && view.status === 'IN_PROGRESS'; const done = view && (view.status === 'GRADED' || view.status === 'SUBMITTED'); return <div className="assessment-overlay" role="dialog" aria-label="五题测评工作区"><div className="assessment-workspace"><header className="assessment-topbar"><div><strong>{this.props.course.code}</strong> · {this.props.node.title}</div><span className="muted">{this.statusLabel()}</span><button className="btn" onClick={this.props.onExit}>退出</button></header><div className="assessment-body">{error && <p className="error-text">{error}</p>}{this.state.preparing && this.renderPreparing()}{!view && !this.state.preparing && this.renderStart()}{active && <div className="assessment-questions">{view.questions.map((q, i) => this.renderQuestion(q, i))}</div>}{done && <><div className="assessment-summary"><strong>{view.status === 'GRADED' ? '已评阅' : '待复核'}</strong>{typeof view.raw_score === 'number' ? <span>原始分：{view.raw_score} / 100</span> : null}{view.grade?.label ? <span>映射：{view.grade.label}</span> : null}</div><div className="assessment-questions">{view.questions.map((q, i) => <div key={q.id}>{this.renderQuestion(q, i)}{this.renderReview(q, i)}</div>)}</div><div className="row" style={{ marginTop: 16 }}><button className="btn" onClick={() => this.setState({ view: null, preparing: null })}>返回概览</button><button className="btn primary" onClick={() => this.start()}>再测一次</button></div></>}</div>{active && <footer className="assessment-composer"><div className="assessment-hint">请按第 1 题至第 5 题填写答案（如“1. … 2. …”），也可上传图片或文档。</div><div className="row"><label className="attach-button" role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault();
+        e.currentTarget.querySelector('input')?.click(); } }}><Icon name="file"/><input type="file" hidden accept=".pdf,.txt,.md,.csv,.ipynb,.png,.jpg,.jpeg,.webp,.docx,.pptx" onChange={e => this.attach(e)}/></label>{this.state.attachments.length > 0 && <span className="muted">{this.state.attachments.length} 个附件</span>}<label className="muted small"><input type="checkbox" checked={this.state.confirmUnanswered} onChange={e => this.setState({ confirmUnanswered: e.target.checked })}/>确认未标注的题目按未作答提交</label></div><textarea aria-label="统一答案" placeholder="在此填写第 1–5 题的答案，用 1. 2. 3. 4. 5. 标记分隔…" value={this.state.answer} maxLength="60000" onChange={e => this.setState({ answer: e.target.value })}/><div className="row" style={{ marginTop: 8 }}><button className="btn" disabled={busy} onClick={() => this.saveDraft()}>保存草稿</button><button className="btn" disabled={busy} onClick={() => this.abandon()}>放弃</button><button className="btn primary" disabled={busy} onClick={() => this.submit()}>{busy ? '正在提交…' : '提交答案'}</button></div></footer>}{this.renderWindows()}</div></div>; }
 }
 export class ExplanationWindow extends React.Component {
     state = { x: 0, y: 0, w: 520, h: 420, followUp: '' };

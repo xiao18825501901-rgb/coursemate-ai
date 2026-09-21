@@ -29,12 +29,33 @@ GOVERNANCE_MIGRATIONS = (
     "019_scoped_publication_reviews.sql",
     "020_official_publication_resource_locks.sql",
     "021_model_call_budget_reservations.sql",
+    "026_learning_start_events.sql",
+    "027_assessment_preparation_reference.sql",
+    "028_jev_decision_receipts.sql",
 )
 SCHEMA_OBJECT = re.compile(
-    r"CREATE\s+(?:UNIQUE\s+)?(TABLE|TRIGGER|INDEX)\s+IF\s+NOT\s+EXISTS\s+"
+    r"CREATE\s+(?:UNIQUE\s+)?(TABLE|TRIGGER|INDEX)\s+(?:IF\s+NOT\s+EXISTS\s+)?"
     r"([A-Za-z_][A-Za-z0-9_]*)",
     re.IGNORECASE,
 )
+# Migration 027 rebuilds four tables under <name>_new and then renames them, so
+# these names only exist inside the migration and must never be required of the
+# migrated database.
+TRANSIENT_OBJECT_SUFFIXES = ("_new", "_old")
+
+
+def ddl_objects(sql: str) -> set[tuple[str, str]]:
+    """Governance objects a migration creates, ignoring comments.
+
+    ``IF NOT EXISTS`` is optional because migration 027 recreates triggers
+    unconditionally after dropping them.
+    """
+    without_comments = re.sub(r"--[^\n]*", "", sql)
+    return {
+        (kind.casefold(), name)
+        for kind, name in SCHEMA_OBJECT.findall(without_comments)
+        if not name.casefold().endswith(TRANSIENT_OBJECT_SUFFIXES)
+    }
 
 
 def expected_governance_schema_objects() -> set[tuple[str, str]]:
@@ -42,7 +63,7 @@ def expected_governance_schema_objects() -> set[tuple[str, str]]:
     objects: set[tuple[str, str]] = set()
     for filename in GOVERNANCE_MIGRATIONS:
         sql = migration_root.joinpath(filename).read_text(encoding="utf-8")
-        objects.update((kind.casefold(), name) for kind, name in SCHEMA_OBJECT.findall(sql))
+        objects.update(ddl_objects(sql))
     return objects
 
 

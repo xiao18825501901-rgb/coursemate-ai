@@ -495,10 +495,12 @@ def test_responses_multimodal_payload_uses_private_data_uri_only() -> None:
             app_env="development",
             rag_provider_mode="openai",
             v3_enabled=True,
+            # Explicit DeepSeek model so the test never depends on a .env
+            # V3_MODEL override (the payload contract it asserts is
+            # protocol-level and unchanged by the generation-provider switch).
+            v3_model="deepseek-flash",
             v3_model_api_key="test-only-key",
-            v3_model_base_url=(
-                "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-            ),
+            v3_model_base_url="https://api.deepseek.com",
         )
     )
     provider.client = SimpleNamespace(responses=Responses())

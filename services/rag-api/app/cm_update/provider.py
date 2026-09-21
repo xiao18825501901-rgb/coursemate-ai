@@ -17,6 +17,17 @@ import json
 from pathlib import Path
 from typing import AsyncIterator
 import httpx
+from app.evaluation.deepseek_contract import (
+    CHAT_COMPLETIONS_PATH,
+    DeepSeekCapabilityError,
+    IMAGE_TOKENS_PER_INPUT,
+    RESPONSES_PATH,
+    chat_completions_body,
+    chat_completions_image_part,
+    json_schema_text_format,
+    responses_body,
+    responses_image_part,
+)
 from .sse import events
 from . import templates
 from .budget import OperationEstimate, estimate_operation_cost
@@ -70,7 +81,7 @@ class QwenProvider:
 
     def work_messages(self, prompt: str, course: dict, text: str, sources: list, history: list, bridge=None):
         """Stage-2 work call: executes the exact plan text from stage 1."""
-        instruction=('你是 CourseMate 教师。执行下面由千问生成的教学 Prompt，给出可核验的教学解释，'
+        instruction=('你是 CourseMate 教师。执行下面由上一阶段生成的教学 Prompt，给出可核验的教学解释，'
                      '不要暴露内部思维链。只使用提供的材料引用标记 [S1] 等；无材料支持时区分补充理解。'
                      '没有工具权限，不要声称修改了数据库、分数或发布状态。\n\n'+prompt)
         messages=[{'role':'system','content':instruction}]
@@ -345,6 +356,185 @@ class QwenProvider:
             if 'text' in item: text += item['text']
             if 'usage' in item: usages.append(item['usage'])
         return text.strip(), usages
+
+class DeepSeekProvider(QwenProvider):
+    """DeepSeek generation engine (deepseek-flash / DeepSeek-V4.1-Flash).
+
+    Reuses the provider-agnostic message builders from ``QwenProvider`` (prompt
+    assembly is product logic, not a Qwen wire detail) and replaces every
+    transport/payload decision with the verified DeepSeek contract:
+
+    * Chat Completions and Responses bodies carry NO Qwen-only fields
+      (``enable_thinking``, ``max_pixels``).
+    * Images use the documented ``detail`` field; native thinking is explicitly
+      disabled; json_schema structured output goes over Responses ``text.format``.
+    * The endpoint host is pinned to ``api.deepseek.com`` by the settings
+      validator; this class never rewrites the host or falls back to Qwen.
+    """
+
+    def __init__(self, settings, transport=None):
+        super().__init__(settings, transport)
+        self.model = settings.deepseek_model
+        self.base_url = settings.deepseek_base_url.rstrip('/')
+        self.protocol = settings.deepseek_protocol
+        self.key = settings.deepseek_key
+
+    # ------------------------------------------------------------------ images
+
+    def attach_images(self, messages: list, images: list) -> None:
+        """Authorized images only; DeepSeek's ``detail`` field, never ``max_pixels``."""
+        if not images:
+            return
+        content = messages[-1]['content']
+        if self.protocol == 'responses':
+            parts = [{'type': 'input_text', 'text': content}]
+            parts.extend(responses_image_part(im['data_url']) for im in images)
+        else:
+            parts = [{'type': 'text', 'text': content}]
+            parts.extend(chat_completions_image_part(im['data_url']) for im in images)
+        messages[-1]['content'] = parts
+
+    def _with_estimated_images(self, messages: list, attachments: list | None) -> list:
+        copied = [dict(message) for message in messages]
+        if not attachments:
+            return copied
+        content = copied[-1]['content']
+        if self.protocol == 'responses':
+            parts = [{'type': 'input_text', 'text': content}]
+            parts.extend(responses_image_part('') for _ in attachments)
+        else:
+            parts = [{'type': 'text', 'text': content}]
+            parts.extend(chat_completions_image_part('') for _ in attachments)
+        copied[-1]['content'] = parts
+        return copied
+
+    def _estimate(self, stages: list[dict]) -> OperationEstimate:
+        return estimate_operation_cost(
+            stages=stages,
+            input_usd_per_million=self.cfg.operation_input_usd_per_million,
+            output_usd_per_million=self.cfg.operation_output_usd_per_million,
+            # DeepSeek resizes every image to at most 1024 tokens (documented).
+            image_tokens_per_input=IMAGE_TOKENS_PER_INPUT + 2,
+        )
+
+    # ------------------------------------------------------------- structured
+
+    def _structured_text_format(self, response_format: dict) -> dict:
+        """Map the exercise.v2 Chat-Completions json_schema into DeepSeek's
+        Responses ``text.format`` json_schema (the schema content is unchanged;
+        only the wire shape is adapted)."""
+        format_type = response_format.get('type')
+        if format_type == 'json_object':
+            return {'type': 'json_object'}
+        if format_type == 'json_schema':
+            js = response_format.get('json_schema') or {}
+            return json_schema_text_format(
+                str(js.get('name') or 'coursemate_response'),
+                js.get('schema') or {},
+            )
+        raise DeepSeekCapabilityError(
+            'exercise', f'response_format {format_type!r}', 'responses'
+        )
+
+    # ------------------------------------------------------------------ stream
+
+    async def stream(self, messages: list, tokens: int, *, response_format: dict | None = None) -> AsyncIterator[dict]:
+        cfg = self.cfg
+        if not cfg.allow_billable:
+            raise ProviderError('BILLING_NOT_AUTHORIZED')
+        # json_schema structured output is documented only on the Responses
+        # ``text.format`` field; force that protocol for structured calls.
+        protocol = 'responses' if response_format is not None else self.protocol
+        if protocol == 'responses':
+            text_format = self._structured_text_format(response_format) if response_format else None
+            body = responses_body(
+                model=self.model,
+                input=messages,
+                max_output_tokens=tokens,
+                stream=True,
+                text_format=text_format,
+            )
+            endpoint = self.base_url + RESPONSES_PATH
+        else:
+            body = chat_completions_body(
+                model=self.model,
+                messages=messages,
+                max_tokens=tokens,
+                stream=True,
+                response_format=response_format,
+            )
+            endpoint = self.base_url + CHAT_COMPLETIONS_PATH
+        self.calls.append({
+            'model': self.model,
+            'stage_tokens': tokens,
+            'protocol': protocol,
+            'structured': response_format is not None,
+        })
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(cfg.timeout, connect=12),
+                transport=self.transport,
+                follow_redirects=False,
+            ) as client:
+                async with client.stream(
+                    'POST', endpoint, headers={'Authorization': 'Bearer ' + self.key}, json=body
+                ) as response:
+                    if response.status_code != 200:
+                        raise ProviderError('PROVIDER_HTTP_' + str(response.status_code))
+                    finished = False
+                    async for event_type, raw in events(response.aiter_lines()):
+                        if raw.strip() == '[DONE]':
+                            if not finished:
+                                raise ProviderError('DISCONNECTED_PROVIDER_STREAM')
+                            break
+                        try:
+                            data = json.loads(raw)
+                        except json.JSONDecodeError:
+                            raise ProviderError('INVALID_PROVIDER_STREAM') from None
+                        if not isinstance(data, dict) or data.get('error'):
+                            raise ProviderError('INVALID_PROVIDER_RESPONSE')
+                        if protocol == 'responses':
+                            kind = data.get('type', event_type)
+                            if kind == 'response.output_text.delta':
+                                value = data.get('delta', '')
+                                if not isinstance(value, str):
+                                    raise ProviderError('INVALID_PROVIDER_STREAM')
+                                if value:
+                                    yield {'text': value}
+                            if kind == 'response.completed':
+                                status = data.get('response', {}).get('status', 'completed')
+                                if status != 'completed':
+                                    raise ProviderError('INCOMPLETE_PROVIDER_RESPONSE')
+                                finished = True
+                                yield {'usage': data.get('response', {}).get('usage', {})}
+                            if kind in {'response.failed', 'response.incomplete', 'error'}:
+                                raise ProviderError('INCOMPLETE_PROVIDER_RESPONSE')
+                        else:
+                            choices = data.get('choices', [])
+                            if not isinstance(choices, list):
+                                raise ProviderError('INVALID_PROVIDER_STREAM')
+                            for choice in choices:
+                                if not isinstance(choice, dict):
+                                    raise ProviderError('INVALID_PROVIDER_STREAM')
+                                delta = choice.get('delta', {}).get('content')
+                                if delta:
+                                    if not isinstance(delta, str):
+                                        raise ProviderError('INVALID_PROVIDER_STREAM')
+                                    yield {'text': delta}
+                                reason = choice.get('finish_reason')
+                                if reason is not None and reason != 'stop':
+                                    raise ProviderError('INCOMPLETE_PROVIDER_RESPONSE')
+                                if reason == 'stop':
+                                    finished = True
+                            if data.get('usage'):
+                                yield {'usage': data['usage']}
+                    if not finished:
+                        raise ProviderError('DISCONNECTED_PROVIDER_STREAM')
+        except ValueError:
+            raise ProviderError('INVALID_PROVIDER_STREAM') from None
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
+            raise ProviderError('PROVIDER_TIMEOUT_OR_NETWORK') from None
+
 
 class DisabledProvider:
     async def generate(self,*args,**kwargs):

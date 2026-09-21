@@ -53,18 +53,19 @@ def _learning_start_fact(
 
     * a ``learning_start_events`` row written when a teaching request was
       accepted (schema 26, the primary fact), and
-    * an existing ``learning_journeys`` row for the same scope — journeys are
-      only ever created by an accepted teaching request or delivery, so a
-      pre-026 journey is legacy evidence of a real start, not an empty shell.
+    * a pre-026 ``learning_journeys`` row that carries a REAL accepted artifact —
+      a delivered teaching unit, coverage, delivery evidence, or a LEARNED
+      status. A bare journey row is not a start: failed/cancelled/rejected
+      submissions can leave an empty shell behind, and that must never look
+      like learning.
 
     Creating a workspace, hovering a node, restoring history or reading a
-    projection never creates either row, so those never look like a start.
-    Coverage is deliberately NOT consulted here.
+    projection never creates either fact, so those never look like a start.
+    Coverage is deliberately NOT consulted for the start decision itself.
     """
 
     if spec_version is None:
         return None, None
-    with_events: tuple[str | None, str | None]
     event = connection.execute(
         "SELECT accepted_at,source FROM learning_start_events "
         "WHERE workspace_id=? AND node_id=? AND spec_version=? "
@@ -73,13 +74,21 @@ def _learning_start_fact(
     ).fetchone()
     if event is not None:
         return str(event[0]), str(event[1])
-    journey = connection.execute(
-        "SELECT COUNT(*) FROM learning_journeys WHERE workspace_id=? AND node_id=? "
-        "AND spec_version=?",
+    legacy = connection.execute(
+        "SELECT journey.id, (SELECT MIN(unit.created_at) FROM teaching_units AS unit "
+        "                  WHERE unit.journey_id=journey.id) AS first_unit_at "
+        "FROM learning_journeys AS journey "
+        "WHERE journey.workspace_id=? AND journey.node_id=? AND journey.spec_version=? "
+        "AND (journey.status='LEARNED' "
+        "     OR EXISTS(SELECT 1 FROM teaching_units AS unit WHERE unit.journey_id=journey.id) "
+        "     OR EXISTS(SELECT 1 FROM learning_coverage AS cov WHERE cov.journey_id=journey.id) "
+        "     OR EXISTS(SELECT 1 FROM teaching_delivery_evidence AS ev "
+        "               WHERE ev.journey_id=journey.id)) "
+        "ORDER BY journey.id LIMIT 1",
         (workspace_id, node_id, spec_version),
     ).fetchone()
-    if journey is not None and int(journey[0]) > 0:
-        return "", "JOURNEY"
+    if legacy is not None:
+        return str(legacy["first_unit_at"] or ""), "LEGACY_JOURNEY"
     return None, None
 
 

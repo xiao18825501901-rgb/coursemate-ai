@@ -65,24 +65,52 @@ describe("Agent security configuration", () => {
     });
     expect(config.host).toBe("0.0.0.0");
   });
-  it("loads a custom OpenAI-compatible base URL", () => {
+  it("defaults the model and base URL to DeepSeek when nothing is set", () => {
     const config = loadConfig({
       CLERK_PUBLISHABLE_KEY: "pk_test_example",
       CLERK_SECRET_KEY: "sk_test_example",
-      OPENAI_BASE_URL: "https://workspace.example.com/compatible-mode/v1",
     });
 
-    expect(config.openaiBaseUrl).toBe("https://workspace.example.com/compatible-mode/v1");
+    expect(config.openaiChatModel).toBe("deepseek-flash");
+    expect(config.openaiBaseUrl).toBe("https://api.deepseek.com");
   });
 
-  it.each([undefined, ""])("leaves an absent or empty OpenAI base URL undefined", (baseUrl) => {
+  it.each([undefined, ""])("defaults an absent or empty base URL to the DeepSeek host", (baseUrl) => {
     const environment: NodeJS.ProcessEnv = {
       CLERK_PUBLISHABLE_KEY: "pk_test_example",
       CLERK_SECRET_KEY: "sk_test_example",
       ...(baseUrl === undefined ? {} : { OPENAI_BASE_URL: baseUrl }),
     };
 
-    expect(loadConfig(environment).openaiBaseUrl).toBeUndefined();
+    expect(loadConfig(environment).openaiBaseUrl).toBe("https://api.deepseek.com");
+  });
+
+  it.each([
+    "https://api.deepseek.com",
+    "https://api.deepseek.com/",
+  ])("accepts the official DeepSeek base URL %s", (endpoint) => {
+    const config = loadConfig({
+      CLERK_PUBLISHABLE_KEY: "pk_test_example",
+      CLERK_SECRET_KEY: "sk_test_example",
+      AGENT_MODEL_NAME: "deepseek-flash",
+      OPENAI_BASE_URL: endpoint,
+    });
+
+    expect(config.openaiBaseUrl).toBe(endpoint);
+    expect(config.openaiChatModel).toBe("deepseek-flash");
+  });
+
+  it.each([
+    "https://workspace.example.com/compatible-mode/v1",
+    "https://api.deepseek.com/v1",
+    "http://api.deepseek.com",
+  ])("rejects a non-DeepSeek base URL for deepseek-flash: %s", (endpoint) => {
+    expect(() => loadConfig({
+      CLERK_PUBLISHABLE_KEY: "pk_test_example",
+      CLERK_SECRET_KEY: "sk_test_example",
+      AGENT_MODEL_NAME: "deepseek-flash",
+      OPENAI_BASE_URL: endpoint,
+    })).toThrow(/deepseek-flash requires/);
   });
 
   it("supports independent Agent provider variables", () => {

@@ -44,11 +44,12 @@ describe("OpenAIResponsesClient", () => {
     });
   });
 
-  it("preserves the SDK default when the base URL is absent", () => {
+  it("defaults to the official DeepSeek base URL when absent", () => {
     new OpenAIResponsesClient("placeholder-key");
 
     expect(sdkConstructor).toHaveBeenCalledWith({
       apiKey: "placeholder-key",
+      baseURL: "https://api.deepseek.com",
       maxRetries: 0,
       timeout: 90_000,
     });
@@ -73,6 +74,25 @@ describe("OpenAIResponsesClient", () => {
       store: false,
     }));
     expect(response).toEqual({ outputText: "Done", output: [] });
+  });
+
+  it("sends the DeepSeek reasoning-off config and never Qwen-only fields", async () => {
+    const create = vi.fn().mockResolvedValue({ output_text: "Done", output: [] });
+    const injected = { responses: { create } } as unknown as OpenAI;
+    const client = new OpenAIResponsesClient("placeholder-key", injected);
+
+    await client.create(request);
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      model: "test-model",
+      reasoning: { effort: "none" },
+    }));
+    const callArgs = create.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+    expect(callArgs).toBeDefined();
+    expect(callArgs).not.toHaveProperty("enable_thinking");
+    expect(callArgs).not.toHaveProperty("max_pixels");
+    expect(JSON.stringify(callArgs)).not.toContain("enable_thinking");
+    expect(JSON.stringify(callArgs)).not.toContain("max_pixels");
   });
 
   it("turns provider failures into a content-free Agent error", async () => {

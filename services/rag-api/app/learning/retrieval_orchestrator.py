@@ -172,12 +172,14 @@ def budget_text(text: str, budget: int, *, per_hit_chars: int = DEFAULT_PER_HIT_
     limit = min(int(budget), per_hit_chars)
     if limit <= 0 or len(text) <= limit:
         return text
-    window = text[:limit]
+    marker = " …"
+    # Reserve the marker's width so the returned text still fits the budget.
+    window = text[: max(0, limit - len(marker))]
     for boundary in ("\n\n", "\n", "。 ", "。", ". ", "；", ";"):
         index = window.rfind(boundary)
-        if index >= limit // 2:
-            return window[: index + len(boundary)].rstrip() + " …"
-    return window.rstrip() + " …"
+        if index >= len(window) // 2:
+            return window[: index + len(boundary)].rstrip() + marker
+    return window.rstrip() + marker
 
 
 def citation_id(index: int) -> str:
