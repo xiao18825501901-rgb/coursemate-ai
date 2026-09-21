@@ -43,6 +43,39 @@ TEACH_DIRECT_INSTRUCTION = (
     '没有工具权限，不要声称修改了数据库、分数或发布状态。'
 )
 
+
+def conflict_note(sources: list) -> str | None:
+    """Bounded note for genuine evidence contradictions (evidence.consistency.v1).
+
+    Only a real ``SAME_CONTEXT_CONTRADICTION`` surfaces here, via the per-source
+    ``jev_conflict_with`` ids the backend attached. A DIFFERENT_ASSUMPTIONS or
+    VERSION_OR_TASK_DIFFERENCE pair never carries that field, so it is never
+    described as a conflict. Returns ``None`` when there is nothing to explain, so
+    the assembled prompt is unchanged under off/shadow/unavailable.
+    """
+    pairs: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        others = source.get("jev_conflict_with") or ()
+        sid = str(source.get("id", ""))
+        for other in others:
+            left, right = sorted((sid, str(other)))
+            if not left or not right or (left, right) in seen:
+                continue
+            seen.add((left, right))
+            pairs.append(f"{left} vs {right}")
+    if not pairs:
+        return None
+    listing = "；".join(pairs[:8])  # bounded: module C compares at most 8 pairs
+    return (
+        "注意：以下证据来源之间存在真实矛盾（相同假设下结论冲突）："
+        f"{listing}。请在回答中同时说明双方结论及其适用边界，保留全部来源，"
+        "不要丢弃、改写或合并任何一方。"
+    )
+
+
 class QwenProvider:
     def __init__(self, settings, transport=None):
         self.cfg=settings
@@ -57,6 +90,9 @@ class QwenProvider:
         """
         template_body = templates.template_body(template_id) or templates.template_body('OTHER')
         instruction = templates.plan_writer_instruction() + '\n\n【选定模板全文】\n' + template_body
+        note = conflict_note(sources)
+        if note:
+            instruction = instruction + '\n\n' + note
         payload={'course':course.get('name',''),'code':course.get('code',''),'mode':lane,
             'template_id':template_id,'student_preferences':profile,
             'course_requirements':course.get('requirements',''),'student_question':text,
@@ -74,6 +110,9 @@ class QwenProvider:
             instruction=templates.problem_prompt()
         else:
             instruction=TEACH_DIRECT_INSTRUCTION
+        note = conflict_note(sources)
+        if note:
+            instruction = instruction + '\n\n' + note
         messages=[{'role':'system','content':instruction}]
         messages.extend({'role':x['role'],'content':x['text'][:10000]} for x in history[-12:] if x['role'] in {'user','assistant'})
         messages.append({'role':'user','content':json.dumps(payload,ensure_ascii=False)})
@@ -84,6 +123,9 @@ class QwenProvider:
         instruction=('你是 CourseMate 教师。执行下面由上一阶段生成的教学 Prompt，给出可核验的教学解释，'
                      '不要暴露内部思维链。只使用提供的材料引用标记 [S1] 等；无材料支持时区分补充理解。'
                      '没有工具权限，不要声称修改了数据库、分数或发布状态。\n\n'+prompt)
+        note = conflict_note(sources)
+        if note:
+            instruction = instruction + '\n\n' + note
         messages=[{'role':'system','content':instruction}]
         messages.extend({'role':x['role'],'content':x['text'][:10000]} for x in history[-12:] if x['role'] in {'user','assistant'})
         messages.append({'role':'user','content':json.dumps({'question':text,'course_materials':sources,'bridge':bridge},ensure_ascii=False)})

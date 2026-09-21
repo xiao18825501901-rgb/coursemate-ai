@@ -305,6 +305,47 @@ class RelationReport:
         return [r for r in self.relations if r.relation == DOCUMENT_VERSION_RELATION]
 
 
+_ACCEPTED_NAME_SQL = (
+    "SELECT node.title AS title, alias.alias AS alias "
+    "FROM knowledge_node_aliases AS alias "
+    "JOIN knowledge_nodes AS node ON node.id = alias.node_id "
+    "WHERE node.course_id = ? AND ("
+    "(node.owner_user_id = ? AND node.status = 'PRIVATE') OR "
+    "(node.owner_user_id IS NULL AND node.status = 'PUBLISHED')) "
+    "ORDER BY node.title, alias.normalized_alias, alias.locale"
+)
+
+
+def accepted_name_groups(
+    database: object,
+    course_id: str,
+    subject: str,
+) -> tuple[tuple[str, ...], ...]:
+    """The accepted names of one course's concepts, scoped to this subject.
+
+    One group per knowledge node: its canonical title first, then its
+    already-accepted aliases. Only rows the subject is actually allowed to see are
+    returned — its own private nodes, plus published official nodes — so another
+    learner's private vocabulary can never widen this subject's query. Returns
+    ``()`` when the registry is unavailable, which leaves the query un-expanded.
+    """
+    try:
+        with database.connect() as connection:  # type: ignore[attr-defined]
+            rows = connection.execute(_ACCEPTED_NAME_SQL, (course_id, subject)).fetchall()
+    except Exception:  # pragma: no cover - the registry is optional for retrieval
+        return ()
+    groups: dict[str, list[str]] = {}
+    for row in rows:
+        title = str(row["title"] or "").strip()
+        alias = str(row["alias"] or "").strip()
+        if not title or not alias:
+            continue
+        names = groups.setdefault(title, [])
+        if alias not in names:
+            names.append(alias)
+    return tuple((title, *names) for title, names in groups.items())
+
+
 @dataclass(frozen=True)
 class ExpandedQuery:
     """The result of conservative alias expansion (retrieval input)."""
@@ -313,6 +354,9 @@ class ExpandedQuery:
     expanded_query: str
     added_aliases: tuple[str, ...]
     skipped_because_explicit_target: bool
+    # Canonical terms whose name group the query matched, so the caller can record
+    # *why* a query was expanded instead of inferring it from the string diff.
+    matched_groups: tuple[str, ...] = ()
 
 
 # --------------------------------------------------------------------------- #
@@ -323,17 +367,25 @@ class ExpandedQuery:
 def expand_query(
     query: str,
     *,
-    aliases: Sequence[str] = (),
+    name_groups: Sequence[Sequence[str]] = (),
     explicit_targets: Sequence[str] = (),
     max_aliases: int = DEFAULT_MAX_QUERY_ALIASES,
 ) -> ExpandedQuery:
-    """Add at most ``max_aliases`` accepted aliases, preserving the original query.
+    """Add the other accepted names of a concept the query already names.
 
-    The user's original query is always the prefix and is never removed. An
-    explicit file/page/question target always outranks alias expansion: when one
-    is present, expansion is skipped entirely so the target can never be
-    displaced by an alias. Aliases that already appear in the query are skipped
-    so the query is never duplicated.
+    ``name_groups`` is one group per concept: the backend-owned canonical term
+    first, then that concept's already-accepted aliases. A group is only used when
+    the query itself names one of its members, so a Chinese question about "密度聚类"
+    can gain "DBSCAN" while an unrelated question in the same course gains nothing —
+    expansion never injects a course-wide alias list into every query, which would
+    hurt precision and spend retrieval budget on terms the learner never asked
+    about. The canonical term is also added back when only an alias was used, so the
+    mapping works in both directions.
+
+    The user's original query is always the prefix and is never removed. An explicit
+    file/page/question target always outranks expansion: when one is present,
+    expansion is skipped entirely so the target can never be displaced. Names that
+    already appear in the query are skipped so the query is never duplicated.
     """
     original = (query or "").strip()
     if not original:
@@ -342,20 +394,37 @@ def expand_query(
         return ExpandedQuery(original, original, (), True)
 
     added: list[str] = []
+    matched: list[str] = []
     folded_original = original.casefold()
-    for alias in aliases:
-        if len(added) >= max(0, max_aliases):
-            break
-        text = (alias or "").strip()
-        if not text:
+    for group in name_groups:
+        names: list[str] = []
+        for candidate in group:
+            text = str(candidate or "").strip()
+            if text and text not in names:
+                names.append(text)
+        if not names:
             continue
-        folded = text.casefold()
-        if folded == folded_original or folded in folded_original:
-            continue  # already present; never duplicate the original
-        added.append(text)
+        folded = [name.casefold() for name in names]
+        # The query must name this concept before any of its other names are added.
+        if not any(name in folded_original for name in folded):
+            continue
+        matched.append(names[0])
+        for name, folded_name in zip(names, folded, strict=True):
+            if len(added) >= max(0, max_aliases):
+                break
+            if folded_name in folded_original:
+                continue  # already present; never duplicate the original
+            added.append(name)
+
     if not added:
         return ExpandedQuery(original, original, (), False)
-    return ExpandedQuery(original, f"{original} {' '.join(added)}", tuple(added), False)
+    return ExpandedQuery(
+        original,
+        f"{original} {' '.join(added)}",
+        tuple(added),
+        False,
+        tuple(matched),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -668,11 +737,14 @@ class CourseEntityResolver:
         self,
         query: str,
         *,
-        aliases: Sequence[str] = (),
+        name_groups: Sequence[Sequence[str]] = (),
         explicit_targets: Sequence[str] = (),
     ) -> ExpandedQuery:
         return expand_query(
-            query, aliases=aliases, explicit_targets=explicit_targets, max_aliases=self.max_aliases
+            query,
+            name_groups=name_groups,
+            explicit_targets=explicit_targets,
+            max_aliases=self.max_aliases,
         )
 
 
@@ -697,6 +769,7 @@ __all__ = [
     "RelationReport",
     "SAME_CONCEPT",
     "UNCERTAIN",
+    "accepted_name_groups",
     "entity_relation_definition",
     "expand_query",
     "generate_candidate_pairs",

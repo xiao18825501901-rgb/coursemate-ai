@@ -38,6 +38,11 @@ from app.db import Database
 from app.errors import ApiError
 from app.jev import callsites
 from app.jev.entity_resolution import CourseEntityResolver, EntityObject
+from app.jev.evidence_consistency import (
+    COMPATIBLE,
+    VERSION_OR_TASK_DIFFERENCE,
+    check_evidence_consistency,
+)
 from app.jev.service import SemanticDecisionService
 from app.learning.coverage_review import CoverageReviewer, NullCoverageReviewer
 from app.learning.models import (
@@ -148,6 +153,36 @@ def _assessment_display(assessment: dict[str, Any]) -> str | None:
     if status == "NEEDS_REVIEW":
         return "待复核"
     return None
+
+
+def _consistency_signal(report: Any) -> dict[str, str]:
+    """Deterministic per-candidate relation from the version/task narrowing only.
+
+    Semantic relations (contradiction / different-assumptions / insufficient) are
+    decided by the Jev mode, so they never enter this map. The map is therefore
+    byte-identical under ``off``/``shadow``/unavailable and with no Jev at all.
+    """
+    signals: dict[str, str] = {}
+    for finding in report.findings:
+        if finding.relation == VERSION_OR_TASK_DIFFERENCE:
+            signals[finding.left_id] = VERSION_OR_TASK_DIFFERENCE
+            signals[finding.right_id] = VERSION_OR_TASK_DIFFERENCE
+    return signals
+
+
+def _contradiction_partners(report: Any) -> dict[str, list[str]]:
+    """Map candidate id -> counterpart ids for genuine contradictions only.
+
+    A genuine ``SAME_CONTEXT_CONTRADICTION`` only ever surfaces in mode ``on``, so
+    this map is empty (and the conflict note absent) under off/shadow/unavailable.
+    A ``DIFFERENT_ASSUMPTIONS`` or ``VERSION_OR_TASK_DIFFERENCE`` pair never enters
+    it, so it is never described as a conflict.
+    """
+    partners: dict[str, list[str]] = {}
+    for finding in report.contradictions:
+        partners.setdefault(finding.left_id, []).append(finding.right_id)
+        partners.setdefault(finding.right_id, []).append(finding.left_id)
+    return partners
 
 
 class V3DomainAdapter:
@@ -666,34 +701,41 @@ class V3DomainAdapter:
 
     # ---------------------------------------------------------------- retrieval
 
-    def _accepted_aliases(self, course_id: str, subject: str) -> tuple[str, ...]:
-        """Accepted knowledge-node aliases the deterministic backend owns.
+    def _accepted_name_groups(self, course_id: str, subject: str) -> tuple[tuple[str, ...], ...]:
+        """Accepted names per concept, as the deterministic backend owns them.
 
-        Query expansion may only *add* recall using these already-accepted
-        aliases; it never invents one. Returns ``()`` when the registry is
-        unavailable (or the course has no published aliases), which keeps the
-        retrieval query byte-identical to the un-expanded form.
+        One group per knowledge node: its canonical title first, then its
+        already-accepted aliases. Query expansion uses a group only when the query
+        itself names one of its members, so a Chinese question about "密度聚类" can
+        gain "DBSCAN" while an unrelated question in the same course gains nothing —
+        a course-wide alias list is never injected into every query. Returns ``()``
+        when the registry is unavailable (or the course has no accepted names),
+        which keeps the retrieval query byte-identical to the un-expanded form.
         """
         try:
             with self.database.connect() as connection:
                 rows = connection.execute(
-                    "SELECT DISTINCT alias.alias AS alias "
+                    "SELECT node.title AS title, alias.alias AS alias "
                     "FROM knowledge_node_aliases AS alias "
                     "JOIN knowledge_nodes AS node ON node.id = alias.node_id "
                     "WHERE node.course_id = ? AND ("
                     "(node.owner_user_id = ? AND node.status = 'PRIVATE') OR "
                     "(node.owner_user_id IS NULL AND node.status = 'PUBLISHED')) "
-                    "ORDER BY alias.normalized_alias, alias.locale",
+                    "ORDER BY node.title, alias.normalized_alias, alias.locale",
                     (course_id, subject),
                 ).fetchall()
         except Exception:  # pragma: no cover - registry is optional for retrieval
             return ()
-        aliases: list[str] = []
+        groups: dict[str, list[str]] = {}
         for row in rows:
-            value = str(row["alias"] or "").strip()
-            if value and value not in aliases:
-                aliases.append(value)
-        return tuple(aliases)
+            title = str(row["title"] or "").strip()
+            alias = str(row["alias"] or "").strip()
+            if not title or not alias:
+                continue
+            names = groups.setdefault(title, [])
+            if alias not in names:
+                names.append(alias)
+        return tuple((title, *names) for title, names in groups.items())
 
     def _persist_relation_proposals(
         self,
@@ -834,14 +876,15 @@ class V3DomainAdapter:
             except Exception:  # pragma: no cover - rewrite is best effort
                 query = raw_query
         workspace = self._workspace_row(course_id, subject)
-        # Conservative alias expansion (deterministic, never reaches Jev): an
-        # accepted backend alias may only ADD recall. The user's original query is
-        # always the prefix, and an explicit file/page/question target skips
-        # expansion entirely so it can never be displaced or outranked.
+        # Conservative alias expansion (deterministic, never reaches Jev): a concept
+        # the query already names may contribute its other accepted names, which can
+        # only ADD recall. The user's original query is always the prefix, an
+        # unrelated query is never expanded, and an explicit file/page/question
+        # target skips expansion entirely so it can never be displaced or outranked.
         exact_targets = exact_targets_from_query(raw_query)
         expanded = self.entity_resolver.expand_query(
             query,
-            aliases=self._accepted_aliases(course_id, subject),
+            name_groups=self._accepted_name_groups(course_id, subject),
             explicit_targets=[target.raw for target in exact_targets],
         )
         query = expanded.expanded_query
@@ -931,6 +974,32 @@ class V3DomainAdapter:
         # source.select_span.v1): Jev may only judge the supplied candidates and
         # never author a citation; insufficient/uncertain keeps every source.
         citation = self._annotate_evidence(subject, course_id, query, fused, workspace)
+        # EvidenceConsistency (evidence.consistency.v1): condition/conflict check
+        # over the already-authorized, already-fused candidates. Annotation only —
+        # it never reorders, drops or rewrites a source. The deterministic signal
+        # is mode-independent; a genuine contradiction only surfaces in mode "on"
+        # and is carried to the teaching prompt as a bounded conflict note.
+        consistency = check_evidence_consistency(
+            self.jev,
+            fused,
+            scope=(
+                self.jev.scope(
+                    owner_user_id=subject,
+                    authorization_scope="evidence_consistency",
+                    course_id=course_id,
+                    workspace_id=str(workspace["id"]) if workspace is not None else None,
+                    material_revision=str(workspace["revision"]) if workspace is not None else None,
+                )
+                if self.jev is not None
+                else None
+            ),
+        )
+        consistency_signal = _consistency_signal(consistency)
+        conflict_partners = _contradiction_partners(consistency)
+        chunk_to_sid = {
+            entry.chunk_id: citation_id(index)
+            for index, entry in enumerate(fused, start=1)
+        }
         sources: list[dict[str, Any]] = []
         for index, entry in enumerate(fused, start=1):
             hit = entry.hit
@@ -942,7 +1011,15 @@ class V3DomainAdapter:
                 "locator": f"{hit.locator_type}:{hit.locator_value}",
                 "section": hit.section,
                 "text": budget_text(str(hit.content or ""), budget),
+                # Deterministic per-source consistency signal (always present and
+                # byte-identical under off/shadow/unavailable and with no Jev).
+                "jev_consistency": consistency_signal.get(entry.chunk_id, COMPATIBLE),
             }
+            partners = conflict_partners.get(entry.chunk_id)
+            if partners:
+                source["jev_conflict_with"] = sorted(
+                    chunk_to_sid[partner] for partner in partners if partner in chunk_to_sid
+                )
             if citation:
                 source["jev_citation_support"] = citation["support"]
                 source["jev_selected_span"] = citation["selected_span"] == source["id"]
@@ -1149,8 +1226,8 @@ class V3DomainAdapter:
 
     def _task_create(self, credential: str, payload: dict[str, Any]) -> dict[str, Any]:
         body: dict[str, Any] = {"title": payload.get("title")}
-        # The agent's `validateCreateTask` schema is narrower than its TypeScript
-        # type: `priority` is an enum with no null member, and every other optional
+        # Note: the agent's `validateCreateTask` schema is narrower than its TypeScript
+        # typing — `priority` is an enum with no null member, and every other optional
         # field accepts null. Only fields this UI actually sets are sent, so an
         # unset value is omitted rather than sent as an invalid one.
         course = _optional_id(payload.get("course"))

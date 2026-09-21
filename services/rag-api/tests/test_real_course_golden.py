@@ -5,6 +5,7 @@ import pytest
 
 from app.config import Settings
 from app.db import Database
+from app.jev.entity_resolution import accepted_name_groups, expand_query
 from app.models import CourseCreate
 from app.rag.embeddings import DeterministicEmbeddingProvider
 from app.repositories.chunks import ChunkRepository
@@ -164,3 +165,66 @@ def test_real_exact_locator_is_course_isolated(
     assert ge_tutorial
     assert {hit.course_id for hit in ge_tutorial} == {"ge2324"}
     assert {hit.filename for hit in ge_tutorial} == {"GE2324_Tut07.docx"}
+
+
+CJK_CLUSTERING_TERM = "\u805a\u7c7b\u5206\u6790"
+CJK_CLUSTERING_QUERY = "\u805a\u7c7b\u5206\u6790\u662f\u4ec0\u4e48\u610f\u601d"
+
+
+@pytest.mark.golden
+def test_accepted_alias_lets_a_cjk_question_reach_english_material(
+    real_corpus_repository: ChunkRepository,
+) -> None:
+    """A Chinese question about a concept the registry also names in English must
+    reach the English material — on the real corpus, through the real registry
+    lookup, the real expansion and the real lexical search.
+
+    The lexical channel is the honest place to measure this: the deterministic stub
+    embedding used by this fixture answers any query with *some* similarity, so a
+    whole-retriever comparison would not isolate the alias's effect. Production runs
+    a real embedding model, where the same expansion also helps the vector channel.
+    """
+
+    database = real_corpus_repository.database
+    # The golden fixture builds the ingestion-only schema; the knowledge registry
+    # (migration 014+) belongs to the V3 schema, so apply it to the same file the
+    # real adapter reads instead of hand-writing the two tables.
+    registry_database = Database(
+        Settings(
+            database_path=database.path,
+            upload_dir=database.upload_dir,
+            v3_enabled=True,
+        )
+    )
+    registry_database.initialize()
+    with registry_database.connect() as connection:
+        connection.execute(
+            "INSERT INTO knowledge_nodes("
+            "id,course_id,owner_user_id,title,description,major,kind,status) "
+            "VALUES('golden-alias-clustering','ge2324',NULL,?,?,?,'ATOMIC','PUBLISHED')",
+            (CJK_CLUSTERING_TERM, "Golden alias fixture", "CS"),
+        )
+        connection.execute(
+            "INSERT INTO knowledge_node_aliases(node_id,alias,normalized_alias,locale) "
+            "VALUES('golden-alias-clustering','clustering','clustering','en')"
+        )
+
+    groups = accepted_name_groups(registry_database, "ge2324", "golden-subject")
+    assert any("clustering" in group for group in groups)
+
+    expanded = expand_query(CJK_CLUSTERING_QUERY, name_groups=groups)
+    assert expanded.original_query == CJK_CLUSTERING_QUERY
+    assert expanded.added_aliases == ("clustering",)
+    assert expanded.matched_groups == (CJK_CLUSTERING_TERM,)
+
+    # The Chinese question alone cannot lexically match the English material …
+    assert (
+        real_corpus_repository.keyword_search("ge2324", CJK_CLUSTERING_QUERY, limit=8) == []
+    )
+    # … and with the accepted alias it reaches the document that discusses it.
+    hits = real_corpus_repository.keyword_search(
+        "ge2324", expanded.expanded_query, limit=8
+    )
+    assert hits
+    assert {hit.filename for hit in hits} == {"assignment_2.pdf"}
+    assert any("clustering" in hit.content.lower() for hit in hits)

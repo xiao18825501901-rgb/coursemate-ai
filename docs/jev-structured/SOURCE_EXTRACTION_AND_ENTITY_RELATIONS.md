@@ -358,8 +358,32 @@ Host wiring: one shared `SemanticDecisionService` is built in
    pack (while the file list keeps every valid file) remains a deliberate
    non-goal here: this path must not change what the learner sees while the
    definition is in shadow.
-4. **Module A (ExtractionVerification) is still `MODULE_ONLY`.** It is implemented
-   and tested (`tests/test_jev_extraction.py`, 16 tests) but no ingestion/parse
-   call site invokes it, so no business effect is claimed for it. The same is true
-   for the planned `NEEDS_REVIEW` outcome.
+4. **Module A (ExtractionVerification) is still `MODULE_ONLY`, and that is an investigated
+   conclusion rather than an omission.** It is implemented and tested
+   (`tests/test_jev_extraction.py`, 16 tests; its own degradation is pinned by
+   `test_no_gateway_is_a_typed_deterministic_fallback` and
+   `test_unavailable_transport_degrades_to_needs_review`), but **no production surface produces an
+   `ExtractionRecord`-shaped record**, so there is nothing to verify and no business effect is
+   claimed. Every place CourseMate turns parser or DeepSeek-Vision output into data was checked:
+
+   | Surface | What it produces | Why it is not a call site |
+   |---|---|---|
+   | `app/cm_update/filesystem.py::parse_document` | `(mime, [(page:int, text:str)], error)` | free-text pages only; image pages return no text; no field/value/unit |
+   | `app/services/ingestion.py::process_document`, `app/rag/loaders.py::load_document`, `app/rag/chunking.py::chunk_sections` | embedded text chunks | free text; no extracted fields |
+   | `app/rag/structure.py::extract_structured_blocks` | deterministic regex labels `question_number` / `question_part` / `heading_path`, persisted in `chunks.metadata_json` and backfilled into `problem_index_entries` | the closest surface — a real structured extraction that feeds structured retrieval (`app/learning/problems.py`). Not wired yet because a per-field review outcome has no persistence slot (`problem_index_entries` has no verification column) and no consumer would act on it today; adding it as a pure annotation would be exactly the "a helper exists" pattern this report refuses to count as integration |
+   | `app/learning/orchestrator.py::solve` (the real DeepSeek-Vision path) → `ProblemSolutionOutput` | `question_transcription: Text`, `conditions: list[Text]`, `visual_uncertainties: list[Text]` | generated natural-language text with no field/value/unit schema; decomposing it into fields would mean *inventing* the parser the task forbids |
+   | `app/cm_update/exercise_contract.py::parse_exercise_output` | validated *generated* exercise JSON | generation output, the reverse direction of extraction |
+   | `app/learning/assessments.py` (`map_unified_answers`, `store_candidates`), `orchestrator._transcribe_answers` | deterministic "第N题" mapping of student answers, generated question candidates, a hard `ASSESSMENT_TRANSCRIPTION_REQUIRED` | no vision transcription of student answers exists to verify |
+
+   Cross-check: `grep` for `ExtractionRecord | ExtractionVerifier | FieldSpec | verify_extraction`
+   across `services/rag-api/app` matches **only** `app/jev/extraction.py` itself.
+
+   **Recorded decision for the next round (so it is not re-litigated):** either (a) wire the
+   `extract_structured_blocks` question-number/part labels *with a real consumer* — an outcome that
+   makes structured retrieval distrust a misassigned 题号, marked only when a real Jev signal says the
+   label does not belong to that block (so shadow/off keeps today's behaviour byte-identical), which
+   needs a migration for the per-entry outcome; or (b) leave module A `MODULE_ONLY` and state that in
+   the final report. Inventing a field-decomposition layer purely to justify a call site is not an
+   option.
+
 

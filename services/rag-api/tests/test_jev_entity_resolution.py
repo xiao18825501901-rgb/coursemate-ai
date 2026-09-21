@@ -352,18 +352,39 @@ def test_scope_isolation_out_of_scope_pair_never_offered() -> None:
 
 def test_alias_query_expansion_preserves_original_query_and_is_bounded() -> None:
     expanded = expand_query(
-        "导数", aliases=["derivative", "differentiation"], max_aliases=1
+        "导数", name_groups=[("导数", "derivative", "differentiation")], max_aliases=1
     )
     assert expanded.original_query == "导数"
     assert expanded.expanded_query == "导数 derivative"
     assert expanded.expanded_query.startswith("导数")  # the original is always the prefix
     assert expanded.added_aliases == ("derivative",)  # bounded to max_aliases
+    assert expanded.matched_groups == ("导数",)  # …and it says why
     assert expanded.skipped_because_explicit_target is False
+
+
+def test_expansion_works_in_both_directions_within_one_concept() -> None:
+    """An English term gains the Chinese name and vice versa."""
+    to_english = expand_query("密度聚类", name_groups=[("密度聚类", "DBSCAN")])
+    assert to_english.expanded_query == "密度聚类 DBSCAN"
+    to_chinese = expand_query("explain DBSCAN", name_groups=[("密度聚类", "DBSCAN")])
+    assert to_chinese.expanded_query == "explain DBSCAN 密度聚类"
+    assert to_chinese.original_query == "explain DBSCAN"
+
+
+def test_unrelated_query_is_never_expanded_with_a_course_wide_alias_list() -> None:
+    """The precision rule: an alias is only added for the concept the query names."""
+    groups = [("密度聚类", "DBSCAN"), ("梯度下降", "gradient descent")]
+    expanded = expand_query("谱聚类是什么", name_groups=groups)
+    assert expanded.expanded_query == "谱聚类是什么"  # unchanged
+    assert expanded.added_aliases == ()
+    assert expanded.matched_groups == ()
 
 
 def test_explicit_target_outranks_alias_expansion() -> None:
     expanded = expand_query(
-        "导数 chapter5.pdf", aliases=["derivative"], explicit_targets=("chapter5.pdf",)
+        "导数 chapter5.pdf",
+        name_groups=[("导数", "derivative")],
+        explicit_targets=("chapter5.pdf",),
     )
     assert expanded.expanded_query == "导数 chapter5.pdf"  # unchanged, target preserved
     assert expanded.added_aliases == ()
@@ -372,10 +393,13 @@ def test_explicit_target_outranks_alias_expansion() -> None:
 
 def test_query_expansion_never_duplicates_an_already_present_term() -> None:
     expanded = expand_query(
-        "derivative rule", aliases=["derivative", "differentiation"]
+        "derivative rule", name_groups=[("导数", "derivative", "differentiation")]
     )
-    assert expanded.added_aliases == ("differentiation",)
+    # The matched concept's other names are added — including the canonical term,
+    # which the query did not name — but never the term already present.
+    assert expanded.added_aliases == ("导数", "differentiation")
     assert expanded.original_query == "derivative rule"
+    assert expanded.expanded_query.startswith("derivative rule ")
 
 
 # --------------------------------------------------------------------------- #
@@ -401,7 +425,7 @@ def test_transport_failure_degrades_to_no_relation(tmp_path) -> None:
     assert all(not r.used_jev for r in report.relations)
     assert report.merged_any is False
     # Query expansion is untouched by a transport failure (it never reaches Jev).
-    expanded = expand_query("导数", aliases=["derivative"])
+    expanded = expand_query("导数", name_groups=[("导数", "derivative")])
     assert expanded.expanded_query == "导数 derivative"
 
 

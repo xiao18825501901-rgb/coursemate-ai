@@ -124,14 +124,14 @@ def test_alias_expansion_preserves_original_query_and_explicit_target(tmp_path) 
         connection.executescript(
             """
             CREATE TABLE knowledge_nodes (
-                id TEXT PRIMARY KEY, course_id TEXT NOT NULL,
-                owner_user_id TEXT, status TEXT NOT NULL
+                id TEXT PRIMARY KEY, course_id TEXT NOT NULL, owner_user_id TEXT,
+                status TEXT NOT NULL, title TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE knowledge_node_aliases (
                 node_id TEXT NOT NULL, alias TEXT NOT NULL,
                 normalized_alias TEXT NOT NULL, locale TEXT NOT NULL
             );
-            INSERT INTO knowledge_nodes VALUES('node-1','jev-course',NULL,'PUBLISHED');
+            INSERT INTO knowledge_nodes VALUES('node-1','jev-course',NULL,'PUBLISHED','导数');
             INSERT INTO knowledge_node_aliases VALUES('node-1','derivative','derivative','en');
             """
         )
@@ -143,12 +143,19 @@ def test_alias_expansion_preserves_original_query_and_explicit_target(tmp_path) 
     retriever = _RecordingRetriever()
     adapter = _adapter(database, tmp_path, service, retriever)
 
-    # No explicit target: the original query is the prefix, and the accepted alias
-    # only ADDS recall.
+    # No explicit target: the original query is the prefix, and the concept the
+    # query names contributes its accepted alias — recall only.
     adapter._retrieve("user-a", {"course": "jev-course", "query": "导数"})  # noqa: SLF001
     official = next(call for call in retriever.calls if call["scope"] == "official")
     assert official["query"].startswith("导数")
     assert "derivative" in official["query"]
+
+    # A query that names no registered concept is NOT expanded: a course-wide alias
+    # list is never injected into every question.
+    retriever.calls.clear()
+    adapter._retrieve("user-a", {"course": "jev-course", "query": "谱聚类是什么"})  # noqa: SLF001
+    official = next(call for call in retriever.calls if call["scope"] == "official")
+    assert official["query"] == "谱聚类是什么"
 
     # An explicit file target outranks expansion: the query is unchanged.
     retriever.calls.clear()
