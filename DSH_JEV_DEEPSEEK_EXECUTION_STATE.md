@@ -253,6 +253,27 @@ Every definition remains `shadow`; there is still no TypeSafe credential, so
 `live evidence = NOT_RUN` for all 19 definitions and no quality claim is made for
 any of them. Wiring a call site is not evidence of quality.
 
+## Round 24 — module C reaches the evidence pack; alias expansion made precise (2026-09-22)
+
+Commit `7186d17` adds one more module to the "really wired" set and closes an
+over-broad retrieval change from round 23.
+
+| Item | What changed | Evidence |
+|---|---|---|
+| **C** EvidenceConsistency (`evidence.consistency.v1`) | `V3DomainAdapter._retrieve` now calls `check_evidence_consistency` over the already-authorized fused candidates and annotates every source with a deterministic `jev_consistency` signal; a genuine `SAME_CONTEXT_CONTRADICTION` additionally carries `jev_conflict_with`, which `provider.conflict_note` turns into a bounded instruction in all three teaching prompt builders — DeepSeek explains **both** sides and no source is dropped. Version/assumption differences are never called conflicts. | `test_jev_evidence_consistency_wiring.py` (4): byte-identical sources across off/shadow/unavailable/no-Jev; a real contradiction keeps both sources, unchanged ids/order, and adds exactly one note; version and assumption differences add none |
+| **B** alias expansion precision | Expansion is now per concept: a group (canonical term + accepted aliases) is used only when the query itself names a member, in both directions. Round 23 appended *every* course alias to *every* query, which spent retrieval budget on terms the learner never asked about. | `test_jev_entity_resolution.py` (20) + `test_real_course_golden.py`: on the **real GE2324 corpus**, "聚类分析是什么意思" has no lexical hit and with the registry's accepted alias "clustering" reaches `assignment_2.pdf` |
+| **A** ExtractionVerification | Investigated and left `MODULE_ONLY`: no production surface produces an `ExtractionRecord`-shaped record (free-text pages, generated model text, deterministic regex question labels with no per-field persistence slot or consumer). Each candidate surface and the reason it is ruled out is recorded in `docs/jev-structured/SOURCE_EXTRACTION_AND_ENTITY_RELATIONS.md` §9.4. | the module's types appear nowhere outside `app/jev/extraction.py` (`grep` cross-check) |
+| mypy | A comment that began with `# type:` was read by mypy as a type comment, aborting the whole run — the app had never been type-checked as a whole. Fixed, and the honest number is now on record: **1068 pre-existing errors in 38 files** (legacy `ui_extension`/`cm_update`); the entire Jev layer has 6, all pre-existing in `gateway.py`/`receipt_store.py` | `work/current-change/mypy-app-round24b.log` |
+
+**Verified on one frozen SHA (`7186d17`):** backend regression **1142 passed / 0 failed**
+(1400.37s, exit 0); browser **28 journeys / 0 failed** across four suites
+(`ui-refresh` 19, `jev-structured` 2, `coursemate` 4, `learning` 3); agent-api 92
+tests with clean typecheck and build; web 64 tests with clean typecheck and build.
+
+Every definition remains `shadow`; there is still no TypeSafe credential, so
+`live evidence = NOT_RUN` for all 19 definitions and no quality claim is made for
+any of them. Wiring a call site is not evidence of quality.
+
 ## Resume instructions for a later round
 
 1. Work in `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY`, branch
