@@ -114,6 +114,38 @@ journey. Assessment results never create coverage; low grades never remove it.
   release can be restored without deleting new grades, chats or learning evidence. Restoring data
   is a separate, explicit operation from the archived backups — never a silent side effect of a
   code rollback.
+* **Rollback compatibility is verified, not assumed.** `scripts/verify_rollback_compat.py` exports
+  the previous release (`git archive b05fd294`), builds a database with the current code, runs the
+  previous release's own code against it, and compares the release's *own* schema (taken from a
+  database it creates itself) with the migrated one. Result on the real release:
+  `ROLLBACK_SAFE_WITH_MIGRATED_DB` — the old code opens the Schema-28 database, `integrity=ok`,
+  `fk_violations=0`, **no missing column, no retyped column and no narrowed CHECK enum** among the
+  four tables rebuilt by 027, and the assessment pool filter is byte-identical, so old and new code
+  select the same pool. `tests/test_schema_rollback_compat.py` freezes the pre-027 column, table
+  and enum snapshot permanently, so a future migration that drops a column or narrows an enum fails
+  the suite instead of shipping a database the deployed release cannot use.
+* Both guards were negative-controlled: temporarily deleting `HUMAN_REVIEWED` from the
+  `verification_method` CHECK makes the test fail with `values no longer accepted
+  ['HUMAN_REVIEWED']` and makes the verifier return `ROLLBACK_REQUIRES_DB_RESTORE` (exit 3). A
+  verifier that cannot fail is not evidence.
+
+### 2.5.1 Two axes, deliberately separate: `validation_status` and `verification_method`
+
+A prepared question is stored with `validation_status='VALIDATED'` **and** an honest
+`verification_method`: `DETERMINISTIC` for MCQ / NUMERIC / enumerated SHORT_TEXT, `AI_REVIEWED` for
+concept or open questions with no provable external standard. The two columns answer different
+questions:
+
+* `validation_status` — may this question enter the pool at all (backend checks on source,
+  integrity, reference solution, duplicate family and verification level);
+* `verification_method` — *how* it was verified, and therefore which grading channel it uses
+  (`DETERMINISTIC` → validated channel, `AI_REVIEWED` → diagnostic channel).
+
+This is not "把 MODEL_ONLY 假装成 VALIDATED": the preparation path never writes `MODEL_ONLY` and
+never relabels an existing `MODEL_ONLY` row. When a question has no provable external standard the
+row says `AI_REVIEWED` and the grading path records the weaker channel. Pinned by
+`tests/test_assessment_preparation_contract.py` (the `EXPLANATION` candidate must be
+`AI_REVIEWED`, every other candidate `DETERMINISTIC`).
 
 ### 2.6 Not run
 

@@ -81,7 +81,7 @@ No marker is PASS because a provider, SDK or health endpoint returned successful
 | 9 | Unified JevGateway → SemanticDecisionService for retrieval/context/intent/pedagogy/coverage/assessment/classification; versioned questions; probabilities never grades or permissions | One gateway façade, one decision service, receipts persisted (migration 028) with scope + invalidation, question revisions versioned (`027`), `probability_is_grade=false`, thresholds UNSET until calibrated; Jev can only select server-supplied ids and never writes state, grades, LEARNED, permissions or budgets | PASS_LOCAL |
 | 10 | A/B/C/D ablation with the listed metrics | **NOT_RUN.** No ablation was executed and **no claim of improved teaching quality is made.** The design, the four arms, the metric list and the acceptance gates are specified in `JEV_ABLATION_AND_PRODUCTION_ACCEPTANCE.md`; producing results needs live credentials and a budget | NOT_RUN |
 | 11 | Latest official SDK/API docs; keys backend-only; batch cost ceiling before real tests | DeepSeek and TypeSafe contracts verified against current official docs (recorded in `DEEPSEEK_AND_JEV_RUNTIME_CONTRACTS.md`); keys are read only from backend config and never logged or sent to the browser; the batch cost ceiling must be fixed before any live batch (blank fields in the action card) | PASS (wiring), live NOT_RUN |
-| 12 | Isolated-copy migration verification; never overwrite the production DB; never regenerate the published CS3481/GE2324 trees; never delete old chat/grades/bridge/template versions/evidence | Migrations are additive and were exercised only on isolated copies; the rehearsal now covers the governance objects of migrations 019–021 **and** 026–028; the four table rebuilds in 027 copy rows before the rename (verified `INSERT INTO …_new SELECT`); V1 templates remain on disk; published course trees were not regenerated; no old chat, grade, bridge, template version or evidence row is deleted anywhere | PASS |
+| 12 | Isolated-copy migration verification; never overwrite the production DB; never regenerate the published CS3481/GE2324 trees; never delete old chat/grades/bridge/template versions/evidence | Migrations are additive and were exercised only on isolated copies; the rehearsal now covers the governance objects of migrations 019–021 **and** 026–028; the four table rebuilds in 027 copy rows before the rename (verified `INSERT INTO …_new SELECT`); V1 templates remain on disk; published course trees were not regenerated; no old chat, grade, bridge, template version or evidence row is deleted anywhere. **Rollback path verified, not assumed** (§4.4): the previous release runs against the migrated Schema-28 database with `integrity=ok`, no column drift and no narrowed CHECK enum, and both the test guard and the verifier were negative-controlled | PASS |
 | 13 | Full pipeline, then controlled release; without authorization deliver all local work plus one minimal action card; never fake acceptance with a fake provider or `health=200` | All locally executable work delivered; release steps prepared but **not executed**; one consolidated action card; no fake provider, no shadow output presented as a live result, no health check presented as acceptance | PASS for local delivery; deployment BLOCKED |
 
 ## 4. Verification log (re-run by the orchestrator, not taken from agent reports)
@@ -135,6 +135,8 @@ All 17 failures were two contained causes, both fixed without weakening any guar
 | Web app | `pnpm --filter @coursemate/web run build` + `test` | build exit 0; **17 files / 64 tests passed** |
 | Agent API | `pnpm --filter @coursemate/agent-api run build` + `test` | build exit 0; **10 files / 72 tests passed** |
 | Schema probe (init + replay, isolated copy) | `python work/current-change/mig_probe.py` | `integrity=ok`, `fk_violations=0`, `max_migration=28`, `leftover_old_tables=[]`, 17 assessment triggers present |
+| Rollback compatibility (previous release vs migrated DB) | `python scripts/verify_rollback_compat.py --release-tree <b05fd294 export>` | `ROLLBACK_SAFE_WITH_MIGRATED_DB` (exit 0): old code opens Schema 28, `integrity=ok`, `fk_violations=0`, no missing/retyped column, no narrowed enum |
+| Schema drift guard | `pytest tests/test_schema_rollback_compat.py -q` | 5 passed (negative-controlled: narrowing an enum makes it fail) |
 | V2 template hashes | `python work/current-change/verify_template_v2.py` | 16/16 verified, no problems |
 
 ### 4.3 Migration 027 — the defect found and fixed inside this round
@@ -156,6 +158,38 @@ Two permanent guards now exist so this cannot regress silently:
 * the rehearsal's governance set was extended to migrations **026–028** (with commented-out DDL
   ignored and transient `_new`/`_old` names excluded), so a lost trigger or table now fails the
   rehearsal itself.
+
+### 4.4 Rollback compatibility: the previous release against the migrated database
+
+Migration 027 rebuilds four tables, which is the one migration shape that can break an
+already-deployed release. Requirement 12's "保数据回滚路径" was therefore verified rather than
+asserted:
+
+* Method — `scripts/verify_rollback_compat.py` exports the previous release
+  (`git archive b05fd294`), builds a fully migrated database with the current code, then runs the
+  **previous release's own code** against that file in a subprocess, and compares the release's
+  *own* schema (captured from a database the release creates itself) with the migrated schema. The
+  first version of this tool compared the release's view of the migrated file with that same file,
+  which is circular and could only ever report "safe"; it was rewritten before the result was used.
+* Result — verdict `ROLLBACK_SAFE_WITH_MIGRATED_DB`, exit 0: the old code imports, opens the
+  Schema-28 database and reports `integrity=ok` / `fk_violations=0`; the release's own schema is
+  Schema 26 while it sees 28; **no table missing, no column missing, no column retyped, no CHECK
+  enum narrowed**; the assessment pool filter string is identical, so old and new code select the
+  same question pool.
+* Permanent guard — `tests/test_schema_rollback_compat.py` (5 passed) freezes the pre-027 column,
+  table and enum snapshot, so a later migration that drops a column or narrows an enum fails the
+  suite.
+* Negative controls (both guards were made to fail on purpose): deleting `HUMAN_REVIEWED` from the
+  `verification_method` CHECK made the test fail with
+  `values no longer accepted ['HUMAN_REVIEWED']` and made the verifier return
+  `ROLLBACK_REQUIRES_DB_RESTORE` (exit 3). The migration file was then restored and the tree checked
+  clean.
+
+A related clarification belongs with this evidence: prepared questions are stored with
+`validation_status='VALIDATED'` **and** an honest `verification_method` (`DETERMINISTIC` or
+`AI_REVIEWED`). The two columns are separate axes — pool admission versus verification strength and
+grading channel — and `MODEL_ONLY` is never written or relabelled. See
+`LEARNING_AND_ASSESSMENT_STATE_SPEC.md` §2.5.1.
 
 ## 5. What is explicitly NOT verified
 
