@@ -12,6 +12,7 @@ import { TaskRepository } from "./repositories/tasks.js";
 import { SqliteModelRateLimiter } from "./rate-limit.js";
 import { AgentService } from "./services/agent.js";
 import { ToolExecutor } from "./tools/executor.js";
+import { JevToolIntentGate } from "./tools/intent-gate.js";
 
 
 const config = loadConfig();
@@ -46,7 +47,22 @@ const modelClient = config.providerMode === "deterministic"
   : config.openaiApiKey
     ? new OpenAIResponsesClient(config.openaiApiKey, undefined, config.openaiBaseUrl)
     : unavailableClient;
-const agentService = new AgentService(modelClient, new ToolExecutor(repository), {
+// The Jev tool-intent gate is opt-in: with the default `off` mode no gate is
+// constructed, so execution is byte-identical to the ungated path. In advisory or
+// enforce mode, config validation has already guaranteed a non-empty URL and token.
+const toolExecutor =
+  config.jevToolIntentMode === "off"
+    ? new ToolExecutor(repository)
+    : new ToolExecutor(
+        repository,
+        new JevToolIntentGate({
+          mode: config.jevToolIntentMode,
+          url: config.jevToolIntentUrl!,
+          token: config.jevToolIntentToken!,
+          timeoutMs: config.jevToolIntentTimeoutMs,
+        }),
+      );
+const agentService = new AgentService(modelClient, toolExecutor, {
   model: config.openaiChatModel,
   maxToolRounds: config.maxToolRounds,
 });

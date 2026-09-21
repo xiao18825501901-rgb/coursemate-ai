@@ -12,10 +12,14 @@ from app.api.learning import router as learning_router
 from app.api.publication import router as publication_router
 from app.api.qa import router as qa_router
 from app.api.teaching_profiles import router as teaching_profiles_router
+from app.api.tool_intent import router as tool_intent_router
 from app.auth import AuthVerifier, ClerkAuthVerifier, TestAuthVerifier
 from app.config import Settings
 from app.db import Database
 from app.errors import ApiError
+from app.jev.gateway import JevGateway
+from app.jev.receipt_store import SqlReceiptStore
+from app.jev.service import SemanticDecisionService
 from app.learning.orchestrator import LearningOrchestrator
 from app.rag.answers import (
     AnswerProvider,
@@ -106,6 +110,13 @@ def create_app(
         embedding_provider,
     )
     application.state.database = database
+    # One shared semantic-decision layer for the whole app (single gateway, single
+    # service). Shadow is the default runtime mode; with no TypeSafe credential the
+    # live transport fails typed (JevNotConfiguredError) and every module stays in
+    # shadow, so the deterministic result remains the user-visible one.
+    application.state.jev_service = SemanticDecisionService(
+        JevGateway(receipt_store=SqlReceiptStore(database))
+    )
     if resolved_settings.v3_enabled:
         application.state.learning = LearningOrchestrator(
             database, resolved_settings,
@@ -228,12 +239,16 @@ def create_app(
     application.include_router(teaching_profiles_router)
     application.include_router(publication_router)
     application.include_router(feedback_router)
+    application.include_router(tool_intent_router)
     if resolved_settings.v3_enabled:
         application.include_router(learning_router)
     if resolved_settings.ui_extension_enabled:
         from app.ui_extension.mount import mount_ui_extension
 
         mount_ui_extension(
-            application, provider=ui_provider, coverage_reviewer=ui_coverage_reviewer
+            application,
+            provider=ui_provider,
+            coverage_reviewer=ui_coverage_reviewer,
+            jev=application.state.jev_service,
         )
     return application

@@ -1,5 +1,7 @@
 import path from "node:path";
 
+import type { ToolIntentMode } from "./tools/intent-gate.js";
+
 export interface AgentConfig {
   databasePath: string;
   host: string;
@@ -16,6 +18,10 @@ export interface AgentConfig {
   agentChatRequestsPerMinute: number;
   agentChatRequestsPerDay: number;
   authTestUserId: string | undefined;
+  jevToolIntentMode: ToolIntentMode;
+  jevToolIntentUrl: string | undefined;
+  jevToolIntentToken: string | undefined;
+  jevToolIntentTimeoutMs: number;
 }
 
 const V3_PRIMARY_MODEL = "qwen3.8-max";
@@ -88,6 +94,20 @@ function boundedInteger(value: string | undefined, fallback: number, min: number
   return parsed;
 }
 
+function isAllowedJevToolIntentUrl(value: string): boolean {
+  if (/[\u0000-\u001f\u007f]/.test(value)) return false;
+  try {
+    const endpoint = new URL(value);
+    return (
+      (endpoint.protocol === "http:" || endpoint.protocol === "https:") &&
+      endpoint.username === "" &&
+      endpoint.password === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AgentConfig {
   const configuredPath = environment.AGENT_DATABASE_PATH ?? "../../data/agent.sqlite3";
   const providerMode = environment.AGENT_PROVIDER_MODE ?? "openai";
@@ -134,6 +154,36 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AgentC
       }
     }
   }
+  const jevToolIntentMode = environment.JEV_TOOL_INTENT_MODE ?? "off";
+  if (
+    jevToolIntentMode !== "off" &&
+    jevToolIntentMode !== "advisory" &&
+    jevToolIntentMode !== "enforce"
+  ) {
+    throw new Error("JEV_TOOL_INTENT_MODE must be off, advisory, or enforce.");
+  }
+  const jevToolIntentUrl = environment.JEV_TOOL_INTENT_URL;
+  const jevToolIntentToken = environment.JEV_TOOL_INTENT_TOKEN;
+  if (jevToolIntentMode !== "off") {
+    if (!jevToolIntentUrl || !isAllowedJevToolIntentUrl(jevToolIntentUrl)) {
+      throw new Error(
+        "JEV_TOOL_INTENT_MODE other than off requires an absolute http(s) " +
+        "JEV_TOOL_INTENT_URL without credentials.",
+      );
+    }
+    if (!jevToolIntentToken || jevToolIntentToken.trim() === "") {
+      throw new Error(
+        "JEV_TOOL_INTENT_MODE other than off requires a non-empty JEV_TOOL_INTENT_TOKEN.",
+      );
+    }
+  }
+  const jevToolIntentTimeoutMs = boundedInteger(
+    environment.JEV_TOOL_INTENT_TIMEOUT_MS,
+    1_500,
+    100,
+    10_000,
+  );
+
   return {
     databasePath:
       configuredPath === ":memory:" ? configuredPath : path.resolve(process.cwd(), configuredPath),
@@ -161,5 +211,9 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AgentC
       1_000,
     ),
     authTestUserId,
+    jevToolIntentMode,
+    jevToolIntentUrl,
+    jevToolIntentToken,
+    jevToolIntentTimeoutMs,
   };
 }

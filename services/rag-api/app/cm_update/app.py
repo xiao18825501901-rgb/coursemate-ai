@@ -31,6 +31,10 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.jev import callsites
+from app.jev.capability_router import (
+    CapabilityRequest,
+    TeachingCapabilityRouter,
+)
 from app.jev.service import SemanticDecisionService, TemplateOption
 from app.learning.intent_commands import route_explicit_command
 
@@ -84,6 +88,66 @@ def classification_key(course_id, owner):
     # Classification can contain evidence from the caller's private workspace.
     # Keep legacy unscoped rows for audit, but never expose them to another user.
     return 'personal:' + hashlib.sha256((owner+'\0'+course_id).encode()).hexdigest()
+
+
+# ── teaching-capability dispatch (module E) ──────────────────────────────────
+# The capability catalog holds nine CourseMate capabilities, but this run endpoint
+# implements exactly two flows: the journey-bound teaching flow (it binds the V3
+# journey through the learning orchestrator) and a plain answer-only flow. Only the
+# capabilities this endpoint can actually serve are ever offered, so the semantic
+# layer can never be handed a capability whose handler lives somewhere else and can
+# never route a node-bound run away from the product's own teaching invariant.
+TEACHING_FLOW_SKILLS = ('node_lesson','worked_example','code_trace','prerequisite_explanation')
+ANSWER_ONLY_SKILLS = ('direct_qa','figure_explanation')
+TEACHING_FLOW = frozenset(TEACHING_FLOW_SKILLS)
+
+
+def run_capability(jev, *, text, explicit_action, node_bound, pair_binding, teaching_mode, owner_user_id, course_id):
+    """Pick this run's capability and report whether it takes the teaching flow.
+
+    The deterministic explicit-command router already answered unambiguous phrasing
+    (``继续`` → ``node_lesson``, ``只回答`` → ``direct_qa``) at zero Jev cost, so those
+    commands are honoured without a semantic call. The code-owned baseline is the
+    flow this shell takes without the router: ``node_lesson`` for a node-bound run
+    and ``direct_qa`` otherwise — which is also what an explicit "answer only"
+    request means. Permissions are the preconditions this endpoint has already
+    verified (an authenticated, course-authorized learner on the teaching surface),
+    never anything the model supplied.
+
+    Returns ``(resolution | None, skill_id, teaching_flow)``. The resolution is
+    returned so the caller can report the recorded decision; ``skill_id`` is what
+    the caller dispatches on.
+    """
+    baseline = 'direct_qa' if (explicit_action=='ANSWER_ONLY' or not node_bound) else 'node_lesson'
+    offered = TEACHING_FLOW_SKILLS if node_bound else ANSWER_ONLY_SKILLS
+    resolution = None
+    if jev is not None:
+        resolution = TeachingCapabilityRouter(jev).resolve(
+            CapabilityRequest(
+                learner_request=text,
+                product_mode='teach',
+                # This endpoint never serves a revealed-answer or assessment
+                # capability, so those states are not offered to the router.
+                revealed_state=False,
+                active_assessment=None,
+                pair_binding=pair_binding if node_bound else None,
+                candidate_skills=offered,
+                mode='thinking' if teaching_mode=='thinking' else 'normal',
+                permissions=frozenset({'teach'}),
+                explicit_command=explicit_action,
+                enabled_skills=None,
+                default_skill=baseline,
+            ),
+            owner_user_id=owner_user_id,
+            authorization_scope='capability',
+            course_id=course_id,
+        )
+    skill_id = resolution.skill_id if resolution is not None else baseline
+    if skill_id not in offered:
+        # Backstop: a capability this endpoint does not implement never changes
+        # the flow, whatever the transport said.
+        skill_id = baseline
+    return resolution, skill_id, skill_id in TEACHING_FLOW
 
 
 def create_app(settings: Settings|None=None, *, provider=None, domain=None, subject_resolver=None, jev: SemanticDecisionService|None=None) -> FastAPI:
@@ -1255,6 +1319,23 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         # never the current question or a fixed anchor. Both are advisory here.
         jev_scope=jev.scope(owner_user_id=user['id'],authorization_scope='intent',course_id=conv['course']) if jev is not None else None
         explicit_action=route_explicit_command(data.text,current_mode=teaching_mode,active_assessment=None)
+        # Capability dispatch (module E). The result is CONSUMED, not just recorded:
+        # `teaching_flow` below decides whether this run binds the V3 learning
+        # journey through the orchestrator (the journey-bound teaching flow) or
+        # answers without advancing the lesson. In shadow/off the router returns the
+        # code-owned baseline, so the flow is exactly what it was before; an explicit
+        # "只回答"/"answer only" now really answers only instead of being discarded.
+        run_pair=pair_for_conversation(user,conv_id) if data.node_id else None
+        capability, capability_skill, teaching_flow = run_capability(
+            jev,
+            text=data.text,
+            explicit_action=explicit_action,
+            node_bound=bool(data.node_id),
+            pair_binding=str(run_pair['id']) if run_pair is not None else None,
+            teaching_mode=teaching_mode,
+            owner_user_id=user['id'],
+            course_id=conv['course'],
+        )
         if jev is not None:
             # The results are advisory (recorded in the Jev receipt ledger); in
             # shadow mode they never change the run's routing or the user's choices.
@@ -1312,7 +1393,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             if not db.one('SELECT id FROM cmui_nodes WHERE id=? AND course=?',(data.node_id,conv['course'])): raise HTTPException(404)
         v3_link=None
         spec_items=None
-        if data.node_id and domain:
+        if teaching_flow and data.node_id and domain:
             # Bind the run to the authoritative V3 learning journey BEFORE the
             # run rows exist, so a missing node never leaves a queued run behind.
             # Coverage is claimed only after completion through the reviewed
@@ -1327,7 +1408,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         # actual cost). Therefore an absent start is the only safe preflight
         # signal: estimate it as Thinking before any provider request.
         budget_teaching_mode=teaching_mode
-        if data.node_id and conv['lane']=='teach' and not db.one(
+        if teaching_flow and data.node_id and conv['lane']=='teach' and not db.one(
             'SELECT 1 FROM cmui_node_starts WHERE owner=? AND course=? AND node=?',
             (user['id'],conv['course'],data.node_id),
         ):
@@ -1350,7 +1431,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         rid=uid('run_')
         try:
             with db.connect(True) as c:
-                if data.node_id and conv['lane']=='teach':
+                if teaching_flow and data.node_id and conv['lane']=='teach':
                     first=c.execute('INSERT OR IGNORE INTO cmui_node_starts(owner,course,node,run) VALUES(?,?,?,?)',
                         (user['id'],conv['course'],data.node_id,rid)).rowcount
                     teaching_mode='thinking' if first else data.teaching_mode
@@ -1361,7 +1442,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 pair=pair_for_conversation(user,conv_id)
                 if pair is not None:
                     c.execute('UPDATE cmui_pairs SET updated_at=? WHERE id=?',(now(),pair['id']))
-                if data.node_id and not domain:
+                if teaching_flow and data.node_id and not domain:
                     c.execute("INSERT INTO cmui_learning(owner,node,progress) VALUES (?,?,'LEARNING') ON CONFLICT(owner,node) DO UPDATE SET progress=CASE WHEN progress='LEARNED' THEN progress ELSE 'LEARNING' END",(user['id'],data.node_id))
                 if v3_link is not None:
                     c.execute('INSERT INTO cmui_run_v3(run,workspace_id,journey_id,node_id,spec_version,created_at) VALUES (?,?,?,?,?,?)',(rid,v3_link['workspace_id'],v3_link['journey_id'],v3_link['node_id'],v3_link['spec_version'],now()))
@@ -1372,7 +1453,14 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         task=asyncio.create_task(generate_run(rid,user,course_data,conv,sources,history,data,bridge_data,images,v3_link,spec_items,teaching_mode,template_id,estimate.audit() if estimate else None))
         jobs[rid]=task
         return {'id':rid,'status':'queued','teaching_mode':teaching_mode,'reasoning_strength':data.reasoning_strength,
-                'application_budget_usd':str(budget.application_usd_cap) if budget and budget.application_usd_cap is not None else None}
+                'application_budget_usd':str(budget.application_usd_cap) if budget and budget.application_usd_cap is not None else None,
+                # The capability this run was dispatched to, and why: the recorded
+                # decision (path/used_jev) plus the flow it selected, so the caller
+                # can see the routing instead of inferring it.
+                'capability':{'skill_id':capability_skill,'teaching_flow':teaching_flow,
+                    'used_jev':bool(capability.used_jev) if capability is not None else False,
+                    'path':capability.path if capability is not None else 'deterministic:baseline',
+                    'explicit_command':explicit_action}}
 
     @r.get('/runs/{rid}')
     async def get_run(rid:str,user:User,request:Request):

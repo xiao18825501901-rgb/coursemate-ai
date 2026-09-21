@@ -53,9 +53,15 @@ def _triage(request: Request) -> FeedbackTriage:
     existing: FeedbackTriage | None = getattr(request.app.state, "feedback_triage", None)
     if existing is not None:
         return existing
-    database = request.app.state.database
-    gateway = JevGateway(receipt_store=SqlReceiptStore(database))
-    service = SemanticDecisionService(gateway)
+    # Reuse the one shared semantic-decision layer assembled at app startup (see
+    # app.main.create_app); do not build a second gateway/service here. The local
+    # fallback only covers app factories that never mount the shared layer.
+    service = getattr(request.app.state, "jev_service", None)
+    if service is None:
+        database = request.app.state.database
+        service = SemanticDecisionService(
+            JevGateway(receipt_store=SqlReceiptStore(database))
+        )
     triage = FeedbackTriage(service)
     request.app.state.feedback_triage = triage
     return triage

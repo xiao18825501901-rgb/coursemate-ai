@@ -2,8 +2,12 @@
 
 The full V3 migration suite (``Database.initialize``) is not used here so the Jev
 layer is verifiable in isolation: only the ``jev_decision_receipts`` table (from
-migration 028) is created, plus — for the retrieval wiring test — the minimum
-``courses`` / ``learning_workspaces`` shape ``V3DomainAdapter._retrieve`` touches.
+migration 028) and the proposal-only ``entity_relations`` store (migration 029)
+are created, plus — for the retrieval wiring test — the minimum ``courses`` /
+``learning_workspaces`` shape ``V3DomainAdapter._retrieve`` touches.
+
+``with_entity_relations=False`` deliberately omits the 029 store so a test can
+prove the retrieval path still works when the proposal store is absent.
 """
 
 from __future__ import annotations
@@ -48,7 +52,12 @@ CREATE TABLE IF NOT EXISTS learning_workspaces (
 """
 
 
-def make_jev_database(tmp_path: Path, *, with_courses: bool = False) -> Database:
+def make_jev_database(
+    tmp_path: Path,
+    *,
+    with_courses: bool = False,
+    with_entity_relations: bool = True,
+) -> Database:
     settings = Settings(
         database_path=tmp_path / "jev.sqlite3",
         upload_dir=tmp_path / "jev-uploads",
@@ -59,12 +68,17 @@ def make_jev_database(tmp_path: Path, *, with_courses: bool = False) -> Database
     database = Database(settings)
     database.upload_dir.mkdir(parents=True, exist_ok=True)
     jev_sql = (_MIGRATIONS / "028_jev_decision_receipts.sql").read_text(encoding="utf-8")
+    relations_sql = (
+        _MIGRATIONS / "029_entity_relations.sql"
+    ).read_text(encoding="utf-8")
     with database.connect() as connection:
         connection.execute(
             "CREATE TABLE IF NOT EXISTS schema_migrations "
             "(version INTEGER PRIMARY KEY, name TEXT NOT NULL)"
         )
         connection.executescript(jev_sql)
+        if with_entity_relations:
+            connection.executescript(relations_sql)
         if with_courses:
             connection.executescript(COURSES_SQL + WORKSPACES_SQL)
     return database

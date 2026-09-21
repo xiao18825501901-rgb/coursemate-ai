@@ -91,7 +91,9 @@ export class AgentService {
         let result: ToolResult<unknown>;
         try {
           const parsed: unknown = JSON.parse(call.arguments);
-          result = this.executor.execute(ownerUserId, call.name, parsed);
+          result = await this.executor.execute(ownerUserId, call.name, parsed, {
+            userMessage: message,
+          });
         } catch (error) {
           if (!(error instanceof SyntaxError)) throw error;
           result = invalidJsonResult();

@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import Settings
 from app.db import Database
+from app.jev.service import SemanticDecisionService
 from app.learning.orchestrator import LearningOrchestrator
 from app.rag.retrieval import HybridRetriever
 from app.services.ingestion import IngestionService
@@ -142,6 +143,7 @@ def mount_ui_extension(
     mount_path: str = MOUNT_PATH,
     provider: object = None,
     coverage_reviewer: object = None,
+    jev: SemanticDecisionService | None = None,
 ) -> object | None:
     """Attach the new UI to an already-built host application.
 
@@ -171,6 +173,7 @@ def mount_ui_extension(
         retriever=retriever,
         task_agent_url=os.getenv("UI_TASK_AGENT_URL", settings.ui_task_agent_url),
         coverage_reviewer=coverage_reviewer or _coverage_reviewer(settings),
+        jev=jev,
     )
     ui_settings = _ui_settings(settings)
     from app.cm_update.integration import install_ui_extension
@@ -182,6 +185,7 @@ def mount_ui_extension(
         clerk_subject_resolver(host_app),
         mount_path=mount_path,
         provider=provider,
+        jev=jev,
     )
     _allow_browser_credentials(host_app, mount_path, ui_settings.allowed_origins)
     _prepend_legacy_history(ui, adapter)

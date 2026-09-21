@@ -37,6 +37,7 @@ from app.course_access import require_course_access
 from app.db import Database
 from app.errors import ApiError
 from app.jev import callsites
+from app.jev.entity_resolution import CourseEntityResolver, EntityObject
 from app.jev.service import SemanticDecisionService
 from app.learning.coverage_review import CoverageReviewer, NullCoverageReviewer
 from app.learning.models import (
@@ -179,6 +180,12 @@ class V3DomainAdapter:
         # Non-authoritative semantic-decision layer. None (the default) disables
         # Jev entirely; the deterministic path is byte-identical to before.
         self.jev = jev
+        # Course-scope entity resolution over already-authorized fused candidates.
+        # Query expansion is deterministic (never reaches Jev); relation resolution
+        # goes through the shared gateway and is returned, never applied.
+        self.entity_resolver = CourseEntityResolver(
+            self.jev.gateway if self.jev is not None else None
+        )
 
     # ------------------------------------------------------------------ helpers
 
@@ -659,6 +666,143 @@ class V3DomainAdapter:
 
     # ---------------------------------------------------------------- retrieval
 
+    def _accepted_aliases(self, course_id: str, subject: str) -> tuple[str, ...]:
+        """Accepted knowledge-node aliases the deterministic backend owns.
+
+        Query expansion may only *add* recall using these already-accepted
+        aliases; it never invents one. Returns ``()`` when the registry is
+        unavailable (or the course has no published aliases), which keeps the
+        retrieval query byte-identical to the un-expanded form.
+        """
+        try:
+            with self.database.connect() as connection:
+                rows = connection.execute(
+                    "SELECT DISTINCT alias.alias AS alias "
+                    "FROM knowledge_node_aliases AS alias "
+                    "JOIN knowledge_nodes AS node ON node.id = alias.node_id "
+                    "WHERE node.course_id = ? AND ("
+                    "(node.owner_user_id = ? AND node.status = 'PRIVATE') OR "
+                    "(node.owner_user_id IS NULL AND node.status = 'PUBLISHED')) "
+                    "ORDER BY alias.normalized_alias, alias.locale",
+                    (course_id, subject),
+                ).fetchall()
+        except Exception:  # pragma: no cover - registry is optional for retrieval
+            return ()
+        aliases: list[str] = []
+        for row in rows:
+            value = str(row["alias"] or "").strip()
+            if value and value not in aliases:
+                aliases.append(value)
+        return tuple(aliases)
+
+    def _persist_relation_proposals(
+        self,
+        report: Any,
+        *,
+        objects: list[EntityObject],
+        course_id: str,
+        material_revision: str,
+    ) -> int:
+        """Record the resolved relations as PROPOSED rows for the backend to review.
+
+        This is the one write the contract allows here, and it is proposal-only:
+        the row's ``status`` is ``PROPOSED`` and the semantic layer can never write
+        ``ACCEPTED``/``REJECTED``, so nothing is merged, deleted, renamed or
+        reordered. ``INSERT OR IGNORE`` against ``UNIQUE(left_id, right_id,
+        relation)`` makes a repeated retrieval idempotent. A missing table or a
+        locked database degrades to "no proposal recorded" — bookkeeping must never
+        break retrieval.
+        """
+        relations = list(getattr(report, "relations", ()) or ())
+        if not relations:
+            return 0
+        versions = {obj.object_id: obj.source_version for obj in objects}
+        recorded = 0
+        try:
+            with self.database.connect() as connection:
+                for relation in relations:
+                    left_id = str(getattr(relation, "left_id", "") or "")
+                    right_id = str(getattr(relation, "right_id", "") or "")
+                    label = str(getattr(relation, "relation", "") or "")
+                    if not left_id or not right_id or not label:
+                        continue
+                    cursor = connection.execute(
+                        "INSERT OR IGNORE INTO entity_relations("
+                        "id,left_id,right_id,left_source_version,right_source_version,"
+                        "course_id,material_revision,relation,evidence,status,"
+                        "receipt_id,used_jev) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,'PROPOSED',?,?)",
+                        (
+                            uuid4().hex,
+                            left_id,
+                            right_id,
+                            versions.get(left_id),
+                            versions.get(right_id),
+                            course_id,
+                            material_revision,
+                            label,
+                            str(getattr(relation, "reason", "") or ""),
+                            getattr(relation, "receipt_id", None),
+                            1 if getattr(relation, "used_jev", False) else 0,
+                        ),
+                    )
+                    recorded += 1 if cursor.rowcount == 1 else 0
+        except sqlite3.Error:  # pragma: no cover - proposal bookkeeping is best effort
+            return recorded
+        return recorded
+
+    def _resolve_entity_relations(
+        self,
+        subject: str,
+        course_id: str,
+        workspace: sqlite3.Row | None,
+        fused: list[Any],
+    ) -> Any:
+        """Resolve pairwise relations over already-authorized fused candidates.
+
+        The report is returned (a proposal set) and never applied: it cannot
+        reorder, merge, delete or rename anything on the path. The only write is
+        the proposal row described in :meth:`_persist_relation_proposals`. Under
+        off/shadow/unavailable every semantic relation is UNCERTAIN and the
+        deterministic fused order is untouched.
+        """
+        if self.jev is None or not fused:
+            return None
+        revision = str(workspace["revision"]) if workspace is not None else "0"
+        objects = [
+            EntityObject(
+                object_id=entry.chunk_id,
+                kind="evidence",
+                course_id=course_id,
+                material_revision=revision,
+                label=str(getattr(entry.hit, "filename", "") or entry.chunk_id),
+                content=str(getattr(entry.hit, "content", "") or ""),
+                source_version=str(getattr(entry.hit, "document_id", "") or ""),
+                aliases=(),
+            )
+            for entry in fused
+        ]
+        scope = self.jev.scope(
+            owner_user_id=subject,
+            authorization_scope="entity_resolution",
+            course_id=course_id,
+            workspace_id=str(workspace["id"]) if workspace is not None else None,
+            material_revision=revision if workspace is not None else None,
+        )
+        report = self.entity_resolver.resolve(
+            objects,
+            course_id=course_id,
+            material_revision=revision,
+            cache_scope=scope,
+        )
+        self._persist_relation_proposals(
+            report,
+            objects=objects,
+            course_id=course_id,
+            material_revision=revision,
+        )
+        return report
+
     def _retrieve(self, subject: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
         """Authorized multi-scope recall with ONE global ranking.
 
@@ -690,6 +834,17 @@ class V3DomainAdapter:
             except Exception:  # pragma: no cover - rewrite is best effort
                 query = raw_query
         workspace = self._workspace_row(course_id, subject)
+        # Conservative alias expansion (deterministic, never reaches Jev): an
+        # accepted backend alias may only ADD recall. The user's original query is
+        # always the prefix, and an explicit file/page/question target skips
+        # expansion entirely so it can never be displaced or outranked.
+        exact_targets = exact_targets_from_query(raw_query)
+        expanded = self.entity_resolver.expand_query(
+            query,
+            aliases=self._accepted_aliases(course_id, subject),
+            explicit_targets=[target.raw for target in exact_targets],
+        )
+        query = expanded.expanded_query
         top_k = int(self.settings.top_k)
         candidates = int(getattr(self.settings, "retrieval_candidates", 40) or 40)
         access = RetrievalAccess(owner_user_id=subject, scope="official")
@@ -746,9 +901,15 @@ class V3DomainAdapter:
         fused = fuse_scoped_candidates(
             groups,
             top_k=top_k,
-            exact_targets=exact_targets_from_query(raw_query),
+            exact_targets=exact_targets,
             max_candidates=candidates,
         )
+        # Entity relations are resolved over the already-authorized fused set and
+        # recorded as PROPOSED rows for the backend to review — never applied: they
+        # cannot reorder, merge, delete or rename anything on the path. Under
+        # shadow/off the semantic pairs are UNCERTAIN and the deterministic fused
+        # order is untouched.
+        self._resolve_entity_relations(subject, course_id, workspace, fused)
         # Jev may only REORDER the already-authorized fused candidates; an exact
         # file/page/question target keeps its slot and is never added or dropped.
         # off/shadow/failed all return the deterministic fused order unchanged.

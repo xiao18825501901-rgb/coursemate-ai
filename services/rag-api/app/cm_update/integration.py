@@ -11,7 +11,7 @@ class DomainPort(Protocol):
         ...
 
 
-def install_ui_extension(host_app, settings, domain: DomainPort, subject_resolver, *, mount_path='/ui-extension', provider=None):
+def install_ui_extension(host_app, settings, domain: DomainPort, subject_resolver, *, mount_path='/ui-extension', provider=None, jev=None):
     """Mount into an existing FastAPI application without replacing its routes/lifespan.
 
     Call once during host construction, before the server starts. The host application's
@@ -30,7 +30,7 @@ def install_ui_extension(host_app, settings, domain: DomainPort, subject_resolve
     if settings.integration_mode!='integrated' or settings.auth_mode!='injected':
         raise ValueError('Host mount requires integrated domain and verified injected identity')
     settings.api_base=mount_path.rstrip('/')+'/api/ui/v1'
-    ui=create_app(settings,domain=domain,subject_resolver=subject_resolver,provider=provider)
+    ui=create_app(settings,domain=domain,subject_resolver=subject_resolver,provider=provider,jev=jev)
     original=host_app.router.lifespan_context
     @asynccontextmanager
     async def combined_lifespan(app):

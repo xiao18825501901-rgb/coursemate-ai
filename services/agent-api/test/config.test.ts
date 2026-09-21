@@ -178,3 +178,84 @@ describe("Agent security configuration", () => {
     })).toThrow(/qwen3\.8-max requires explicit/);
   });
 });
+
+describe("Jev tool-intent gate configuration", () => {
+  const clerk = {
+    CLERK_PUBLISHABLE_KEY: "pk_test_example",
+    CLERK_SECRET_KEY: "sk_test_example",
+  };
+
+  it("defaults to off with no required env vars", () => {
+    const config = loadConfig(clerk);
+    expect(config.jevToolIntentMode).toBe("off");
+    expect(config.jevToolIntentUrl).toBeUndefined();
+    expect(config.jevToolIntentToken).toBeUndefined();
+    expect(config.jevToolIntentTimeoutMs).toBe(1_500);
+  });
+
+  it("rejects an unknown mode", () => {
+    expect(() => loadConfig({ ...clerk, JEV_TOOL_INTENT_MODE: "block" })).toThrow(
+      /off, advisory, or enforce/,
+    );
+  });
+
+  it("requires a URL and token for a non-off mode", () => {
+    expect(() => loadConfig({ ...clerk, JEV_TOOL_INTENT_MODE: "enforce" })).toThrow(
+      /JEV_TOOL_INTENT_URL/,
+    );
+    expect(() => loadConfig({
+      ...clerk,
+      JEV_TOOL_INTENT_MODE: "enforce",
+      JEV_TOOL_INTENT_URL: "http://internal/jev",
+    })).toThrow(/JEV_TOOL_INTENT_TOKEN/);
+  });
+
+  it("rejects a non-absolute or credentialed URL", () => {
+    expect(() => loadConfig({
+      ...clerk,
+      JEV_TOOL_INTENT_MODE: "enforce",
+      JEV_TOOL_INTENT_URL: "not-a-url",
+      JEV_TOOL_INTENT_TOKEN: "t",
+    })).toThrow(/absolute http/);
+    expect(() => loadConfig({
+      ...clerk,
+      JEV_TOOL_INTENT_MODE: "enforce",
+      JEV_TOOL_INTENT_URL: "https://user:pass@host/jev",
+      JEV_TOOL_INTENT_TOKEN: "t",
+    })).toThrow(/without credentials/);
+    expect(() => loadConfig({
+      ...clerk,
+      JEV_TOOL_INTENT_MODE: "enforce",
+      JEV_TOOL_INTENT_URL: "ftp://host/jev",
+      JEV_TOOL_INTENT_TOKEN: "t",
+    })).toThrow(/absolute http/);
+  });
+
+  it("accepts an advisory URL and bounds the timeout", () => {
+    const config = loadConfig({
+      ...clerk,
+      JEV_TOOL_INTENT_MODE: "advisory",
+      JEV_TOOL_INTENT_URL: "http://internal/jev/tool-intent",
+      JEV_TOOL_INTENT_TOKEN: "t",
+      JEV_TOOL_INTENT_TIMEOUT_MS: "2500",
+    });
+    expect(config.jevToolIntentMode).toBe("advisory");
+    expect(config.jevToolIntentUrl).toBe("http://internal/jev/tool-intent");
+    expect(config.jevToolIntentTimeoutMs).toBe(2_500);
+  });
+
+  it("bounds the timeout between 100 and 10000", () => {
+    const base = {
+      ...clerk,
+      JEV_TOOL_INTENT_MODE: "enforce",
+      JEV_TOOL_INTENT_URL: "http://internal/jev",
+      JEV_TOOL_INTENT_TOKEN: "t",
+    };
+    expect(() => loadConfig({ ...base, JEV_TOOL_INTENT_TIMEOUT_MS: "50" })).toThrow(
+      /between 100 and 10000/,
+    );
+    expect(() => loadConfig({ ...base, JEV_TOOL_INTENT_TIMEOUT_MS: "20000" })).toThrow(
+      /between 100 and 10000/,
+    );
+  });
+});

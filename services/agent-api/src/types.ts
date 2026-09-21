@@ -1,3 +1,5 @@
+import type { ToolIntentRecord } from "./tools/intent-gate.js";
+
 export type TaskStatus = "todo" | "in_progress" | "completed";
 export type TaskPriority = "low" | "medium" | "high";
 
@@ -59,4 +61,5 @@ export interface ToolResult<T> {
   ok: boolean;
   data: T | null;
   error: { code: string; message: string } | null;
+  intent?: ToolIntentRecord;
 }
