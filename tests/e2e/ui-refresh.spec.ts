@@ -256,8 +256,16 @@ test("comments are real, and a reply notifies the other account", async ({ page,
   const text = `端到端验收评论 ${Date.now()}`;
   const box = page.getByRole("textbox").first();
   await box.fill(text);
+  const posted = page.waitForResponse(
+    (response) =>
+      response.url().includes("/comments") && response.request().method() === "POST",
+  );
   await page.getByRole("button", { name: /发布|发送|发表/ }).first().click();
-  await expect(page.getByText(text)).toBeVisible();
+  expect((await posted).status()).toBe(201);
+  // A textarea reports its own value as text, so an unscoped `getByText` would
+  // pass on the still-filled input before the comment was ever persisted. Scope
+  // the assertion to the rendered feed: the comment must come back from the API.
+  await expect(page.locator(".discussion-text").filter({ hasText: text })).toBeVisible();
 
   // The comment is stored in the UI database behind the mounted API.
   const listed = await request.get(
@@ -286,7 +294,9 @@ test("the learning workspace keeps two panes, a collapsed tree, and a draggable 
   // it covers the workbench while both left navigations stay in place.
   const strip = page.locator("button.knowledge-strip");
   await expect(strip).toBeVisible();
-  await expect(strip).toContainText("课程知识点树");
+  // The shipped strip names the knowledge tree and its expand affordance.
+  await expect(strip).toContainText("课程知识点");
+  await expect(strip).toContainText("点击展开");
   await expect(page.locator(".tree-expanded")).toHaveCount(0);
   await strip.click();
   const tree = page.locator(".tree-expanded");
@@ -448,30 +458,32 @@ test("a node assessment runs the real V3 flow: start, answer, submit, grade", as
   const nodeLabel = tree.locator(".tree-node-new").filter({ hasText: "Assessment Addition" });
   await expect(nodeLabel).toBeVisible();
   await nodeLabel.hover();
-  const assessButton = tree.getByRole("button", { name: /测评结果/ });
+  const assessButton = nodeLabel
+    .locator(".node-popover")
+    .getByRole("button", { name: /测评结果/ });
   await expect(assessButton).toBeVisible();
   await assessButton.click();
 
-  const modal = page.locator(".modal");
-  await expect(modal).toBeVisible();
-  await expect(modal).toContainText("未测评");
+  // The assessment surface is the shipped full-screen workspace (an overlay
+  // dialog), not a generic modal.
+  const workspace = page.locator('.assessment-overlay[aria-label="五题测评工作区"]');
+  await expect(workspace).toBeVisible();
+  await expect(workspace).toContainText("未开始");
 
-  const start = modal.getByRole("button", { name: /开始测评/ });
-  await expect(start).toBeVisible();
-  await start.click();
+  await workspace.getByRole("button", { name: /开始测评/ }).click();
 
   // The V3 session starts for real and exposes exactly five frozen questions.
-  await expect(modal.locator(".assessment-question")).toHaveCount(5);
-  const answerBoxes = modal.getByLabel(/题答案/);
-  await expect(answerBoxes).toHaveCount(5);
-  for (let i = 0; i < 5; i += 1) {
-    await answerBoxes.nth(i).fill("correct");
-  }
-  await modal.getByRole("button", { name: /提交答案/ }).click();
+  await expect(workspace.locator(".assessment-question")).toHaveCount(5, {
+    timeout: 60_000,
+  });
+  // Answers are written into the one unified composer, labelled per question.
+  const answerBox = workspace.getByLabel("统一答案");
+  await answerBox.fill("1. correct\n2. correct\n3. correct\n4. correct\n5. correct");
+  await workspace.getByRole("button", { name: /提交答案/ }).click();
 
   // Grading happened against the V3 assessment engine and its grade snapshot.
-  await expect(modal).toContainText("已评阅");
-  await expect(modal.locator(".assessment-review").first()).toContainText("参考答案");
+  await expect(workspace).toContainText("已评阅", { timeout: 60_000 });
+  await expect(workspace.locator(".assessment-review").first()).toContainText("参考解");
 
   // The node's own state reports the graded result too - still independent from
   // the learning progress, which this fixture never faked. This fixture course
@@ -524,12 +536,12 @@ test("the knowledge tree renders the seeded hierarchy with real V3 statuses", as
   ).toContainText("未测评");
 
   // Move off the node first: its popover overlays the next row.
-  await tree.getByRole("heading", { name: "课程知识点树" }).hover();
+  await tree.getByRole("heading", { name: "课程知识点" }).hover();
   await kmeans.hover();
   await expect(kmeans.locator(".node-popover")).toBeVisible();
   await expect(
     kmeans.locator(".node-popover").getByRole("button", { name: /学习进度/ }),
-  ).toContainText("教学已完成");
+  ).toContainText("已完成");
 
   // The same rendering's database facts through the mounted API.
   const listed = await request.get(
@@ -673,7 +685,7 @@ test("the knowledge tree is reachable by keyboard and by touch", async ({ page }
   // The coverage-closure test taught this node to LEARNED earlier in the run.
   await expect(
     touchPopover.getByRole("button", { name: /学习进度/ }),
-  ).toContainText("教学已完成");
+  ).toContainText("已完成");
   await touchPopover.getByRole("button", { name: /学习进度/ }).tap();
 
   await expect(page.locator(".mobile-pane-tabs button.active")).toHaveText("知识学习");

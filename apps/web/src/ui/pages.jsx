@@ -360,11 +360,16 @@ export class Learn extends React.Component {
     componentDidMount() { this.load(); this.keyHandler = e => { if (e.key === 'Escape')
         this.setState({ fullscreen: false, expanded: false }); }; window.addEventListener('keydown', this.keyHandler); }
     componentWillUnmount() { this.unmounted = true; window.removeEventListener('keydown', this.keyHandler); Object.values(this.controllers).forEach(c => c.abort()); Object.values(this.explanationControllers).forEach(c => c.abort()); if(this.onMove){window.removeEventListener('mousemove',this.onMove);window.removeEventListener('touchmove',this.onMove);}if(this.onUp){window.removeEventListener('mouseup',this.onUp);window.removeEventListener('touchend',this.onUp);window.removeEventListener('touchcancel',this.onUp);} }
-    async load() { const revision=this.pairRevision || 0; try {
+    async load() { const revision=this.pairRevision || 0; const strengthRevision = this.strengthRevision || 0; try {
         const cid = this.props.course.id;
         const [nodes, layout] = await Promise.all([request(`/courses/${cid}/knowledge`), request(`/courses/${cid}/layout`)]);
         if (this.unmounted || revision !== (this.pairRevision || 0)) return;
-        this.setState({ nodes, ratio: layout.ratio || .5, activeNode: layout.active_node, strength: { teach: layout.teach_strength || 'medium', problem: layout.problem_strength || 'medium' } });
+        // A layout response that began before the learner moved a reasoning-strength
+        // slider must not overwrite that choice: the change is already persisted by
+        // saveLayout, and re-applying the older value would silently discard it (the
+        // next save then writes the stale value back to the server).
+        const strength = strengthRevision === (this.strengthRevision || 0) ? { teach: layout.teach_strength || 'medium', problem: layout.problem_strength || 'medium' } : this.state.strength;
+        this.setState({ nodes, ratio: layout.ratio || .5, activeNode: layout.active_node, strength });
         const pairs = await listPairs(cid);
         if (this.unmounted || revision !== (this.pairRevision || 0)) return;
         const current = pairs.find(p =>
@@ -385,6 +390,8 @@ export class Learn extends React.Component {
     setLane(field, lane, value, callback) { if (this.unmounted)
         return; this.setState(s => ({ [field]: { ...s[field], [lane]: value } }), callback); }
     setStrength(lane, strength) {
+        // Marks a local strength edit so an in-flight layout load cannot undo it.
+        this.strengthRevision = (this.strengthRevision || 0) + 1;
         this.setLane('strength', lane, strength, () => this.saveLayout());
     }
     async saveLayout() { try {
