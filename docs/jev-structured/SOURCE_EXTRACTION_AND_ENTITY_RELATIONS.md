@@ -200,10 +200,143 @@ writes.
 
 ---
 
-## Entity Relations — NOT OWNED YET
+## Module B — CourseEntityResolution
 
-> **STUB — this half is unowned.** No workstream has claimed the entity-relations
-> half of this document. It is intentionally left blank until an owner is assigned;
-> nothing here should be read as a promise about entity resolution, alias handling,
-> or a `CourseEntityResolution` module. Module B (entity alignment) is a separate
-> workstream and will fill in this section.
+**Files owned by this workstream:**
+
+* `services/rag-api/app/jev/entity_resolution.py`
+* `services/rag-api/tests/test_jev_entity_resolution.py`
+* `docs/jev-structured/SOURCE_EXTRACTION_AND_ENTITY_RELATIONS.md` (this half)
+
+**Goal.** Relate the semantic objects inside a course — bilingual terms, aliases,
+the same concept, question variants, material versions, duplicate evidence —
+**without merging anything**. The rule is fixed: **deterministic checks run first;
+Jev judges only the residue; relations are proposals only, never mutations.**
+
+### 1. The entity object
+
+`EntityObject` (a frozen dataclass) is the normalized object handed to the
+resolver. It carries: `object_id` (the stable backend id — knowledge-node id, term
+id, question id, material id, evidence id), `kind` (`term | concept | question |
+material | evidence`), `course_id`, `material_revision`, `label`, `content` (the
+bounded text to hash and compare), `source_version`, and `aliases` (the
+already-*accepted* aliases the backend owns). `content_hash()` is the sha256 of the
+exact content bytes.
+
+### 2. Deterministic candidate generation (all in code — zero Jev calls)
+
+`generate_candidate_pairs(objects, …)` narrows an already-authorized in-scope set
+into pairs, each classified in priority order:
+
+1. **exact id** — same `object_id`, same revision → `SAME_CONCEPT` (deterministic).
+2. **version** — same `object_id`, different `material_revision` →
+   `DOCUMENT_VERSION_RELATION` (deterministic).
+3. **content hash** — different ids, byte-identical non-empty content →
+   `SAME_CONCEPT` (duplicate evidence, decided by hash).
+4. **accepted alias** — one object's label/id is in the other's `aliases` →
+   `ALIAS` (authoritative, deterministic).
+5. **title normalization** — same normalized label → semantic residue (offered to
+   Jev).
+6. **bounded local similarity** — token-set Jaccard ≥ threshold → semantic residue
+   (offered to Jev).
+
+Deterministic reasons (1–4) carry a `deterministic_relation` and cost **zero** Jev
+calls; the model only ever sees the title/similarity residue, one pair per call.
+
+Candidate generation is **symmetric and order-independent**: every unordered pair
+is scored the same whichever object is `left`, ids are canonicalized
+(`left_id <= right_id`), and the set is sorted by a stable key (deterministic
+pairs first, then strongest score, then canonical ids). An optional
+`max_candidate_pairs` cap is applied **after** scoring in that canonical order, and
+the number of pairs it drops is recorded in `dropped_by_cap` (the report exposes
+`scored_pairs = candidate_pairs + dropped_by_cap`), so a cap can never be mistaken
+for "there was nothing else to compare".
+
+### 3. The semantic judgment (Jev, over the residue only)
+
+`resolve_relations(gateway, objects, course_id=…, material_revision=…, max_pairs=…,
+max_candidate_pairs=…)` runs the deterministic pairs in code and hands the semantic
+pairs to the catalog's own `entity.relation.v1` (a `Choice`), with state exactly
+`{left, right, course_id, material_revision}` where `left`/`right` are the bounded
+`{kind, label, content, source_version}` views. Candidates are the seven
+`SAME_CONCEPT / ALIAS / QUESTION_VARIANT / DOCUMENT_VERSION_RELATION /
+RELATED_NOT_SAME / DIFFERENT / UNCERTAIN`. One relation per pair; at most
+`max_pairs` (default 8) semantic pairs per request; the remainder is recorded in
+`unchecked_pairs` (distinct from `dropped_by_cap`, which is the pre-Jev candidate
+cap).
+
+The definition is **already registered** in `decision_catalog.json`
+(`entity.relation.v1`); this module calls `load_catalog().get(...)` and never
+invents another id.
+
+### 4. Similarity is not proof, and relations are never transitive
+
+A local-similarity or normalized-title match only *offers* a pair; Jev may answer
+`DIFFERENT` (a same-word pair such as "bank"/"bank" stays `DIFFERENT`, never
+merged). A relation is never transitive by assumption: A≈B and B≈C never silently
+relate A and C. Pair generation is pairwise only and produces no cluster id —
+`RelationReport.merged_any` is always `False`.
+
+### 5. Scope isolation and cross-user privacy
+
+Candidate generation never queries the database: it pairs only the objects the
+caller already authorized for the course/workspace. As a backstop,
+`resolve_relations` drops any object whose `course_id` differs and names it in
+`excluded_out_of_scope`, so an out-of-scope pair is never offered and another
+user's private material is never compared.
+
+### 6. Conservative query expansion
+
+`expand_query(query, aliases=…, explicit_targets=…, max_aliases=…)` adds at most
+`max_aliases` (default 3) *accepted* aliases; the original query is always the
+prefix, and an explicit file/page/question target always outranks alias expansion
+(expansion is skipped, so the target is never displaced). Aliases already present
+in the query are skipped. Deduplication may fold duplicate evidence inside an
+evidence pack, but the file list and shared snapshots keep every valid file, and
+cross-user deduplication never reveals that another user uploaded the same
+material.
+
+### 7. Degradation
+
+Jev unavailable / invalid / off / shadow / over budget returns `UNCERTAIN` (no
+relation, `used_jev=False`); the original query is unchanged and retrieval is
+unaffected. The only table ever written is `jev_decision_receipts` (through the
+gateway's receipt store).
+
+### 8. Test coverage
+
+`tests/test_jev_entity_resolution.py` (18 tests, offline `FakeTransport` only)
+covers: byte-identical duplicates with zero Jev calls; a Chinese↔English accepted
+alias; a same-word-different-meaning pair staying `DIFFERENT`; a question-variant
+pair; a deterministic version relation; a non-transitive A/B/C chain that does not
+merge; symmetric, order-independent candidate generation (same pair whichever
+object is `left`); the post-scoring candidate cap with dropped pairs recorded; the
+pair budget with unchecked pairs recorded; scope isolation (an out-of-scope pair
+never offered); alias query expansion preserving the original query and never
+overriding an explicit target; transport-failure degradation; and no writes
+outside the receipt table.
+
+### 9. Wiring (recommended insertion points — not performed here)
+
+No business file was edited (out of scope). The recommended, default-shadow
+insertion points are:
+
+1. **Host wiring.** Assemble `CourseEntityResolver(JevGateway(…, receipt_store=SqlReceiptStore(database)))`
+   in the same place the `SemanticDecisionService` is built for the existing 12
+   call sites (today no production caller passes `jev` — see `JEV_CALLSITE_MATRIX.md`
+   "Host wiring (default-off today)"). Keep it `shadow` until a TypeSafe credential
+   exists.
+2. **Query expansion.** In `app/ui_extension/domain.py::V3DomainAdapter._retrieve`,
+   right after the history-rewrite block (around line 691, before the first
+   `self.retriever.retrieve`), replace the recall `query` with
+   `resolver.expand_query(query, aliases=<course's accepted aliases>, explicit_targets=exact_targets_from_query(raw_query)).expanded_query`.
+   The original query is preserved and an explicit file/page/question target
+   outranks expansion.
+3. **Relation resolution.** In the same `_retrieve`, after `fuse_scoped_candidates`
+   (around line 746) and the optional rerank, build `EntityObject`s from the
+   already-authorized fused candidates and call
+   `resolver.resolve(objects, course_id=course_id, material_revision=<workspace revision>, cache_scope=…)`;
+   persist the returned `EntityRelation`s (both original ids, source versions,
+   evidence, status) into a backend-owned `entity_relations` table. Duplicate
+   evidence (content-hash `SAME_CONCEPT`) may be folded inside the evidence pack,
+   while the file list and shared snapshots keep every valid file.
