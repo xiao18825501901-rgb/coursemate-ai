@@ -14,9 +14,9 @@ nothing here claims a quality improvement.
 |---|---|
 | Work tree | `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY` |
 | Branch | `fix/codex-dsh-audit-20260919` |
-| Regression SHA | `4b968e5` (full backend suite run on this revision) |
-| Feature SHAs added after it | `4ec62c8` (evaluation/migration specs), `7842255` (DeepSeek acceptance), `b947455` (P1 modules), `1ff038a` (feedback definitions) |
-| Schema | RAG **28** (001–028), UI 13, Agent 1 — no migration added by this round |
+| Backend regression SHA | `034e3aa` (full backend suite run on this revision) |
+| Current HEAD | `544a97d` — **zero changes under `services/` since `034e3aa`** (`git diff --stat 034e3aa..544a97d -- services/` is empty), so the regression result still describes the backend at HEAD; the later commits touch the web shell, the browser specs and docs only |
+| Schema | RAG **29** (001–029, migration 029 `entity_relations` added this round), UI 13, Agent 1 |
 | Live TypeSafe model/calibration version | **none configured** — live Jev is `NOT_RUN` |
 
 ## 2. Case dispositions (summary of `docs/jev-structured/CASE_ADOPTION_MATRIX.md`)
@@ -52,14 +52,14 @@ pool preparation. All twelve are `shadow`.
 
 **The six structured modules** (all new files under `services/rag-api/app/jev/`):
 
-| Module | Entry point | Deterministic part | Jev part | Writes |
-|---|---|---|---|---|
-| A `ExtractionVerification` | `extraction.py` | required fields, numeric parse, units, question-number shape, table structure, source id, scope | `extraction.field_grounded.v1` on the residue only | receipts |
-| B `CourseEntityResolution` | `entity_resolution.py` | exact id, revision relation, content-hash duplicate, accepted alias; pair canonicalisation and a capped, order-independent score | `entity.relation.v1`, one relation per pair | receipts (relations returned for backend persistence) |
-| C `EvidenceConsistency` | `evidence_consistency.py` | version/task difference resolution, pair narrowing, budget accounting | `evidence.consistency.v1` over at most 8 pairs | receipts |
-| D `ClaimCitationAudit` | `citation_audit.py` | layer 1 authorization/existence, layer 2 quote existence (whitespace-only normalisation) | `source.supports_claim.v1` + `source.select_span.v1` | receipts |
-| E `TeachingCapabilityRouter` | `capability_router.py` | candidate filtering by explicit command, permission, mode, revealed state, assessment, Pair | `teaching.capability.v1` over ≤4 offered candidates, ≤1 disambiguation round | receipts |
-| F `ToolIntentCheck` | `tool_intent.py` | schema/permission, and a re-check of permission + object revision immediately before execution | `tool.intent.v1` for side-effecting calls only | receipts |
+| Module | Entry point | Deterministic part | Jev part | Writes | Business wiring |
+|---|---|---|---|---|---|
+| A `ExtractionVerification` | `extraction.py` | required fields, numeric parse, units, question-number shape, table structure, source id, scope | `extraction.field_grounded.v1` on the residue only | receipts | **`MODULE_ONLY`** — no ingestion/parse call site invokes it yet; no effect claimed |
+| B `CourseEntityResolution` | `entity_resolution.py` | exact id, revision relation, content-hash duplicate, accepted alias; pair canonicalisation and a capped, order-independent score | `entity.relation.v1`, one relation per pair | receipts + `entity_relations` proposals | **WIRED**: `V3DomainAdapter._retrieve` expands the query with accepted aliases (deterministic, recall only) and records resolved relations as `PROPOSED` rows |
+| C `EvidenceConsistency` | `evidence_consistency.py` | version/task difference resolution, pair narrowing, budget accounting | `evidence.consistency.v1` over at most 8 pairs | receipts | **`MODULE_ONLY`** — not yet called from the evidence-pack step |
+| D `ClaimCitationAudit` | `citation_audit.py` | layer 1 authorization/existence, layer 2 quote existence (whitespace-only normalisation) | `source.supports_claim.v1` + `source.select_span.v1` | receipts | **PARTIAL** — the two reused definitions annotate every returned source in `_annotate_evidence`; the three-layer post-generation audit is not yet bound to the message revision |
+| E `TeachingCapabilityRouter` | `capability_router.py` | candidate filtering by explicit command, permission, mode, revealed state, assessment, Pair; only the capabilities this endpoint serves are offered | `teaching.capability.v1` over ≤4 offered candidates, ≤1 disambiguation round | receipts | **WIRED and consumed**: the resolved `skill_id` decides `teaching_flow` (journey binding vs answer-only) in `cm_update.run_capability`, and is reported on the create-run response |
+| F `ToolIntentCheck` | `tool_intent.py` | schema/permission, and a re-check of permission + object revision immediately before execution | `tool.intent.v1` for side-effecting calls only | receipts | **WIRED, opt-in**: `services/agent-api` `ToolExecutor` gates the four write tools over the token-authenticated `POST /api/jev/tool-intent`; default mode `off` makes no call and leaves the path byte-identical |
 
 **Feedback triage** (`feedback.category.v1` Choice + `feedback.severity.v1` Score) is user-initiated
 only, stores identifiers by default and a body only with explicit opt-in, sends **one** batched call,
@@ -79,35 +79,47 @@ work (`extraction.field_grounded.v1`, `evidence.consistency.v1`), three for P1
 
 | Gate | Result |
 |---|---|
-| Full backend regression on `4b968e5` | **1047 passed, 0 failed**, 1322.16s, exit 0 (`work/current-change/full_run_round9.log`) |
+| Full backend regression on `034e3aa` | **1135 passed, 0 failed**, 1572.69s, exit 0 (`work/current-change/full_run_round23.log`) — and `services/` is unchanged at HEAD `544a97d` |
 | Module suites (A 16, B 18, C/D 21, E/F 29, P2 17) | **101 passed** |
 | Twelve call-site suite | **16 passed** |
+| Structured-insertion suites (shadow invariance 6, capability dispatch 10, tool-intent endpoint 8) | **24 passed** |
 | Measurement layer (dataset build, calibration, A/B/C/D/E harness) | **43 passed**; offline ablation exits 0 with verdict `NOT_INTERPRETABLE` |
 | Zero-Laya production guard | **3 passed** (and it caught a real leftover reference, which was fixed) |
 | Catalog integrity | green with 19 definitions |
-| agent-api | real `tsc --noEmit` **exit 0**, **72 tests passed** |
-| Web app (after the feedback UI entry) | real `tsc --noEmit` **exit 0**, **64 tests passed**, build **exit 0** |
-| Browser journeys (real Chrome, isolated identity) | `coursemate.spec.ts` **4 passed**, `learning.spec.ts` **3 passed**, including multi-student private isolation |
-| `ui-refresh.spec.ts` (19 journeys) | **partial**: previously unrunnable; after fixing the static server's missing `/api` proxy and building a dist with the E2E identity it runs — **2 passed**, then the legacy-deep-link journey fails on a missing `h1` and 16 stay unrun. Reported as partial, not as passing |
-| Ruff | clean on every file this round touched |
-| mypy | no new errors; the only failures are 4 pre-existing ones in `app/jev/gateway.py` |
+| Migration 029 on an isolated database | `integrity=ok`, `fk_violations=0`, `max_migration=29`, no `*_old`/`*_new` leftovers |
+| agent-api | real `tsc --noEmit` **exit 0**, **92 tests passed** (12 files), build **exit 0** |
+| Web app | real `tsc --noEmit` **exit 0**, **64 tests passed**, build **exit 0** |
+| Browser journeys (real Chrome, isolated identity, real three-service shape) | `ui-refresh.spec.ts` **19/19 passed**, `jev-structured.spec.ts` **2 passed** (new), `coursemate.spec.ts` **4 passed**, `learning.spec.ts` **3 passed** — **28 journeys, 0 failed** |
+| Ruff | clean on every file this round touched (pre-existing debt elsewhere unchanged) |
+| mypy | no new errors; the only failures are the 4 pre-existing ones in `app/jev/gateway.py` |
+
+The browser gate found one real product bug, which is fixed rather than papered over: a `GET /layout`
+still in flight when the learner moved a reasoning-strength slider overwrote the new value on arrival,
+and the next save wrote the stale value back, so the control visibly snapped back
+(`apps/web/src/ui/pages.jsx`, `setStrength`/`load`). Three stale test expectations written against
+earlier UI drafts and one weak assertion (which matched a textarea's own value instead of the persisted
+comment) were corrected without weakening any product assertion.
 
 ## 5. Status markers (evidence-based, no marker promoted on plumbing)
 
 | Marker | Status | Basis |
 |---|---|---|
-| DETERMINISTIC_FIXES | **PASS** | learning-start fact, RRF fusion, raw-score projection, command router — all with regressions |
+| DETERMINISTIC_FIXES | **PASS** | learning-start fact, RRF fusion, raw-score projection, command router, and the reasoning-strength save race — all with regressions |
 | DEEPSEEK_TEXT / VISION / AGENT | **LOCAL** | contract + host-spy tests prove the wiring and zero Qwen egress; live calls `NOT_RUN` |
 | PROMPT_V2_REGISTRY | **PASS** | 16/16 manifest hashes, V1 retained |
-| JEV_GATEWAY | **PASS** (local) | gateway/catalog/receipts/cache/modes tested; live TypeSafe `NOT_RUN` |
+| JEV_GATEWAY | **PASS** (local) | gateway/catalog/receipts/cache/modes tested; one shared service app-wide; live TypeSafe `NOT_RUN` |
 | JEV_RETRIEVAL · JEV_CITATION · JEV_CONTEXT · JEV_INTENT · JEV_PEDAGOGY · JEV_COVERAGE · JEV_ASSESSMENT · JEV_CLASSIFICATION · JEV_EXERCISE_SELECTION · JEV_PREREQUISITE · JEV_CORPUS_QUALITY | **SOURCE_IMPLEMENTED + LOCAL_INTEGRATED**, all `shadow` | call-site suite plus the module suites; authority boundaries asserted |
-| EXTRACTION_VERIFICATION · ENTITY_RESOLUTION · EVIDENCE_CONSISTENCY · CITATION_AUDIT · CAPABILITY_ROUTER · TOOL_INTENT_CHECK | **SOURCE_IMPLEMENTED + LOCAL_INTEGRATED** | 84 module tests; business wiring for B/E/F described as a one-line insertion, not yet applied |
-| USER_FEEDBACK_TRIAGE | **SOURCE_IMPLEMENTED + LOCAL_INTEGRATED** | module, backend route, shell entry, 17 tests; human review queue only |
-| LEARNING_PROGRESS · FIVE_QUESTION_ASSESSMENT | **PASS** (local) | regression suites |
-| LOCAL_REGRESSION | **PASS** | 1047 passed / 0 failed on `4b968e5` |
+| ENTITY_RESOLUTION | **PASS (local, shadow)** | wired into the authorized retrieval path, proposal-only store with an idempotency and degradation proof, alias expansion proven to preserve the original query and explicit targets |
+| CAPABILITY_ROUTER | **PASS (local, shadow)** | the decision is consumed (flow dispatch + reported on the response), zero-Jev explicit commands proven by receipt count, hardened against a hostile transport, and exercised end to end in real Chrome |
+| TOOL_INTENT_CHECK | **PASS (local, default-off)** | real gate at the model-proposed write boundary on both sides, 14 Node tests + 8 endpoint tests + 12 guard tests; `off` proven to make no call |
+| EXTRACTION_VERIFICATION · EVIDENCE_CONSISTENCY | **SOURCE_IMPLEMENTED, `MODULE_ONLY`** | modules tested (16 + 21) but **not** invoked from a business path; no effect claimed |
+| CITATION_AUDIT | **SOURCE_IMPLEMENTED, PARTIAL** | the two reused definitions are on the evidence-annotation path and covered by a browser assertion; the three-layer audit is not yet bound |
+| USER_FEEDBACK_TRIAGE | **SOURCE_IMPLEMENTED + LOCAL_INTEGRATED** | module, backend route, shell entry, 17 tests; human review queue only (in-memory — see the disclosed limitation) |
+| LEARNING_PROGRESS · FIVE_QUESTION_ASSESSMENT | **PASS** (local) | regression suites plus the browser assessment journey (start → 5 questions → submit → graded) |
+| LOCAL_REGRESSION | **PASS** | 1135 passed / 0 failed on `034e3aa`; `services/` unchanged at HEAD |
 | JEV_LIVE_VALIDATION · DEEPSEEK_LIVE_VALIDATION | **NOT_RUN** | no credential, no budget |
 | ABLATION | **NOT_RUN** | harness and 310-sample dataset ready; no labelled live run |
-| BROWSER_ACCEPTANCE | **PARTIAL** | 7 journeys green, one suite partially diagnosed and 16 unrun, no production browser acceptance |
+| BROWSER_ACCEPTANCE | **PASS (local)** | 28 journeys across four suites in real Chrome against the real services, including the Jev-unavailable deployment; production browser acceptance still `NOT_RUN` |
 | PRODUCTION_DEPLOYMENT · PRODUCTION_ACCEPTANCE | **BLOCKED** | requires the release window and the credentials in `MINIMAL_OWNER_ACTION_CARD.md` |
 
 ## 6. Cost, latency and quality
@@ -124,25 +136,32 @@ success, p50/p95 latency, per-provider cost and failure rate — are specified i
 ## 7. Explicitly not done, not claimed
 
 * No live TypeSafe Jev call, no live DeepSeek call, no calibration, no ablation result.
-* No promotion of any definition out of `shadow`; no threshold was invented.
+* No promotion of any definition out of `shadow`; no threshold was invented. A wired call site is
+  still not evidence of quality, and nothing here claims teaching quality improved.
 * No production change: no deployment, no migration, no DNS/Netlify/Clerk change; production still
   answers with Qwen and remains on schema 25.
-* Business wiring for modules B/E/F is specified at an exact insertion point but not applied, because
-  those files belong to other workstreams; it is **not** reported as integrated.
-* The UI-refresh suite is not reported as passing.
-* Nothing in this round shows that teaching quality, marks or coverage accuracy improved — that requires
-  the labelled ablation with a real Jev, which has not run.
+* Modules **A (extraction)** and **C (evidence consistency)** are `MODULE_ONLY`: implemented and
+  tested, but not invoked from a business path, so they have **no** product effect. Module **D**'s
+  three-layer audit is `PARTIAL` (its reused definitions are wired; the post-generation audit is not).
+  None of these three is reported as integrated.
+* The tool-intent gate ships **default-off**; with `off` (the current production setting) it makes no
+  call and changes nothing, so its enforcement path has never run against a live model in production.
+* The user-feedback review queue is in-memory plus the receipt ledger; it is not durable across a
+  restart until the migration workstream owns a table for it.
+* Production browser acceptance, production deployment and production acceptance have not run.
 
 ## 8. What the next round must do
 
-1. Finish and verify the feedback module, then run the web gate (build, vitest, real `tsc`) on the
-   frozen SHA.
-2. Apply the three documented business insertions (entity relations, capability routing, tool-intent
-   check) and re-run the full regression.
-3. Diagnose the legacy-deep-link browser journey and add the module-level browser journeys the task
-   lists (extraction, alias retrieval, condition conflict, unsupported citation, capability choice,
-   tool misexecution, Jev-down fallback).
-4. Whole-app mypy, then freeze one APPLICATION SHA and re-run the complete gate on it.
-5. Only then the live gate: TypeSafe credential + bounded budget, DeepSeek key, release window, one
-   real login — followed by backup, isolated rehearsal, migration 026–028, immutable release, real
+1. Wire the three remaining module gaps to real business paths, in this order: **A** into the
+   ingestion/parse path (with the `NEEDS_REVIEW` outcome), **C** into the evidence-pack step
+   (conflicting sources kept and explained, never dropped), and **D**'s three-layer audit into answer
+   finalisation bound to the message revision. Each with a shadow-invariance proof and a browser
+   journey, and each honestly marked `MODULE_ONLY` until it is.
+2. Add the remaining browser journeys the task lists for modules that are wired (alias retrieval with
+   a seeded alias fixture, condition conflict, unsupported citation, tool misexecution) and record the
+   ones that cannot exist yet as `NOT_RUN` with the reason.
+3. Whole-app mypy, then freeze one APPLICATION SHA and re-run the entire gate (backend + web + agent +
+   four browser suites) on that exact revision.
+4. Only then the live gate: TypeSafe credential + bounded budget, DeepSeek key, release window, one
+   real login — followed by backup, isolated rehearsal, migration 026–029, immutable release, real
    acceptance and post-release monitoring.

@@ -229,6 +229,26 @@ implemented and tested but not yet invoked from ingestion/parse, the evidence-pa
 step, or post-generation citation binding. `JEV_CALLSITE_MATRIX.md` marks each row
 `MODULE_ONLY` / `PARTIAL` rather than `DONE`.
 
+### Round 23 verification (real runs, not agent reports)
+
+| Gate | Result |
+|---|---|
+| Full backend regression on `034e3aa` | **1135 passed / 0 failed** in 1572.69s (exit 0); `git diff 034e3aa..HEAD -- services/` is empty, so it still describes the backend at HEAD `544a97d` |
+| Migration 029 on an isolated database | `integrity=ok`, `fk_violations=0`, `max_migration=29`, no `*_old`/`*_new` leftovers |
+| agent-api | `vitest` **92 passed / 12 files**, `tsc --noEmit` exit 0, build exit 0 |
+| Web app | `vitest` **64 passed**, `tsc` exit 0, build exit 0 |
+| Browser journeys (real Chrome, real three services, injected identity) | `ui-refresh.spec.ts` **19/19**, `jev-structured.spec.ts` **2/2** (new), `coursemate.spec.ts` **4**, `learning.spec.ts` **3** — **28 journeys, 0 failed** |
+| ruff / mypy | clean on every touched file; only the 4 pre-existing `gateway.py` mypy errors remain |
+
+The browser gate earned its keep: `ui-refresh.spec.ts` had never actually run, and once
+it did it found a **real product bug** — a `GET /layout` in flight when the learner moved
+a reasoning-strength slider overwrote the new value and the next save wrote the stale
+value back, so the control visibly snapped back. Fixed in `apps/web/src/ui/pages.jsx`
+(plus three stale test expectations and one assertion that had matched a textarea's own
+value instead of the persisted comment). It also produced the two new module journeys,
+which run with **no TypeSafe credential on purpose**, making the suite double as the
+Jev-unavailable acceptance.
+
 Every definition remains `shadow`; there is still no TypeSafe credential, so
 `live evidence = NOT_RUN` for all 19 definitions and no quality claim is made for
 any of them. Wiring a call site is not evidence of quality.

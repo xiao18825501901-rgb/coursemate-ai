@@ -89,6 +89,8 @@ receipts (plus, for entity resolution, the proposal-only `entity_relations` stor
 1. **Modules A, C and the three-layer audit of D are `MODULE_ONLY`.** They are
    implemented and tested but not yet invoked from ingestion/parse, the evidence-pack
    step, or post-generation citation binding. No business effect is claimed for them.
+   **A browser journey cannot exist for them yet**, and none was written: a journey
+   that asserts behaviour no call site produces would be fiction.
 2. **`retrieval.support.v1` is one call per candidate.** The SDK
    `system_one(state, questions)` supports several questions per call; a multi-question
    `evaluate` on `JevGateway` would batch it (the transport contract was not touched).
@@ -99,3 +101,13 @@ receipts (plus, for entity resolution, the proposal-only `entity_relations` stor
    row: no TypeSafe credential exists in this environment. Every `live evidence` cell
    above is `NOT_RUN`, and no quality claim is made anywhere for a definition that has
    only produced shadow receipts.
+
+## Browser evidence per wired module
+
+| Module | Journey | Assertion |
+|---|---|---|
+| E CapabilityRouter | `tests/e2e/jev-structured.spec.ts` → "the shipped shell reports the capability it dispatched" | the shipped shell's own create-run response reports `direct_qa` / `teaching_flow=false` / `used_jev=false` for "只回答" and `node_lesson` / `teaching_flow=true` for a normal teaching message, and both runs reach `completed` |
+| E + all definitions (Jev unavailable) | `tests/e2e/jev-structured.spec.ts` → "with no TypeSafe credential every decision degrades and teaching still works" | with **no** TypeSafe credential configured, every decision reports `used_jev=false`, and the teaching run still completes with citations and no error |
+| B EntityResolution (query expansion half) | `services/rag-api/tests/test_jev_shadow_invariance.py` | the original query stays the prefix, accepted aliases only add recall, an explicit file/page/question target skips expansion, and the fused order is byte-identical under shadow / unavailable / `jev=None` |
+| F ToolIntentCheck | agent-api `test/executor-intent-gate.test.ts` (+ the endpoint tests) | write tools gated, `searchTask` never gated, `off` byte-identical, `advisory` records, `enforce` blocks |
+| Shell entry for the feedback module | `tests/e2e/ui-refresh.spec.ts` | the "报告问题" entry is reachable in the shipped shell |
