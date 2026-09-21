@@ -48,6 +48,13 @@ from app.learning.models import (
 )
 from app.learning.previews import IMAGE_MEDIA_TYPES
 from app.learning.problems import ProblemRepository
+from app.learning.retrieval_orchestrator import (
+    ScopedCandidates,
+    budget_text,
+    citation_id,
+    exact_targets_from_query,
+    fuse_scoped_candidates,
+)
 from app.learning.workspaces import (
     current_document_version,
     document_for,
@@ -56,6 +63,8 @@ from app.learning.workspaces import (
 )
 from app.rag.retrieval import HybridRetriever
 from app.repositories.chunks import RetrievalAccess
+from app.tutor.references import parse_query_reference
+from app.tutor.rewrite import rewrite_retrieval_query
 from app.services.ingestion import IngestionService
 
 # The UI palette is a presentation concern; V3 courses have no colour column, so
@@ -98,6 +107,39 @@ def _cache() -> _RequestCache:
         current = _RequestCache()
         _CACHE.set(current)
     return current
+
+
+def _assessment_display(assessment: dict[str, Any]) -> str | None:
+    """Ready-to-render assessment label for the node panel.
+
+    ``None`` means "no assessment yet" (the UI renders 未测评). A raw score is
+    always shown when it exists — including when the school publishes no grade
+    mapping — and is explicitly marked as an AI-graded self-assessment so it is
+    never mistaken for an official grade. A running attempt keeps the previous
+    valid result visible instead of blanking the panel.
+    """
+
+    if not assessment:
+        return None
+    status = str(assessment.get("status") or "")
+    raw = assessment.get("raw_score")
+    label = assessment.get("grade_label")
+    score = f"{round(float(raw), 1)}/100" if isinstance(raw, (int, float)) else None
+    if status == "GRADED":
+        if label and score:
+            return f"{label} · {score}"
+        if label:
+            return str(label)
+        if score:
+            return f"{score} · AI自测"
+        return "已评分"
+    if status == "PARTIALLY_ASSESSED":
+        return f"{score} · 部分测评（AI自测）" if score else "部分测评"
+    if status == "IN_PROGRESS":
+        return f"测评进行中 · 上次 {score}" if score else "测评进行中"
+    if status == "NEEDS_REVIEW":
+        return "待复核"
+    return None
 
 
 class V3DomainAdapter:
@@ -607,48 +649,103 @@ class V3DomainAdapter:
     # ---------------------------------------------------------------- retrieval
 
     def _retrieve(self, subject: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """Authorized multi-scope recall with ONE global ranking.
+
+        Order (deterministic, no model): authorize course/workspace -> rewrite the
+        query from bounded history -> recall keyword/vector/structured candidates
+        per authorized scope -> merge scopes and fuse ranks (official and private
+        compete on the same scale; append order is not a score) -> protect
+        explicit file/page/question references -> budget the text -> assign the
+        public S1..Sn ids.
+        """
+
         course_id = str(payload["course"])
         self._course_row(course_id, subject)
-        query = str(payload.get("query") or "").strip()
-        if not query:
+        raw_query = str(payload.get("query") or "").strip()
+        if not raw_query:
             return []
+        history = payload.get("history") or []
+        query = raw_query
+        if history:
+            try:
+                query = rewrite_retrieval_query(raw_query, history) or raw_query
+            except Exception:  # pragma: no cover - rewrite is best effort
+                query = raw_query
         workspace = self._workspace_row(course_id, subject)
-        top_k = self.settings.top_k
-        sources: list[dict[str, Any]] = []
-        hit_rows = self.retriever.retrieve(
-            course_id=course_id,
-            query=query,
-            top_k=top_k,
-            access=RetrievalAccess(owner_user_id=subject, scope="official"),
+        top_k = int(self.settings.top_k)
+        candidates = int(getattr(self.settings, "retrieval_candidates", 40) or 40)
+        access = RetrievalAccess(owner_user_id=subject, scope="official")
+        official_hits = self.retriever.retrieve(
+            course_id=course_id, query=query, top_k=candidates, access=access
         )
-        if workspace is not None:
-            hit_rows = [
-                *hit_rows,
-                *self.retriever.retrieve(
+        groups: list[ScopedCandidates] = [ScopedCandidates(scope="official", hits=official_hits)]
+        # Structured exact retrieval reuses the legacy QA locator parser so an
+        # explicit "file.pdf page 3 question 2" reference is recalled precisely
+        # instead of being left to similarity search.
+        try:
+            reference = parse_query_reference(raw_query)
+        except Exception:  # pragma: no cover - parser is defensive
+            reference = None
+        if reference is not None:
+            structured: list[Any] = []
+            if workspace is not None:
+                structured = self.retriever.retrieve_structured(
                     course_id=workspace["private_course_id"],
-                    query=query,
+                    reference=reference,
                     top_k=top_k,
                     access=RetrievalAccess(owner_user_id=subject, scope="mine"),
-                ),
-            ]
-        seen: set[str] = set()
-        for index, hit in enumerate(hit_rows[: top_k * 2], start=1):
-            if hit.chunk_id in seen:
-                continue
-            seen.add(hit.chunk_id)
+                )
+            official_structured = self.retriever.retrieve_structured(
+                course_id=course_id,
+                reference=reference,
+                top_k=top_k,
+                access=access,
+            )
+            if official_structured:
+                groups[0] = ScopedCandidates(
+                    scope="official", hits=[*official_structured, *official_hits]
+                )
+            if structured:
+                groups.append(ScopedCandidates(scope="mine", hits=structured))
+        if workspace is not None:
+            private_hits = self.retriever.retrieve(
+                course_id=workspace["private_course_id"],
+                query=query,
+                top_k=candidates,
+                access=RetrievalAccess(owner_user_id=subject, scope="mine"),
+            )
+            if private_hits:
+                if any(group.scope == "mine" for group in groups):
+                    groups = [
+                        ScopedCandidates(
+                            scope=group.scope,
+                            hits=[*group.hits, *private_hits] if group.scope == "mine" else group.hits,
+                        )
+                        for group in groups
+                    ]
+                else:
+                    groups.append(ScopedCandidates(scope="mine", hits=private_hits))
+        fused = fuse_scoped_candidates(
+            groups,
+            top_k=top_k,
+            exact_targets=exact_targets_from_query(raw_query),
+            max_candidates=candidates,
+        )
+        budget = max(0, int(self.settings.max_context_chars)) // max(len(fused), 1)
+        sources: list[dict[str, Any]] = []
+        for index, entry in enumerate(fused, start=1):
+            hit = entry.hit
             sources.append(
                 {
-                    "id": f"S{len(sources) + 1}",
+                    "id": citation_id(index),
                     "document_id": hit.document_id,
                     "name": hit.filename,
                     "page": _page_number(hit.locator_type, hit.locator_value),
                     "locator": f"{hit.locator_type}:{hit.locator_value}",
                     "section": hit.section,
-                    "text": hit.content[: self.settings.max_context_chars // max(index, 1)][:4000],
+                    "text": budget_text(str(hit.content or ""), budget),
                 }
             )
-            if len(sources) >= top_k:
-                break
         return sources
 
     def _attachments(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -950,6 +1047,15 @@ class V3DomainAdapter:
                     "position": member.get("ordinal") or 0,
                     "progress": learning.get("status") or "NOT_STARTED",
                     "grade": assessment.get("grade_label"),
+                    # Assessment projection: a raw score without a school grade
+                    # mapping must still be visible, and must never be shown as
+                    # "未测评". `assessment_display` is the ready-to-render label.
+                    "raw_score": assessment.get("raw_score"),
+                    "assessment_status": assessment.get("status"),
+                    "assessment_display": _assessment_display(assessment),
+                    "latest_result": assessment.get("latest_result"),
+                    "latest_independent_result": assessment.get("latest_independent_result"),
+                    "active_session": assessment.get("active_session"),
                     "assessment": assessment,
                     "learning": learning,
                 }
@@ -975,6 +1081,15 @@ class V3DomainAdapter:
                     "position": len(tree),
                     "progress": learning.get("status") or "NOT_STARTED",
                     "grade": assessment.get("grade_label"),
+                    # Assessment projection: a raw score without a school grade
+                    # mapping must still be visible, and must never be shown as
+                    # "未测评". `assessment_display` is the ready-to-render label.
+                    "raw_score": assessment.get("raw_score"),
+                    "assessment_status": assessment.get("status"),
+                    "assessment_display": _assessment_display(assessment),
+                    "latest_result": assessment.get("latest_result"),
+                    "latest_independent_result": assessment.get("latest_independent_result"),
+                    "active_session": assessment.get("active_session"),
                     "assessment": assessment,
                     "learning": learning,
                 }
@@ -1027,6 +1142,8 @@ class V3DomainAdapter:
         self._course_row(course_id, subject)
         workspace = self._workspace_for_node(course_id, subject)
         node = self.learning.node(workspace, node_id)  # 404/409 with real codes
+        raw_operation = payload.get("operation_id") or payload.get("request_id")
+        operation_id = str(raw_operation).strip() if raw_operation else ""
         with self.database.connect() as connection:
             journey = LearningOrchestrator.journey(connection, workspace["id"], node)
             spec = connection.execute(
@@ -1034,6 +1151,25 @@ class V3DomainAdapter:
                 (node_id, journey["spec_version"]),
             ).fetchone()
             items = json.loads(spec["content_json"]) if spec is not None else []
+            # Accepting this teaching request IS the learning start. The fact is
+            # recorded independently of coverage (schema 26) so a started node
+            # without accepted evidence still projects LEARNING. Replays of the
+            # same accepted operation (or a retried request id) insert nothing.
+            start_operation = operation_id or (
+                f"node-start:{workspace['id']}:{node_id}:{journey['spec_version']}"
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO learning_start_events"
+                "(id,workspace_id,node_id,spec_version,operation_id,source,accepted_at) "
+                "VALUES(?,?,?,?,?,'UI_RUN',strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                (
+                    f"start-{hashlib.sha256(f'{workspace['id']}|{node_id}|{journey['spec_version']}|{start_operation}'.encode()).hexdigest()[:24]}",
+                    workspace["id"],
+                    node_id,
+                    journey["spec_version"],
+                    start_operation[:120],
+                ),
+            )
         return {
             "journey_id": journey["id"],
             "node_id": node_id,

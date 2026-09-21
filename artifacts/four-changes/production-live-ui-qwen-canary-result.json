@@ -1,0 +1,79 @@
+{
+  "artifact_version": "four-changes-live-ui-canary-v1",
+  "status": "LIVE_QWEN_CALLS_COMPLETED",
+  "environment": "isolated synthetic RAG/UI databases; exact immutable release source",
+  "application_release": "4ef5064",
+  "provider": "qwen3.8-max",
+  "authorized_max_live_usd": "2.00",
+  "model_calls_authorized": 5,
+  "operations": [
+    {
+      "label": "normal-medium",
+      "lane": "teach",
+      "requested_mode": "normal",
+      "effective_mode": "normal",
+      "strength": "medium",
+      "initial_application_budget_usd": "0.20",
+      "status": "completed",
+      "public_generated_prompt_present": false,
+      "response_text_chars": 317,
+      "usage": {
+        "input_tokens": 122,
+        "output_tokens": 142,
+        "usage_events": 1
+      }
+    },
+    {
+      "label": "thinking-medium",
+      "lane": "teach",
+      "requested_mode": "thinking",
+      "effective_mode": "thinking",
+      "strength": "medium",
+      "initial_application_budget_usd": "0.20",
+      "status": "completed",
+      "public_generated_prompt_present": false,
+      "response_text_chars": 7311,
+      "usage": {
+        "input_tokens": 4495,
+        "output_tokens": 5563,
+        "usage_events": 2
+      }
+    },
+    {
+      "label": "problem-high",
+      "lane": "problem",
+      "requested_mode": "normal",
+      "effective_mode": "normal",
+      "strength": "high",
+      "initial_application_budget_usd": "0.40",
+      "status": "completed",
+      "public_generated_prompt_present": false,
+      "response_text_chars": 1854,
+      "usage": {
+        "input_tokens": 1766,
+        "output_tokens": 923,
+        "usage_events": 1
+      }
+    },
+    {
+      "label": "normal-max",
+      "lane": "teach",
+      "requested_mode": "normal",
+      "effective_mode": "normal",
+      "strength": "max",
+      "initial_application_budget_usd": null,
+      "status": "completed",
+      "public_generated_prompt_present": false,
+      "response_text_chars": 56,
+      "usage": {
+        "input_tokens": 121,
+        "output_tokens": 30,
+        "usage_events": 1
+      }
+    }
+  ],
+  "thinking_prompt_saved_chars": 3803,
+  "high_application_cap": "0.40",
+  "max_application_cap": null,
+  "new_bridge_rows": 0
+}

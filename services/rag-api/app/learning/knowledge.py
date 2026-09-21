@@ -39,6 +39,50 @@ def _has_cycle(adjacency: dict[str, set[str]], nodes: set[str]) -> bool:
     return any(visit(node_id) for node_id in nodes if node_id not in visited)
 
 
+def _learning_start_fact(
+    connection: sqlite3.Connection,
+    workspace_id: str,
+    node_id: str,
+    spec_version: int | None,
+) -> tuple[str | None, str | None]:
+    """Authoritative learning-start fact for one node.
+
+    Returns ``(accepted_at, source)`` where source is the recorded origin, or
+    ``(None, None)`` when the learner never started this node. Two sources are
+    accepted as real starts:
+
+    * a ``learning_start_events`` row written when a teaching request was
+      accepted (schema 26, the primary fact), and
+    * an existing ``learning_journeys`` row for the same scope — journeys are
+      only ever created by an accepted teaching request or delivery, so a
+      pre-026 journey is legacy evidence of a real start, not an empty shell.
+
+    Creating a workspace, hovering a node, restoring history or reading a
+    projection never creates either row, so those never look like a start.
+    Coverage is deliberately NOT consulted here.
+    """
+
+    if spec_version is None:
+        return None, None
+    with_events: tuple[str | None, str | None]
+    event = connection.execute(
+        "SELECT accepted_at,source FROM learning_start_events "
+        "WHERE workspace_id=? AND node_id=? AND spec_version=? "
+        "ORDER BY accepted_at,id LIMIT 1",
+        (workspace_id, node_id, spec_version),
+    ).fetchone()
+    if event is not None:
+        return str(event[0]), str(event[1])
+    journey = connection.execute(
+        "SELECT COUNT(*) FROM learning_journeys WHERE workspace_id=? AND node_id=? "
+        "AND spec_version=?",
+        (workspace_id, node_id, spec_version),
+    ).fetchone()
+    if journey is not None and int(journey[0]) > 0:
+        return "", "JOURNEY"
+    return None, None
+
+
 class KnowledgeService:
     """Course-scoped Registry and immutable tree projections.
 
@@ -334,11 +378,17 @@ class KnowledgeService:
             for row in connection.execute(historical_query, historical_parameters)
         ]
         if spec_version is None:
+            start_fact_at, start_source = _learning_start_fact(
+                connection, workspace_id, node_id, spec_version
+            )
             return {
                 "status": "SPEC_UNAVAILABLE",
                 "spec_version": None,
                 "required_total": 0,
                 "covered_required": 0,
+                "started": start_source is not None,
+                "started_at": start_fact_at or None,
+                "start_source": start_source,
                 "historical_learned_spec_versions": historical,
             }
         required = int(
@@ -362,19 +412,86 @@ class KnowledgeService:
             ).fetchone()[0]
         )
         if required == 0:
-            status = "SPEC_UNAVAILABLE"
-        elif covered == 0:
+            start_fact_at, start_source = _learning_start_fact(
+                connection, workspace_id, node_id, spec_version
+            )
+            return {
+                "status": "SPEC_UNAVAILABLE",
+                "spec_version": spec_version,
+                "required_total": 0,
+                "covered_required": 0,
+                "started": start_source is not None,
+                "started_at": start_fact_at or None,
+                "start_source": start_source,
+                "historical_learned_spec_versions": historical,
+            }
+        if covered == 0:
             status = "NOT_STARTED"
         elif covered < required:
             status = "LEARNING"
         else:
             status = "LEARNED"
+        # An accepted learning start is a fact independent of coverage: a started
+        # node without accepted evidence yet is LEARNING, never NOT_STARTED.
+        # Coverage is still the only thing that can reach LEARNED.
+        start_fact_at, start_source = _learning_start_fact(
+            connection, workspace_id, node_id, spec_version
+        )
+        if status == "NOT_STARTED" and start_source is not None:
+            status = "LEARNING"
         return {
             "status": status,
             "spec_version": spec_version,
             "required_total": required,
             "covered_required": min(covered, required),
+            "started": start_source is not None,
+            "started_at": start_fact_at or None,
+            "start_source": start_source,
             "historical_learned_spec_versions": historical,
+        }
+
+    @staticmethod
+    def _assessment_result(
+        connection: sqlite3.Connection,
+        workspace_id: str,
+        node_id: str,
+        *,
+        independent_only: bool,
+    ) -> dict[str, Any] | None:
+        """Newest valid graded result for a node.
+
+        "Newest" means the newest *valid completed* result: graded time first,
+        then snapshot revision. Independent-eligible results are reported
+        separately (see `_atomic_assessment`) instead of being promoted into the
+        "latest" slot — preferring independence over recency misrepresented the
+        student's most recent attempt.
+        """
+
+        filter_clause = "AND snapshot.independent_eligible=1 " if independent_only else ""
+        row = connection.execute(
+            "SELECT session.id,session.mode,session.assistance_status,session.graded_at,"
+            "snapshot.raw_score,snapshot.grade_label,snapshot.numeric_value,"
+            "snapshot.mapping_status,snapshot.independent_eligible,snapshot.revision "
+            "FROM assessment_sessions AS session "
+            "JOIN grade_snapshots AS snapshot ON snapshot.assessment_session_id=session.id "
+            "WHERE session.workspace_id=? AND session.node_id=? AND session.status='GRADED' "
+            + filter_clause
+            + "ORDER BY session.graded_at DESC,snapshot.revision DESC,session.id DESC LIMIT 1",
+            (workspace_id, node_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "session_id": row["id"],
+            "mode": row["mode"],
+            "assistance_status": row["assistance_status"],
+            "graded_at": row["graded_at"],
+            "revision": row["revision"],
+            "raw_score": row["raw_score"],
+            "grade_label": row["grade_label"],
+            "numeric_value": row["numeric_value"],
+            "mapping_status": row["mapping_status"],
+            "independent_eligible": bool(row["independent_eligible"]),
         }
 
     @staticmethod
@@ -383,6 +500,12 @@ class KnowledgeService:
         workspace_id: str,
         node_id: str,
     ) -> dict[str, Any]:
+        latest = KnowledgeService._assessment_result(
+            connection, workspace_id, node_id, independent_only=False
+        )
+        latest_independent = KnowledgeService._assessment_result(
+            connection, workspace_id, node_id, independent_only=True
+        )
         active = connection.execute(
             "SELECT id,mode,assistance_status,started_at FROM assessment_sessions "
             "WHERE workspace_id=? AND node_id=? AND status='IN_PROGRESS' "
@@ -390,36 +513,44 @@ class KnowledgeService:
             (workspace_id, node_id),
         ).fetchone()
         if active is not None:
+            # A new attempt must not erase the previous valid result: the active
+            # session is reported alongside it, so the UI can show "评分中" (or
+            # "进行中") while the last real score stays visible.
             return {
                 "status": "IN_PROGRESS",
-                "raw_score": None,
-                "grade_label": None,
+                "raw_score": latest["raw_score"] if latest else None,
+                "grade_label": latest["grade_label"] if latest else None,
+                "numeric_value": latest["numeric_value"] if latest else None,
+                "mapping_status": latest["mapping_status"] if latest else None,
+                "independent_eligible": bool(latest["independent_eligible"]) if latest else False,
                 "session_id": active["id"],
                 "mode": active["mode"],
                 "assistance_status": active["assistance_status"],
+                "active_session": {
+                    "session_id": active["id"],
+                    "mode": active["mode"],
+                    "assistance_status": active["assistance_status"],
+                    "started_at": active["started_at"],
+                },
+                "latest_result": latest,
+                "latest_independent_result": latest_independent,
             }
-        graded = connection.execute(
-            "SELECT session.id,session.mode,session.assistance_status,session.graded_at,"
-            "snapshot.raw_score,snapshot.grade_label,snapshot.numeric_value,"
-            "snapshot.mapping_status,snapshot.independent_eligible "
-            "FROM assessment_sessions AS session "
-            "JOIN grade_snapshots AS snapshot ON snapshot.assessment_session_id=session.id "
-            "WHERE session.workspace_id=? AND session.node_id=? AND session.status='GRADED' "
-            "ORDER BY snapshot.independent_eligible DESC,session.graded_at DESC,"
-            "snapshot.revision DESC LIMIT 1",
-            (workspace_id, node_id),
-        ).fetchone()
-        if graded is not None:
+        if latest is not None:
             return {
                 "status": "GRADED",
-                "raw_score": graded["raw_score"],
-                "grade_label": graded["grade_label"],
-                "numeric_value": graded["numeric_value"],
-                "mapping_status": graded["mapping_status"],
-                "independent_eligible": bool(graded["independent_eligible"]),
-                "session_id": graded["id"],
-                "mode": graded["mode"],
-                "assistance_status": graded["assistance_status"],
+                "raw_score": latest["raw_score"],
+                "grade_label": latest["grade_label"],
+                "numeric_value": latest["numeric_value"],
+                "mapping_status": latest["mapping_status"],
+                "independent_eligible": latest["independent_eligible"],
+                "session_id": latest["session_id"],
+                "mode": latest["mode"],
+                "assistance_status": latest["assistance_status"],
+                "graded_at": latest["graded_at"],
+                "revision": latest["revision"],
+                "active_session": None,
+                "latest_result": latest,
+                "latest_independent_result": latest_independent,
             }
         pending_review = connection.execute(
             "SELECT id,mode,assistance_status FROM assessment_sessions "
@@ -435,8 +566,16 @@ class KnowledgeService:
                 "session_id": pending_review["id"],
                 "mode": pending_review["mode"],
                 "assistance_status": pending_review["assistance_status"],
+                "active_session": None,
+                "latest_result": None,
+                "latest_independent_result": None,
             }
-        return _not_assessed()
+        return {
+            **_not_assessed(),
+            "active_session": None,
+            "latest_result": None,
+            "latest_independent_result": None,
+        }
 
     @staticmethod
     def _composite_assessment(

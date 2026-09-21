@@ -21,9 +21,10 @@ V3_MIGRATIONS = (
     "023_official_knowledge_draft_fingerprint.sql",
     "024_official_knowledge_generation_plans.sql",
     "025_campus_display_and_verification.sql",
+    "026_learning_start_events.sql",
 )
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 25
+LATEST_V3_SCHEMA_VERSION = 26
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (
