@@ -165,6 +165,43 @@ Published CS3481/GE2324 trees (the 2 published courses) must not be regenerated.
 | DeepSeek live canary, Jev live validation + calibration, A/B/C/D/E results | **blocked**: DeepSeek key + TypeSafe credential/budget |
 | Production release + real acceptance | **blocked**: credentials + the release window |
 
+## Round 7 — Jev call sites landed; structured enhancement started (2026-09-22)
+
+Commit `9a87cd6` closes the two in-flight workstreams and promotes the measurement layer.
+
+**Verified by the orchestrator, not taken from agent reports:**
+
+| Item | Evidence |
+|---|---|
+| 12 Jev call sites wired, all `shadow` | `tests/test_jev_callsites.py` **16 passed**; `JEV_CALLSITE_MATRIX.md` delivered |
+| No regression in the surrounding product | Jev + intent + retrieval fusion + coverage + learning closure: **113 passed** |
+| Measurement promoted to Jev names, data unchanged | `benchmarks/jev-judgments.dataset.json` (310 samples; splits 196/47/67; hash `2af0f40d…`), `app/evaluation/{jev_calibration,jev_semantic_ablation}.py`, `scripts/{build_jev_dataset,calibrate_jev,run_jev_semantic_ablation}.py`, **43 passed** |
+| A/B/C/D/E harness really runs | offline CLI exit 0, verdict `NOT_INTERPRETABLE`, arms differentiated (E raises citation accuracy, D/E lower criterion error) — plumbing only, **not a result** |
+| Zero Laya in the production tree | new `tests/test_no_laya_in_production.py` (**3 passed**) found and forced the fix of a real leftover comment in `app/jev/service.py` |
+| Syntax/typing | all 10 agent-touched files parse; ruff clean after two import-sort fixes; mypy adds **no** new errors — the only 4 are pre-existing in `gateway.py` |
+| Browser journeys (local, isolated identity) | `coursemate.spec.ts` **4 passed**, `learning.spec.ts` **3 passed** in real Chrome; `ui-refresh.spec.ts` (19 journeys) **cannot run as configured** — it serves a prebuilt bundle through `scripts/serve_web_dist.mjs`, which has no `/api` proxy, so the shell's same-origin `/api/ui/v1` calls return HTML (this is a pre-existing harness gap, not a product regression; the failing assertion is an API response parse error) |
+
+Naming note: the new A–E semantic harness is `jev_semantic_ablation.py` / `run_jev_semantic_ablation.py`
+because `run_jev_ablation.py` already exists as the older A–D plumbing CLI. The old pair is untouched
+and documented as superseded for reporting only.
+
+### Structured enhancement (new this round)
+
+`docs/jev-structured/CASE_ADOPTION_MATRIX.md` records the disposition of the twelve cases: adopted
+(entity alignment P1, passage conflict P0, citation checking P0, capability routing P1, tool-intent
+check P1, ticket triage P2-last, extraction cascade P0-highest), merged (Paper Trellis into citation
+checking) and explicitly **not** adopted (GEO/brand mentions, website expression scoring, CatBoost
+student prediction, Browser Use in the request path).
+
+The referenced Word file (`85462d42…m(3).doc`) is **not present** in this workspace or any readable
+download folder, and the 60-case collection it cites was never provided, so the matrix is built from
+the task specification's own case list and says so. No claim is made about unread material and no
+quoted URL is treated as an API path.
+
+Two P0 workstreams are running: module A `ExtractionVerification` and modules C+D
+`EvidenceConsistency` + `ClaimCitationAudit`, each implementing against the existing gateway with a
+recorded request for any new catalog definition rather than editing the catalog themselves.
+
 ## Resume instructions for a later round
 
 1. Work in `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY`, branch
