@@ -113,3 +113,21 @@ export const loadAssessmentDraft = (courseId, sessionId) => request(`/courses/${
 export const cancelPreparation = (courseId, nodeId, jobId) => send(`/courses/${courseId}/knowledge/${nodeId}/assessment/prepare/cancel`, { job: jobId, request_id: key() });
 export const resumePreparation = (courseId, nodeId) => send(`/courses/${courseId}/knowledge/${nodeId}/assessment/prepare/resume`, { request_id: key() });
 export const createAssessmentExplanation = (courseId, sessionId, blueprintItemId, stepId) => send(`/courses/${courseId}/knowledge/assessment/${sessionId}/explain`, { blueprint_item: blueprintItemId, step: stepId, request_id: key() });
+// User-initiated feedback reports go to the RAG API host at /api/feedback, a
+// sibling of the ui-extension base the rest of this client uses.
+export async function submitFeedback(payload) {
+    const token = await tokenGetter();
+    const headers = { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) };
+    const response = await fetch('/api/feedback', { method: 'POST', headers, credentials: 'include', cache: 'no-store', body: JSON.stringify(payload) });
+    if (!response.ok) {
+        let body = null;
+        try { body = await response.json(); } catch { /* keep body null */ }
+        const nested = body && (body.error || body.detail);
+        const message = typeof nested === 'string' ? nested : (nested && typeof nested === 'object' && nested.message) || `请求失败 (${response.status})`;
+        const err = new Error(message || `请求失败 (${response.status})`);
+        err.status = response.status;
+        err.body = body;
+        throw err;
+    }
+    return response.json();
+}

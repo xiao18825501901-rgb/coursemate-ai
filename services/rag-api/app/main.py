@@ -6,6 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.feedback import router as feedback_router
 from app.api.ingestion import router as ingestion_router
 from app.api.learning import router as learning_router
 from app.api.publication import router as publication_router
@@ -226,10 +227,13 @@ def create_app(
     application.include_router(qa_router)
     application.include_router(teaching_profiles_router)
     application.include_router(publication_router)
+    application.include_router(feedback_router)
     if resolved_settings.v3_enabled:
         application.include_router(learning_router)
     if resolved_settings.ui_extension_enabled:
         from app.ui_extension.mount import mount_ui_extension
 
-        mount_ui_extension(application, provider=ui_provider, coverage_reviewer=ui_coverage_reviewer)
+        mount_ui_extension(
+            application, provider=ui_provider, coverage_reviewer=ui_coverage_reviewer
+        )
     return application
