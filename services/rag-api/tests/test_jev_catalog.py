@@ -1,4 +1,5 @@
-"""Catalog integrity: 12 definitions, primitive split, thresholds unset."""
+"""Catalog integrity: the 12 core definitions plus the 2 structured-enhancement ones,
+primitive split, thresholds unset."""
 
 from __future__ import annotations
 
@@ -17,13 +18,18 @@ EXPECTED_KEYS = (
     "exercise.prototype.v1",
     "graph.prerequisite.v1",
     "corpus.quality.v1",
+    # Structured enhancement round: field-level extraction verification (module A) and
+    # evidence condition/conflict checking (module C). Both were implemented against
+    # module constants first and are now the catalog's own definitions.
+    "extraction.field_grounded.v1",
+    "evidence.consistency.v1",
 )
 
 
-def test_catalog_has_exactly_twelve_definitions() -> None:
+def test_catalog_has_exactly_the_expected_definitions() -> None:
     catalog = load_catalog()
     assert catalog.keys() == EXPECTED_KEYS
-    assert len(catalog.definitions) == 12
+    assert len(catalog.definitions) == 14
 
 
 def test_catalog_primitive_split() -> None:
@@ -39,6 +45,9 @@ def test_catalog_primitive_split() -> None:
         "assessment.criterion_review.v1",
         "template.match.v1",
         "exercise.prototype.v1",
+        # the two structured-enhancement definitions are both Choice primitives
+        "extraction.field_grounded.v1",
+        "evidence.consistency.v1",
         "graph.prerequisite.v1",
     }
     assert nouls == {"source.supports_claim.v1", "context.keep_segment.v1"}

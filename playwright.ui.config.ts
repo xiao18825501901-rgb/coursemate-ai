@@ -122,7 +122,14 @@ export default defineConfig({
       // applies, so the suite covers build output and deployed URL shapes.
       command: `"${nodeExecutable}" "${path.join(repositoryRoot, "scripts", "serve_web_dist.mjs")}" "${path.join(repositoryRoot, "apps", "web", "dist")}" 5273`,
       cwd: repositoryRoot,
-      env: { ...process.env },
+      env: {
+        ...process.env,
+        // The refreshed shell calls the API on its own origin (`/api/ui/v1`), exactly
+        // as it does behind the production Netlify proxy. Without this the static
+        // server answers those calls with index.html and the suite fails on a JSON
+        // parse error instead of exercising the product.
+        COURSEMATE_API_PROXY: "http://127.0.0.1:8100",
+      },
       url: "http://127.0.0.1:5273/app",
       reuseExistingServer: false,
       timeout: 90_000,

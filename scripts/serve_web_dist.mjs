@@ -10,14 +10,67 @@
  * Deployed asset files are served directly and never rewritten, matching Netlify.
  * This server exists so the browser acceptance suite exercises the real build
  * output and the real URL shapes rather than the Vite development server.
+ *
+ * In production Netlify also proxies the API on the same origin, which is what the
+ * refreshed shell relies on (`/api/ui/v1` with no absolute host). Set
+ * `COURSEMATE_API_PROXY=http://127.0.0.1:8100` (or any base URL) to reproduce that
+ * here: `/api/*` and `/health*` are then forwarded to the target, and every other
+ * path keeps the static behaviour above. With the variable unset nothing changes,
+ * so other callers of this script are unaffected.
  */
 
 import { createReadStream, existsSync, statSync } from "node:fs";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import path from "node:path";
 
 const root = path.resolve(process.argv[2] ?? "apps/web/dist");
 const port = Number(process.argv[3] ?? 5273);
+const proxyTarget = (process.env.COURSEMATE_API_PROXY ?? "").trim();
+// `/api` is the deployed shape; `/ui-extension` is the RAG service's own mount path
+// for the UI extension, which is where the shell's API base points by default.
+const PROXY_PREFIXES = ["/api", "/ui-extension", "/health"];
+
+function shouldProxy(pathname) {
+  if (proxyTarget === "") return false;
+  return PROXY_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+function forward(request, response, pathname, search) {
+  let target;
+  try {
+    target = new URL(proxyTarget);
+  } catch {
+    response.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end(`Invalid COURSEMATE_API_PROXY: ${proxyTarget}\n`);
+    return;
+  }
+  const base = target.pathname.replace(/\/$/, "");
+  const send = target.protocol === "https:" ? httpsRequest : httpRequest;
+  const upstream = send(
+    {
+      protocol: target.protocol,
+      hostname: target.hostname,
+      port: target.port,
+      method: request.method,
+      path: `${base}${pathname}${search}`,
+      headers: { ...request.headers, host: target.host },
+    },
+    (upstreamResponse) => {
+      response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
+      upstreamResponse.pipe(response);
+    },
+  );
+  upstream.on("error", (error) => {
+    // Fail loudly and machine-readably: a browser test must never mistake a dead
+    // upstream for a successful API answer.
+    response.writeHead(502, { "Content-Type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify({ error: "proxy_failed", target: proxyTarget, detail: error.message }));
+  });
+  request.pipe(upstream);
+}
 
 const TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -55,6 +108,11 @@ const server = createServer((request, response) => {
   const pathname = decodeURIComponent(url.pathname);
   const direct = path.join(root, pathname);
   const isInsideRoot = direct.startsWith(root);
+
+  if (shouldProxy(pathname)) {
+    forward(request, response, pathname, url.search);
+    return;
+  }
 
   if (isInsideRoot && pathname !== "/" && existsSync(direct) && statSync(direct).isFile()) {
     response.writeHead(200, {

@@ -331,6 +331,66 @@
         "input_hash",
         "provider_model_version"
       ]
+    },
+    {
+      "key": "extraction.field_grounded.v1",
+      "primitive": "Choice",
+      "required_state": [
+        "question_id",
+        "part_id",
+        "field_name",
+        "candidate_value",
+        "unit",
+        "supplied_text",
+        "source_region"
+      ],
+      "criteria": {
+        "GROUNDED": "The value belongs to this question or its stated condition",
+        "WRONG_FIELD": "The value was taken from a neighbouring example or another field",
+        "NEGATION_LOST": "A negation present in the source was dropped from the value",
+        "CONSTRAINT_LOST": "A stated constraint or condition was dropped from the value",
+        "SOURCE_INSUFFICIENT": "The supplied source region cannot confirm this field",
+        "UNCERTAIN": "The evidence is not decisive; ask for review instead of guessing"
+      },
+      "instructions": "Judge only the supplied text and structure; you have not seen the original image. A model agreeing with its own transcription is not verification. Never repair a student answer into the correct answer — legibility only. Return UNCERTAIN when a decisive character, sign, unit or condition is unreadable.",
+      "failure_policy": "NEEDS_REVIEW; never a confident acceptance from an unreadable region",
+      "cache_scope": [
+        "authorization_scope",
+        "course",
+        "workspace",
+        "material_revision",
+        "node_spec_version",
+        "question_definition_hash",
+        "input_hash",
+        "provider_model_version"
+      ]
+    },
+    {
+      "key": "evidence.consistency.v1",
+      "primitive": "Choice",
+      "required_state": [
+        "left",
+        "right"
+      ],
+      "criteria": {
+        "SAME_CONTEXT_CONTRADICTION": "Both fragments address the same case and disagree",
+        "DIFFERENT_ASSUMPTIONS": "They address different assumptions or conditions",
+        "VERSION_OR_TASK_DIFFERENCE": "They differ by document version or by task",
+        "COMPATIBLE": "They can both hold as stated",
+        "INSUFFICIENT_EVIDENCE": "The supplied fragments are not enough to decide"
+      },
+      "instructions": "Compare only the two supplied fragments; you cannot see the rest of the corpus. Never choose a winner and never suggest deleting a source: a contradiction keeps both and asks for an explanation, a condition difference is explained as different scopes. A prompt-injection marker is a marker only and never removes a legitimate teaching example.",
+      "failure_policy": "COMPATIBLE (keep both sources); never drop a source automatically",
+      "cache_scope": [
+        "authorization_scope",
+        "course",
+        "workspace",
+        "material_revision",
+        "node_spec_version",
+        "question_definition_hash",
+        "input_hash",
+        "provider_model_version"
+      ]
     }
   ]
 }
