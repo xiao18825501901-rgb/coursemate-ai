@@ -66,6 +66,11 @@ executed (fake transport or deterministic provider only); **NOT_RUN** = never ex
 
 No marker is PASS because a provider, SDK or health endpoint returned successfully.
 
+Ready but unexecuted, so a credential is the only thing between this build and real evidence:
+the DeepSeek canary (`scripts/run_deepseek_canary.py`, ten roles, ceiling printed before any call)
+and the Jev A/B/C/D ablation harness (`scripts/run_jev_ablation.py`, four arms, twelve metrics,
+fail-closed against a placeholder baseline). Neither has been run against a live provider.
+
 ## 3. Requirement-by-requirement mapping
 
 | # | Requirement | What was implemented | Status |
@@ -75,11 +80,11 @@ No marker is PASS because a provider, SDK or health endpoint returned successful
 | 3 | Knowledge-node learning state | Both tree titles are exactly `课程知识点`; NOT_STARTED → LEARNING → LEARNED; the first real teaching start is written as an idempotent fact (migration `026_learning_start_events.sql`, written from the accepted run, with a legacy backfill that requires a real artifact); LEARNED only when all REQUIRED coverage is validated | PASS |
 | 4 | Full `开始测评` flow | Three-line node panel (学习进度 / 测评结果 with raw-score fallback / 开始测评), COMPOSITE nodes ask for the child node first, fullscreen workspace with all five questions at once, one fixed bottom composer (paste/upload/draft/submit/confirm-unanswered), drafts are not submissions, existing AssessmentService/blueprint/`grade_snapshots` reused, real pool preparation replaces the permanent 409 with no seed and no `MODEL_ONLY` relabelling, raw score shown as e.g. `78 / 100 · AI 自测` (never 未测评), a needs-review outcome keeps the last valid result, per-step 详解 reuses the existing explanation component | PASS_LOCAL |
 | 5 | Merge official/private/workspace candidates → global ranking → Jev rerank; deterministic exact locator priority; real chapter evidence packs | `app/learning/retrieval_orchestrator.py`: RRF across authorized scopes (rank constant 60), per-scope recall cap, exact-target protection, boundary-aware budgeting, sequential S-ids assigned only at projection; structured locator path via `parse_query_reference` + `retrieve_structured`; Jev rerank reorders only | PASS |
-| 6 | Fixed learning anchors vs filterable history; permanent history never deleted; deterministic handling of explicit commands | Anchors stay fixed while history is filterable; history rows are never deleted (no delete path added in any migration); explicit user commands (`继续`/`暂停`/`只回答`/`做一题`/`给答案然后继续`) handled deterministically and covered by the closure suite | PASS |
+| 6 | Fixed learning anchors vs filterable history; permanent history never deleted; deterministic handling of explicit commands | Anchors stay fixed while history is filterable; history rows are never deleted (no delete path added in any migration); explicit commands are now answered by a deterministic, I/O-free router (`app/learning/intent_commands.py`) **before** any semantic call — it fires only when the message *is* the command ("继续讲一下 K-means" stays semantic), and a fixed anchor is never offered to Jev for dropping | PASS |
 | 7 | Replace with the 16 V2 prompts; keep 题目/详解 prompts and the exercise.v2 hidden private answers | 16 V2 files imported (14 professional + OTHER + EXERCISE), manifest hashes verified 16/16, versioned registry (`registry("V2")` default, V1 loadable), `problem_prompt()`/`explanation_prompt()`/`exercise_runtime_contract()` untouched, first round shows only the question while the private reference answer is still generated through `exercise.v2` | PASS |
 | 8 | Apply selected Jev ecosystem patterns; no 20 production dependencies | Only one third-party package is involved at all: `typesafe-sdk` **0.7.0** (MIT), and it is deliberately **not** a default dependency — the live transport imports it lazily. No ecosystem bulk import. Selection and rejection reasoning in `JEV_APPLICATION_DECISION_MATRIX.md` and `docs/jev-deepseek/JEV_SKILL_DECISIONS.md` | PASS |
 | 9 | Unified JevGateway → SemanticDecisionService for retrieval/context/intent/pedagogy/coverage/assessment/classification; versioned questions; probabilities never grades or permissions | One gateway façade, one decision service, receipts persisted (migration 028) with scope + invalidation, question revisions versioned (`027`), `probability_is_grade=false`, thresholds UNSET until calibrated; Jev can only select server-supplied ids and never writes state, grades, LEARNED, permissions or budgets | PASS_LOCAL |
-| 10 | A/B/C/D ablation with the listed metrics | **NOT_RUN.** No ablation was executed and **no claim of improved teaching quality is made.** The design, the four arms, the metric list and the acceptance gates are specified in `JEV_ABLATION_AND_PRODUCTION_ACCEPTANCE.md`; producing results needs live credentials and a budget | NOT_RUN |
+| 10 | A/B/C/D ablation with the listed metrics | **Result NOT_RUN**, but the harness now exists and runs offline with zero credentials: `scripts/run_jev_ablation.py --arm all --transport deterministic_fake` executes the four arms through the real wired paths and computes the twelve metrics. It is fail-closed against exactly the ways a comparison could flatter Jev: a fake transport can never be interpretable, a live run needs a labelled dataset, and a **placeholder baseline** (abstention, or the service's `OTHER` default) makes the verdict `NOT_INTERPRETABLE` until the real production baselines are injected. No ablation number is claimed as a quality result, and **no claim of improved teaching quality is made** | NOT_RUN (harness ready) |
 | 11 | Latest official SDK/API docs; keys backend-only; batch cost ceiling before real tests | DeepSeek and TypeSafe contracts verified against current official docs (recorded in `DEEPSEEK_AND_JEV_RUNTIME_CONTRACTS.md`); keys are read only from backend config and never logged or sent to the browser; the batch cost ceiling must be fixed before any live batch (blank fields in the action card) | PASS (wiring), live NOT_RUN |
 | 12 | Isolated-copy migration verification; never overwrite the production DB; never regenerate the published CS3481/GE2324 trees; never delete old chat/grades/bridge/template versions/evidence | Migrations are additive and were exercised only on isolated copies; the rehearsal now covers the governance objects of migrations 019–021 **and** 026–028; the four table rebuilds in 027 copy rows before the rename (verified `INSERT INTO …_new SELECT`); V1 templates remain on disk; published course trees were not regenerated; no old chat, grade, bridge, template version or evidence row is deleted anywhere. **Rollback path verified, not assumed** (§4.4): the previous release runs against the migrated Schema-28 database with `integrity=ok`, no column drift and no narrowed CHECK enum, and both the test guard and the verifier were negative-controlled | PASS |
 | 13 | Full pipeline, then controlled release; without authorization deliver all local work plus one minimal action card; never fake acceptance with a fake provider or `health=200` | All locally executable work delivered; release steps prepared but **not executed**; one consolidated action card; no fake provider, no shadow output presented as a live result, no health check presented as acceptance | PASS for local delivery; deployment BLOCKED |
@@ -137,6 +142,12 @@ All 17 failures were two contained causes, both fixed without weakening any guar
 | Schema probe (init + replay, isolated copy) | `python work/current-change/mig_probe.py` | `integrity=ok`, `fk_violations=0`, `max_migration=28`, `leftover_old_tables=[]`, 17 assessment triggers present |
 | Rollback compatibility (previous release vs migrated DB) | `python scripts/verify_rollback_compat.py --release-tree <b05fd294 export>` | `ROLLBACK_SAFE_WITH_MIGRATED_DB` (exit 0): old code opens Schema 28, `integrity=ok`, `fk_violations=0`, no missing/retyped column, no narrowed enum |
 | Schema drift guard | `pytest tests/test_schema_rollback_compat.py -q` | 5 passed (negative-controlled: narrowing an enum makes it fail) |
+| Explicit-command router | `pytest tests/test_intent_commands.py -q` | 70 passed (Chinese + English commands, politeness tolerance, semantic messages deliberately unrouted) |
+| A/B/C/D ablation harness (offline) | `python scripts/run_jev_ablation.py --arm all --transport deterministic_fake --out <fresh path>` | exit 0; 4 arms, 12 metrics, `verdict=NOT_INTERPRETABLE`, `interpretation=NON_INTERPRETABLE_PLUMBING_ONLY`, no key token in the artifact |
+| Ablation harness + baseline fidelity | `pytest tests/test_jev_ablation.py tests/test_jev_ablation_baselines.py -q` | 40 passed (raw harness 30 + baseline/anchor guards 10) |
+| DeepSeek live canary (preflight, no key) | `python scripts/run_deepseek_canary.py --preflight-only` | exit 0: 10 provider calls, 2 on `/chat/completions` + 8 on `/responses`, input-token ceiling 46665, no monetary figure invented without explicit prices |
+| DeepSeek live canary (refusal path) | same with `--allow-billable`, no key | exit 2, `Missing credential environment variable: DEEPSEEK_API_KEY`, before any client is built |
+| DeepSeek canary contract | `pytest tests/test_deepseek_canary.py -q` | 25 passed |
 | V2 template hashes | `python work/current-change/verify_template_v2.py` | 16/16 verified, no problems |
 
 ### 4.3 Migration 027 — the defect found and fixed inside this round
@@ -222,8 +233,10 @@ Nothing below has been run. It requires the owner's authorization (action card �
    `integrity_check`, `foreign_key_check`, trigger set, row counts and the rehearsal invariants.
 3. Build an immutable release from the committed SHA and place it under
    `/home/admin/coursemate-v3-releases/`; publish the web artifact through Netlify.
-4. Enable the canary first: DeepSeek roles, then Jev in `shadow`, and compare shadow decisions
-   against the deterministic path before switching any definition to `on`.
+4. Enable the canary first: `scripts/run_deepseek_canary.py --preflight-only` (prints the ten-call
+   plan and the ceiling), then the same command with `--allow-billable --max-cost <approved>` and
+   explicit per-million prices; then Jev in `shadow`, and compare shadow decisions against the
+   deterministic path (`scripts/run_jev_ablation.py`) before switching any definition to `on`.
 5. Run the real signed-in browser journey (login by the owner — no captcha bypass), then record
    `PRODUCTION_ACCEPTANCE` from the observed result, including failures.
 6. Rollback: re-point to the previous release directory and restore the pre-migration database
@@ -241,6 +254,9 @@ Nothing below has been run. It requires the owner's authorization (action card �
 | `DSH_JEV_DEEPSEEK_EXECUTION_STATE.md` | Stage-by-stage execution state and resumption instructions |
 | `MINIMAL_OWNER_ACTION_CARD.md` | The single consolidated owner request (credentials, budgets, production authorization) |
 | `docs/jev-deepseek/*.md` | Supporting notes: source baseline and gaps, learning state and evidence, retrieval and context, template V2 migration, provider capability matrix, decision catalog and calibration, Jev skill decisions |
+| `scripts/run_deepseek_canary.py` | Fail-closed DeepSeek live canary: ten roles, native fields only, ceiling printed before any call, one call per role, no retry |
+| `scripts/run_jev_ablation.py` | A/B/C/D ablation CLI: offline plumbing by default, twelve metrics, refuses an interpretable verdict from a fake transport, an unlabelled dataset or a placeholder baseline |
+| `scripts/verify_rollback_compat.py` | Runs the previous release against the migrated database and returns `ROLLBACK_SAFE_WITH_MIGRATED_DB` or `ROLLBACK_REQUIRES_DB_RESTORE` |
 
 ## 8. Resuming in a later round
 

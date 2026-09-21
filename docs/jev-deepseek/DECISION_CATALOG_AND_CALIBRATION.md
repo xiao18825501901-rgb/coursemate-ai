@@ -29,7 +29,7 @@ material-revision or authorization change (`SqlReceiptStore.lookup` +
 
 | key | primitive | authorized inputs (`required_state`) | fallback | wired |
 |---|---|---|---|---|
-| `intent.next_action.v1` | Choice | message, fixed_anchor, current_mode, active_assessment | rule-based command/state routing, otherwise DeepSeek answers without forcing advancement | service helper (`SemanticDecisionService.next_action`) |
+| `intent.next_action.v1` | Choice | message, fixed_anchor, current_mode, active_assessment | **in-repo deterministic router first** (`app/learning/intent_commands.py::route_explicit_command`: 继续 / 暂停 / 只回答 / 给答案然后继续 / 做一题 / 回到主线 / 交卷 and English equivalents are answered without a Jev call), otherwise DeepSeek answers without forcing advancement | service helper (`SemanticDecisionService.next_action`) |
 | `retrieval.support.v1` | Score (0–4) | query, exact_target, candidate_id, candidate_text, source_metadata | corrected merged RRF with exact-target protection | **yes** — `domain.py::_retrieve` re-rank |
 | `source.supports_claim.v1` | Noul | claim, source_span, source_version, task_scope | mark unverified, obtain source or defer claim | service helper |
 | `source.select_span.v1` | Choice | claim, candidate_spans | keep real selected evidence or return no support | service helper |

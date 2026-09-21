@@ -1,0 +1,186 @@
+{
+  "dataset_status": "EXAMPLE_NOT_LABELLED_FOR_RESULTS",
+  "schema_version": "1",
+  "note": "Self-contained example schema only. No result produced from this file is interpretable as quality: the real dataset (200 judgements / 40 trajectories / 30 image cases) is not invented here.",
+  "cases": {
+    "retrieval": [
+      {
+        "id": "retrieval-01",
+        "query": "explain DBSCAN core points",
+        "top_k": 3,
+        "candidates": [
+          {"id": "c1", "text": "DBSCAN groups points by density.", "filename": "clustering.md", "locator_type": "page", "locator_value": "1", "section": "intro", "scope": "official", "rank": 1},
+          {"id": "c2", "text": "A core point has at least minPts neighbours within eps.", "filename": "clustering.md", "locator_type": "page", "locator_value": "2", "section": "dbscan", "scope": "official", "rank": 2},
+          {"id": "c3", "text": "K-means minimises within-cluster variance.", "filename": "clustering.md", "locator_type": "page", "locator_value": "3", "section": "kmeans", "scope": "official", "rank": 3},
+          {"id": "c4", "text": "My private notes on density reachability.", "filename": "notes.md", "locator_type": "page", "locator_value": "1", "section": "private", "scope": "mine", "rank": 1}
+        ],
+        "relevant_ids": ["c2"],
+        "graded_relevance": {"c2": 4}
+      },
+      {
+        "id": "retrieval-02",
+        "query": "binary search tree rotation",
+        "top_k": 2,
+        "candidates": [
+          {"id": "d1", "text": "A left rotation moves the right child up.", "filename": "trees.md", "locator_type": "page", "locator_value": "5", "section": "rotation", "scope": "official", "rank": 1},
+          {"id": "d2", "text": "Heap sort uses a binary heap.", "filename": "trees.md", "locator_type": "page", "locator_value": "6", "section": "heaps", "scope": "official", "rank": 2},
+          {"id": "d3", "text": "Rotation preserves the in-order traversal order.", "filename": "trees.md", "locator_type": "page", "locator_value": "7", "section": "rotation", "scope": "official", "rank": 3}
+        ],
+        "relevant_ids": ["d1", "d3"],
+        "graded_relevance": {"d1": 3, "d3": 4}
+      }
+    ],
+    "locator": [
+      {
+        "id": "locator-01",
+        "query": "lecture3.pdf page 2 question 1",
+        "top_k": 3,
+        "candidates": [
+          {"id": "exact-1", "text": "The answer to question 1 is in this chunk.", "filename": "lecture3.pdf", "locator_type": "page", "locator_value": "2", "section": "question 1", "scope": "official", "rank": 1},
+          {"id": "decoy-1", "text": "Unrelated background material.", "filename": "other.pdf", "locator_type": "page", "locator_value": "9", "section": "misc", "scope": "official", "rank": 2},
+          {"id": "decoy-2", "text": "Another unrelated chunk.", "filename": "other.pdf", "locator_type": "page", "locator_value": "10", "section": "misc", "scope": "official", "rank": 3}
+        ],
+        "expected_id": "exact-1",
+        "expected_slot": 0
+      },
+      {
+        "id": "locator-02",
+        "query": "notes.docx page 4",
+        "top_k": 2,
+        "candidates": [
+          {"id": "decoy-3", "text": "Unrelated note.", "filename": "elsewhere.docx", "locator_type": "page", "locator_value": "1", "section": "misc", "scope": "official", "rank": 1},
+          {"id": "exact-2", "text": "The requested page-4 content.", "filename": "notes.docx", "locator_type": "page", "locator_value": "4", "section": "s4", "scope": "official", "rank": 2}
+        ],
+        "expected_id": "exact-2",
+        "expected_slot": 0
+      }
+    ],
+    "citation": [
+      {
+        "id": "citation-01",
+        "claim": "DBSCAN requires two parameters: eps and minPts.",
+        "source_span": "DBSCAN takes eps and minPts as parameters.",
+        "source_version": "v1",
+        "task_scope": "clustering",
+        "label_supported": true
+      },
+      {
+        "id": "citation-02",
+        "claim": "DBSCAN always produces exactly three clusters.",
+        "source_span": "The number of clusters is not fixed a priori.",
+        "source_version": "v1",
+        "task_scope": "clustering",
+        "label_supported": false
+      }
+    ],
+    "trajectory": [
+      {
+        "id": "trajectory-01",
+        "anchor": "unit 1 prerequisites",
+        "fixed_anchor": {"node_id": "n1"},
+        "current_mode": "teach",
+        "active_assessment": null,
+        "current_task": "DBSCAN core points",
+        "remaining_scope": "clustering",
+        "turns": [
+          {"message": "please continue the lesson", "expected_action": "CONTINUE"}
+        ],
+        "expected_action": "CONTINUE",
+        "filterable_segments": [
+          "resolved follow-up: what does eps mean again",
+          "duplicate explanation of the minPts rule"
+        ]
+      },
+      {
+        "id": "trajectory-02",
+        "anchor": "unit 2 anchor",
+        "fixed_anchor": {"node_id": "n2"},
+        "current_mode": "teach",
+        "active_assessment": null,
+        "current_task": "tree rotation",
+        "remaining_scope": "binary search trees",
+        "turns": [
+          {"message": "answer this detour then resume", "expected_action": "ANSWER_AND_RESUME"}
+        ],
+        "expected_action": "ANSWER_AND_RESUME"
+      },
+      {
+        "id": "trajectory-03",
+        "anchor": "unit 3 anchor",
+        "fixed_anchor": {"node_id": "n3"},
+        "current_mode": "teach",
+        "active_assessment": null,
+        "current_task": "density reachability",
+        "remaining_scope": "clustering",
+        "turns": [
+          {"message": "继续", "expected_action": "CONTINUE"}
+        ],
+        "expected_action": "CONTINUE"
+      },
+      {
+        "id": "trajectory-04",
+        "anchor": "unit 4 anchor",
+        "fixed_anchor": {"node_id": "n4"},
+        "current_mode": "teach",
+        "active_assessment": null,
+        "current_task": "in-order traversal",
+        "remaining_scope": "binary search trees",
+        "turns": [
+          {"message": "暂停", "expected_action": "PAUSE"}
+        ],
+        "expected_action": "PAUSE"
+      }
+    ],
+    "coverage": [
+      {
+        "id": "coverage-01",
+        "required_item": {"item_id": "item-a", "requirement": "REQUIRED"},
+        "accepted_evidence": "Core points are defined by minPts within eps.",
+        "spec_version": "1",
+        "label_supported": true
+      },
+      {
+        "id": "coverage-02",
+        "required_item": {"item_id": "item-b", "requirement": "REQUIRED"},
+        "accepted_evidence": "A keyword is mentioned without explanation.",
+        "spec_version": "1",
+        "label_supported": false
+      }
+    ],
+    "criterion": [
+      {
+        "id": "criterion-01",
+        "frozen_question": {"text": "Define a DBSCAN core point."},
+        "reference_solution": "A point with at least minPts neighbours within eps.",
+        "student_answer": "A point with at least minPts neighbours within eps.",
+        "deterministic_verification": "verified",
+        "criteria": [
+          {"id": "crit-1", "criterion": {"text": "States the minPts threshold"}, "label": "accurate", "acceptable_alternatives": []},
+          {"id": "crit-2", "criterion": {"text": "States the eps radius"}, "label": "partially", "acceptable_alternatives": []}
+        ]
+      },
+      {
+        "id": "criterion-02",
+        "frozen_question": {"text": "State the in-order property."},
+        "reference_solution": "Left subtree, then node, then right subtree.",
+        "student_answer": "The tree is not sorted.",
+        "deterministic_verification": "verified",
+        "criteria": [
+          {"id": "crit-1", "criterion": {"text": "Correct traversal order"}, "label": "not", "acceptable_alternatives": []}
+        ]
+      }
+    ],
+    "image": [
+      {
+        "id": "image-01",
+        "prompt": "What is the value of the highlighted cell?",
+        "ground_truth_answer": "42"
+      },
+      {
+        "id": "image-02",
+        "prompt": "Name the shape shown.",
+        "ground_truth_answer": "triangle"
+      }
+    ]
+  }
+}

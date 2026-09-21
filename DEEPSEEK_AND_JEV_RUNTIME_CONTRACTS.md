@@ -68,6 +68,28 @@ per role and there is no fallback branch.
 | Qwen-egress host spy across roles in the official configuration | covered by the role tests (see provider matrix) |
 | Any live DeepSeek call, image understanding, structured output, tool replay, pricing | **NOT_RUN** — needs `DEEPSEEK_API_KEY` + approved budget (see `MINIMAL_OWNER_ACTION_CARD.md`) |
 
+### A6. DeepSeek canary (preflight + optional live step)
+
+A small, fail-closed DeepSeek canary (`scripts/run_deepseek_canary.py`, pure logic in
+`app/evaluation/deepseek_canary.py`, offline tests in `tests/test_deepseek_canary.py`) covers every
+migrated production role exactly once, mirroring the Qwen canary's bounded philosophy.
+
+```text
+.\services\rag-api\.venv\Scripts\python.exe scripts\run_deepseek_canary.py --preflight-only
+```
+
+* The **preflight is the default**: it prints the ordered call plan and the conservative ceiling
+  **before any call**, then exits 0 without a key and without any network request.
+* A billable run additionally requires `--allow-billable`, `DEEPSEEK_API_KEY`, explicit owner-supplied
+  prices (`--input-price-per-million` / `--output-price-per-million`, never invented) and
+  `--max-cost`; it refuses **before any call** when the conservative ceiling exceeds `--max-cost`.
+* The monetary ceiling is computed only from explicit prices via the existing
+  `calculate_cost_ceiling`; without prices the preflight reports the input-token ceiling and
+  refuses to invent a monetary figure.
+* **Live validation status: NOT_RUN** — there are no DeepSeek credentials or approved budget in
+  this environment, so no live call, image understanding, structured output or pricing result is
+  claimed here.
+
 ---
 
 ## Part B — TypeSafe Jev semantic-decision contract

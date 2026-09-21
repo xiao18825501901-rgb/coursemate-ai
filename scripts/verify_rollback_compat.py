@@ -133,6 +133,7 @@ def run_old_release(service: pathlib.Path, database_path: pathlib.Path) -> dict[
         [sys.executable, str(script), str(service), str(database_path)],
         capture_output=True,
         text=True,
+        check=False,
     )
     lines = [line for line in completed.stdout.strip().splitlines() if line.strip()]
     if not lines:
@@ -143,13 +144,12 @@ def run_old_release(service: pathlib.Path, database_path: pathlib.Path) -> dict[
 
 
 def current_pool_filter() -> str:
+    """The pool filter both releases must share, as written in the current source."""
     source = (NEW_SERVICE / "app" / "learning" / "assessments.py").read_text(encoding="utf-8")
     match = re.search(
-        r"validation_status='VALIDATED'\s*\"\s*\"?.*?verification_method!='MODEL_ONLY'",
+        r"validation_status='VALIDATED'[^;]{0,200}?verification_method!='MODEL_ONLY'",
         source,
-        re.S,
-    ) or re.search(
-        r"validation_status='VALIDATED'[^;]{0,200}?verification_method!='MODEL_ONLY'", source, re.S
+        re.DOTALL,
     )
     return match.group(0) if match else ""
 

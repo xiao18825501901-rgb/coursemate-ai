@@ -78,6 +78,59 @@ Thresholds stay centralized and `UNSET` until calibrated on the labelled split; 
 is frozen **before** looking at the final holdout, and one definition switches from `shadow` to
 `on` only with a documented non-inferiority result.
 
+### 3.2 Ablation harness (implemented; result still NOT_RUN)
+
+The A/B/C/D harness now exists and runs offline with zero credentials:
+
+```
+services\rag-api\.venv\Scripts\python.exe scripts\run_jev_ablation.py --arm all --transport deterministic_fake --out work\current-change\jev-ablation-offline.json
+```
+
+* Arm resolution, case schema/loader, the twelve metric functions, the runner and the honesty
+  guardrails live in `services/rag-api/app/evaluation/jev_ablation.py`; the CLI is
+  `scripts/run_jev_ablation.py`; the self-contained example is
+  `benchmarks/jev-ablation-cases.example.json` (`dataset_status`
+  `EXAMPLE_NOT_LABELLED_FOR_RESULTS`); the tests are `services/rag-api/tests/test_jev_ablation.py`.
+* An offline (`deterministic_fake`) run is tagged `NON_INTERPRETABLE_PLUMBING_ONLY`, and
+  `compare_arms` refuses an improvement verdict (raising `ValueError` on a quality-claim
+  request). A live run is tagged `INTERPRETABLE` only with a `LABELLED_DATASET` — never the
+  example file.
+* **Ablation result: still NOT_RUN.** No metric number from the offline plumbing run is a
+  quality result, and no number is reported here. The real dataset (200 judgements /
+  40 trajectories / 30 image cases) is not invented in this release; when it and the
+  credentials/budget arrive, the same command with `--transport live --allow-billable` plus a
+  labelled case file produces the numbers.
+
+**Baseline fidelity — fixed in this round, because a comparison is only as honest as its
+baseline.** Verifying the harness surfaced three ways it could have flattered Jev once a live
+credential arrives; all three are fixed and pinned by tests
+(`services/rag-api/tests/test_jev_ablation_baselines.py`, `tests/test_intent_commands.py`):
+
+1. **Explicit commands both wasted a model call and depressed the baseline.** 继续 / 暂停 /
+   只回答 / 做一题 / 回到主线 / 交卷 and their English equivalents are meant to be answered by
+   deterministic code (requirement 6). They now go through
+   `app/learning/intent_commands.py::route_explicit_command` — a conservative, I/O-free router
+   that fires only when the message *is* the command (a command with a new object, e.g.
+   "继续讲一下 K-means", is semantic and is deliberately not routed) — and never reach Jev. The
+   run records how many turns took that path.
+2. **Placeholder baselines could look interpretable.** For coverage, criterion and citation the
+   non-Jev side used to be an abstention when no production predictor was injected, which is not
+   what the product ships. `run_ablation` now accepts the real baselines (`coverage_baseline`,
+   `criterion_baseline`, `citation_baseline`), names any remaining placeholder in
+   `placeholder_baselines`, and `compare_arms` refuses to call such a comparison interpretable
+   (`verdict="NOT_INTERPRETABLE"`, and `ValueError` on a quality-claim request).
+3. **Fixed anchors were offered to Jev.** The harness asked whether to keep *the anchor itself*,
+   so arms C/D scored 0.000 on the mainline metric purely because the transport answered "drop" —
+   a penalty the product can never suffer, since anchors are fixed by construction and only the
+   filterable class (resolved follow-ups, duplicate explanations, unrelated asides) may be
+   dropped. The anchor is now preserved structurally, Jev is asked only about
+   `filterable_segments` (recorded as informational, not a quality metric), and a test asserts the
+   anchor survives even when the transport says drop.
+
+Consequence for reading any future live result: arm A must be the shipped pipeline — the
+deterministic fixes plus the deterministic command router — and the release gate is
+non-inferiority against that baseline, never against an abstaining stub.
+
 ## 4. Production acceptance
 
 | Item | Status | Required to proceed |
