@@ -90,19 +90,31 @@ re-initialising anything.
 | Check | State |
 |---|---|
 | Targeted suites (per workstream) | green (see the final report table) |
-| Full backend regression | **808 passed, 0 failed** in 2074.86s (exit 0) on the frozen tree; the two clusters behind the earlier `789 passed / 17 failed` run were fixed (V1 template pin; migration-count ceiling) and two new guards added |
-| Web build + vitest | **exit 0**, 17 files / 64 tests passed (re-run by the orchestrator) |
-| Agent build + vitest | **exit 0**, 10 files / 72 tests passed (re-run by the orchestrator) |
+| Full backend regression | **948 passed, 0 failed** in 1312.19s (exit 0) on the delivered revision `6b85df7` — 808 before the round-4 additions plus 140 new tests; the two clusters behind the earlier `789 passed / 17 failed` run were fixed (V1 template pin; migration-count ceiling) and two new guards added. It completed after the owner's pause, on the frozen commit, with no file change during the run — log `work/current-change/full_run_round4.log` |
+| Web build + vitest | **exit 0**, 17 files / 64 tests passed |
+| Agent build + vitest | **exit 0**, 10 files / 72 tests passed |
 | Migration init + replay probe | `integrity=ok`, `fk_violations=0`, max migration 28, no `*_old`/`*_new` leftovers, all 17 assessment triggers present |
 | Migration rehearsal governance coverage | extended to migrations 026–028; a fresh-init regression now pins the ten rebuild-sensitive triggers from 027 |
+| Rollback compatibility | `ROLLBACK_SAFE_WITH_MIGRATED_DB` (previous release runs against Schema 28); pre-027 column/table/enum snapshot frozen as a test, both negative-controlled |
+| Round-4 additions (router, ablation harness, canary, rollback guard) | **140 passed**; both CLIs exercised offline (ablation exit 0 / verdict NOT_INTERPRETABLE, canary preflight exit 0, canary refusal exit 2) |
 | Real browser journeys | **NOT_RUN** (needs production/live authorization and a real login) |
-| DeepSeek/Jev live canary | **NOT_RUN** (credentials/budget) |
+| DeepSeek/Jev live canary | **NOT_RUN** (credentials/budget); the runner exists and is fail-closed |
+
+### Stage 6b — owner-requested pause (2026-09-22)
+
+The owner paused the round to freeze state. Feature work stopped immediately; a read-only inventory
+was taken and the full handover report is
+**`DSH_JEV_DEEPSEEK_PAUSE_AND_HANDOFF_REPORT.md`**. At pause: `HEAD=6b85df7`, branch
+`fix/codex-dsh-audit-20260919`, worktree clean apart from that report, 5 commits unpushed,
+`PRODUCTION_TOUCHED = no`, model/Jev/embedding/Clerk calls = 0, spend = 0. The only thing mid-flight
+was the read-only full regression, left to finish naturally.
 
 ## Stage 7 — controlled release · NOT STARTED (blocked, correctly)
 
 No production authorization in this session, so nothing was deployed, no production database was
 touched, and no DNS/Clerk/Netlify change was made. The single consolidated request is
-`MINIMAL_OWNER_ACTION_CARD.md`.
+`MINIMAL_OWNER_ACTION_CARD.md`. Commit `6b85df7` is the candidate revision to release; `scripts/run_deepseek_canary.py`
+and `scripts/run_jev_ablation.py` are the two commands a credential would unlock.
 
 ## Resume instructions for a later round
 

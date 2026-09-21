@@ -59,7 +59,7 @@ executed (fake transport or deterministic provider only); **NOT_RUN** = never ex
 | 10 | JEV_ASSESSMENT_REVIEW | **PASS_LOCAL** | Criterion-review + template/exercise-quality helpers implemented and tested; never authoritative over grades; live NOT_RUN |
 | 11 | LEARNING_PROGRESS | **PASS** | `课程知识点` titles, NOT_STARTED/LEARNING/LEARNED, first real start recorded idempotently (migration 026 + `_begin_learning`), LEARNED gated on all REQUIRED coverage; legacy regression suites updated and green |
 | 12 | FIVE_QUESTION_ASSESSMENT | **PASS_LOCAL** | Pool preparation (migration 027, idempotent/resumable/cancellable, no seed, `MODEL_ONLY` still excluded), 5-at-once fullscreen workspace, unified composer, drafts, raw-score display, NEEDS_REVIEW never overwrites the last valid result, per-step 详解; local tests + 64 web tests green. Live generation NOT_RUN |
-| 13 | LOCAL_REGRESSION | **PASS** | §4: backend **808 passed / 0 failed** (exit 0), agent 72/72, web 64/64, both builds exit 0, schema probe clean, V2 hashes 16/16 |
+| 13 | LOCAL_REGRESSION | **PASS** | §4: backend **948 passed / 0 failed** (exit 0) on the delivered revision `6b85df7`, agent 72/72, web 64/64, both builds exit 0, schema probe clean, V2 hashes 16/16 |
 | 14 | LIVE_MODEL_VALIDATION | **NOT_RUN** | Blocked on the owner's DeepSeek key/budget (action card §1) |
 | 15 | PRODUCTION_DEPLOYMENT | **BLOCKED** | No production authorization in this session; nothing deployed, no DB touched |
 | 16 | PRODUCTION_ACCEPTANCE | **BLOCKED** | Requires an authorized release plus a real login for the browser journey (action card §3) |
@@ -97,6 +97,7 @@ fail-closed against a placeholder baseline). Neither has been run against a live
 |---|---|
 | First full run on the pre-fix tree | **789 passed, 17 failed** in 1262.63s (exit 1) |
 | Authoritative run on the frozen post-fix tree | **808 passed, 0 failed** in 2074.86s (34:34), exit code 0, 2 pre-existing warnings |
+| Authoritative run on the delivered revision `6b85df7` (after the round-4 additions) | **948 passed, 0 failed** in 1312.19s (21:52), exit code 0, 2 pre-existing warnings; 808 + 140 new tests = 948, log `work/current-change/full_run_round4.log` |
 
 The count is self-consistent: 789 + 17 = 806 tests were collected before the fixes, and this run
 collected 808 — the two additions being the new guards described below.
