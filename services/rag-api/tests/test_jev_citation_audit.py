@@ -24,6 +24,7 @@ from app.jev.citation_audit import (
     CitationRequest,
     StaticEvidenceResolver,
     audit_citation,
+    missing_claim_numbers,
 )
 from app.jev.errors import JevUnavailableError
 from app.jev.gateway import FakeTransport, JevGateway
@@ -144,6 +145,50 @@ def test_direct_numeric_conflict_is_reported_as_contradicted(tmp_path) -> None:
         scope=scope_for(service),
     )
     assert result.label == CONTRADICTED
+
+
+def test_percentage_points_are_never_read_as_percent(tmp_path) -> None:
+    """Two different quantities must not be compared as if they shared a unit.
+
+    A regex alternation matches its first alternative, so listing ``percent`` before
+    ``percentage points`` made "7 percentage points" parse as "7 percent" against an
+    evidence "5%" — a fabricated contradiction. The units are distinct, so this is
+    NOT_ADDRESSED, never CONTRADICTED.
+    """
+    database = make_jev_database(tmp_path)
+
+    def responder(call):
+        return JevResult(answers={"source.supports_claim.v1": JevAnswer(noul=0.05)})
+
+    service, _ = make_service(database, responder, modes={"source.supports_claim.v1": "on"})
+    resolver = StaticEvidenceResolver({"doc-a": "the pass mark is 5%"})
+    result = audit_citation(
+        service,
+        CitationRequest(claim="the pass mark rose 7 percentage points", document_id="doc-a"),
+        resolver=resolver,
+        scope=scope_for(service),
+    )
+    assert result.label == NOT_ADDRESSED_IN_AVAILABLE_EVIDENCE
+    assert result.label != CONTRADICTED
+
+
+def test_missing_claim_number_is_detected_deterministically() -> None:
+    """Layer 2 without a verbatim quotation: a figure the source never states."""
+    assert missing_claim_numbers("accuracy reaches 91.5% on the test split",
+                                 "measured accuracy: 91.5%") == ()
+    assert missing_claim_numbers("accuracy reaches 88% on the test split",
+                                 "measured accuracy: 91.5%") == ("88%",)
+    # Unit-aware: 5 percentage points is not satisfied by 5%.
+    assert missing_claim_numbers("it rose 5 percentage points", "it rose 5%") == (
+        "5 percentage points",
+    )
+    assert missing_claim_numbers("it rose 5%", "it rose 5 percentage points") == ("5%",)
+    # A number without a unit is weak evidence and is never treated as an assertion.
+    assert missing_claim_numbers("there are 3 clusters", "two clusters were used") == ()
+    # A symbol unit stays attached; the Chinese unit is preserved verbatim.
+    assert missing_claim_numbers("\u6e29\u5ea6\u662f 5\u2103", "\u6e29\u5ea6\u662f 7\u2103") == (
+        "5\u2103",
+    )
 
 
 def test_supported_when_evidence_backs_the_claim(tmp_path) -> None:

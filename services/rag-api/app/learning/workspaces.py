@@ -4,9 +4,9 @@ from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
+from app.course_access import check_course_content_access
 from app.db import Database
 from app.errors import ApiError
-from app.course_access import check_course_content_access
 
 
 def accessible_course(database: Database, course_id: str, owner: str) -> sqlite3.Row:
@@ -134,6 +134,23 @@ def _authorize_document_version(
         if course["visibility"] == "public" and course["publication_status"] == "published":
             return
     raise ApiError(404, "DOCUMENT_VERSION_NOT_FOUND", "The source version was not found.")
+
+
+def can_read_document_version(
+    database: Database, version: sqlite3.Row, owner: str
+) -> bool:
+    """True when ``owner`` may read this document version (the canonical ACL).
+
+    The same rule :func:`_authorize_document_version` enforces, exposed as a
+    predicate so a caller that must answer with a verdict instead of raising
+    (the citation evidence resolver) maps ``False`` to ``unauthorized`` rather
+    than importing or duplicating the ACL.
+    """
+    try:
+        _authorize_document_version(database, version, owner)
+    except ApiError:
+        return False
+    return True
 
 
 def document_version_for(

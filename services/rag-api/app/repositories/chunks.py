@@ -340,3 +340,45 @@ class ChunkRepository:
                 continue
             scored.append(_search_hit(row, score=score, channel="vector"))
         return sorted(scored, key=lambda item: (-item.score, item.chunk_id))[:limit]
+
+    def resolve_document_chunks(
+        self,
+        course_id: str,
+        document_id: str,
+        *,
+        access: RetrievalAccess,
+        version: str | None = None,
+    ) -> list[sqlite3.Row]:
+        """Authorized chunks of one document, optionally for one immutable version.
+
+        Authorization is the same ``_source_access`` scope every chunk query uses,
+        so a document version in another course, or another user's workspace-private
+        material, is never returned. Rows come back in ``ordinal`` order.
+        """
+        source_joins, source_condition, source_parameters, _filename = _source_access(
+            course_id, access
+        )
+        conditions = [source_condition, "c.document_id = ?"]
+        parameters: list[object] = [*source_parameters, document_id]
+        if version is not None:
+            conditions.append("CAST(dv.version AS TEXT) = ?")
+            parameters.append(version)
+        where = " AND ".join(conditions)
+        with self.database.connect() as connection:
+            return connection.execute(
+                f"""
+                SELECT
+                    c.id AS chunk_id,
+                    c.content,
+                    c.locator_type,
+                    c.locator_value,
+                    c.section,
+                    c.ordinal
+                FROM chunks AS c
+                JOIN documents AS d ON d.id = c.document_id
+                {source_joins}
+                WHERE {where}
+                ORDER BY c.ordinal, c.id
+                """,  # noqa: S608 -- fragments are fixed; values stay parameterized.
+                parameters,
+            ).fetchall()

@@ -5,6 +5,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import secrets
 import sqlite3
 import time
@@ -148,6 +149,104 @@ def run_capability(jev, *, text, explicit_action, node_bound, pair_binding, teac
         # the flow, whatever the transport said.
         skill_id = baseline
     return resolution, skill_id, skill_id in TEACHING_FLOW
+
+
+def _claim_for_citation(output: str, source_id: str, *, max_chars: int = 600) -> str:
+    """The bounded sentence(s) of the answer that actually cite ``source_id``.
+
+    Only the text that carries the marker is offered to the audit: auditing the
+    whole answer against one source would ask a question the learner never made.
+    """
+    if not source_id:
+        return output.strip()[:max_chars]
+    marker = f"[{source_id}]"
+    pieces = re.split(r"(?<=[。！？!?;；\n])", output)
+    picked = [piece.strip() for piece in pieces if marker in piece]
+    if not picked:
+        picked = [output.strip()]
+    return " ".join(part for part in picked if part).strip()[:max_chars]
+
+
+def audit_answer_citations(
+    citations,
+    output,
+    *,
+    sources,
+    jev,
+    owner_user_id,
+    course_id,
+    database,
+    resolver=None,
+    max_cards=6,
+):
+    """Bind each cited source to the claim that cites it, then audit it (module D).
+
+    Layer 2 runs first and deterministically: a figure the claim asserts that the
+    cited source never states is ``NOT_ADDRESSED_IN_AVAILABLE_EVIDENCE`` and costs no
+    model call. Layer 1 then re-checks, at the fixed message revision, that the cited
+    document/version/locator exists and is still authorized for this caller. Layer 3
+    is the Jev support decision.
+
+    Nothing is removed, reordered or rewritten: the cards keep their ids, names and
+    pages, and a citation is never dropped because of a verdict. With no semantic
+    layer configured the cards are returned **unchanged**, so the response is
+    byte-identical to before this audit existed. An audit failure can never lose an
+    answer that has already been generated — the cards are returned un-annotated
+    with the failure recorded on them.
+    """
+    if jev is None or not citations:
+        return citations
+
+    from app.jev.citation_audit import (
+        NOT_ADDRESSED_IN_AVAILABLE_EVIDENCE,
+        CitationRequest,
+        audit_citation,
+        missing_claim_numbers,
+    )
+    from app.jev.citation_evidence import DocumentEvidenceResolver
+
+    try:
+        if resolver is None:
+            resolver = DocumentEvidenceResolver(
+                database, owner_user_id=owner_user_id, course_id=course_id
+            )
+        scope = jev.scope(
+            owner_user_id=owner_user_id, authorization_scope="citation", course_id=course_id
+        )
+        texts = {
+            str(source.get("id")): str(source.get("text") or "")
+            for source in sources
+            if isinstance(source, dict) and source.get("id")
+        }
+        for card in citations[: max(0, int(max_cards))]:
+            source_id = str(card.get("id") or "")
+            claim = _claim_for_citation(output, source_id)
+            card["audit_claim"] = claim
+            missing = missing_claim_numbers(claim, texts.get(source_id, ""))
+            if missing:
+                card["support"] = NOT_ADDRESSED_IN_AVAILABLE_EVIDENCE
+                card["audit_layer"] = "quote"
+                card["audit_missing_numbers"] = list(missing)
+                continue
+            result = audit_citation(
+                jev,
+                CitationRequest(
+                    claim=claim,
+                    document_id=str(card.get("document_id") or ""),
+                    version=None,
+                    location=str(card.get("locator") or "") or None,
+                ),
+                resolver=resolver,
+                scope=scope,
+            )
+            card["support"] = result.label
+            card["audit_layer"] = result.layer
+            if result.reject_reason:
+                card["audit_reject_reason"] = result.reject_reason
+    except Exception as exc:  # the answer is already generated; never lose it
+        for card in citations:
+            card["audit_error"] = type(exc).__name__
+    return citations
 
 
 def create_app(settings: Settings|None=None, *, provider=None, domain=None, subject_resolver=None, jev: SemanticDecisionService|None=None) -> FastAPI:
@@ -1215,6 +1314,12 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             import re
             mentioned=set(re.findall(r'\[(S\d+)\]',output))
             citations=[{k:v for k,v in s.items() if k!='text'} for s in sources if s['id'] in mentioned]
+            # Module D: bind each citation to the claim that cites it and audit it
+            # against the source the learner was actually shown. Additive only — no
+            # card is dropped or reordered, and with no semantic layer the list is
+            # returned exactly as built above.
+            citations=audit_answer_citations(citations,output,sources=sources,jev=jev,
+                owner_user_id=user['id'],course_id=conv['course'],database=db)
             message_id=uid('message_')
             with db.connect(True) as c:
                 # The final write is a conditional transition: if a cancel won the

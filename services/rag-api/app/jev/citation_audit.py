@@ -72,9 +72,12 @@ _PARTIAL_THRESHOLD = 0.5
 
 # Number-with-unit assertions used for the deterministic contradiction check.
 # The unit is required, so a bare integer is never used to "prove" a conflict.
+# The longer alternatives come first: a regex alternation takes the first match, so
+# `percent` before `percentage points` would read "5 percentage points" as "5 percent"
+# and compare two different quantities as if they were the same unit.
 _NUMBER = re.compile(
     r"(-?\d+(?:\.\d+)?)\s*"
-    r"(%|percent|percentage\s+points?|个百分点|百分点|km|m/s|ms|kg|℃|°C|°F|m|s)",
+    r"(percentage\s+points?|个百分点|百分点|percent|%|km|m/s|ms|kg|℃|°C|°F|m|s)",
     re.I,
 )
 
@@ -143,6 +146,35 @@ def _numeric_contradiction(claim: str, evidence_text: str) -> bool:
                 if value != evidence_value:
                     return True
     return False
+
+
+def missing_claim_numbers(claim: str, evidence_text: str) -> tuple[str, ...]:
+    """Numbers the claim asserts that do not appear in the cited evidence (layer 2).
+
+    This is the deterministic half of layer 2 for the teaching path, where a
+    citation card carries no verbatim quotation: a claim that states a figure the
+    cited source never contains is ``NOT_ADDRESSED_IN_AVAILABLE_EVIDENCE``, not a
+    verified citation, and it is decided in code with zero model calls. Only numbers
+    that carry a unit are compared (a bare integer is weak evidence and is skipped),
+    and the comparison is unit-aware via :func:`_canonical_unit`, so ``5%`` is never
+    satisfied by ``5 percentage points``. Returns the offending literals, empty when
+    nothing is missing.
+    """
+    missing: list[str] = []
+    evidence_units = _numeric_assertions(evidence_text)
+    for number, unit in _NUMBER.findall(claim):
+        key = _canonical_unit(unit)
+        if key == _canonical_unit(""):
+            continue  # a unitless number is not treated as a falsifiable assertion
+        values = evidence_units.get(key)
+        if not values or float(number) not in values:
+            # Readable literal: a worded unit keeps its space ("5 percentage points"),
+            # a symbol stays attached ("5%").
+            separator = "" if unit[:1] in "%℃°" else " "
+            literal = f"{number}{separator}{unit}".strip()
+            if literal not in missing:
+                missing.append(literal)
+    return tuple(missing)
 
 
 @dataclass(frozen=True)
@@ -362,6 +394,7 @@ __all__ = [
     "SUPPORTED",
     "audit_citation",
     "is_definitive",
+    "missing_claim_numbers",
     "normalize_whitespace",
     "quote_exists",
 ]

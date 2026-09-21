@@ -17,3 +17,9 @@
 .modal:has(.real-preview){position:fixed;inset:16px;width:auto;max-width:none;max-height:none;display:flex;flex-direction:column}.modal:has(.real-preview) .modal-body{flex:1;min-height:0;display:flex;flex-direction:column}.real-preview{flex:1;min-height:0;display:flex;flex-direction:column;gap:12px}.real-preview .pdf-frame{flex:1;width:100%;height:auto;min-height:180px}.image-preview{flex:1;min-height:0;overflow:auto}.image-preview img{object-fit:contain;max-height:100%}
 @media(max-width:680px){.modal:has(.real-preview){inset:4px}.prompt-inspector{max-height:70vh}}
 .workspace-columns.is-resizing{user-select:none;cursor:col-resize}.workspace-columns.is-resizing .learning-pane{pointer-events:none}.pane-divider:focus-visible{outline:2px solid #b32964;outline-offset:-2px;background:#f6e8ee}
+/* Claim↔citation audit verdicts: only a real negative verdict is marked, so an
+   installation without the semantic layer renders citations exactly as before. */
+.citation-row button.citation-unverified{border-color:#d8b48f;color:#8a6236;background:#fdf9f2}
+.citation-row button.citation-contradicted{border-color:#c57b8f;color:#8f1f45;background:#fceff3}
+.citation-row .citation-warning{display:inline-flex;align-items:center;flex:none}
+.citation-row .citation-warning .ico{width:12px;height:12px}
