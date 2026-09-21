@@ -12,7 +12,18 @@ if (root === null) {
 }
 
 const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
-const testToken = import.meta.env.DEV ? import.meta.env.VITE_AUTH_TEST_TOKEN : undefined;
+/**
+ * Development and E2E identity, matching the refreshed shell (`CourseMateUi.tsx`).
+ *
+ * Vite inlines this value only when the build was given it. A production build
+ * cannot be produced with it at all: `scripts/preflight_release_build.mjs` fails
+ * when `VITE_AUTH_TEST_TOKEN` is set for a production context, and
+ * `scripts/verify_release_build.mjs` fails if the token string appears in the
+ * emitted bundle — so this cannot silently bypass production sign-in. Reading it
+ * without a `DEV` guard is what lets the built legacy entry (`index.html`) be
+ * exercised by the browser acceptance suite at all.
+ */
+const testToken = import.meta.env.VITE_AUTH_TEST_TOKEN;
 
 let application;
 if (testToken) {

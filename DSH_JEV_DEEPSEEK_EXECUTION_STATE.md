@@ -202,6 +202,37 @@ Two P0 workstreams are running: module A `ExtractionVerification` and modules C+
 `EvidenceConsistency` + `ClaimCitationAudit`, each implementing against the existing gateway with a
 recorded request for any new catalog definition rather than editing the catalog themselves.
 
+## Round 23 — the three structured modules reach real business paths (2026-09-22)
+
+Commit `034e3aa` closes the "helper exists but nothing reaches it" gap for three of
+the six structured modules. The rule applied throughout: a decision that is only
+written to the receipt ledger is **not** an integration, and a module whose result
+is discarded does not count as wired.
+
+| Module | Real business entry point | Effect that actually happens | Test |
+|---|---|---|---|
+| **B** CourseEntityResolution (`entity.relation.v1`) | `V3DomainAdapter._retrieve` (query expansion before the first recall; relation resolution after `fuse_scoped_candidates`) | accepted knowledge-node aliases expand the *query* (recall only, original query stays the prefix, explicit file/page targets skip expansion); resolved relations are written to the new **proposal-only** `entity_relations` store (migration 029, `status=PROPOSED`, `UNIQUE(left,right,relation)`, `used_jev`/`receipt_id` recorded, idempotent). Nothing merged/renamed/reordered/deleted. | `test_jev_entity_resolution.py` (18), `test_jev_shadow_invariance.py` (6) |
+| **E** TeachingCapabilityRouter (`teaching.capability.v1`) | `cm_update/app.py::run` → `run_capability` | the resolved `skill_id` is **consumed**: only the capabilities this endpoint serves are offered, the code-owned baseline equals the previous flow, and `teaching_flow` decides whether the run binds the V3 journey through the orchestrator or answers without advancing. An explicit "answer only" is now really honoured at **0 Jev cost** instead of being discarded. The decision is reported on the create-run response. | `test_jev_capability_router.py` (17), `test_jev_capability_business_dispatch.py` (10, incl. an end-to-end run), `test_jev_shadow_invariance.py` |
+| **F** ToolIntentCheck (`tool.intent.v1`) | `services/agent-api` `ToolExecutor.execute` → `JevToolIntentGate` → `POST /api/jev/tool-intent` → `ToolIntentCheck.authorize` | the guard now sits at the real model-proposed write boundary. `JEV_TOOL_INTENT_MODE=off` (default) makes **no** call and leaves the path byte-identical; `advisory` records the verdict and still executes; `enforce` blocks a non-`ALLOW` write. `searchTask` is read-only and never gated. The internal endpoint fails closed without a configured token. | `test_jev_tool_intent.py` (12), `test_api_tool_intent.py` (8), agent-api `intent-gate` (8) + `executor-intent-gate` (6) |
+
+Also landed: **one shared semantic-decision layer** built in `app/main.py::create_app`
+and threaded through `mount.py` → `integration.py` → `create_app(jev=…)` →
+`V3DomainAdapter(jev=…)`, reused by the feedback and tool-intent routes (no second
+gateway anywhere), and **migration 029** (`entity_relations`, `LATEST_V3_SCHEMA_VERSION`
+28 → 29). Verified on an isolated database: `integrity=ok`, `fk_violations=0`,
+`max_migration=29`, no `*_old`/`*_new` leftovers.
+
+**Still `MODULE_ONLY` (no business effect claimed):** module **A** ExtractionVerification,
+module **C** EvidenceConsistency, and the three-layer claim→citation audit of module
+**D** (its two reused definitions *are* on the `_annotate_evidence` path). These are
+implemented and tested but not yet invoked from ingestion/parse, the evidence-pack
+step, or post-generation citation binding. `JEV_CALLSITE_MATRIX.md` marks each row
+`MODULE_ONLY` / `PARTIAL` rather than `DONE`.
+
+Every definition remains `shadow`; there is still no TypeSafe credential, so
+`live evidence = NOT_RUN` for all 19 definitions and no quality claim is made for
+any of them. Wiring a call site is not evidence of quality.
+
 ## Resume instructions for a later round
 
 1. Work in `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY`, branch

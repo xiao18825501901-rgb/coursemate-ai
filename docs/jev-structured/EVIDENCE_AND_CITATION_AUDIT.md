@@ -124,6 +124,30 @@ second citation service** and no new citation definition — it reuses
 
 ---
 
+## Wiring status (honest, as of this round)
+
+* **Module C — `MODULE_ONLY`.** `app/jev/evidence_consistency.py` is complete and
+  tested, and `evidence.consistency.v1` is registered in the catalog (19
+  definitions), but **no retrieval/evidence-pack call site invokes it yet**. No
+  business effect is claimed for it. The intended insertion point remains the
+  evidence-pack step in `V3DomainAdapter._retrieve`, between the fused candidate
+  set (where entity relations are already resolved) and the DeepSeek prompt, with
+  the rule that a genuine conflict keeps both sources and is explained by DeepSeek
+  rather than resolved by deletion.
+* **Module D — partial.** The two definitions it reuses *are* on a real path:
+  `domain.py::_annotate_evidence` → `app/rag/answers.py::evidence_bundle_support`
+  → `callsites.select_citation_span` + `callsites.citation_support` annotates each
+  returned source with `jev_citation_support` / `jev_selected_span` before
+  generation. The three-layer audit module (`app/jev/citation_audit.py`,
+  post-generation claim→citation binding to the message revision) is **not yet
+  bound** to the answer finalization path, so `SUPPORTED / PARTIALLY_SUPPORTED /
+  CONTRADICTED / NOT_ADDRESSED_IN_AVAILABLE_EVIDENCE / INSUFFICIENT_CONTEXT`
+  verdicts are not produced in the product yet. Claimed as: call sites wired,
+  audit module `MODULE_ONLY`.
+* Nothing here is `on`/`advisory`: with no TypeSafe credential every evaluation
+  stays in `shadow`, so `used_jev == False` and the deterministic annotation
+  (`UNVERIFIED`, keep evidence) is what the business uses.
+
 ## Tests
 
 ```

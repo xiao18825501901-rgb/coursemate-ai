@@ -300,8 +300,12 @@ material.
 
 Jev unavailable / invalid / off / shadow / over budget returns `UNCERTAIN` (no
 relation, `used_jev=False`); the original query is unchanged and retrieval is
-unaffected. The only table ever written is `jev_decision_receipts` (through the
-gateway's receipt store).
+unaffected. With no Jev service at all (`V3DomainAdapter(jev=None)`) the retrieval
+path is byte-identical: no expansion input, no resolution, no proposal write. If
+the `entity_relations` store is absent (an un-migrated database) the proposal
+bookkeeping degrades to "nothing recorded" and retrieval still returns the same
+deterministic order — proven by
+`test_relation_bookkeeping_never_breaks_retrieval_without_the_store`.
 
 ### 8. Test coverage
 
@@ -316,27 +320,46 @@ never offered); alias query expansion preserving the original query and never
 overriding an explicit target; transport-failure degradation; and no writes
 outside the receipt table.
 
-### 9. Wiring (recommended insertion points — not performed here)
+The wiring itself is covered by `tests/test_jev_shadow_invariance.py`:
+`test_alias_expansion_preserves_original_query_and_explicit_target`,
+`test_fused_order_unchanged_under_shadow_and_unavailable` (byte-identical
+`document_id` order across shadow, unavailable and `jev=None`),
+`test_duplicate_evidence_is_recorded_as_a_proposed_relation` (one
+`SAME_CONCEPT`/`content_hash` row, `status=PROPOSED`, `used_jev=0`, canonical ids,
+source versions, course, idempotent on a second retrieval, and the duplicate is
+*not* merged away on the path), and
+`test_relation_bookkeeping_never_breaks_retrieval_without_the_store`.
 
-No business file was edited (out of scope). The recommended, default-shadow
-insertion points are:
+### 9. Wiring — **LANDED** (entity resolution); extraction still `MODULE_ONLY`
 
-1. **Host wiring.** Assemble `CourseEntityResolver(JevGateway(…, receipt_store=SqlReceiptStore(database)))`
-   in the same place the `SemanticDecisionService` is built for the existing 12
-   call sites (today no production caller passes `jev` — see `JEV_CALLSITE_MATRIX.md`
-   "Host wiring (default-off today)"). Keep it `shadow` until a TypeSafe credential
-   exists.
-2. **Query expansion.** In `app/ui_extension/domain.py::V3DomainAdapter._retrieve`,
-   right after the history-rewrite block (around line 691, before the first
-   `self.retriever.retrieve`), replace the recall `query` with
-   `resolver.expand_query(query, aliases=<course's accepted aliases>, explicit_targets=exact_targets_from_query(raw_query)).expanded_query`.
-   The original query is preserved and an explicit file/page/question target
-   outranks expansion.
-3. **Relation resolution.** In the same `_retrieve`, after `fuse_scoped_candidates`
-   (around line 746) and the optional rerank, build `EntityObject`s from the
-   already-authorized fused candidates and call
-   `resolver.resolve(objects, course_id=course_id, material_revision=<workspace revision>, cache_scope=…)`;
-   persist the returned `EntityRelation`s (both original ids, source versions,
-   evidence, status) into a backend-owned `entity_relations` table. Duplicate
-   evidence (content-hash `SAME_CONCEPT`) may be folded inside the evidence pack,
-   while the file list and shared snapshots keep every valid file.
+Host wiring: one shared `SemanticDecisionService` is built in
+`app/main.py::create_app` and threaded to the adapter, and
+`V3DomainAdapter.__init__` builds `CourseEntityResolver(jev.gateway if jev else None)`
+— there is no second gateway.
+
+1. **Query expansion — landed.** `_retrieve` calls
+   `self.entity_resolver.expand_query(query, aliases=self._accepted_aliases(course_id, subject),
+   explicit_targets=[target.raw for target in exact_targets])` after the
+   history-rewrite block and before the first recall. Expansion is deterministic
+   and never reaches Jev; the user's original query stays the prefix, only
+   already-accepted aliases (from the authorized knowledge registry, private rows
+   scoped to the subject) are added, and an explicit file/page/question target
+   skips expansion entirely.
+2. **Relation resolution — landed, proposal-only.** After `fuse_scoped_candidates`,
+   `_resolve_entity_relations` builds `EntityObject`s from the already-authorized
+   fused candidates and calls `resolver.resolve(..., cache_scope=<owner-scoped>)`.
+   The returned relations are **persisted as proposals** into `entity_relations`
+   (migration 029) with `status=PROPOSED`, `evidence`, `used_jev` and
+   `receipt_id`, `UNIQUE(left_id,right_id,relation)` so a repeated retrieval is
+   idempotent. Nothing is merged, renamed, reordered or deleted: the duplicate
+   evidence stays in the returned sources, and only the backend may later move a
+   row to `ACCEPTED`/`REJECTED`.
+3. **Not part of this endpoint.** Folding duplicate evidence *inside* the evidence
+   pack (while the file list keeps every valid file) remains a deliberate
+   non-goal here: this path must not change what the learner sees while the
+   definition is in shadow.
+4. **Module A (ExtractionVerification) is still `MODULE_ONLY`.** It is implemented
+   and tested (`tests/test_jev_extraction.py`, 16 tests) but no ingestion/parse
+   call site invokes it, so no business effect is claimed for it. The same is true
+   for the planned `NEEDS_REVIEW` outcome.
+

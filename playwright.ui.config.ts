@@ -54,6 +54,11 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   reporter: [["list"]],
+  // These journeys drive three real services (upload → parse/index → preview →
+  // download) in one test, so the default 30s budget is not a product signal: a
+  // single file journey legitimately takes ~35s on a busy machine. The assertions
+  // stay unchanged; only the budget for a whole end-to-end journey is raised.
+  timeout: 120_000,
   expect: { timeout: 20_000 },
   use: {
     baseURL: "http://127.0.0.1:5273",

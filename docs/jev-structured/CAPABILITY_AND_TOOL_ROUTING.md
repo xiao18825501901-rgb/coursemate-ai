@@ -104,45 +104,57 @@ plus `used_jev`, `receipt_id`, the `offered_candidates`, `disambiguation_rounds`
 `jev_calls`. The business layer calls the existing orchestrator entry named in
 `handler` — a receipt alone is not integration.
 
-### Production wiring (one-line insertion, owning workstream)
+### Production wiring — **LANDED** (this round)
 
-The router is wired where the teaching shell / `cm_update` decides which capability
-to serve a learner message:
+The router is wired into the teaching run endpoint, and its result is *consumed*
+rather than recorded: `app/cm_update/app.py::run_capability` is the single entry
+point, called from the `POST /conversations/{conv_id}/runs` route right after
+`route_explicit_command`:
 
 ```python
-# app/cm_update/app.py (or the teaching shell) — after route_explicit_command returns None:
-from app.jev.capability_router import CapabilityRequest, TeachingCapabilityRouter
-
-router = TeachingCapabilityRouter(jev)
-choice = router.resolve(
-    CapabilityRequest(
-        learner_request=message,
-        product_mode=product_mode,
-        revealed_state=revealed,
-        active_assessment=active_assessment,
-        pair_binding=pair_id,
-        candidate_skills=server_candidate_skills,
-        mode=mode,                       # "normal" | "thinking"
-        permissions=actor_permissions,
-        explicit_command=route_explicit_command(message),
-    ),
-    owner_user_id=user_id,               # server-derived, never client-supplied
-    authorization_scope="capability",
-    course_id=course_id,
-    workspace_id=workspace_id,
-    material_revision=material_revision,
+capability, capability_skill, teaching_flow = run_capability(
+    jev,
+    text=data.text,
+    explicit_action=explicit_action,          # deterministic router, 0 Jev
+    node_bound=bool(data.node_id),
+    pair_binding=str(run_pair['id']) if run_pair is not None else None,
+    teaching_mode=teaching_mode,
+    owner_user_id=user['id'],                 # server-derived, never client-supplied
+    course_id=conv['course'],
 )
-# dispatch to choice.handler (the existing entry point) — the deterministic backend
-# still owns permissions, the exact locator, arithmetic, state machines, budgets,
-# coverage, marks and every write.
 ```
 
-`product_mode`, `permissions`, `pair_binding`, `active_assessment` and
-`revealed_state` are server-derived; none are client-supplied. The cache scope
-(`owner_scope_hash`, `course_id`, …) is built inside `resolve` from the
-server-derived `owner_user_id`/`authorization_scope`/course/workspace values, so a
-Jev call always writes a properly-scoped receipt and never reuses another owner's
-cached judgement.
+What `run_capability` guarantees, so that a Jev answer can never break the product:
+
+* **only the capabilities this endpoint actually serves are ever offered.** A
+  node-bound run offers `node_lesson / worked_example / code_trace /
+  prerequisite_explanation`; a non-node run offers `direct_qa /
+  figure_explanation`. A capability whose handler lives in another endpoint
+  (`exercise`, `step_explanation`, `assessment_submission`) is never offered and
+  is additionally rejected by a code-owned backstop if a transport names it.
+* **the code-owned baseline is the flow the shell already took**: `node_lesson`
+  for a node-bound run, `direct_qa` otherwise, and `direct_qa` when the learner's
+  own explicit command was "answer only" (`ANSWER_ONLY`).
+* **the result is dispatched**: `teaching_flow = skill_id in TEACHING_FLOW_SKILLS`
+  decides whether the run binds the V3 learning journey through the orchestrator
+  (`remote('knowledge.begin_learning')` → `LearningOrchestrator`, plus the
+  `cmui_node_starts` claim and the `cmui_learning` LEARNING row) or answers
+  without advancing the lesson. Under shadow/off the baseline is returned, so
+  every one of those branches is exactly what it was before.
+* **an explicit command costs zero Jev calls** and is never overridden by the
+  semantic layer (`CONTINUE`/`ANSWER_AND_RESUME` → teaching flow,
+  `ANSWER_ONLY` → answer-only, both proven with a receipt count of 0).
+* **the decision is observable**: the create-run response carries
+  `capability: {skill_id, teaching_flow, used_jev, path, explicit_command}`.
+
+Not (yet) dispatched: the heterogeneous handler strings in `CAPABILITY_CATALOG`
+(`QaService.stream`, `LearningOrchestrator.teach`, `generate_exercise_run`, the
+step-explanation endpoints). Those surfaces have their own product endpoints, so
+this run endpoint deliberately offers only the two flows it implements. Flipping
+`teaching.capability.v1` to `on` therefore changes *which* teaching skill serves
+the request and whether the lesson advances — never permissions, reasoning
+strength, revealed answers, Pairs or node bindings.
+
 
 ---
 
@@ -184,41 +196,63 @@ Hard rules:
 `jev_label`, `receipt_id`, `path` and `jev_calls`. `needs_intent_check(...)` is the
 tier-independent predicate (`not is_read_only and not explicit`).
 
-### Production wiring (one-line insertion, owning workstream)
+### Production wiring — **LANDED** (this round), opt-in and default-off
 
-Wrap the executor of a model-proposed side-effecting tool call:
+The real execution boundary for a model-proposed tool call is the Node task agent
+(`services/agent-api`), not the Python service, so the guard runs there and calls
+the Python guard over an authenticated internal hop:
 
-```python
-from app.jev.tool_intent import ToolIntentCheck
-
-check = ToolIntentCheck(jev)
-result = check.authorize(
-    user_message=user_message,            # the user's own words only
-    proposed_tool=tool_name,
-    tool_arguments=tool_arguments,
-    actor_scope=actor_scope,
-    actor_permissions=actor_permissions,  # server-derived, at proposal time
-    required_permissions=required_permissions,
-    is_read_only=tool_is_read_only,
-    explicit=action_was_explicitly_requested,
-    object_revision=object_revision,      # captured before the intent check
-    current_revision=current_revision,    # re-read immediately before execution
-    owner_user_id=user_id,                # server-derived, never client-supplied
-    authorization_scope="tool_intent",
-    course_id=course_id,
-)
-if result.verdict != "ALLOW":
-    return require_confirmation_or_refuse(result)   # never execute, never auto-allow
-run_original_tool(tool_name, tool_arguments)
 ```
+AgentService.chat ──▶ ToolExecutor.execute(owner, tool, args, {userMessage})
+                        └─ write tool only ──▶ JevToolIntentGate.checkToolIntent
+                                                 └─ POST /api/jev/tool-intent
+                                                      └─ ToolIntentCheck.authorize
+```
+
+* `services/rag-api/app/api/tool_intent.py` — `POST /api/jev/tool-intent`, guarded
+  by a constant-time internal-token comparison (`JEV_TOOL_INTENT_TOKEN`,
+  `X-CourseMate-Internal-Token`). A missing/blank configured token disables the
+  endpoint (503) instead of opening it; a mismatch is 401. The body is bounded
+  (message/tool/permission/revision lengths and a serialized `tool_arguments`
+  cap), the shared `app.state.jev_service` is reused, and the route writes nothing
+  except the Jev receipt the guard itself records.
+* `services/agent-api/src/tools/intent-gate.ts` — `JevToolIntentGate` with an
+  injected `fetchImpl` and a bounded timeout (default 1500 ms). Network error,
+  timeout, non-2xx, malformed JSON or an unrecognised verdict all map to
+  `REQUIRE_CONFIRMATION` / `intent:unavailable`; the gate never throws.
+* `services/agent-api/src/tools/executor.ts` — only the four write tools
+  (`createTask`, `updateTask`, `completeTask`, `deleteTask`) are gated;
+  `searchTask` is read-only and is never gated. Permissions are computed in code
+  (`["tasks:write"]` for the authenticated owner), never supplied by the model.
+
+Three modes, so the guard can be introduced without changing production behaviour:
+
+| `JEV_TOOL_INTENT_MODE` | HTTP call | effect | default |
+|---|---|---|---|
+| `off` | none at all | the existing synchronous path, byte-identical (no gate object is even constructed) | **yes** |
+| `advisory` | yes | the verdict is recorded on the tool result (`intent`) and the tool still executes | no |
+| `enforce` | yes | a non-`ALLOW` verdict blocks the write (`CONFIRMATION_REQUIRED` / `INTENT_REFUSED`) and the tool does not run | no |
+
+`enforce` requires both `JEV_TOOL_INTENT_URL` (absolute http/https, no credentials,
+no control characters) and a non-empty `JEV_TOOL_INTENT_TOKEN`; config validation
+throws at load time otherwise. `README`-level operator note: with `off` (the
+default) no new environment variable is required and no call is made.
+
 
 ---
 
-## Requested follow-ups
+## Follow-ups
 
-* **Host wiring (default-off today).** Wire `JevGateway` + `SqlReceiptStore(database)`
-  into `app/main.py` / `app/cm_update/integration.py` / `app/ui_extension/mount.py`
-  once a TypeSafe credential exists; everything stays `shadow` until calibrated.
-* The capability catalog is a faithful, in-code mapping to the existing entry points;
-  the owning workstream must confirm the `handler` strings against the exact
-  dispatch site before flipping any definition to `on`.
+* **Host wiring — DONE.** One shared `SemanticDecisionService`
+  (`app/main.py::create_app` → `application.state.jev_service`) is threaded through
+  `app/ui_extension/mount.py` → `app/cm_update/integration.py` →
+  `app/cm_update/app.py::create_app(jev=…)` → `V3DomainAdapter(jev=…)`, and reused
+  by the feedback and tool-intent routes. With no TypeSafe credential the live
+  transport fails typed and everything stays `shadow`.
+* **Still to do before any `on`:** live Jev validation and calibration on the
+  labelled test split, then the module ablation. Every definition is `shadow`
+  today and no quality claim is made for any of them.
+* The capability catalog is a faithful, in-code mapping to the existing entry
+  points, but only the two flows this run endpoint implements are offered to the
+  router; the remaining `handler` strings name their own endpoints and would need
+  a real dispatch site before they could be selected.
