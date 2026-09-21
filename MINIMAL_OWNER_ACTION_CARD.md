@@ -1,104 +1,67 @@
-# MINIMAL OWNER ACTION CARD — Laya round
+# MINIMAL OWNER ACTION CARD — Jev + DeepSeek round
 
-Only what cannot be done without you. No secret is requested in chat: every item says where the
-value belongs. Everything else in this round (source work, tests, dataset, calibration, the
-inference service, the deployment runbook, the release rehearsal) is being done without you.
+Only what cannot be done without you. No secret is requested in chat: every item says where the value
+belongs. Everything else (source work, call sites, dataset, calibration, tests, release rehearsal) is
+being done without you.
 
-Scope note: the previous TypeSafe/Jev request in this file is **cancelled by the owner** — no
-TypeSafe key will be requested or used. The semantic layer is now self-hosted Laya.
+Scope note: the **Laya direction is stopped** and the request for a Laya ECS node in the previous
+version of this card is **withdrawn** — no Laya resource was ever created
+(`LAYA_PRODUCTION_RESOURCE_CREATED = false`). The architecture is DeepSeek (generation) + TypeSafe Jev
+(typed semantic decisions) + the deterministic backend.
 
 ---
 
-## 1. Alibaba Cloud: create the dedicated Laya node (blocks `REAL_LAYA_INFERENCE` + `PRODUCTION_DEPLOYMENT`)
-
-I verified the current estate read-only and **no existing instance can host Laya**:
-
-| Host | What it is | Spec | Region | Verdict |
-|---|---|---|---|---|
-| `47.114.34.175` (i-bp1f0vqhds2341pdqqiy) | **current production** (rag.qqttai.com, agent.qqttai.com, release `4ef5064`) | **2 vCPU / 3 GiB** | cn-hangzhou-k | cannot host Laya, must not be squeezed |
-| `47.237.179.69` (iZt4n0k005125h6vlxoiloZ) | idle, no services | **2 vCPU / 1 GiB** | ap-southeast-1 | too small and wrong region |
-| `8.210.58.22` | SRSZQ (untouched) | — | ap-southeast-1 | out of scope, must not be touched |
-
-I also confirmed this instance has **no RAM role** and there is no `aliyun` CLI or credential file,
-so I cannot create the instance myself.
-
-**Ask — either (a) or (b):**
-
-**(a) You create it** (paste-ready facts):
+## 1. TypeSafe Jev credentials + budget (blocks `JEV_LIVE_VALIDATION`, `CALIBRATION`, `ABLATION`)
 
 | Item | Value |
 |---|---|
-| Region / zone | `cn-hangzhou` / `cn-hangzhou-k` (same as production) |
-| VPC | `vpc-bp1384ux5srgabb6h8se1` |
-| VSwitch | `vsw-bp13nh63x221tquuysvi0` |
-| Spec | 8 vCPU / 16 GiB x86 (e.g. `ecs.c7.2xlarge` or the current-generation equivalent) |
-| Image | Ubuntu 24.04 64-bit |
-| Disk | 60 GiB ESSD (PL0/PL1 is enough; read-heavy, no IOPS requirement) |
-| Billing | **pay-as-you-go (hourly)** — no subscription, no auto-renew, no auto-scaling |
-| Public IP | none preferred (private only). If SSH must come from outside, an EIP with a security group locked to your admin IP is acceptable |
-| Security group | inbound `22` only from your admin IP; inbound `8105` **only** from the production private IP `172.20.170.40/32`; no `0.0.0.0/0` |
-| SSH access for me | install this public key for user `ubuntu` (or `root`):<br>`ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEYARFzyVaaLpYGT3W9/DhrtIZk0iNH3+Dtko6U8Naw6 dsh-laya-node`<br>fingerprint `SHA256:yTa8DKE6txlV4Yk7/HRMUFdfkRXh3QjzJ0TjlVw/zlU` |
-| Price record | the console shows the exact hourly price at order time — tell me the figure (or leave it visible) and I will record it, plus the 730 h estimate, in `LAYA_ALIYUN_DEPLOYMENT_RUNBOOK.md`. I will not invent a price |
+| What is missing | TypeSafe account/API access for the Jev SDK: endpoint + key + the licensed SDK version to pin |
+| Where it must live | Backend env only, on `47.114.34.175`: the `JEV_*` variables read by `JevGateway` in `/etc/coursemate/rag.env` (mode 640, `root:coursemate`, exactly like the existing keys). The browser never sees them and the frontend never calls TypeSafe |
+| Who provides | You (account owner) |
+| Install step | `typesafe-sdk` is deliberately **not** a default dependency (the live transport imports it lazily and raises `JEV_NOT_CONFIGURED` without it, so off/shadow mode works today). Install the pinned MIT package in the backend venv when the key is provisioned: the exact pin is recorded in `DEEPSEEK_AND_JEV_RUNTIME_CONTRACTS.md` and the commented line in `services/rag-api/requirements.txt` |
+| Budget request | A single bounded batch for the canary + calibration: **[to fill: max total cost, max decisions (12 definitions × cases), max input tokens]**. Failure/timeout attempts count toward it; there is no automatic retry |
+| Cost evidence I will produce before spending | the planned call count, per-definition input-token ceilings, the official price applied, and the combined ceiling (Jev + DeepSeek) — printed before any call, as `scripts/run_jev_ablation.py --allow-billable --max-cost …` requires |
+| Data scope confirmation | Jev receives only the fragments one legal decision needs (course fragment + candidates + criteria) after identity/course/file authorization filtering, and never a full `.env`, Clerk secret, DeepSeek key, other users' private data or unauthorized course text. Please confirm you accept sending course fragments to TypeSafe and whether region/retention restrictions apply |
+| One decision that is yours | the Jev arms/definitions that may leave `shadow` for `on`/`advisory`. My default: promote `retrieval.support.v1` plus **one** of context/intent/pedagogy once the calibration gate passes, and keep coverage/assessment advisory — never authoritative |
 
-**(b) Or grant me scoped access** so I create it: a RAM user (or STS session) limited to
-`ecs:DescribeInstances`, `ecs:DescribePrice`, `ecs:RunInstances`, `ecs:CreateInstance`,
-`ecs:DescribeInstanceStatus`, `ecs:DescribeSecurityGroups`, `ecs:AuthorizeSecurityGroup`,
-`ecs:CreateSecurityGroup`, `vpc:DescribeVSwitchAttributes`, `vpc:DescribeVpcs`, plus read-only
-`ecs:DescribeImages`. Credentials go into `~/.aliyun/config.json` on this machine (never into chat,
-Git or a report).
-
-**What it unlocks:** `REAL_LAYA_INFERENCE`, `CALIBRATION`, `BUSINESS_EFFECT`, and the backend half of
-`PRODUCTION_DEPLOYMENT`.
-
----
-
-## 2. DeepSeek API key (blocks `DEEPSEEK_LIVE`)
+## 2. DeepSeek API key (blocks `DEEPSEEK_LIVE_VALIDATION`)
 
 | Item | Value |
 |---|---|
 | What | the API key for the current DeepSeek platform account |
-| Where | `/etc/coursemate/rag.env` and `/etc/coursemate/agent.env` on `47.114.34.175` (mode `640`, owner `root:coursemate`, exactly like the existing keys) — **not** in chat, Git or any report |
-| Variable names | `V3_MODEL_API_KEY`, `RAG_CHAT_API_KEY`, `RAG_QA…`/`DEEPSEEK_*` equivalents as the deployed release reads them; the release wiring will be pinned to the names in `DEEPSEEK_AND_JEV_RUNTIME_CONTRACTS.md` §§A2–A3 |
+| Where | `/etc/coursemate/rag.env` and `/etc/coursemate/agent.env` on `47.114.34.175`, by you, in the protected env file — not in chat, Git or any report |
 | Also confirm | the model alias to pin (`deepseek-flash` per the verified contract) |
-| Budget | the USD 10 cumulative test/annotation cap you set this round — I will preflight the exact call plan and refuse to exceed it |
+| Budget | the cumulative test/annotation cap for this round (the earlier USD 10 cap) — I will preflight the exact call plan and refuse to exceed it |
 
-Current production runs **Qwen/Model Studio** (`V3_MODEL=qwen3.8-max`, `AGENT_MODEL_NAME=qwen3.8-max`,
-`OPENAI_CHAT_MODEL=qwen3.7-plus`, embeddings `text-embedding-v4`), so this key is what switches the
+Production today still answers with **Qwen/Model Studio** (`V3_MODEL=qwen3.8-max`,
+`AGENT_MODEL_NAME=qwen3.8-max`, `OPENAI_CHAT_MODEL=qwen3.7-plus`), so this key is what switches the
 generative path to DeepSeek during the release window.
 
-**What it unlocks:** `DEEPSEEK_LIVE` (text, structured, vision, tool replay, grading feedback).
-
----
-
-## 3. Production release window (authorization already given; two confirmations)
+## 3. Production release window (authorization + two confirmations)
 
 You authorized backup, isolated rehearsal, migration, release and acceptance. Two points need a
 yes/no because they change the live product:
 
-1. **Generative model switch on the live site**: production currently answers with Qwen. Publishing
-   the new release switches all generative roles to DeepSeek and adds the Laya dependency. Confirm
-   the switch may happen in one window (or tell me to hold the model switch back and ship the rest
-   first).
-2. **Frontend publish**: the site is Netlify project `coursemate-ai-qqtt` (qqttai.com), GitHub-linked
-   to `main`, current deploy `6ab02278b7fae664934df25d`. I will publish a locally built artifact with
-   `netlify deploy --prod` (rollback = restore the previous deploy), unless you prefer a merge to
-   `main` instead.
+1. **Model switch on the live site** — publishing this release switches every generative role from
+   Qwen to DeepSeek. Confirm it may happen in one window, or tell me to ship the rest first and hold
+   the model switch.
+2. **Frontend publish** — the site is Netlify project `coursemate-ai-qqtt` (qqttai.com), current deploy
+   `6ab02278b7fae664934df25d`. I will publish a locally built artifact with `netlify deploy --prod`
+   (rollback = restore the previous deploy) unless you prefer a merge to `main`.
 
----
+Facts for the same window: production is schema **25** and must go to **28** (migrations 026–028), the
+live release is `4ef5064`, and the rollback rehearsal will use that real release.
 
 ## 4. Real login for browser acceptance (blocks `BROWSER_ACCEPTANCE` / `PRODUCTION_ACCEPTANCE`)
 
-I will not bypass Cloudflare/Clerk or create new accounts. When the release is live I need you (or a
-staff account you designate) to complete one real sign-in while I drive the acceptance journey:
-课程 → 知识点 → 学习进度 shows 学习中 → 开始测评 → five questions → submit → 测评结果 shows a raw
-score → 详解 → history/shared/theme/qualification checks. A screen-share or a short-lived session is
-enough.
+Local Playwright journeys against an isolated identity adapter need no login and are being run
+regardless. The **production** acceptance journey does need one real sign-in (学业/课程 → 知识点 →
+学习进度 shows 学习中 → 开始测评 → five questions → submit → 测评结果 raw score → 详解 → history /
+shared / theme / qualification). I will not bypass Cloudflare/Clerk or create accounts; a short-lived
+session or a screen-share is enough.
 
----
+## 5. Deliberately not requested
 
-## 5. Not requested (so you know what I am deliberately not asking for)
-
-* No TypeSafe key, no `typesafe-sdk` install, no `TYPESAFE_API_KEY`.
-* No GPU purchase, no cluster, no extra load balancer, no NAT gateway, no annual subscription.
+* No Laya ECS/GPU/CPU node, no Laya deployment, no Laya package — that direction is closed.
 * No new user accounts, no DNS change, no SRSZQ change, no force-push, no old-Singapore writer.
-* No additional budget beyond the USD 10 test/annotation cap and the single CPU instance above.
+* No additional budget beyond the Jev batch above and the DeepSeek cap.

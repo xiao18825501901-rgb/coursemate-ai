@@ -116,6 +116,55 @@ touched, and no DNS/Clerk/Netlify change was made. The single consolidated reque
 `MINIMAL_OWNER_ACTION_CARD.md`. Commit `6b85df7` is the candidate revision to release; `scripts/run_deepseek_canary.py`
 and `scripts/run_jev_ablation.py` are the two commands a credential would unlock.
 
+## Round 6 — Laya direction stopped, Jev path restored (2026-09-22)
+
+The owner tried a self-hosted Laya semantic layer, then stopped it ("阿里云当前可用服务器性能不适合部署
+Laya") and restored TypeSafe Jev. Commit `44e9e5d` archives the Laya-only work under
+`archive/laya-superseded-20260922/`, reverts the Laya-only edits (including the retired `SdkTransport`,
+which is live again) and keeps the model-agnostic measurement assets for Jev. The archive README lists
+exactly what was archived and why; every archived document carries a `SUPERSEDED_BY_JEV_DECISION`
+header and is **not** a production source of truth.
+
+**Final architecture (fixed):** DeepSeek → generation, vision, plan/work, problems, explanations,
+grading feedback, Agent generation. TypeSafe Jev → fast typed semantic decisions
+(choice / score / noul). CourseMate backend → permissions, state machine, retrieval, transactions,
+mark scoring, learning state, final writes. Jev is not a generator; DeepSeek does not replace Jev's
+lightweight judgments; Qwen is never an automatic production fallback.
+
+`LAYA_PRODUCTION_RESOURCE_CREATED = false` — no ECS instance, node, port, DNS entry or billable
+resource was ever created for Laya; no Laya service is running. The only leftovers are a CPU-only venv
+and a 654 MB model snapshot outside the repository (documented in the archive README).
+
+### Production baseline — re-verified read-only in round 6 (not inherited from the pause report)
+
+| Item | Verified value |
+|---|---|
+| Frontend | `https://qqttai.com` on Netlify project `coursemate-ai-qqtt` (GitHub-linked to `main`), current deploy `6ab02278b7fae664934df25d`, live bundle `/assets/ui-UCeSo0VK.js`; the Netlify CLI on this machine is authenticated (Qiu Tian / team `Q_WCTJ`) |
+| Backend hosts | `rag.qqttai.com` and `agent.qqttai.com` → `47.114.34.175` (instance `i-bp1f0vqhds2341pdqqiy`, `cn-hangzhou-k`, private `172.20.170.40`, **2 vCPU / 3 GiB**) |
+| Live release | `/srv/coursemate/current` → `/srv/coursemate/releases/4ef5064` (the pause report's `5ba6a3a` was stale) |
+| Services | `coursemate-rag.service` (uvicorn on `127.0.0.1:28000`), `coursemate-agent.service` (node on `127.0.0.1:28001`), nginx |
+| Live RAG database | `/srv/coursemate/data/releases/20260919T202006Z/rag.sqlite3` → **schema 25**, migrations 1–25, `integrity_check=ok`, 76 tables |
+| Live data volumes | courses 20 (18 private, **2 published**), documents 67, chunks 1 963, learning_workspaces 16; UI store `…/ui-extension/ui.sqlite3` (3.3 MB, actively written); uploads 119 MB |
+| Production generative models today | **Qwen only** (`V3_MODEL=qwen3.8-max`, `RAG_CHAT_MODEL=qwen3.8-max`, `OPENAI_CHAT_MODEL=qwen3.7-plus`, `AGENT_MODEL_NAME=qwen3.8-max`); embeddings `text-embedding-v4` |
+| Backups | `/srv/coursemate/backups` (1.3 GB), latest `20260921-four-changes-final-before-schema13` |
+| Env files (paths only) | `/etc/coursemate/{rag,agent,monitor}.env` (640, `root:coursemate`), `secrets/`, `env-backups/` |
+| Out of scope, untouched | SRSZQ on `8.210.58.22` (`api.srszq.com`) and its local processes; the idle `47.237.179.69` |
+
+Migration/direction consequences: production must go **25 → 28** (migrations 026–028; there is no 029 —
+it was withdrawn with Laya), and the release must switch the generative path from Qwen to DeepSeek. The
+rollback release to rehearse against is the real one (`4ef5064`), not an assumed schema-28 build.
+Published CS3481/GE2324 trees (the 2 published courses) must not be regenerated.
+
+### Round-6 work in flight
+
+| Workstream | State |
+|---|---|
+| Real Jev business call sites for all 12 definitions (incl. the citation / context / pedagogy / classification / prerequisite / corpus-quality gaps the pause report named) | in progress |
+| Promotion of the Laya-era measurement assets to Jev (310-sample judgment dataset, calibration maths, A/B/C/D/E arms) + a guard test keeping Laya out of the production tree | in progress |
+| Mypy, local Playwright journeys, full regression on the frozen SHA | queued |
+| DeepSeek live canary, Jev live validation + calibration, A/B/C/D/E results | **blocked**: DeepSeek key + TypeSafe credential/budget |
+| Production release + real acceptance | **blocked**: credentials + the release window |
+
 ## Resume instructions for a later round
 
 1. Work in `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY`, branch
