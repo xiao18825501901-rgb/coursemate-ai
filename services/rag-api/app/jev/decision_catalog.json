@@ -485,6 +485,63 @@
         "input_hash",
         "provider_model_version"
       ]
+    },
+    {
+      "key": "feedback.category.v1",
+      "primitive": "Choice",
+      "required_state": [
+        "report_text",
+        "attached_context_ids",
+        "product_surface"
+      ],
+      "criteria": {
+        "ANSWER_WRONG": "The answer itself is wrong",
+        "CITATION_WRONG": "A citation is wrong, missing or unsupported",
+        "QUESTION_INCOMPLETE": "A question is missing its conditions or data",
+        "IMAGE_RECOGNITION": "An image was transcribed or read incorrectly",
+        "GRADING_DISPUTE": "The student disputes a mark or the grading rationale",
+        "COURSE_CLASSIFICATION": "The course or template classification is wrong",
+        "SERVICE_FAULT": "A page or service misbehaved",
+        "OTHER": "Does not match a listed category"
+      },
+      "instructions": "Classify only what the user actually submitted. Never scan other messages, never infer mood, personality or ability, and never widen the report beyond the ids the user attached.",
+      "failure_policy": "OTHER; a human triage queue decides",
+      "cache_scope": [
+        "authorization_scope",
+        "course",
+        "workspace",
+        "material_revision",
+        "node_spec_version",
+        "question_definition_hash",
+        "input_hash",
+        "provider_model_version"
+      ]
+    },
+    {
+      "key": "feedback.severity.v1",
+      "primitive": "Score",
+      "required_state": [
+        "report_text",
+        "category",
+        "attached_context_ids"
+      ],
+      "criteria": {
+        "0": "cosmetic or unclear",
+        "1": "a real defect with a workaround",
+        "2": "blocks learning or grading for the reporting user"
+      },
+      "instructions": "Judge only the reported problem, never the person. A severity is a triage hint, not a grade and never a reason to punish or silence a user.",
+      "failure_policy": "middle level; a human decides, never an automatic action",
+      "cache_scope": [
+        "authorization_scope",
+        "course",
+        "workspace",
+        "material_revision",
+        "node_spec_version",
+        "question_definition_hash",
+        "input_hash",
+        "provider_model_version"
+      ]
     }
   ]
 }

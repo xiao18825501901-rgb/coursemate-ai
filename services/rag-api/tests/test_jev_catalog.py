@@ -28,13 +28,16 @@ EXPECTED_KEYS = (
     "entity.relation.v1",
     "teaching.capability.v1",
     "tool.intent.v1",
+    # P2: lightweight user-initiated feedback triage (category is a Choice, severity a Score).
+    "feedback.category.v1",
+    "feedback.severity.v1",
 )
 
 
 def test_catalog_has_exactly_the_expected_definitions() -> None:
     catalog = load_catalog()
     assert catalog.keys() == EXPECTED_KEYS
-    assert len(catalog.definitions) == 17
+    assert len(catalog.definitions) == 19
 
 
 def test_catalog_primitive_split() -> None:
@@ -57,10 +60,13 @@ def test_catalog_primitive_split() -> None:
         "entity.relation.v1",
         "teaching.capability.v1",
         "tool.intent.v1",
+        # P2: feedback category is a Choice (severity is the Score above)
+        "feedback.category.v1",
         "graph.prerequisite.v1",
     }
     assert nouls == {"source.supports_claim.v1", "context.keep_segment.v1"}
-    assert scores == {"retrieval.support.v1", "corpus.quality.v1"}
+    # feedback.severity.v1 joined the Score primitives in the feedback round.
+    assert scores == {"retrieval.support.v1", "corpus.quality.v1", "feedback.severity.v1"}
 
 
 def test_catalog_thresholds_unset_and_probability_not_a_grade() -> None:
