@@ -229,6 +229,11 @@ implemented and tested but not yet invoked from ingestion/parse, the evidence-pa
 step, or post-generation citation binding. `JEV_CALLSITE_MATRIX.md` marks each row
 `MODULE_ONLY` / `PARTIAL` rather than `DONE`.
 
+> **Superseded (rounds 24–30).** This paragraph is a round-23 record. C was wired in
+> round 24, D in round 25, and **A in round 30** — see "Round 30" below for why A's
+> `MODULE_ONLY` decision was wrong and what replaced it. Today no structured module is
+> left without a consumer.
+
 ### Round 23 verification (real runs, not agent reports)
 
 | Gate | Result |
@@ -296,7 +301,8 @@ three services); web 68 tests with clean `tsc` and build; agent-api 92 tests wit
 
 Still open and deliberately not claimed: `is_definitive` (audit the assessment
 reference solution **before** presenting it) is implemented but not bound to the
-assessment path; module A remains `MODULE_ONLY`; every definition remains `shadow`, so
+assessment path; module A was reversed out of `MODULE_ONLY` in round 30 (wired to the
+query-side exact-locator surface); every definition remains `shadow`, so
 `live evidence = NOT_RUN` and no quality claim is made for any of them.
 
 ## Round 26 — high-impact gate, the last three call sites, and receipt safety (2026-09-22)
@@ -351,6 +357,50 @@ no foreign-key violations, `max_migration=30` and no leftovers.
 
 Recorded while doing it: writing that browser journey is what exposed the consent-gate
 bug — the suite would have passed forever if it had only asserted that the dialog opens.
+
+## Round 30 — module A wired to the exact-locator surface, and the round-26 decision reversed (2026-09-22)
+
+Commit `ff1cfa9`. No schema change (still **30**). Module **A** was the last structured
+module marked `MODULE_ONLY`; it is now wired, and the reason the earlier decision was
+wrong is part of the record.
+
+| Item | What changed |
+|---|---|
+| **The missed surface** | Round 26 looked for a *document-side* field record and concluded none existed. The surface it missed is the **query-side** parser `app/tutor/references.py::parse_query_reference`: its `question_number`/`question_part` are not annotations but **hard filters** — `ChunkRepository.structured_search` adds `json_extract(metadata_json,'$.question_number'/'$.question_part') = ?` in the official scope *and* the learner's private scope, and puts its hits at the head of the candidate list. `QaService.stream` also derives `example_mode` from the same label. |
+| **A real parser defect, reproduced first** | The old sub-part pattern was optional and unterminated, so **the word following the number donated its first letter** as a phantom sub-part, and the roman-numeral alternative matched the first letter of the next word. Five of six prose probes invented a label: `question 5 have …` → `question_part='h'`, `q mean in this context` → `question_number='M'` + `part='e'`, `question 3 marks …` → `part='m'`. The phantom filter suppressed the legitimate exact hits for question 5 and could pin retrieval onto a wrong sub-question. A sub-part is now read only when **delimited** (parenthesised, or a standalone token not glued to a following word) and a roman numeral must not be followed by a word character. Every pinned real-corpus case still parses. |
+| **The wiring** | `app/jev/reference_verification.py` projects a present label into an `ExtractionRecord` (source = the learner's own normalised message, locator = the character span it was read from) and runs the module-A pipeline over it. The judgment goes through a new **13th call site** `callsites.verify_extraction_field` → `SemanticDecisionService.field_grounded`, whose candidate vocabulary is read from the catalog entry; `ExtractionVerifier` gained an optional `service` and now routes through it, and `field_grounded_definition()` is projected from the catalog with the module constants asserted against it. |
+| **Disposal — the answer to the round-26 objection** | Only a deterministic failure or an affirmative defect (`WRONG_FIELD`/`NEGATION_LOST`/`CONSTRAINT_LOST`/`SOURCE_INSUFFICIENT`) drops a label. `UNCERTAIN`, `off`, `shadow`, no-service and timeout keep the deterministic reference **exactly as it was** and report `NEEDS_REVIEW`, so nothing changes behaviour until a decision is calibrated and enabled. Dropping can only ever *remove* a filter, so this module can never widen what a learner may read, add a source, or reach an unauthorized chunk. |
+| **Consumers** | `V3DomainAdapter._retrieve` attaches `jev_reference` to every returned source; `QaService.stream` adds `referenceVerification` to the SSE `meta` event and the stored message metadata. A message that names no question label costs **zero** calls and reports `questioned: false`. |
+| **Two further real defects found while testing** | (1) **Cross-user cache leak**: the first version took the cache scope from the *optional* decision service, so a run without one fell back to a single server-internal scope and served one learner's judgment to another. `owner_user_id`/`authorization_scope` are now required and the scope is derived from the caller; `test_cache_scope_is_owner_scoped_and_never_crosses_users` reproduces the leak and pins the fix. (2) **The layer could fail a learner request**: `SqlReceiptStore.lookup` raised `sqlite3.OperationalError: no such table: jev_decision_receipts` when its own ledger was absent (a V2-only schema, or new code running before migration 028) — it surfaced as two `test_qa_api.py` failures in the first full regression of this round. An absent ledger is now a cache miss plus a dropped receipt, while every other SQLite error still propagates. |
+| **One more latent hazard closed** | The module's single default repair allowance left the *second* label unplanned, so an exhausted allowance could have kept a label the model called wrong as a filter. Disposal is **verdict-driven** rather than status-driven, and the surface is built with one allowance per label. |
+
+**Verified on one frozen SHA (`ff1cfa9`)** — every number below comes from a run on the
+tree that was committed, and `git diff ff1cfa9 -- services/rag-api tests` is empty:
+
+| Gate | Result |
+|---|---|
+| Full backend regression | **1234 passed / 0 failed** in 1477.65s (exit 0) — `work/current-change/full_run_round30_final.log`. The first run of this round was **1226 passed / 2 failed**, and both failures were the absent-ledger defect above, fixed in the layer rather than in the test |
+| Browser journeys (real Chrome, real three services, injected identity) | **32 journeys / 0 failed**: `ui-refresh` 19, `jev-structured` **6** (three new), `coursemate` 4, `learning` 3 |
+| ruff | **1815 errors at HEAD and 1815 in the tree** — identical, so this round added none (measured against a `git worktree` of `def6c37`) |
+| mypy | **1074 errors in 39 files**, none in a file this round changed or added (a run before and after the receipt-store fix agree exactly; the +6 since round 24's recorded 1068 belongs to rounds 25–29) |
+| New tests | 29 module-contract (`test_jev_reference_verification.py`), 4 business-path over the real chunker and real `context.retrieve` (`test_jev_reference_business_path.py`), 6 absent-ledger (`test_jev_absent_ledger.py`), plus the prose cases pinned in `test_reference_parser.py` — 39 new tests, which is exactly the regression delta 1195 → 1234 |
+
+The three new browser journeys needed real deployment work rather than a fake: the
+shipped *legacy* pages resolve the RAG API from the value baked into the build
+(`localhost:8000`), so the acceptance config serves the same build output once more on
+that origin with the same proxy; and the shell **aborts the answer stream** as soon as it
+sees the terminal event, so `response.text()` always rejects with `AbortError` — the
+journey tees the page's own response incrementally and reads the report off the first
+frame instead. Both are local-test plumbing, no product or release artifact.
+
+Honest limitations recorded with this round: module A's semantic half is **inert in
+production** — with no TypeSafe credential every field reports `fallback:jev_shadow`
+with `used_jev=false`, so a verdict that actually drops a label has never been produced
+by a live decision and is covered only by the offline transport. The *document-side*
+surface `app/rag/structure.py::extract_structured_blocks` remains unwired with its
+original reasons (a metadata annotation with no per-field review slot and no consumer).
+Every definition remains `shadow`; `live evidence = NOT_RUN` for all 19, and wiring a
+call site is still not evidence of quality.
 
 ## Resume instructions for a later round
 

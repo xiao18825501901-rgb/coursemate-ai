@@ -330,7 +330,7 @@ source versions, course, idempotent on a second retrieval, and the duplicate is
 *not* merged away on the path), and
 `test_relation_bookkeeping_never_breaks_retrieval_without_the_store`.
 
-### 9. Wiring — **LANDED** (entity resolution); extraction still `MODULE_ONLY`
+### 9. Wiring — **LANDED** (entity resolution, extraction verification)
 
 Host wiring: one shared `SemanticDecisionService` is built in
 `app/main.py::create_app` and threaded to the adapter, and
@@ -358,49 +358,91 @@ Host wiring: one shared `SemanticDecisionService` is built in
    pack (while the file list keeps every valid file) remains a deliberate
    non-goal here: this path must not change what the learner sees while the
    definition is in shadow.
-4. **Module A (ExtractionVerification) is still `MODULE_ONLY`, and that is an investigated
-   conclusion rather than an omission.** It is implemented and tested
-   (`tests/test_jev_extraction.py`, 16 tests; its own degradation is pinned by
-   `test_no_gateway_is_a_typed_deterministic_fallback` and
-   `test_unavailable_transport_degrades_to_needs_review`), but **no production surface produces an
-   `ExtractionRecord`-shaped record**, so there is nothing to verify and no business effect is
-   claimed. Every place CourseMate turns parser or DeepSeek-Vision output into data was checked:
+4. **Module A (ExtractionVerification) — wired in round 30.** The round-26 decision to leave it
+   `MODULE_ONLY` was **wrong**, and the reason it was wrong is worth recording precisely: the
+   investigation looked for a surface that produces a *document-side* field record, and missed the
+   **query-side** parser `app/tutor/references.py::parse_query_reference`, whose output is not an
+   annotation at all but a hard exact-locator filter.
 
-   | Surface | What it produces | Why it is not a call site |
+   What the label does (this is the consumer the document-side surface lacked):
+
+   * `ChunkRepository.structured_search` adds
+     `json_extract(c.metadata_json,'$.question_number') = ?` **and**
+     `json_extract(c.metadata_json,'$.question_part') = ?` to the `WHERE` clause, in the official
+     scope *and* in the learner's private scope, and its hits are then placed at the **head** of the
+     candidate list (`hits=[*official_structured, *official_hits]`);
+   * `QaService.stream` derives `is_referenced_example` — and therefore `example_mode` — from
+     `question_number is not None`.
+
+   So an invented or mis-read label either suppresses legitimate exact recall or pins it onto the
+   wrong sub-question, and it does so with a `locator` score of 1.0. A reproduced defect, measured
+   before any change (six prose probes, five invented labels):
+
+   | Query | Label before | Label after |
    |---|---|---|
-   | `app/cm_update/filesystem.py::parse_document` | `(mime, [(page:int, text:str)], error)` | free-text pages only; image pages return no text; no field/value/unit |
-   | `app/services/ingestion.py::process_document`, `app/rag/loaders.py::load_document`, `app/rag/chunking.py::chunk_sections` | embedded text chunks | free text; no extracted fields |
-   | `app/rag/structure.py::extract_structured_blocks` | deterministic regex labels `question_number` / `question_part` / `heading_path`, persisted in `chunks.metadata_json` and backfilled into `problem_index_entries` | the closest surface — a real structured extraction that feeds structured retrieval (`app/learning/problems.py`). Not wired yet because a per-field review outcome has no persistence slot (`problem_index_entries` has no verification column) and no consumer would act on it today; adding it as a pure annotation would be exactly the "a helper exists" pattern this report refuses to count as integration |
-   | `app/learning/orchestrator.py::solve` (the real DeepSeek-Vision path) → `ProblemSolutionOutput` | `question_transcription: Text`, `conditions: list[Text]`, `visual_uncertainties: list[Text]` | generated natural-language text with no field/value/unit schema; decomposing it into fields would mean *inventing* the parser the task forbids |
-   | `app/cm_update/exercise_contract.py::parse_exercise_output` | validated *generated* exercise JSON | generation output, the reverse direction of extraction |
-   | `app/learning/assessments.py` (`map_unified_answers`, `store_candidates`), `orchestrator._transcribe_answers` | deterministic "第N题" mapping of student answers, generated question candidates, a hard `ASSESSMENT_TRANSCRIPTION_REQUIRED` | no vision transcription of student answers exists to verify |
+   | `What does question 5 have to do with chapter 2?` | `number=5`, **`part="h"`** (from "have") | `number=5`, `part=None` |
+   | `what does q mean in this context` | **`number="M"`**, **`part="e"`** (from "mean") | no label at all |
+   | `question 3 marks distribution` | `number=3`, **`part="m"`** (from "marks") | `number=3`, `part=None` |
+   | `How many marks is question 4 worth` | `number=4`, **`part="w"`** (from "worth") | `number=4`, `part=None` |
 
-   Cross-check: `grep` for `ExtractionRecord | ExtractionVerifier | FieldSpec | verify_extraction`
-   across `services/rag-api/app` matches **only** `app/jev/extraction.py` itself.
+   The old pattern made the sub-part optional *and* unterminated
+   (`(?:\s*[\(\uFF08]?\s*(?P<part>[a-z]|\d+)\s*[\)\uFF09]?)?`), so any word directly after the number
+   donated its first letter as a sub-part, and the roman-numeral alternative matched the first letter
+   of any following word. The parser now reads a sub-part **only when it is delimited** — parenthesised
+   (`Question 1(b)`, `Q3(2)`) or a standalone token not glued to a following word (`q 2 b`) — and a
+   roman numeral must not be followed by a word character. Every existing pinned case still parses
+   (`test_reference_parser.py`, `test_real_course_golden.py`).
 
-   **Decision (round 26, final): option (b) — module A stays `MODULE_ONLY`.** Reasons, so this is not
-   re-litigated:
+   The wiring itself (round 30):
 
-   * the only surface close enough is `extract_structured_blocks`, whose "fields" are the deterministic
-     regex labels `question_number` / `question_part` written into `chunks.metadata_json` and
-     backfilled into `problem_index_entries`. Those labels have **no per-field review slot** and, more
-     importantly, **no consumer that would act on one**: structured retrieval already protects the
-     exact locator deterministically (`tests/test_real_course_golden.py` proves `Question 1(b)` and
-     `Question 3(2)` resolve exactly and stay course-isolated), and a review-only annotation that
-     nobody reads is precisely the "a helper exists" pattern this project refuses to count;
-   * adding a real consumer would mean making structured retrieval *distrust* a label — a behaviour
-     change to the exact-locator path, which is the one place the task explicitly says must never be
-     displaced. It would need a migration, and it would risk the reliability guarantee that is already
-     tested on real course files;
-   * the DeepSeek-Vision path (`ProblemSolutionOutput.question_transcription` / `conditions`) is
-     generated natural-language text with no field/value/unit schema, so wiring module A there would
-     require inventing the field-decomposition layer the task forbids, and there is no per-field
-     persistence slot to record a `NEEDS_REVIEW` outcome even if it existed.
+   * `app/jev/reference_verification.py` — the adapter and the consumer. `reference_records` projects a
+     present label into an `ExtractionRecord` (source = the learner's own normalised message, locator =
+     the character span the label was read from), `verify_query_reference` runs the module-A pipeline
+     over it and returns both the report and the reference the caller may actually use.
+   * The semantic judgment goes through the **13th call site**
+     `callsites.verify_extraction_field` → `SemanticDecisionService.field_grounded` (a bounded Choice
+     whose candidate vocabulary is read from the catalog entry), so an extraction decision is
+     observable and budgeted like every other business decision and never reaches the transport
+     directly. `ExtractionVerifier` gained an optional `service` and now routes through it;
+     `field_grounded_definition()` is projected **from the catalog** (which had already registered
+     `extraction.field_grounded.v1`) with the module constants asserted against it.
+   * Disposal — the only repair on this surface, and the answer to the round-26 objection about
+     displacing the exact locator: a label is dropped **only** for a deterministic failure (the label
+     is not well formed) or an affirmative Jev defect (`WRONG_FIELD` / `NEGATION_LOST` /
+     `CONSTRAINT_LOST` / `SOURCE_INSUFFICIENT`). `UNCERTAIN`, `off`, `shadow`, no-service and timeout
+     all keep the deterministic reference **exactly as it was** and only report `NEEDS_REVIEW`. A
+     `GROUNDED` label from an enabled decision is used unchanged. The rule is verdict-driven rather
+     than status-driven on purpose: reading only the status would let an exhausted repair allowance
+     leave a label the model called wrong in place as a filter
+     (`test_a_defect_drops_the_locator_even_when_no_repair_remains`).
+   * Dropping a label can only ever **remove** a filter, so this module can never widen what a learner
+     may read, add a source, or make an unauthorized chunk reachable; and a sub-part whose parent
+     question is untrusted is dropped with it, because filtering on "part b" across every question is
+     not the reference the learner wrote.
+   * `owner_user_id` and `authorization_scope` are **required** arguments, and the cache scope is
+     derived from them rather than from the decision service. The first version took the scope from the
+     optional service, which meant a run whose service was absent fell back to one shared
+     server-internal scope — user-b was served user-a's judgment from cache. The test
+     `test_cache_scope_is_owner_scoped_and_never_crosses_users` reproduces exactly that and now pins
+     it (two distinct owner scopes, and a repeat call by the same owner served from cache).
+   * Consumers: `V3DomainAdapter._retrieve` attaches `jev_reference` (the report) to every returned
+     source, and `QaService.stream` puts `referenceVerification` into the SSE `meta` event and the
+     stored message metadata. A message that names no question label costs **zero** calls and reports
+     `questioned: false` — no lookup, no transport, nothing to bill.
 
-   The module, its 16 tests and its catalog definition stay in place: if CourseMate later gains a real
-   field-level extraction surface (for example a structured question/table parser whose fields feed
-   something a user sees), wiring it is a small, well-defined change. Until then it is reported as
-   `MODULE_ONLY` in every deliverable, and no behaviour is claimed for it.
+   Tests: `tests/test_jev_reference_verification.py` (29 — the module contract with an offline
+   transport, including the negation residue `"it is not question 3, it is 4"`), the prose cases above
+   in `tests/test_reference_parser.py`, and `tests/test_jev_reference_business_path.py` (4) which
+   drives the real `context.retrieve` adapter over a document whose labels came from the real chunker
+   and structure parser. Browser: journey 4 of `tests/e2e/jev-structured.spec.ts` drives the shipped QA
+   page and reads the report out of that page's own `POST /api/qa/chat` stream.
+
+   **Still not wired, with the original reasons intact:** the *document-side* surface
+   `app/rag/structure.py::extract_structured_blocks`. There, a label is a metadata annotation with no
+   per-field review slot in `problem_index_entries` and no consumer that would act on a review
+   outcome, so wiring it would still be the "a helper exists" pattern this report refuses to count.
+   The DeepSeek-Vision path (`ProblemSolutionOutput.question_transcription` / `conditions`) likewise
+   remains generated natural-language text with no field/value/unit schema.
 
 
 

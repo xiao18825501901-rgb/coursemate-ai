@@ -30,6 +30,24 @@ the server generated, and the criteria text. It never receives:
 Ordering is mandatory: **identity authorization → course authorization → file-scope filtering →
 field trimming → Jev call**. A decision is never made on a payload that skipped a step.
 
+One surface is deliberately narrower than it looks: module A judges a question label read out of the
+learner's **own message**, so the text it sends is the message the learner typed (normalised
+whitespace) plus the label and its character span — never retrieved material, never another user's
+content. The label itself is a query token, not course material, and its source is authorized for that
+reason alone (`QueryTextSourceRegistry` refuses every other source id, so the verifier cannot be
+pointed at material to launder authority through it).
+
+### 2a. Cache scope is derived from the caller, never from the transport
+
+Every judgment carries a server-derived scope, and the scope is built from the *caller's* identity and
+authorization scope, **not** from the decision service. That distinction is a real defect found in round
+30: the first version of the module-A wiring took the scope from an optional service argument, so a run
+without a service object fell back to a single shared server-internal scope and the second learner was
+served the first learner's cached judgment. `test_cache_scope_is_owner_scoped_and_never_crosses_users`
+reproduces it (two owners, one repeated call: exactly two scopes, and the repeat served from the owner's
+own cache) and now pins it. Any future call site should take `owner_user_id`/`authorization_scope` as
+*required* arguments for the same reason.
+
 ## 3. Authority limits
 
 Jev cannot write grades, LEARNED, coverage, permissions or budgets; it cannot open a transaction,

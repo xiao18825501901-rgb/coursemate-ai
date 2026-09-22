@@ -82,12 +82,11 @@ additions above.
 
 All of it is in `FINAL_COURSEMATE_JEV_STRUCTURED_ENHANCEMENT_REPORT.md` in detail. In
 short: 12 case call sites reachable in the production wiring with the semantic layer in
-`shadow`; six structured modules wired with consumers (B, C, D, E, F + feedback) or
-`MODULE_ONLY` by an investigated decision (A); shadow invariance proven byte-identical
-for the retrieval, evidence and citation paths; the citation/evidence/conflict machinery
-deterministic where it can be and semantic only where a real signal exists; the
-high-impact reference-solution gate in place; and 28 browser journeys green against the
-real services in real Chrome.
+`shadow`; all six structured modules wired with consumers (A, B, C, D, E, F + feedback);
+shadow invariance proven byte-identical for the retrieval, evidence and citation paths;
+the citation/evidence/conflict machinery deterministic where it can be and semantic only
+where a real signal exists; the high-impact reference-solution gate in place; and the
+browser journeys green against the real services in real Chrome.
 
 ## 6. What is NOT verified (every one of these is `NOT_RUN`)
 
@@ -157,8 +156,10 @@ semantic layer is unreachable.
 
 The system is **release-ready locally and unverified in production**. The value of this
 round is that the local state is real and reproducible — one frozen revision, a full
-backend regression, 28 real-browser journeys, honest `INSUFFICIENT_SAMPLES` where no
-labels exist, `MODULE_ONLY` where no call site exists, and `shadow` everywhere until a
-credential and a calibration gate say otherwise. Nothing here should be read as evidence
-that teaching quality improved: that requires the labelled live run, which has not
-happened.
+backend regression, real-browser journeys over the shipped shell, honest
+`INSUFFICIENT_SAMPLES` where no labels exist, **no module left without a call site**
+(round 30 wired A to the query-side exact-locator surface and reversed the earlier
+`MODULE_ONLY` decision with the reasoning and the reproduced defect on record), and
+`shadow` everywhere until a credential and a calibration gate say otherwise. Nothing here
+should be read as evidence that teaching quality improved: that requires the labelled live
+run, which has not happened.

@@ -14,8 +14,8 @@ nothing here claims a quality improvement.
 |---|---|
 | Work tree | `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY` |
 | Branch | `fix/codex-dsh-audit-20260919` |
-| Backend regression SHA | `5be2d0a` (full backend suite run on this revision) |
-| Current HEAD | `5be2d0a` — backend, shell and browser suites all re-run on this same revision |
+| Backend regression SHA | `ff1cfa9` (full backend suite run on this revision) |
+| Current HEAD | `ff1cfa9` — backend and all four browser suites re-run on this same revision; `git diff ff1cfa9 -- services/rag-api tests` is empty |
 | Schema | RAG **30** (001–030; 029 is the proposal-only `entity_relations` store, 030 the durable feedback queue), UI 13, Agent 1 |
 | Live TypeSafe model/calibration version | **none configured** — live Jev is `NOT_RUN` |
 
@@ -54,7 +54,7 @@ pool preparation. All twelve are `shadow`.
 
 | Module | Entry point | Deterministic part | Jev part | Writes | Business wiring |
 |---|---|---|---|---|---|
-| A `ExtractionVerification` | `extraction.py` | required fields, numeric parse, units, question-number shape, table structure, source id, scope | `extraction.field_grounded.v1` on the residue only | receipts | **`MODULE_ONLY`, investigated** — no production surface produces an `ExtractionRecord`-shaped record; every candidate was inspected and ruled out with a reason (`SOURCE_EXTRACTION_AND_ENTITY_RELATIONS.md` §9.4). No effect claimed |
+| A `ExtractionVerification` | `extraction.py` + `reference_verification.py` | required fields, numeric parse, units, question-number shape, table structure, source id, scope; on this surface: the label's shape and the locator span | `extraction.field_grounded.v1` on the residue only | receipts | **WIRED (round 30)** — the surface is the query-side exact-locator label (`parse_query_reference`), whose value becomes a hard `chunks.metadata_json` filter in both the official and the private scope. An affirmative defect (or a deterministic failure) drops that label and retrieval falls back to hybrid search; `UNCERTAIN`/off/shadow/no-service keep the deterministic reference unchanged. Fixing the parser that fed it also removed an invented-sub-part filter that had been suppressing legitimate exact recall. Reasoning, reproduced defect and disposal rule: `SOURCE_EXTRACTION_AND_ENTITY_RELATIONS.md` §9.4 |
 | B `CourseEntityResolution` | `entity_resolution.py` | exact id, revision relation, content-hash duplicate, accepted alias; pair canonicalisation and a capped, order-independent score; **per-concept** name groups for expansion | `entity.relation.v1`, one relation per pair | receipts + `entity_relations` proposals | **WIRED**: `_retrieve` expands the query only for a concept the query itself names (both directions), so an unrelated question is never widened by the course's other aliases, and records resolved relations as `PROPOSED` rows. Proven on the real GE2324 corpus |
 | C `EvidenceConsistency` | `evidence_consistency.py` | version/task difference resolution, pair narrowing, budget accounting | `evidence.consistency.v1` over at most 8 pairs | receipts | **WIRED and consumed**: a deterministic per-source `jev_consistency` signal plus a genuine-contradiction channel that reaches the teaching prompt as a bounded note, so both sides are explained and no source is dropped; version/assumption differences are never called conflicts |
 | D `ClaimCitationAudit` | `citation_audit.py` + `citation_evidence.py` | layer 1 authorization/existence through the canonical ACL (read-only, version- and locator-aware, bounded text), layer 2 quote existence **and** a unit-aware number check (`missing_claim_numbers`) | `source.supports_claim.v1` + `source.select_span.v1` | receipts | **WIRED and consumed**: the pre-generation evidence bundle is annotated as before, and after generation `audit_answer_citations` binds each cited span to the sentence that cites it, records the verdict/layer/claim on the citation card, and the shipped shell marks only a *real* negative verdict (≤6 cards per answer) |
@@ -64,11 +64,10 @@ pool preparation. All twelve are `shadow`.
 **Feedback triage** (`feedback.category.v1` Choice + `feedback.severity.v1` Score) is user-initiated
 only, stores identifiers by default and a body only with explicit opt-in, sends **one** batched call,
 and queues the report for a human; it has no ability to close a ticket, delete feedback, change a mark
-or sanction a user. Two disclosed limitations belong with that claim: the review queue is **in-memory**
-plus the existing receipt ledger (no migration was allowed in this round, so the queue is not durable
-across a restart — a persistent queue is a follow-up for the migration workstream), and the shell
-helper posts to the RAG host path `/api/feedback`, whose exact proxying under a `/ui-extension` mount
-must be confirmed by the workstream that owns that mount before release.
+or sanction a user. The queue is **durable** since round 29 (migration 030, `feedback_reports`:
+idempotent by report key, `status` starting `OPEN`, read by an admin-only queue endpoint and by the
+submitter's own list), and the privacy rule is a schema CHECK rather than a convention, so no future
+code path can store a question/answer body without consent.
 
 **Catalog:** 19 definitions, every one in `shadow`. Two new ids were registered in this round's P0/P1
 work (`extraction.field_grounded.v1`, `evidence.consistency.v1`), three for P1
@@ -79,8 +78,8 @@ work (`extraction.field_grounded.v1`, `evidence.consistency.v1`), three for P1
 
 | Gate | Result |
 |---|---|
-| Full backend regression on `5be2d0a` | **1195 passed, 0 failed**, 1473.95s, exit 0 (`work/current-change/full_run_round29.log`) |
-| Module suites (A 16, B 20, C 9+wiring 4, D 14+12+7, high-impact gate 6, E/F 29, P2 17) | **134 passed** |
+| Full backend regression on `ff1cfa9` | **1234 passed, 0 failed**, 1477.65s, exit 0 (`work/current-change/full_run_round30_final.log`) |
+| Jev module + call-site suites (A extraction, reference verification, business path, absent ledger, B entity resolution, C evidence consistency + wiring, D citation audit/evidence/binding, high-impact gate, E capability router + dispatch, F tool intent + endpoint, P2 feedback triage, the call sites themselves) | **207 passed** on this revision |
 | Host-wiring suite (orchestrator receives the shared service; receipts never stall a business call) | **4 passed** |
 | Twelve call-site suite | **16 passed** |
 | Structured-insertion suites (shadow invariance 6, capability dispatch 10, tool-intent endpoint 8) | **24 passed** |
@@ -88,12 +87,12 @@ work (`extraction.field_grounded.v1`, `evidence.consistency.v1`), three for P1
 | Measurement layer (dataset build, calibration, A/B/C/D/E + the six component arms) | **97 passed**; offline runs exit 0, arms tagged `NON_INTERPRETABLE_PLUMBING_ONLY` |
 | Zero-Laya production guard | **3 passed** |
 | Catalog integrity | green with 19 definitions |
-| Migration 029 on an isolated database | `integrity=ok`, `fk_violations=0`, `max_migration=29`, no `*_old`/`*_new` leftovers |
+| Migrations on an isolated database (re-run on this revision; no schema change this round) | `expected_schema=30`, idempotent replay, `integrity=ok`, `fk_violations=0`, `max_migration=30`, no `*_old`/`*_new` leftovers |
 | agent-api | real `tsc --noEmit` **exit 0**, **92 tests passed** (12 files), build **exit 0** |
 | Web app | real `tsc --noEmit` **exit 0**, **68 tests passed** (18 files), build **exit 0** |
-| Browser journeys (real Chrome, isolated identity, real three-service shape) | `ui-refresh.spec.ts` **19/19**, `jev-structured.spec.ts` **3/3**, `coursemate.spec.ts` **4**, `learning.spec.ts` **3** — **29 journeys, 0 failed** |
-| Ruff | clean on every file this round touched (pre-existing debt elsewhere unchanged) |
-| mypy | whole-app runs: **1068 pre-existing errors in 38 files** (legacy `ui_extension`/`cm_update`); the whole Jev layer has **6**, all pre-existing |
+| Browser journeys (real Chrome, isolated identity, real three-service shape) | `ui-refresh.spec.ts` **19/19**, `jev-structured.spec.ts` **6/6** (three new module-A journeys), `coursemate.spec.ts` **4**, `learning.spec.ts` **3** — **32 journeys, 0 failed** |
+| Ruff | measured against a `git worktree` of the previous revision: **1815 errors at HEAD and 1815 in the tree** — this round added none |
+| mypy | whole-app runs: **1074 errors in 39 files** (legacy `ui_extension`/`cm_update`); none in a file this round changed or added |
 
 The browser gate found one real product bug, which is fixed rather than papered over: a `GET /layout`
 still in flight when the learner moved a reasoning-strength slider overwrote the new value on arrival,
@@ -115,14 +114,14 @@ comment) were corrected without weakening any product assertion.
 | EVIDENCE_CONSISTENCY | **PASS (local, shadow)** | wired into the evidence-pack step; byte-identical sources under off/shadow/unavailable/no-Jev, a real contradiction kept and explained through the teaching prompt, and version/assumption differences never presented as conflicts |
 | CAPABILITY_ROUTER | **PASS (local, shadow)** | the decision is consumed (flow dispatch + reported on the response), zero-Jev explicit commands proven by receipt count, hardened against a hostile transport, and exercised end to end in real Chrome |
 | TOOL_INTENT_CHECK | **PASS (local, default-off)** | real gate at the model-proposed write boundary on both sides, 14 Node tests + 8 endpoint tests + 12 guard tests; `off` proven to make no call |
-| EXTRACTION_VERIFICATION | **SOURCE_IMPLEMENTED, `MODULE_ONLY` (final decision, investigated)** | module tested (16) but **no production surface produces the record shape it verifies**. The decision to leave it unwired is recorded with its reasons in `docs/jev-structured/SOURCE_EXTRACTION_AND_ENTITY_RELATIONS.md` §9.4: the closest surface's fields are deterministic regex question labels with no per-field review slot and no consumer, and the exact-locator path they feed is the one place that must never be displaced |
+| EXTRACTION_VERIFICATION | **PASS (local, shadow)** | wired in round 30 to the query-side exact-locator surface and consumed there: `reference_records`/`verify_query_reference` (29 tests incl. the negation residue and the owner-scoped cache), 4 tests driving the real `context.retrieve` adapter over a document labelled by the real chunker, the parser defect fixed with its prose cases pinned, and a real-browser journey reading the report out of the shipped QA page's own `POST /api/qa/chat` stream. An affirmative defect needs the live credential, so that half stays `NOT_RUN` |
 | CITATION_AUDIT | **PASS (local, shadow)** | all three layers bound to the teaching path: a deterministic layer-2 verdict that costs zero model calls, a layer-1 re-check through the canonical ACL on a real migrated database (incl. cross-user and cross-course `unauthorized`), the verdict recorded on the card the client receives and marked in the shipped shell, an enforced per-answer budget, and byte-identical cards when no semantic layer is configured. A unit-regex defect that could fabricate a CONTRADICTION was found and fixed |
 | USER_FEEDBACK_TRIAGE | **SOURCE_IMPLEMENTED + LOCAL_INTEGRATED + DURABLE** | module, backend route, durable queue (migration 030), admin reader and the caller's own list, shell entry; 17 triage tests + 6 queue tests + a real-browser journey through the dialog. The privacy rule is a schema CHECK, not a convention |
 | LEARNING_PROGRESS · FIVE_QUESTION_ASSESSMENT | **PASS** (local) | regression suites plus the browser assessment journey (start → 5 questions → submit → graded) |
-| LOCAL_REGRESSION | **PASS** | 1195 passed / 0 failed on `5be2d0a`; backend, shell and all four browser suites re-run on that same revision |
+| LOCAL_REGRESSION | **PASS** | **1234 passed / 0 failed** on `ff1cfa9` (1477.65s, exit 0); `git diff ff1cfa9 -- services/rag-api tests` is empty, so the run describes the committed tree. The round's first run was 1226/2 and both failures were a real defect in the Jev layer (an absent receipt ledger raising out of a learner request), fixed there rather than in the test |
 | JEV_LIVE_VALIDATION · DEEPSEEK_LIVE_VALIDATION | **NOT_RUN** | no credential, no budget |
 | ABLATION | **NOT_RUN** | harness and 310-sample dataset ready; no labelled live run |
-| BROWSER_ACCEPTANCE | **PASS (local)** | 28 journeys across four suites in real Chrome against the real services, including the Jev-unavailable deployment; production browser acceptance still `NOT_RUN` |
+| BROWSER_ACCEPTANCE | **PASS (local)** | **32 journeys / 0 failed** on `ff1cfa9` across four suites in real Chrome against the real services (`ui-refresh` 19, `jev-structured` 6 with three new module-A journeys, `coursemate` 4, `learning` 3), including the Jev-unavailable deployment; production browser acceptance still `NOT_RUN` |
 | PRODUCTION_DEPLOYMENT · PRODUCTION_ACCEPTANCE | **BLOCKED** | requires the release window and the credentials in `MINIMAL_OWNER_ACTION_CARD.md` |
 
 ## 6. Cost, latency and quality
@@ -143,10 +142,11 @@ success, p50/p95 latency, per-provider cost and failure rate — are specified i
   still not evidence of quality, and nothing here claims teaching quality improved.
 * No production change: no deployment, no migration, no DNS/Netlify/Clerk change; production still
   answers with Qwen and remains on schema 25.
-* Module **A (extraction)** is `MODULE_ONLY` after a full investigation: no production surface
-  produces the record shape it verifies, and the candidate surfaces are listed with the reason each is
-  ruled out. Every other structured module (B, C, D, E, F, feedback) is wired to a real business path
-  with a consumer; none of them is promoted out of `shadow`.
+* Module **A (extraction)** is wired (round 30) to the query-side exact-locator label — the surface the
+  earlier investigation had missed — and its disposal rule can only ever *remove* an exact-locator
+  filter, so it cannot widen what a learner may read. The document-side parser labels stay unwired with
+  their original reasons recorded. Every structured module (A, B, C, D, E, F, feedback) is wired to a
+  real business path with a consumer; none of them is promoted out of `shadow`.
 * Module D's high-impact gate now runs: the reference solution is verified **before** it is used as
   grading evidence (deterministic layer 1 over its `source_ref` chunks plus the semantic support
   decision), a negative verdict marks that question `needs_review` with a reason, and no mark, weight,
@@ -168,8 +168,12 @@ success, p50/p95 latency, per-provider cost and failure rate — are specified i
   call and changes nothing, so its enforcement path has never run against a live model in production.
 * The user-feedback review queue is now **durable** (migration 030, `feedback_reports`),
   written idempotently by report key with a schema-level CHECK that refuses any body text
-  without the submitter's opt-in, and read by an admin-only queue endpoint; module A remains
-  the only `MODULE_ONLY` module.
+  without the submitter's opt-in, and read by an admin-only queue endpoint.
+* The exact-locator parser carried a real defect until round 30: a word following the number donated its
+  first letter as a phantom sub-part (`question 5 have …` → `question_part='h'`, `q mean` →
+  `question_number='M'`), and that phantom label became a hard chunk-metadata filter. It suppressed
+  legitimate exact recall and could pin retrieval onto a wrong sub-question. Fixed at the parser, with
+  the prose cases pinned as regression tests; the module-A wiring above is what made the defect visible.
 * Whole-app mypy is now honest rather than green: 1068 pre-existing errors in 38 files. That debt is
   inherited legacy code and is **not** cleaned up in this round.
 * Production browser acceptance, production deployment and production acceptance have not run.
@@ -184,8 +188,8 @@ success, p50/p95 latency, per-provider cost and failure rate — are specified i
    `evidence.consistency.v1`, `teaching.capability.v1`, `tool.intent.v1`) — a sampling task that needs
    the live model and the owner's budget.
 3. Add the browser journeys that can exist once a credential does (condition conflict, unsupported
-   citation end to end); module A has no call site by decision, and the tool-misexecution journey is
-   impossible while the E2E agent uses the deterministic model client.
+   citation end to end, and an extraction verdict that actually *drops* a label); the tool-misexecution
+   journey is impossible while the E2E agent uses the deterministic model client.
 4. Re-run the whole gate on one frozen APPLICATION SHA.
 5. Only then the live gate: TypeSafe credential + bounded budget, DeepSeek key, release window, one
    real login — followed by backup, isolated rehearsal, migration 026–029, immutable release, real
