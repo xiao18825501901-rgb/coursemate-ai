@@ -60,6 +60,22 @@ to reconstruct logits; a fitted temperature is reported as an approximation at t
 `confidence` is `1 − normalized entropy` of the answer distribution — **distribution concentration**.
 It is never mapped to `p_correct`, never used as an accuracy reference, and never becomes a grade.
 
+**Where the artefact's numbers come from (added in round 41).** `scripts/calibrate_jev.py` already pinned
+its dataset by content hash and its split by name, and recorded the input paths. It now also records
+`predictions_sha256` — the digest of the predictions file, which is the only model evidence it consumes —
+and `predictions_provenance`, an explicit statement supplied with the new optional
+`--predictions-provenance` flag. When that flag is omitted the artefact records **`UNSTATED`** and the CLI
+prints a note saying the numbers are only as real as the predictions file. That matters here more than
+elsewhere: this is the artefact a promotion out of `shadow` would lean on, and before this change a
+synthetic predictions file produced a file that read exactly like a fitted result. Run it as:
+
+```
+python scripts/calibrate_jev.py --predictions <file> \
+  --predictions-provenance "jev shadow run <revision> (<date>)" \
+  --dataset benchmarks/jev-judgments.dataset.json \
+  --split benchmarks/jev-calibration.split.json --out <artifact>
+```
+
 ## 4. Arms (versioned; historical definitions unchanged)
 
 | Arm | Definition |

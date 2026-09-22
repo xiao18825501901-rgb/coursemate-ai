@@ -69,11 +69,11 @@ Claimed **finished and verified on a named revision**:
 
 ## 4. What is NOT finished, and why — by status class
 
-The ledger carries 39 rows (B-01 … B-39) with full detail; the summary:
+The ledger carries 40 rows (B-01 … B-40) with full detail; the summary:
 
 | Status | Count | Representative items |
 |---|---|---|
-| `RESOLVED_WITH_EVIDENCE` | 25 | module-D resolver type errors; missing QA-stream evidence bundle; `is_definitive` having no caller; the five module metrics being uncomputable; the companion dataset's missing split manifest; six documentation claims that did not match the code; the reference-gate note now reaching the shipped UI; the DeepSeek switch-window configuration refusals now pinned by test; the V1↔V2 template-parity question closed by measurement; an owner instruction that named an environment variable no code reads; a production marker that was written for an artifact set the verifier had just rejected; the call-site matrix now pinned to the catalog; the service that could not read the TypeSafe credential at all; the live adapter verified against the real SDK wheel; and **an ablation CLI that produced a fake run labelled `live`** |
+| `RESOLVED_WITH_EVIDENCE` | 26 | module-D resolver type errors; missing QA-stream evidence bundle; `is_definitive` having no caller; the five module metrics being uncomputable; the companion dataset's missing split manifest; six documentation claims that did not match the code; the reference-gate note now reaching the shipped UI; the DeepSeek switch-window configuration refusals now pinned by test; the V1↔V2 template-parity question closed by measurement; an owner instruction that named an environment variable no code reads; a production marker that was written for an artifact set the verifier had just rejected; the call-site matrix now pinned to the catalog; the service that could not read the TypeSafe credential at all; the live adapter verified against the real SDK wheel; an ablation CLI that produced a fake run labelled `live`; and **a calibration artifact that could not say where its model evidence came from** |
 | `LOCAL_IMPLEMENTATION_GAP` (open, mine) | **0** | none — every local gap this audit found is closed with code and a test |
 | `WAITING_CREDENTIAL` | 2 | live Jev validation; live DeepSeek validation |
 | `WAITING_BUDGET` | 1 | a real token/USD ceiling (all current figures are proposals) |
@@ -463,6 +463,35 @@ forbids, so the flag stays `false`.
     `tests/test_jev_semantic_ablation_cli.py` now drives `main()` directly (3 tests), covering both
     refusals and the recorded transport. The sibling A–E CLI was checked and does **not** share the defect.
 
+23. **The calibration artefact could not say where its model evidence came from.** Checking the remaining
+    artefact-producing tools on the live path, the calibration CLI pins its dataset by content hash and its
+    split by name, and records the input *paths* — but the predictions file itself, which is the only model
+    evidence it consumes, was represented by nothing but a path string. A synthetic predictions file
+    therefore produced an artefact that reads exactly like a fitted result: buckets, `n_calibration`, ECE
+    before and after, a dataset hash. Nothing in the file said the numbers came from a stub — I had to say
+    so in **prose** in the last round's report ("demonstrates the plumbing, and is not a calibration
+    result"), which is exactly the situation where the artefact should speak for itself, because this is
+    the artefact a promotion decision would lean on. Fixed by recording two fields: `predictions_sha256`
+    pins the exact model evidence the way the datasets are already pinned by content hash, and
+    `predictions_provenance` carries an explicit statement from a new optional
+    `--predictions-provenance` flag that defaults to **`UNSTATED`** and prints a note telling the operator
+    that the numbers are only as real as the predictions file. The flag is optional so existing callers
+    keep working, and the existing test was **strengthened** rather than adjusted to assert both fields.
+    Verified by running the CLI twice: without the flag the artefact records `UNSTATED` and the note is
+    printed; with it the text is recorded verbatim; both artefacts' `predictions_sha256` equal the
+    predictions file's own digest. No new lint debt — the file still reports the same 2 pre-existing E402
+    as its pre-change version taken from git.
+
+    The same sweep produced a **negative** result worth recording, because a clean check is also evidence:
+    the DeepSeek canary CLI is already correct. Its preflight **returns** (it does not fall through), and it
+    is followed by an explicit refusal chain — missing key, missing `--max-cost`, non-finite or
+    non-positive cost, missing prices, cost ceiling exceeded, existing output or checkpoint — before it
+    ever builds the real `httpx` transport. I ran those refusals rather than reading them:
+    `--allow-billable` without a key exits **2** ("Missing credential environment variable"), with a dummy
+    key but no `--max-cost` exits **2** ("--max-cost is required for a billable run"), and with no
+    `--allow-billable` it exits **0** after printing the ten per-role token ceilings *before* any call.
+    No network was contacted and nothing was spent.
+
 Two of my own first-draft claims were wrong and were corrected in place rather than left standing: I
 first recorded the retrieval re-rank as "40 calls per page, fixable by batching" — it is bounded at
 **16**, and the batching I proposed is not available for that shape (`JevCall` shares one state across
@@ -474,7 +503,9 @@ QA stream would be byte-identical without a credential — `create_app` **always
 
 | Gate | Result |
 |---|---|
-| Full backend regression | **1304 passed / 1 skipped / 0 failed** in 1544.60s (exit 0) — `work/current-change/full_run_round40.log`, run on the **frozen** revision `5497aa3`, with `git diff 5497aa3 -- services/rag-api benchmarks scripts` empty so the run describes the code as shipped. The delta from 1301 is exactly the 3 CLI tests added this round; the one skip is the skip-aware SDK-constants test |
+| Full backend regression | **1305 passed / 1 skipped / 0 failed** in 1529.06s (exit 0) — `work/current-change/full_run_round41.log`, run on the **frozen** revision `db57af0`, with `git diff db57af0 -- services/rag-api benchmarks scripts` empty so the run describes the code as shipped. The delta from 1304 is exactly the calibration test added this round; the one skip is the skip-aware SDK-constants test |
+| Calibration artefact provenance (new this round) | Run twice on a synthetic predictions file for the companion dataset: without the flag the artefact records `predictions_provenance: 'UNSTATED'` and the CLI prints the note; with `--predictions-provenance "…"` the text is recorded verbatim; in both cases `predictions_sha256` equals the predictions file's own digest (`d06b9961…`). `scripts/calibrate_jev.py` reports the same 2 pre-existing E402 as its pre-change version from git, so no lint debt was added |
+| DeepSeek canary CLI guards (verified this round, no defect) | Run rather than read: `--allow-billable` with no key → **exit 2** "Missing credential environment variable: DEEPSEEK_API_KEY"; `--allow-billable` with a dummy key and no `--max-cost` → **exit 2** "Refusing provider calls: --max-cost is required for a billable run"; without `--allow-billable` → **exit 0** after printing the ten per-role token ceilings *before* any call. Its preflight returns rather than falling through, and the refusals precede the real `httpx` transport. No network was contacted |
 | Ablation CLI coverage (new this round) | `tests/test_jev_semantic_ablation_cli.py` (3 tests) is the first coverage this entry point has ever had: it asserts the live branch refuses (exit 3, no artefact), that the preflight still refuses without authorization (exit 2, no artefact), and that an offline run records `transport: fake` with `transport_used: deterministic_fake`. Mutation-proved against the pre-fix script read from git, which exits 0 and writes an artefact claiming `live` |
 | Two invariant suites added this round | `tests/test_jev_callsite_matrix.py` (5) pins the §3 deliverable to `app/jev/catalog.py` and `JevGateway.mode_for`; `tests/test_owner_actions_name_real_variables.py` (3) fails if any variable the owner document names is not read through a real mechanism. Both carry a measured mutation proof (5/5 and 3/3 respectively, including the pre-fix gateway read from git) |
 | Browser journeys (real Chrome, real three services, injected identity) | **46 journeys / 0 failed** — `ui-refresh` 19, `jev-structured` 6, `coursemate` 4, `learning` 3 (re-run on `6ba70b0`) **plus `codex-audit` 14** (round 37, on `d656bf7`). The audit suite is isolated: its own fixtures, its own ports (8200/8201/5373), its own web bundle built into the run directory, and a stripped environment ("do not forward account credentials, provider endpoints, or live environment files" is in its config); its Playwright report records **14 expected / 0 unexpected / 0 flaky / 0 skipped**. It had never been part of this report's evidence before, which is itself the finding — the task's gate list asks for the audit journeys and I had been citing four suites, not five |
@@ -519,8 +550,8 @@ contract.
 ### 6.1 Backend regression
 
 Command: `services\rag-api\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider`
-Log: `work/current-change/full_run_round40.log` → `1304 passed, 1 skipped, 2 warnings in 1544.60s
-(0:25:44)`, exit 0, on the frozen revision `5497aa3`. Only documentation changed after that commit, so
+Log: `work/current-change/full_run_round41.log` → `1305 passed, 1 skipped, 2 warnings in 1529.06s
+(0:25:29)`, exit 0, on the frozen revision `db57af0`. Only documentation changed after that commit, so
 this run still describes the services and scripts in the tree. The two warnings are pre-existing
 third-party deprecations (`starlette.testclient` with `httpx`, and an `anyio.abc.BlockingPortal` alias),
 not failures. The skip is named in the log (`tests/test_owner_actions_name_real_variables.py:141`) and is
