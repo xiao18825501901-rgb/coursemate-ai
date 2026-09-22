@@ -18,6 +18,15 @@ from .http_safety import (
     validate_api_url,
     validate_download_target,
 )
+from .job import (
+    ALL_STATES,
+    TERMINAL_STATES,
+    FileRecord,
+    ImportJob,
+    JobStateError,
+    new_job,
+    selection_fingerprint,
+)
 from .oauth import (
     AuthorizationState,
     CanvasOAuthClient,
@@ -41,6 +50,13 @@ from .registry import (
     InstitutionConnectionRegistry,
     UnknownInstitutionError,
     default_institutions,
+)
+from .store import CanvasJobRepository, ClaimedJob
+from .worker_decisions import (
+    FileOutcome,
+    outcome_for_download,
+    outcome_for_error,
+    should_stop_job,
 )
 
 __all__ = [
@@ -78,4 +94,18 @@ __all__ = [
     "token_provider_for",
     "validate_api_url",
     "validate_download_target",
+    # import-job core (job.py), its persistence (store.py) and the worker's decisions
+    "ALL_STATES",
+    "TERMINAL_STATES",
+    "FileRecord",
+    "ImportJob",
+    "JobStateError",
+    "new_job",
+    "selection_fingerprint",
+    "CanvasJobRepository",
+    "ClaimedJob",
+    "FileOutcome",
+    "outcome_for_download",
+    "outcome_for_error",
+    "should_stop_job",
 ]
