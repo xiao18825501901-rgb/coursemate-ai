@@ -61,8 +61,15 @@ into this chat, a report, a ticket, or a commit.** The variable name to set is:
 TYPESAFE_API_KEY=<your key>
 ```
 
-If your TypeSafe account names the model something other than the adapter's default (`jev`), also set
-`TYPESAFE_MODEL=<model id>` — that is a *name*, safe to state in chat if you are unsure.
+That one variable is enough. The model id needs no action unless your account names it something else:
+the adapter uses the SDK's own default, `jev-latest`, and the override variable is the name **the SDK
+itself** reads — `TYPESAFE_DEFAULT_MODEL=<model id>` — that is a *name*, safe to state in chat if you are
+unsure. (This corrects an earlier version of this document, which named `TYPESAFE_MODEL`: no code and no
+SDK version reads that. All of the above was checked against the real `typesafe-sdk==0.7.0` wheel rather
+than against its documentation — `constants.API_KEY_ENV`, `DEFAULT_MODEL_ENV` and `DEFAULT_MODEL`, plus
+the `TypeSafeClient` / `system_one` signatures and the `choices`/`scores`/`nouls` answer accessors, all
+match what the adapter does. The download and inspection changed exactly two things: this variable name,
+and the default model id, which the adapter had pinned to `jev` instead of the SDK's `jev-latest`.)
 
 **What you should see afterwards (non-sensitive proof).** On the next backend start, the service logs
 and the health surface stop reporting the Jev layer as unconfigured; the first decision writes a

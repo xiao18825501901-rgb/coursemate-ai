@@ -69,11 +69,11 @@ Claimed **finished and verified on a named revision**:
 
 ## 4. What is NOT finished, and why — by status class
 
-The ledger carries 37 rows (B-01 … B-37) with full detail; the summary:
+The ledger carries 38 rows (B-01 … B-38) with full detail; the summary:
 
 | Status | Count | Representative items |
 |---|---|---|
-| `RESOLVED_WITH_EVIDENCE` | 23 | module-D resolver type errors; missing QA-stream evidence bundle; `is_definitive` having no caller; the five module metrics being uncomputable; the companion dataset's missing split manifest; six documentation claims that did not match the code; the reference-gate note now reaching the shipped UI; the DeepSeek switch-window configuration refusals now pinned by test; the V1↔V2 template-parity question closed by measurement; an owner instruction that named an environment variable no code reads; a production marker that was written for an artifact set the verifier had just rejected; the call-site matrix now pinned to the catalog; and **the service that could not read the TypeSafe credential at all while the document claimed the SDK was already installed** |
+| `RESOLVED_WITH_EVIDENCE` | 24 | module-D resolver type errors; missing QA-stream evidence bundle; `is_definitive` having no caller; the five module metrics being uncomputable; the companion dataset's missing split manifest; six documentation claims that did not match the code; the reference-gate note now reaching the shipped UI; the DeepSeek switch-window configuration refusals now pinned by test; the V1↔V2 template-parity question closed by measurement; an owner instruction that named an environment variable no code reads; a production marker that was written for an artifact set the verifier had just rejected; the call-site matrix now pinned to the catalog; the service that could not read the TypeSafe credential at all; and **the live adapter verified against the real SDK wheel, which exposed two wrong model values** |
 | `LOCAL_IMPLEMENTATION_GAP` (open, mine) | **0** | none — every local gap this audit found is closed with code and a test |
 | `WAITING_CREDENTIAL` | 2 | live Jev validation; live DeepSeek validation |
 | `WAITING_BUDGET` | 1 | a real token/USD ceiling (all current figures are proposals) |
@@ -398,6 +398,51 @@ forbids, so the flag stays `false`.
     mutation proof includes the pre-fix file read from git: it *mentions* `TYPESAFE_API_KEY` in a
     docstring and does **not** read it, which is precisely the failure the new test would have reported.
 
+20. **The live adapter had been verified against documentation, so I downloaded the package and verified
+    it against the artifact.** The adapter's own docstring said its signatures were "verified against
+    `docs.typesafe.ai`" — verified against prose, not against the thing that will actually be imported at
+    the live gate. The pinned package turned out to resolve from the configured index
+    (`typesafe_sdk-0.7.0-py3-none-any.whl`, 35 KB), so I downloaded and read it — **without installing
+    it**, so no virtualenv was changed. That converted an assumption into a check and found **two real
+    defects**, both introduced or missed while fixing the credential wiring the round before:
+    the model override read `TYPESAFE_MODEL`, and the SDK's own constant is
+    `DEFAULT_MODEL_ENV = "TYPESAFE_DEFAULT_MODEL"` — a name **no code and no SDK version reads**; and the
+    adapter pinned its default model to `"jev"` when the SDK's default is `DEFAULT_MODEL = "jev-latest"`,
+    so a live call would have asked for a model id the SDK does not default to. Both are fixed in the
+    code and in the owner document. The other half is worth stating too, because it is the half that did
+    not need changing: `Choice`/`Noul`/`Score`/`TypeSafeClient` are all exported; `TypeSafeClient.__init__`
+    takes `api_key`/`model`/`base_url`/`timeout`; `Config.resolve` reads `API_KEY_ENV = "TYPESAFE_API_KEY"`,
+    the exact variable my guard now reads, so guard and SDK agree; `system_one(state, questions)` is
+    positional as called; `SystemOneResponse.choices/scores/nouls` are real cached properties over
+    `answers`, and the fields the adapter reads — `ChoiceAnswer.choice`, `ScoreAnswer.score`,
+    `NoulAnswer.noul` — all exist; and `DEFAULT_TIMEOUT = 10.0` matches the gateway's 10-second bound.
+    A test now pins our names and default to the SDK's own constants whenever the package is installed
+    (it skips here, which is honest: the package is deliberately optional). **A caveat on my own test**:
+    the owner-document check cannot know which names the *SDK* reads, only that our code reads the names
+    the document gives — which is exactly how `TYPESAFE_MODEL` slipped past it last round. The skip-aware
+    test above closes that gap where it can be closed.
+
+21. **The six component-ablation arms now have offline numbers, and the reason they sometimes look
+    unmeasured is a pairing rule nobody had written down.** Running
+    `scripts/run_jev_semantic_ablation.py --arm all-components --transport fake` against the companion
+    dataset makes five of the six arms report **MEASURED** values with denominators — extraction false
+    acceptance 1.0 over 4 and false rejection 0.0 over 2; entity false merge 1.0 over 4, missed alias 1.0
+    over **1**, conflict false positive 0.0 over 4; condition distinction 0.0 over 4; capability misroute
+    0.2 over 5; tool false allow 1.0 over 3 and false block 0.0 over 2 — all tagged
+    `NON_INTERPRETABLE_PLUMBING_ONLY`, because the transport is the fake one. The sixth, `M-CITATION`,
+    reports `INSUFFICIENT_SAMPLES` against that file **by design**: its definitions' labels (42 + 16
+    samples) live in the frozen dataset, while the companion holds the seven definitions that had none.
+    So no single dataset covers all six arms, and an operator who ran one file would read "unmeasured"
+    for arms that are in fact measurable. That pairing rule, the union accounting (310 + 49 = 359 samples
+    = the 19 catalog definitions plus the deliberate non-catalog `image_transcription.v1`) and the
+    measured table are now in `JEV_CALIBRATION_AND_ABLATION_REPORT.md` §6.3. Two column meanings are
+    stated there because they disagree on purpose and are easy to confuse: the number of labels for the
+    decision a metric reads (7) versus the denominator its rate divides by (3 for `tool_false_allow`).
+    And one number is deliberately flagged as thin rather than quoted: `entity_missed_alias` divides by
+    **1**, so its value carries almost no information yet. I also checked the obvious suspicion that the
+    two numbers meant a mis-mapping in the metric-to-decision table — they do not: each metric is mapped
+    to the definition it reads, which is exactly what the docstring says.
+
 Two of my own first-draft claims were wrong and were corrected in place rather than left standing: I
 first recorded the retrieval re-rank as "40 calls per page, fixable by batching" — it is bounded at
 **16**, and the batching I proposed is not available for that shape (`JevCall` shares one state across
@@ -409,12 +454,13 @@ QA stream would be byte-identical without a credential — `create_app` **always
 
 | Gate | Result |
 |---|---|
-| Full backend regression | **1301 passed / 0 failed** in 1543.33s (exit 0) — `work/current-change/full_run_round38.log`, run on the **frozen** revision `b10fe07`, with `git diff b10fe07 -- services/rag-api benchmarks` empty so the run describes the code as shipped. The delta from 1293 is exactly the 8 tests added this round (5 call-site-matrix tests, 3 owner-document tests) |
+| Full backend regression | **1301 passed / 1 skipped / 0 failed** in 1614.72s (exit 0) — `work/current-change/full_run_round39.log`, run on the **frozen** revision `e3cdc51`, with `git diff e3cdc51 -- services/rag-api benchmarks` empty so the run describes the code as shipped. The one skip is deliberate: the test that pins our TypeSafe names to the SDK's own constants skips while the optional package is absent and activates where it is installed |
 | Two invariant suites added this round | `tests/test_jev_callsite_matrix.py` (5) pins the §3 deliverable to `app/jev/catalog.py` and `JevGateway.mode_for`; `tests/test_owner_actions_name_real_variables.py` (3) fails if any variable the owner document names is not read through a real mechanism. Both carry a measured mutation proof (5/5 and 3/3 respectively, including the pre-fix gateway read from git) |
 | Browser journeys (real Chrome, real three services, injected identity) | **46 journeys / 0 failed** — `ui-refresh` 19, `jev-structured` 6, `coursemate` 4, `learning` 3 (re-run on `6ba70b0`) **plus `codex-audit` 14** (round 37, on `d656bf7`). The audit suite is isolated: its own fixtures, its own ports (8200/8201/5373), its own web bundle built into the run directory, and a stripped environment ("do not forward account credentials, provider endpoints, or live environment files" is in its config); its Playwright report records **14 expected / 0 unexpected / 0 flaky / 0 skipped**. It had never been part of this report's evidence before, which is itself the finding — the task's gate list asks for the audit journeys and I had been citing four suites, not five |
 | Web app | `tsc --noEmit` exit 0, **73 vitest passed** (18 → 19 files), production build exit 0 |
 | Agent service (`services/agent-api`, TypeScript) | **92 vitest passed / 0 failed** (12 files), `tsc -p tsconfig.json --noEmit` exit 0, production build exit 0 with `dist/src/server.js` emitted — run this round on `cfd0ef1`; the 14 intent-gate tests are `executor-intent-gate.test.ts` (6) + `intent-gate.test.ts` (8), exactly the pair the call-site matrix cites for tool misexecution |
 | Measurement / module-metric suites | **121 passed** (`test_jev_module_metrics.py` 13, `test_jev_module_split_calibration.py` 8) |
+| Six component ablation arms, run offline (this round) | `scripts/run_jev_semantic_ablation.py --arm all-components --transport fake` now produces **MEASURED** metrics with published denominators for five of the six arms, over the companion dataset: `M-EXTRACT` (false acceptance 1.0 over 4, false rejection 0.0 over 2), `M-ENTITY` (false merge 1.0 over 4, missed alias 1.0 over **1**, conflict false positive 0.0 over 4), `M-CONSISTENCY` (condition distinction 0.0 over 4), `M-CAPABILITY` (misroute 0.2 over 5), `M-TOOL` (false allow 1.0 over 3, false block 0.0 over 2). Every number is tagged `NON_INTERPRETABLE_PLUMBING_ONLY` — it shows the arms compute where labels exist, not that quality is good. The sixth, `M-CITATION`, correctly reports `INSUFFICIENT_SAMPLES` **against the companion** because citation labels live in the frozen dataset; the pairing rule (which dataset each arm needs, and why no single file covers all six) is now written into `JEV_CALIBRATION_AND_ABLATION_REPORT.md` §6.3 having been absent before |
 | Migration, backup/restore and rollback gate (run this round) | **67 passed / 0 failed** across `test_document_versions.py`, `test_four_change_migration.py`, `test_assessment_runtime.py`, `test_backup_restore.py`, `test_backup_ui_extension.py`, `test_monitor_v2.py`, `test_knowledge_registry.py`, `test_database.py` and `test_codex_snapshot_backup.py`. The upgrade path is not just asserted: `test_document_versions.py` builds a **V2** database with course/document/chunk rows, then initialises the same file with `v3_enabled=True` **twice** and asserts the resulting `schema_migrations`, so the additive backfill and the idempotent replay are proven together |
 | The 25 → 30 upgrade rehearsed end to end (run this round, locally) | `scripts/rehearse_v3_migration.py` on a source database built by the **old release's own code** (`4ef5064`, schema 25, one course/document/chunk seeded): real migrations 001–030 applied to a copy with `initialize()` called **twice** → **`old_rows_unchanged: true`** (every fingerprinted table byte-identical before and after by SHA-256, so the upgrade is strictly additive), `integrity=ok`, `foreign_key_violations=0`, `v3_invariants_ok=true` with **52** counters at zero and only the four expected seeds/backfills non-zero (`document_versions=1` backfilled from the seeded document, `documents=1`, `grade_policy_versions=1`, `requirements_grade_policy_seed=1`). Evidence: `work/current-change/rehearsal-25-to-30.clean.json`. **Not covered:** the source is synthetic and one row per table, so the same rehearsal against the real production dump remains a release-window step |
 | Production frontend build, local half (run this round) | The exact Netlify command from `netlify.toml` — `preflight → build → verify` — with production-shaped configuration (`pk_live`-shaped Clerk key, `VITE_UI_API_BASE=https://rag.qqttai.com/ui-extension/api/ui/v1`, `VITE_RAG_API_URL`/`VITE_AGENT_API_URL` on the two documented hosts, `VITE_V3_ENABLED=true`, `VITE_AUTH_TEST_TOKEN` **unset**): preflight **exit 0** ("production configuration checks passed"), build **exit 0**, verify **exit 0** writing `build-info.json` with 8 artifact hashes, `context=production`, `not_for_production=false`, the Clerk field present and all three origins recorded. **Negative control on the real browser-acceptance dist: exit 1** listing seven forbidden markers (`test-session-token`, `VITE_AUTH_TEST_TOKEN`, `http://localhost:`, `localhost:8000/8001`) — the safety net demonstrably blocks the build I use for E2E from ever being published. Deviations stated: the local build ran through `pnpm --filter @coursemate/web run build` because npm is not installed in this environment (the repo does configure npm workspaces), and the Clerk **application** is not verified — the key is shape-valid only, so a real sign-in remains the release-window check |
@@ -452,10 +498,12 @@ contract.
 ### 6.1 Backend regression
 
 Command: `services\rag-api\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider`
-Log: `work/current-change/full_run_round38.log` → `1301 passed, 2 warnings in 1543.33s (0:25:43)`,
-exit 0, on the frozen revision `b10fe07`. Only documentation changed after that commit, so this run
-still describes the services in the tree. The two warnings are pre-existing third-party deprecations
-(`starlette.testclient` with `httpx`, and an `anyio.abc.BlockingPortal` alias), not failures.
+Log: `work/current-change/full_run_round39.log` → `1301 passed, 1 skipped, 2 warnings in 1614.72s
+(0:26:54)`, exit 0, on the frozen revision `e3cdc51`. Only documentation changed after that commit, so
+this run still describes the services in the tree. The two warnings are pre-existing third-party
+deprecations (`starlette.testclient` with `httpx`, and an `anyio.abc.BlockingPortal` alias), not failures.
+The skip is named in the log (`tests/test_owner_actions_name_real_variables.py:141`) and is the
+skip-aware SDK-constants test described above; it is the only skip in the run.
 
 Evidence hygiene, stated because it tripped me up while re-reading: these logs are **UTF-16LE**
 (PowerShell's `Tee-Object`), as are the earlier rounds' logs, so a UTF-8 reader shows them as spaced-out

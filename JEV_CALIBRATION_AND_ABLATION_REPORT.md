@@ -186,13 +186,66 @@ and the companion `content_hash`. **The predictions in that run were synthetic**
 distribution written by the test), which is why ECE is unchanged before and after — that run
 demonstrates the plumbing, and is not a calibration result.
 
+### 6.3 Round 39: which dataset each arm must run against, and the offline numbers
+
+The table above reports "status on the frozen dataset", which is now only half the story, because the
+labels are split across two files on purpose. **No single dataset covers all six arms:**
+
+| Dataset | Samples | Definitions it labels |
+|---|---|---|
+| `benchmarks/jev-judgments.dataset.json` (frozen) | 310 | 13 — including `source.supports_claim.v1` (42) and `source.select_span.v1` (16), which is why the citation arm needs this file |
+| `benchmarks/jev-module-judgments.dataset.json` (companion) | 49 | 7 — the definitions that had none, which is why the other five arms need this file |
+
+Together they cover every catalog definition exactly once (13 + 7 = 20 ids = **19 catalog definitions**
+plus the deliberately non-catalog `image_transcription.v1` case set), across 359 labelled samples.
+
+So the rule is: `--arm M-CITATION` with the **frozen** dataset; `--arm M-EXTRACT|M-ENTITY|M-CONSISTENCY|
+M-CAPABILITY|M-TOOL` with the **companion**. Running every component arm against one file makes the arms
+whose labels live in the other report `INSUFFICIENT_SAMPLES`, which is a statement about the pairing, not
+about the system.
+
+Run in round 39, offline (`--transport fake`, so every number below is tagged
+`NON_INTERPRETABLE_PLUMBING_ONLY` — these say the arms compute numbers where labels exist, never that the
+quality is good):
+
+| Arm | Metric | Value | Labels for the decision | Rate denominator |
+|---|---|---|---|---|
+| `M-EXTRACT` | extraction_false_acceptance | 1.0 | 7 | 4 |
+| | extraction_false_rejection | 0.0 | 7 | 2 |
+| `M-ENTITY` | entity_false_merge | 1.0 | 7 | 4 |
+| | entity_missed_alias | 1.0 | 7 | **1** |
+| | entity_conflict_false_positive | 0.0 | 7 | 4 |
+| `M-CONSISTENCY` | condition_distinction | 0.0 | 7 | 4 |
+| `M-CAPABILITY` | capability_misroute | 0.2 | 7 | 5 |
+| `M-TOOL` | tool_false_allow | 1.0 | 7 | 3 |
+| | tool_false_block | 0.0 | 7 | 2 |
+
+Two column meanings that are easy to confuse, stated because they disagree on purpose: **labels for the
+decision** is how many labelled samples exist for the definition that metric reads (7 for
+`tool.intent.v1`), while **rate denominator** is the population the rate divides by (3 for
+`tool_false_allow`, because only three of the seven cases are ones that should have been blocked). The
+runner publishes both (`component.metrics.*.samples` and `metric_denominators`), and neither may be read
+alone — `entity_missed_alias`, for instance, has a denominator of **1**, so its value carries almost no
+information yet and should not be quoted as a rate.
+
+Evidence: `work/current-change/semantic-arms-companion-r39.json` (companion run) and
+`work/current-change/semantic-arms-r39.json` (frozen run), both produced by
+`scripts/run_jev_semantic_ablation.py --arm all-components --transport fake`.
+
 ## 7. What is needed to produce a real result
 
-1. `TYPESAFE_API_KEY` in the backend env (owner), `typesafe-sdk` pinned and installed.
+1. `TYPESAFE_API_KEY` in the backend env (owner) **and** `typesafe-sdk==0.7.0` installed in the service
+   venv — the key alone was not wired until round 38 (the adapter never read it) and the package is an
+   optional dependency that is commented out in `requirements.txt`, so both halves are required. The
+   adapter's usage of that package was verified against the real wheel in round 39, which corrected two
+   values: the model override is `TYPESAFE_DEFAULT_MODEL` (not `TYPESAFE_MODEL`) and the default model is
+   the SDK's `jev-latest` (not `jev`).
 2. DeepSeek key in the backend env plus an approved batch ceiling.
 3. A labelled run on the frozen splits, calibration fitted on the calibration split only, then a
    single evaluation on the test split.
-4. Labelled samples for the five module definitions above, so their component arms stop reporting
-   `INSUFFICIENT_SAMPLES`.
+4. **Corrected in round 39:** the five module definitions no longer need labels invented — the companion
+   dataset supplies 7 each and their arms are measurable offline today (§6.3). What is still needed for
+   those arms is a **live** run, and the citation arm needs the frozen dataset rather than the companion.
+   The remaining thin spot is population size (`entity_missed_alias` divides by 1), not missing labels.
 5. Only then may a definition leave `shadow` — and the promotion is per definition, with the
    non-inferiority evidence recorded here. Coverage and assessment stay advisory even when enabled.
