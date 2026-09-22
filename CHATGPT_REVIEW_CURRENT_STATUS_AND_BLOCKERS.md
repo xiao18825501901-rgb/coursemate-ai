@@ -552,6 +552,9 @@ QA stream would be byte-identical without a credential — `create_app` **always
     **Why this one matters for the release:** it was in the evidence I would have handed to whoever runs
     the migration window. The verdict itself (can the old release open the migrated database?) was always
     real — it comes from running the old release's code — but the reassurance sitting next to it was not.
+    All three cited artefacts were also re-produced by the shipped revision after the probe guard was
+    added, and they are field-for-field identical (`work/current-change/rollback-compat-*.rerun.json`), so
+    the evidence describes the code as committed rather than an earlier revision of the tool.
 
 ## 6. Evidence for this round
 
