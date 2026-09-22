@@ -24,6 +24,7 @@ is invented.
 from __future__ import annotations
 
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from dataclasses import dataclass, field, replace
 from time import perf_counter
@@ -147,15 +148,26 @@ class FakeTransport:
 class SdkTransport:
     """Live adapter over ``typesafe-sdk`` (verified signature only).
 
-    Unconfigured (no ``TYPESAFE_API_KEY``) or missing SDK raises
-    :class:`JevNotConfiguredError` before any network access, so the live path is
-    a real adapter that fails typed and never invents a request.
+    Unconfigured (no ``TYPESAFE_API_KEY`` in the environment and none passed in)
+    or missing SDK raises :class:`JevNotConfiguredError` before any network access,
+    so the live path is a real adapter that fails typed and never invents a
+    request. ``TYPESAFE_MODEL`` overrides the verified default model id when the
+    account needs a different one.
     """
 
-    def __init__(self, *, api_key: str | None = None, model: str = "jev") -> None:
-        self.api_key = api_key
-        self.model = model
-        self.model_version = model
+    def __init__(self, *, api_key: str | None = None, model: str | None = None) -> None:
+        # The SDK resolves its own credential from the environment, so this
+        # guard has to look in the same place: the service builds
+        # ``SdkTransport()`` with no arguments, while the ablation CLI passes a
+        # key explicitly and that still wins. Before this, the guard always
+        # fired in the service, so putting the key in the protected env -- the
+        # documented owner action -- could not enable the live path at all.
+        self.api_key = (
+            api_key if api_key is not None else os.environ.get("TYPESAFE_API_KEY")
+        )
+        resolved_model = model or os.environ.get("TYPESAFE_MODEL") or "jev"
+        self.model = resolved_model
+        self.model_version = resolved_model
 
     def call(self, call: JevCall, *, timeout_seconds: float) -> JevResult:
         if not self.api_key:
