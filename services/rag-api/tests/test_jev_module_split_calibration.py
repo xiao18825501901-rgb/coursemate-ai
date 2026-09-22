@@ -14,6 +14,7 @@ committed calibration result.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import sys
@@ -163,6 +164,28 @@ def test_calibration_runs_over_the_companion_dataset(tmp_path: Path) -> None:
     # A synthetic flat distribution still has to produce finite numbers, not NaN.
     assert payload["ece_before"] is not None
     assert math.isfinite(float(payload["ece_before"]))
+    # The artifact must say where its model evidence came from, and pin it: this file
+    # is what a promotion decision would lean on, and before round 41 a synthetic
+    # predictions file produced an artifact that read exactly like a fitted result.
+    assert payload["predictions_sha256"] == hashlib.sha256(predictions.read_bytes()).hexdigest()
+    assert payload["predictions_provenance"] == calibrate_jev.PREDICTIONS_PROVENANCE_UNSTATED
+
+
+def test_calibration_records_a_stated_predictions_provenance(tmp_path: Path) -> None:
+    """A named source is recorded verbatim, so an artifact can be traced to its run."""
+    samples = companion_samples()
+    predictions = synthetic_predictions(samples, path=tmp_path / "predictions.json")
+    out = tmp_path / "calibration.json"
+
+    payload = calibrate_jev.fit_and_write(
+        predictions,
+        out,
+        dataset_path=COMPANION,
+        split_path=COMPANION_SPLIT,
+        predictions_provenance="unit-test fixture",
+    )
+
+    assert payload["predictions_provenance"] == "unit-test fixture"
 
 
 def test_calibration_refuses_an_empty_calibration_split(tmp_path: Path) -> None:

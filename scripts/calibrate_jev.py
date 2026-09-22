@@ -13,6 +13,7 @@ No network and no model calls: the predictions file is the only model evidence.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import sys
@@ -36,6 +37,11 @@ from app.evaluation.jev_semantic_ablation import (
 DATASET_PATH = ROOT / "benchmarks" / "jev-judgments.dataset.json"
 SPLIT_PATH = ROOT / "benchmarks" / "jev-calibration.split.json"
 DEFAULT_OUT = ROOT / "work" / "current-change" / "jev-temperature-calibration.json"
+
+# Recorded in the artefact when the caller does not state where the predictions came
+# from. Deliberately not a silent default: an artefact whose model evidence is a stub
+# must say so, because this file is what a promotion decision would lean on.
+PREDICTIONS_PROVENANCE_UNSTATED = "UNSTATED"
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -70,6 +76,7 @@ def fit_and_write(
     *,
     dataset_path: Path | None = None,
     split_path: Path | None = None,
+    predictions_provenance: str | None = None,
 ) -> dict:
     """Fit and write the artifact. ``dataset_path``/``split_path`` default to the frozen pair.
 
@@ -77,7 +84,13 @@ def fit_and_write(
     with the same maths and the same leakage validation instead of being unreachable: the
     contract is unchanged — fit only on the held-out calibration split, refuse when there
     is none, and refuse when a calibration row has no prediction.
+
+    ``predictions_provenance`` is free text naming where the predictions came from (a
+    model version, a run id, "synthetic fixture"). It is optional so existing callers
+    keep working, but an artefact written without it records
+    ``PREDICTIONS_PROVENANCE_UNSTATED`` and says so on stdout.
     """
+    predictions_bytes = predictions_path.read_bytes()
     dataset = json.loads((dataset_path or DATASET_PATH).read_text(encoding="utf-8"))
     manifest = json.loads((split_path or SPLIT_PATH).read_text(encoding="utf-8"))
     samples = judgments_from_dataset(dataset)
@@ -147,6 +160,16 @@ def fit_and_write(
     payload = artifact.to_dict()
     payload["dataset_path"] = str(source_dataset)
     payload["predictions_path"] = str(predictions_path)
+    payload["predictions_sha256"] = hashlib.sha256(predictions_bytes).hexdigest()
+    payload["predictions_provenance"] = (
+        predictions_provenance or PREDICTIONS_PROVENANCE_UNSTATED
+    )
+    if not predictions_provenance:
+        print(
+            "note: no --predictions-provenance was given, so the artifact records "
+            f"{PREDICTIONS_PROVENANCE_UNSTATED}. These numbers are only as real as the "
+            "predictions file; name its source before quoting them."
+        )
     payload["n_calibration"] = len(records)
     payload["precision_note"] = PRECISION_LIMITATION_NOTE
     _write_json(out, payload)
@@ -186,13 +209,23 @@ def main() -> int:
         default=None,
         help="split manifest (default: the frozen benchmarks/jev-calibration.split.json)",
     )
+    parser.add_argument(
+        "--predictions-provenance",
+        default=None,
+        help="free text naming where the predictions came from; recorded in the artifact "
+        "so it cannot imply a real run it did not have (default: UNSTATED)",
+    )
     args = parser.parse_args()
     if args.out.exists() or args.out.with_name(f".{args.out.name}.partial").exists():
         print("Refusing to overwrite an existing calibration artifact or partial checkpoint.")
         return 2
     try:
         payload = fit_and_write(
-            args.predictions, args.out, dataset_path=args.dataset, split_path=args.split
+            args.predictions,
+            args.out,
+            dataset_path=args.dataset,
+            split_path=args.split,
+            predictions_provenance=args.predictions_provenance,
         )
     except ValueError as error:
         print(f"Calibration preflight failed: {error}")
