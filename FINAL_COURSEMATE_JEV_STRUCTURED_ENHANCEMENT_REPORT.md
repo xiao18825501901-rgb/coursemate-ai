@@ -14,8 +14,8 @@ nothing here claims a quality improvement.
 |---|---|
 | Work tree | `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY` |
 | Branch | `fix/codex-dsh-audit-20260919` |
-| Backend regression SHA | `6e65396` (full backend suite run on this revision) |
-| Current HEAD | `6e65396` — backend and all four browser suites re-run on this same revision; `git diff HEAD -- services/rag-api tests` is empty |
+| Backend regression SHA | `169bd57` (full backend suite run on this revision; previously `6e65396`) |
+| Current HEAD | `169bd57` — the backend gate was re-run on this revision and `git diff 169bd57 -- services/rag-api benchmarks` is empty; the browser suites were re-run on `6ba70b0`, and `apps/` + `tests/e2e/` are unchanged since (`git diff 6ba70b0 -- apps tests/e2e` empty) |
 | Schema | RAG **30** (001–030; 029 is the proposal-only `entity_relations` store, 030 the durable feedback queue), UI 13, Agent 1 |
 | Live TypeSafe model/calibration version | **none configured** — live Jev is `NOT_RUN` |
 
@@ -76,10 +76,18 @@ work (`extraction.field_grounded.v1`, `evidence.consistency.v1`), three for P1
 
 ## 4. Evidence on the frozen SHA
 
+**Re-verified 2026-09-22 (rounds 31–35).** This table's rows were originally measured on `6e65396`.
+Every row that could have moved has been re-measured since, and the rows below name the revision they
+were measured on; where a row still stands from the earlier revision, it says so. Two rows were
+**wrong** when first written and are corrected here rather than quietly overwritten: the mypy row said
+the whole-app count was "unchanged" (it was not — see its cell) and the false-claim history for that
+number is in `docs/recovery/CURRENT_BLOCKER_LEDGER.md` B-10.
+
 | Gate | Result |
 |---|---|
-| Full backend regression on `6e65396` | **1235 passed, 0 failed**, 1467.07s, exit 0 (`work/current-change/full_run_round30_final2.log`) |
-| Jev module + call-site suites (A extraction, reference verification, business path, absent ledger, B entity resolution, C evidence consistency + wiring, D citation audit/evidence/binding, high-impact gate, E capability router + dispatch, F tool intent + endpoint, P2 feedback triage, the call sites themselves) | **208 passed** on this revision |
+| Full backend regression on the frozen revision `169bd57` | **1293 passed, 0 failed**, 1577.08s (0:26:17), exit 0 (`work/current-change/full_run_round35.log`). The delta from 1235 is accounted for: +17 (4 QA + 13 module-metric tests), +8 (split/calibration tests), +33 (the DeepSeek switch-window config guards) = 1293. The row's earlier measurement stands as history: **1235 passed, 0 failed**, 1467.07s, exit 0 on `6e65396` (`work/current-change/full_run_round30_final2.log`) |
+| Sub-suites re-measured on the frozen revision (round 35) | **Jev + DeepSeek set (23 files): 343 passed / 0 failed** — gateway, absent-ledger, orchestrator wiring, the twelve call sites, capability router + dispatch, extraction, entity resolution, evidence consistency + wiring, citation audit + binding, feedback triage, tool-intent endpoint, calibration, A/B/C/D/E + semantic ablation, module metrics, and the DeepSeek canary/contract/provider-role/config-guard suites. **Measurement + module-metric set (8 files): 121 passed / 0 failed.** **Zero-Laya production guard: 3 passed** |
+| Jev module + call-site suites (A extraction, reference verification, business path, absent ledger, B entity resolution, C evidence consistency + wiring, D citation audit/evidence/binding, high-impact gate, E capability router + dispatch, F tool intent + endpoint, P2 feedback triage, the call sites themselves) | **208 passed** (measured on `6e65396`; the same files are inside the 343-test re-measurement above) |
 | Host-wiring suite (orchestrator receives the shared service; receipts never stall a business call) | **4 passed** |
 | Twelve call-site suite | **16 passed** |
 | Structured-insertion suites (shadow invariance 6, capability dispatch 10, tool-intent endpoint 8) | **24 passed** |
@@ -87,12 +95,12 @@ work (`extraction.field_grounded.v1`, `evidence.consistency.v1`), three for P1
 | Measurement layer (dataset build, calibration, A/B/C/D/E + the six component arms) | **97 passed**; offline runs exit 0, arms tagged `NON_INTERPRETABLE_PLUMBING_ONLY` |
 | Zero-Laya production guard | **3 passed** |
 | Catalog integrity | green with 19 definitions |
-| Migrations on an isolated database (re-run on this revision; no schema change this round) | `expected_schema=30`, idempotent replay, `integrity=ok`, `fk_violations=0`, `max_migration=30`, no `*_old`/`*_new` leftovers |
+| Migrations on an isolated database (measured on `6e65396`; no schema change since — `LATEST_V3_SCHEMA_VERSION` is still `30` in `app/db.py`, with 026–030 the newest files) | `expected_schema=30`, idempotent replay, `integrity=ok`, `fk_violations=0`, `max_migration=30`, no `*_old`/`*_new` leftovers |
 | agent-api | real `tsc --noEmit` **exit 0**, **92 tests passed** (12 files), build **exit 0** |
-| Web app | real `tsc --noEmit` **exit 0**, **68 tests passed** (18 files), build **exit 0** |
+| Web app | real `tsc --noEmit` **exit 0**, **73 tests passed** (19 files), build **exit 0** (68/18 before the reference-gate note added its 5 tests) |
 | Browser journeys (real Chrome, isolated identity, real three-service shape) | `ui-refresh.spec.ts` **19/19**, `jev-structured.spec.ts` **6/6** (three new module-A journeys), `coursemate.spec.ts` **4**, `learning.spec.ts` **3** — **32 journeys, 0 failed** |
-| Ruff | measured against a `git worktree` of the previous revision: **1815 errors at HEAD and 1815 in the tree** — this round added none |
-| mypy | whole-app runs: **1074 errors in 39 files** (legacy `ui_extension`/`cm_update`); none in a file this round changed or added |
+| Ruff | **1815 errors before and 1815 after** this round's three-file change, measured on `app` + `tests` with `services/rag-api` as the working directory (the cwd changes ruff's verdict — recorded in `CHATGPT_REVIEW_CURRENT_STATUS_AND_BLOCKERS.md` §6). Mid-round the count did rise to **1821** when the ablation-harness rename pushed six lines past 100 columns; those were rewrapped in their own commit, so the total is back to 1815 rather than claimed unchanged without measuring |
+| mypy | whole-app: **1004 errors in 32 files** (from 1074/39 when this report was first written, and 1077/38 when it was actually re-measured on `cfd0ef1`). **`app/jev/` and `app/evaluation/` now report zero errors**: six of this round's errors were fixed as real type defects in the Jev layer rather than deferred, and `app/jev/citation_evidence.py`, `app/evaluation/jev_semantic_ablation.py`, `app/evaluation/jev_ablation.py`, `app/evaluation/jev_calibration.py`, `app/evaluation/deepseek_canary.py`, `app/jev/receipt_store.py` and `app/jev/gateway.py` are each clean. What remains is legacy `cm_update`/`ui_extension` debt (728 of the 1004 in `app/cm_update/app.py`) and is reported by rule, not hidden. The earlier claim in this table that the count was "unchanged" was wrong and is corrected here |
 
 The browser gate found one real product bug, which is fixed rather than papered over: a `GET /layout`
 still in flight when the learner moved a reasoning-strength slider overwrote the new value on arrival,
@@ -103,12 +111,18 @@ comment) were corrected without weakening any product assertion.
 
 ## 5. Status markers (evidence-based, no marker promoted on plumbing)
 
+**Re-checked 2026-09-22 (round 35).** No marker was promoted: every definition is still in `shadow`,
+and the two live markers are still `NOT_RUN`. What changed is the *evidence* behind the local markers —
+`JEV_GATEWAY` is now type-clean, the backend and browser gate numbers are current, and the agent
+service has its own row. The rule this table follows is unchanged: a wired call site, a shadow receipt,
+a fake transport or an HTTP 200 is never a PASS.
+
 | Marker | Status | Basis |
 |---|---|---|
 | DETERMINISTIC_FIXES | **PASS** | learning-start fact, RRF fusion, raw-score projection, command router, and the reasoning-strength save race — all with regressions |
-| DEEPSEEK_TEXT / VISION / AGENT | **LOCAL** | contract + host-spy tests prove the wiring and zero Qwen egress; live calls `NOT_RUN` |
+| DEEPSEEK_TEXT / VISION / AGENT | **LOCAL** | contract + host-spy tests prove the wiring and zero Qwen egress; live calls `NOT_RUN`. The switch-window configuration is now guarded as well: 33 tests pin the refusals (host allowlist, `/v1` path, scheme, embedded credentials, the `deepseek-flash` model pin, the missing credential, production pricing) and two ordering facts — validation runs before the database is opened, so a bad environment fails at boot without half-initialised state |
 | PROMPT_V2_REGISTRY | **PASS** | 16/16 manifest hashes, V1 retained |
-| JEV_GATEWAY | **PASS** (local) | gateway/catalog/receipts/cache/modes tested; one shared service app-wide; live TypeSafe `NOT_RUN` |
+| JEV_GATEWAY | **PASS** (local) | gateway/catalog/receipts/cache/modes tested; one shared service app-wide; live TypeSafe `NOT_RUN`. **Type-clean since round 35**: the whole `app/jev/` layer reports zero mypy errors, and the two errors this file carried were fixed as narrowing rather than suppression |
 | JEV_RETRIEVAL · JEV_CITATION · JEV_CONTEXT · JEV_INTENT · JEV_PEDAGOGY · JEV_COVERAGE · JEV_ASSESSMENT · JEV_CLASSIFICATION · JEV_EXERCISE_SELECTION · JEV_PREREQUISITE · JEV_CORPUS_QUALITY | **SOURCE_IMPLEMENTED + LOCAL_INTEGRATED**, all `shadow` | call-site suite plus the module suites; authority boundaries asserted |
 | ENTITY_RESOLUTION | **PASS (local, shadow)** | wired into the authorized retrieval path, proposal-only store with an idempotency and degradation proof, per-concept expansion proven to preserve the original query, leave unrelated queries untouched, and reach the English material for a Chinese question on the real GE2324 corpus |
 | EVIDENCE_CONSISTENCY | **PASS (local, shadow)** | wired into the evidence-pack step; byte-identical sources under off/shadow/unavailable/no-Jev, a real contradiction kept and explained through the teaching prompt, and version/assumption differences never presented as conflicts |
@@ -118,10 +132,10 @@ comment) were corrected without weakening any product assertion.
 | CITATION_AUDIT | **PASS (local, shadow)** | all three layers bound to the teaching path: a deterministic layer-2 verdict that costs zero model calls, a layer-1 re-check through the canonical ACL on a real migrated database (incl. cross-user and cross-course `unauthorized`), the verdict recorded on the card the client receives and marked in the shipped shell, an enforced per-answer budget, and byte-identical cards when no semantic layer is configured. A unit-regex defect that could fabricate a CONTRADICTION was found and fixed |
 | USER_FEEDBACK_TRIAGE | **SOURCE_IMPLEMENTED + LOCAL_INTEGRATED + DURABLE** | module, backend route, durable queue (migration 030), admin reader and the caller's own list, shell entry; 17 triage tests + 6 queue tests + a real-browser journey through the dialog. The privacy rule is a schema CHECK, not a convention |
 | LEARNING_PROGRESS · FIVE_QUESTION_ASSESSMENT | **PASS** (local) | regression suites plus the browser assessment journey (start → 5 questions → submit → graded) |
-| LOCAL_REGRESSION | **PASS** | **1235 passed / 0 failed** on `6e65396` (1467.07s, exit 0); `git diff HEAD -- services/rag-api tests` is empty, so the run describes the committed tree. The round's first run was 1226/2 and both failures were a real defect in the Jev layer (an absent receipt ledger raising out of a learner request), fixed there rather than in the test |
+| LOCAL_REGRESSION | **PASS** | **1293 passed / 0 failed** on the frozen revision `169bd57` (1577.08s, exit 0, `work/current-change/full_run_round35.log`); `git diff 169bd57 -- services/rag-api benchmarks` is empty, so the run describes the committed tree. History kept rather than overwritten: the first measurement was **1235 passed / 0 failed** on `6e65396`, and before that the round's first run was 1226/2 with both failures a real defect in the Jev layer (an absent receipt ledger raising out of a learner request), fixed there rather than in the test. No test was renamed, skipped or weakened to reach 1293, and two tests drafted and then found to assert a false contract were **deleted** (B-10) |
 | JEV_LIVE_VALIDATION · DEEPSEEK_LIVE_VALIDATION | **NOT_RUN** | no credential, no budget |
 | ABLATION | **NOT_RUN** | harness and 310-sample dataset ready; no labelled live run |
-| BROWSER_ACCEPTANCE | **PASS (local)** | **32 journeys / 0 failed** on `6e65396` across four suites in real Chrome against the real services (`ui-refresh` 19, `jev-structured` 6 with three new module-A journeys, `coursemate` 4, `learning` 3), including the Jev-unavailable deployment; production browser acceptance still `NOT_RUN` |
+| BROWSER_ACCEPTANCE | **PASS (local)** | **32 journeys / 0 failed** across four suites in real Chrome against the real services (`ui-refresh` 19, `jev-structured` 6 with three new module-A journeys, `coursemate` 4, `learning` 3), including the Jev-unavailable deployment; re-run on `6ba70b0` with `apps/` + `tests/e2e/` unchanged since. The seven further journeys the task lists are classified per item in `JEV_CALLSITE_MATRIX.md` (Skill selection and Jev-unavailable exist as browser journeys; alias retrieval, tool misexecution, extraction verification and unsupported citation are verified at their real boundaries with the reasons stated; a condition-conflict journey cannot exist until a live credential produces `SAME_CONTEXT_CONTRADICTION`). Production browser acceptance remains `NOT_RUN` |
 | PRODUCTION_DEPLOYMENT · PRODUCTION_ACCEPTANCE | **BLOCKED** | requires the release window and the credentials in `MINIMAL_OWNER_ACTION_CARD.md` |
 
 ## 6. Cost, latency and quality
@@ -174,11 +188,14 @@ success, p50/p95 latency, per-provider cost and failure rate — are specified i
   `question_number='M'`), and that phantom label became a hard chunk-metadata filter. It suppressed
   legitimate exact recall and could pin retrieval onto a wrong sub-question. Fixed at the parser, with
   the prose cases pinned as regression tests; the module-A wiring above is what made the defect visible.
-* Whole-app mypy is now honest rather than green: **1074 errors in 39 files** (the same count as the
-  evidence table above; 6 of them arrived with rounds 25–29 in `citation_evidence.py` and
-  `cm_update/app.py`, and round 30 added none). That debt is inherited legacy code and is **not**
-  cleaned up in this round, apart from the module-D resolver, whose four errors were fixed in round
-  31 (`app/jev/citation_evidence.py` is now mypy-clean).
+* Whole-app mypy is honest rather than green: **1004 errors in 32 files** as of round 35 (it read
+  **1074 in 39 files** when this section was written, and the claim made here and in the evidence table
+  that the count was "unchanged" was **wrong** — re-measuring showed 1077/38, because rounds 25–31 had
+  in fact moved it). What the later rounds cleaned up is the whole Jev layer, not the legacy debt:
+  `app/jev/` and `app/evaluation/` now report **zero** errors, while the inherited `cm_update` /
+  `ui_extension` debt (728 of the 1004 in `app/cm_update/app.py`) is still **not** cleaned up and is
+  reported by rule rather than hidden. The full accounting, including the six in-scope defects fixed in
+  round 35 and the one strict-mypy trade-off, is in `docs/recovery/CURRENT_BLOCKER_LEDGER.md` B-10.
 * Production browser acceptance, production deployment and production acceptance have not run.
 
 ## 8. What the next round must do
