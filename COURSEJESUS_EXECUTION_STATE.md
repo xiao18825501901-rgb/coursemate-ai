@@ -13,8 +13,8 @@ record there.
 | Branch | `fix/codex-dsh-audit-20260919` |
 | HEAD at the start of this round | `552e809` — working tree clean, 76 commits ahead of `origin`, nothing pushed |
 | Last full backend gate before this round | **1314 passed / 1 skipped / 0 failed** in 1534.25 s on frozen revision `2fd532b` (`work/current-change/full_run_round42b.log`) |
-| Gate **on this round's revision** | **1418 passed / 2 skipped / 0 failed** in 1350.74 s (22:30) on frozen revision `19e09d2`, exit 0 (`work/current-change/full_run_round50.log`) — the +10 are the job-repository tests; `git diff 19e09d2 -- services benchmarks scripts` is empty |
-| Previous round's gate | **1408 passed / 2 skipped / 0 failed** in 1342.96 s on frozen revision `8e92aec` (`work/current-change/full_run_round49.log`) — the +10 there were the Canvas import schema tests. Schema is **31**; job rows, connections and per-file records now have a repository that writes them |
+| Gate **on this round's revision** | **1434 passed / 2 skipped / 0 failed** in 1361.67 s (22:41) on frozen revision `7b6316a`, exit 0 (`work/current-change/full_run_round53.log`) — the +16 are the worker failure-decision tests; `git diff 7b6316a -- services benchmarks scripts` is empty |
+| Previous round's gate | **1418 passed / 2 skipped / 0 failed** in 1350.74 s on frozen revision `19e09d2` (`work/current-change/full_run_round50.log`) — the +10 there were the job-repository tests. Schema is **31**; connections, jobs and per-file rows have a repository, and a failure now has a recorded decision |
 | Running jobs at the start | none (no pytest / Playwright / mypy process was live) |
 | Instruction pack | `D:\UserData\Downloads\CourseJesus_Domain_Canvas_Campus_DSH_Pack\CourseJesus_Domain_Canvas_Campus_Plan`, **SHA-256 verified 6/6** against its own `SHA256_MANIFEST.json` (a first PowerShell check wrongly reported one failure because the shell decoded the CJK filename as GBK and hashed the wrong file — measured with Python before trusting it) |
 | Production | **not contacted in this round at all** — no deploy, no DNS, no Clerk, no database |
