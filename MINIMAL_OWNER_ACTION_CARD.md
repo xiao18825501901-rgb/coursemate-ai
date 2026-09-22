@@ -74,9 +74,9 @@ yes/no because they change the live product:
    `6ab02278b7fae664934df25d`. I will publish a locally built artifact with `netlify deploy --prod`
    (rollback = restore the previous deploy) unless you prefer a merge to `main`.
 
-Facts for the same window: production is schema **25** and must go to **29** (migrations 026–029; 029 is
-the proposal-only `entity_relations` store), the live release is `4ef5064`, and the rollback rehearsal
-will use that real release.
+Facts for the same window: production is schema **25** and must go to **30** (migrations 026–030; 029 is
+the proposal-only `entity_relations` store and 030 the durable feedback queue), the live release is
+`4ef5064`, and the rollback rehearsal will use that real release.
 
 ## 3b. Two production risks I found in the read-only verification (2026-09-22T01:59Z)
 

@@ -331,6 +331,27 @@ Commit `b8104d9`.
 (1471.55s, exit 0); browser **28 journeys / 0 failed** across the four suites, in real
 Chrome against the real services.
 
+## Round 29 — the feedback queue becomes durable, and its consent gate is fixed (2026-09-22)
+
+Commit `5be2d0a`. Schema **29 → 30**.
+
+| Item | What changed |
+|---|---|
+| Durable queue (spec §5's "review queue") | The P2 module classified a report and kept it in process memory, so the queue a reviewer was meant to work through vanished on every restart and nothing could read it back. Migration 030 adds `feedback_reports`: one row per submission, idempotent by report key, carrying the identifiers, the triage suggestion and its Jev receipts, with `status` starting `OPEN`. |
+| Privacy is now structural | A CHECK constraint refuses any body text unless the submitter set `attach_body`, so no future code path can store a question/answer body without consent — the endpoint and the triage module enforce the same rule earlier, and the shipped form only enables the free-text field once the box is ticked. |
+| The queue has a reader | `GET /api/feedback/queue` (admin only, most severe first) and `GET /api/feedback/mine` (the caller's own reports). The store exposes read/append methods only — a test pins that surface so adding a mutating method has to be a conscious design step, which is what keeps "no auto-grade, no auto-ban, no auto-delete" true. |
+| Product bug fixed | The shell's report form sent the user's free-text note while the consent box was unchecked, so describing a problem and submitting it was rejected with `400 BODY_NOT_OPTED_IN`. The form now gates the note on the checkbox, matching the task spec, the server rule and the form's own helper text. |
+| Two bugs caught by the new tests | `_public` iterated a `sqlite3.Row` (which yields *values*, not column names) and broke as soon as two suites ran together; and the queue-name assertion in my first test guessed the module's naming instead of reading it. Both fixed in the code/test, not by weakening an assertion. |
+
+**Verified on one frozen SHA (`5be2d0a`):** backend regression **1195 passed / 0 failed**
+(1473.95s, exit 0); browser **29 journeys / 0 failed** (the `jev-structured` suite gained
+the report-dialog journey, which drives the real shell in real Chrome); the isolated
+migration probe reports `expected_schema=30`, idempotent replay, `integrity=ok`,
+no foreign-key violations, `max_migration=30` and no leftovers.
+
+Recorded while doing it: writing that browser journey is what exposed the consent-gate
+bug — the suite would have passed forever if it had only asserted that the dialog opens.
+
 ## Resume instructions for a later round
 
 1. Work in `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY`, branch

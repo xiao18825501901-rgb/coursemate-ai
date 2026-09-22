@@ -31,8 +31,8 @@ release plan with its rollback. Anything that has not happened is marked `NOT_RU
 
 | Change | Detail |
 |---|---|
-| Backend code | the Jev semantic-decision layer (19 definitions, all in `shadow`), the six structured-enhancement modules, the single shared decision layer threaded through the orchestrator/UI extension/run endpoint/internal APIs, and the receipt/entity-relation stores |
-| Database | schema **25 → 29**: 026 learning-start events, 027 assessment preparation reference, 028 Jev decision receipts, 029 proposal-only entity relations. All additive; a release rolled back after the migration still runs (verified by the rollback-compatibility guard and by the property that a missing 029 store degrades to "nothing recorded") |
+| Backend code | the Jev semantic-decision layer (19 definitions, all in `shadow`), the six structured-enhancement modules, the single shared decision layer threaded through the orchestrator/UI extension/run endpoint/internal APIs, and the receipt, entity-relation and feedback-queue stores |
+| Database | schema **25 → 30**: 026 learning-start events, 027 assessment preparation reference, 028 Jev decision receipts, 029 proposal-only entity relations, 030 the durable feedback queue. All additive; a release rolled back after the migration still runs (verified by the rollback-compatibility guard, and by the properties that a missing 029 store degrades to "nothing recorded" and a missing 030 store only means feedback cannot be queued) |
 | Generative path | **only if the owner supplies a DeepSeek key**: every generative role moves from Qwen/Model Studio to DeepSeek. Without the key the deployment keeps answering exactly as it does today |
 | Semantic path | **only if the owner supplies a TypeSafe credential**: definitions can leave `shadow` for `advisory`/`on`, per definition, after the calibration gate. Without it every decision stays in `shadow` and the deterministic result remains user-visible |
 | Frontend | the shell changes from the previous round's build (the "报告问题" entry, the citation-verdict marker, the reasoning-strength save fix). Netlify project `coursemate-ai-qqtt` (`qqttai.com`) |
@@ -119,7 +119,7 @@ real services in real Chrome.
    housekeeping: the newest existing snapshot is 32 hours old and the monitor is already failing on
    that (§4 finding 2).
 5. **Isolated restore + migration rehearsal**: restore that fresh backup into a separate directory and
-   run migrations 026–029 there, proving `integrity_check=ok`, `foreign_key_check` empty, and that the
+   run migrations 026–030 there, proving `integrity_check=ok`, `foreign_key_check` empty, and that the
    data survives.
 6. **Real rollback check**: run the *actual* previous release (`4ef5064`) against the migrated database
    (`verify_rollback_compat.py`) and record the verdict.

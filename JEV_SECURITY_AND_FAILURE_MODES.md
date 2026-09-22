@@ -84,6 +84,16 @@ private course text, plan content or keys. Receipts store the decision metadata 
 version, model/calibration version, mode, outcome, cache-scope keys, latency) and not the raw private
 payload.
 
+The one place where user-authored content is stored is the feedback queue, and its rule is structural
+rather than procedural (migration 030): a `feedback_reports` row carries identifiers by default, and a
+CHECK constraint refuses any question/answer/description text unless the submitter set `attach_body`.
+A future code path therefore cannot store a body without consent even if it wanted to; the endpoint
+and the triage module enforce the same rule earlier, and the shipped form only enables the free-text
+field once the consent box is ticked. Only an admin can list the queue (`GET /api/feedback/queue`), a
+user can list their own reports (`GET /api/feedback/mine`), and nothing in the module resolves,
+deletes, sanctions or grades anything — the store exposes read/append methods only, which a test
+pins.
+
 ## 6. Cost safety
 
 * One attempt per decision, no automatic retry, no automatic paid escalation.

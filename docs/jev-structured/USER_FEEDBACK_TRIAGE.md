@@ -122,10 +122,18 @@ result = triage.submit(
 # result.used_jev, result.jev_calls, result.receipt_ids, result.report_key, ...
 ```
 
-`FeedbackTriage.reports` is the in-memory human review queue (in submission
-order) and `summary()` exposes `submitted`, per-category/path counts and the
-queued reports.  `suggested_queue(category, severity)` is a deterministic routing
-hint (`priority`/`service`/`grading`/`content`/`triage`) — never an action.
+`FeedbackTriage.reports` is the in-process view of what this process triaged, and
+`summary()` exposes `submitted`, per-category/path counts and the queued reports.
+**The durable queue is the database, not that list** (round 29): `FeedbackStore`
+writes each triaged report into `feedback_reports` (migration 030) keyed by
+`report_key`, so a restart loses nothing, and a repeat submission of the same report
+is recorded once. What a reviewer works through comes from
+`FeedbackStore.queue(status="OPEN")` — exposed as `GET /api/feedback/queue`
+(admin only, most severe first) — and a user's own list from
+`GET /api/feedback/mine`. `suggested_queue(category, severity)` is a deterministic
+routing hint (`priority`/`service`/`grading`/`content`/`triage`) — never an action, and
+no method here can resolve, delete or sanction anything: `status` starts `OPEN` and a
+human moves it.
 
 The owner/course scope is built with `build_feedback_scope`, the same
 genuinely-scoped `CacheScope` pattern the P1 modules (`capability_router`,
@@ -182,11 +190,16 @@ plus one dialog form.
 
 ## Not done / explicitly out of scope
 
-* No live Jev call; only `FakeTransport` has run.
-* No new database table: the report's persistent audit trail is the existing
-  `jev_decision_receipts` ledger (the two category/severity receipts carry the
-  owner/course scope and the report input hash), and the human review queue is
-  the in-memory `FeedbackTriage.reports`.  A persistent report queue is a
-  follow-up owned by the workstream that owns migrations.
+* No live Jev call; only `FakeTransport` has run, so every report so far degrades to
+  `OTHER` + middle severity (`path` starts with `fallback:`).
+* **The persistent queue now exists** (migration 030, `feedback_reports`): the report's
+  audit trail is the two `jev_decision_receipts` rows *plus* the durable report row,
+  which carries the identifiers, the opt-in flag, the triage suggestion and the queue
+  status. The body columns can only be non-NULL when the submitter opted in — a schema
+  CHECK enforces it, not just the endpoint.
+* Still deliberately out of scope: no CRM, no ticket lifecycle automation, no
+  notification of the reporter, and no endpoint that resolves a report. `status`
+  starts `OPEN`; moving it is a human action performed outside this module, which is
+  why the store exposes read/append only.
 * Host wiring stays default-off: no definition is promoted from `shadow` to `on`
   until a TypeSafe credential exists and the layer is calibrated.

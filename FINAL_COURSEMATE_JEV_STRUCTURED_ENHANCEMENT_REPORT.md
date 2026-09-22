@@ -14,9 +14,9 @@ nothing here claims a quality improvement.
 |---|---|
 | Work tree | `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY` |
 | Branch | `fix/codex-dsh-audit-20260919` |
-| Backend regression SHA | `b8104d9` (full backend suite run on this revision) |
-| Current HEAD | `b8104d9` — backend, shell and browser suites all re-run on this same revision |
-| Schema | RAG **29** (001–029; 029 is the proposal-only `entity_relations` store), UI 13, Agent 1 |
+| Backend regression SHA | `5be2d0a` (full backend suite run on this revision) |
+| Current HEAD | `5be2d0a` — backend, shell and browser suites all re-run on this same revision |
+| Schema | RAG **30** (001–030; 029 is the proposal-only `entity_relations` store, 030 the durable feedback queue), UI 13, Agent 1 |
 | Live TypeSafe model/calibration version | **none configured** — live Jev is `NOT_RUN` |
 
 ## 2. Case dispositions (summary of `docs/jev-structured/CASE_ADOPTION_MATRIX.md`)
@@ -79,7 +79,7 @@ work (`extraction.field_grounded.v1`, `evidence.consistency.v1`), three for P1
 
 | Gate | Result |
 |---|---|
-| Full backend regression on `b8104d9` | **1189 passed, 0 failed**, 1471.55s, exit 0 (`work/current-change/full_run_round27.log`) |
+| Full backend regression on `5be2d0a` | **1195 passed, 0 failed**, 1473.95s, exit 0 (`work/current-change/full_run_round29.log`) |
 | Module suites (A 16, B 20, C 9+wiring 4, D 14+12+7, high-impact gate 6, E/F 29, P2 17) | **134 passed** |
 | Host-wiring suite (orchestrator receives the shared service; receipts never stall a business call) | **4 passed** |
 | Twelve call-site suite | **16 passed** |
@@ -91,7 +91,7 @@ work (`extraction.field_grounded.v1`, `evidence.consistency.v1`), three for P1
 | Migration 029 on an isolated database | `integrity=ok`, `fk_violations=0`, `max_migration=29`, no `*_old`/`*_new` leftovers |
 | agent-api | real `tsc --noEmit` **exit 0**, **92 tests passed** (12 files), build **exit 0** |
 | Web app | real `tsc --noEmit` **exit 0**, **68 tests passed** (18 files), build **exit 0** |
-| Browser journeys (real Chrome, isolated identity, real three-service shape) | `ui-refresh.spec.ts` **19/19**, `jev-structured.spec.ts` **2/2**, `coursemate.spec.ts` **4**, `learning.spec.ts` **3** — **28 journeys, 0 failed** |
+| Browser journeys (real Chrome, isolated identity, real three-service shape) | `ui-refresh.spec.ts` **19/19**, `jev-structured.spec.ts` **3/3**, `coursemate.spec.ts` **4**, `learning.spec.ts` **3** — **29 journeys, 0 failed** |
 | Ruff | clean on every file this round touched (pre-existing debt elsewhere unchanged) |
 | mypy | whole-app runs: **1068 pre-existing errors in 38 files** (legacy `ui_extension`/`cm_update`); the whole Jev layer has **6**, all pre-existing |
 
@@ -117,9 +117,9 @@ comment) were corrected without weakening any product assertion.
 | TOOL_INTENT_CHECK | **PASS (local, default-off)** | real gate at the model-proposed write boundary on both sides, 14 Node tests + 8 endpoint tests + 12 guard tests; `off` proven to make no call |
 | EXTRACTION_VERIFICATION | **SOURCE_IMPLEMENTED, `MODULE_ONLY` (final decision, investigated)** | module tested (16) but **no production surface produces the record shape it verifies**. The decision to leave it unwired is recorded with its reasons in `docs/jev-structured/SOURCE_EXTRACTION_AND_ENTITY_RELATIONS.md` §9.4: the closest surface's fields are deterministic regex question labels with no per-field review slot and no consumer, and the exact-locator path they feed is the one place that must never be displaced |
 | CITATION_AUDIT | **PASS (local, shadow)** | all three layers bound to the teaching path: a deterministic layer-2 verdict that costs zero model calls, a layer-1 re-check through the canonical ACL on a real migrated database (incl. cross-user and cross-course `unauthorized`), the verdict recorded on the card the client receives and marked in the shipped shell, an enforced per-answer budget, and byte-identical cards when no semantic layer is configured. A unit-regex defect that could fabricate a CONTRADICTION was found and fixed |
-| USER_FEEDBACK_TRIAGE | **SOURCE_IMPLEMENTED + LOCAL_INTEGRATED** | module, backend route, shell entry, 17 tests; human review queue only (in-memory — see the disclosed limitation) |
+| USER_FEEDBACK_TRIAGE | **SOURCE_IMPLEMENTED + LOCAL_INTEGRATED + DURABLE** | module, backend route, durable queue (migration 030), admin reader and the caller's own list, shell entry; 17 triage tests + 6 queue tests + a real-browser journey through the dialog. The privacy rule is a schema CHECK, not a convention |
 | LEARNING_PROGRESS · FIVE_QUESTION_ASSESSMENT | **PASS** (local) | regression suites plus the browser assessment journey (start → 5 questions → submit → graded) |
-| LOCAL_REGRESSION | **PASS** | 1189 passed / 0 failed on `b8104d9`; backend, shell and all four browser suites re-run on that same revision |
+| LOCAL_REGRESSION | **PASS** | 1195 passed / 0 failed on `5be2d0a`; backend, shell and all four browser suites re-run on that same revision |
 | JEV_LIVE_VALIDATION · DEEPSEEK_LIVE_VALIDATION | **NOT_RUN** | no credential, no budget |
 | ABLATION | **NOT_RUN** | harness and 310-sample dataset ready; no labelled live run |
 | BROWSER_ACCEPTANCE | **PASS (local)** | 28 journeys across four suites in real Chrome against the real services, including the Jev-unavailable deployment; production browser acceptance still `NOT_RUN` |
@@ -166,8 +166,10 @@ success, p50/p95 latency, per-provider cost and failure rate — are specified i
   every mode the deployment can currently reach.
 * The tool-intent gate ships **default-off**; with `off` (the current production setting) it makes no
   call and changes nothing, so its enforcement path has never run against a live model in production.
-* The user-feedback review queue is in-memory plus the receipt ledger; it is not durable across a
-  restart until the migration workstream owns a table for it.
+* The user-feedback review queue is now **durable** (migration 030, `feedback_reports`),
+  written idempotently by report key with a schema-level CHECK that refuses any body text
+  without the submitter's opt-in, and read by an admin-only queue endpoint; module A remains
+  the only `MODULE_ONLY` module.
 * Whole-app mypy is now honest rather than green: 1068 pre-existing errors in 38 files. That debt is
   inherited legacy code and is **not** cleaned up in this round.
 * Production browser acceptance, production deployment and production acceptance have not run.

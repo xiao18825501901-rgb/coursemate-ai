@@ -9,18 +9,21 @@ reversed — and what must never be lost.
 
 | Item | Value |
 |---|---|
-| Source schema target (RAG) | **29** — `app/db.py::LATEST_V3_SCHEMA_VERSION`, migrations 001–029 |
+| Source schema target (RAG) | **30** — `app/db.py::LATEST_V3_SCHEMA_VERSION`, migrations 001–030 |
 | Jev receipts | `028_jev_decision_receipts.sql` (executed, historical; never rewritten) |
 | Entity relations | `029_entity_relations.sql` — the proposal-only store for module B. Note the number was previously used by the cancelled Laya migration, which was removed and archived under `archive/laya-superseded-20260922/`; this 029 is a different, additive migration and must not be confused with it |
+| Feedback queue | `030_feedback_reports.sql` — the durable user-initiated feedback queue: identifiers by default, a schema CHECK that refuses any body without the submitter's opt-in, and a status that starts `OPEN` |
 | UI schema | 13 (unchanged) |
 | Agent schema | 1 (unchanged) |
-| Production (verified read-only) | **25** — the live database is `/srv/coursemate/data/releases/20260919T202006Z/rag.sqlite3`, `integrity_check=ok`, migrations 001–025 |
+| Production (verified read-only 2026-09-22T01:59Z) | **25** — the live database is `/srv/coursemate/data/releases/20260919T202006Z/rag.sqlite3`, `integrity_check=ok`, migrations 001–025 |
 
-Production therefore needs **25 → 29** (026 learning start events, 027 assessment preparation,
-028 Jev receipts, 029 the entity-relation proposal store). Because 029 is additive and its only writer
-is the retrieval path's proposal bookkeeping — which degrades to "nothing recorded" when the table is
-absent (`test_relation_bookkeeping_never_breaks_retrieval_without_the_store`) — a release that is
-rolled back after the migration still runs against the migrated database.
+Production therefore needs **25 → 30** (026 learning start events, 027 assessment preparation,
+028 Jev receipts, 029 the entity-relation proposal store, 030 the durable feedback queue). Every one of
+them is additive and each new store degrades safely when absent — 029's only writer is proposal
+bookkeeping that records nothing without the table
+(`test_relation_bookkeeping_never_breaks_retrieval_without_the_store`), and 030's only writer is the
+feedback route — so a release that is rolled back after the migration still runs against the migrated
+database.
 
 ## 2. Rules for new state
 
@@ -84,8 +87,8 @@ make a report look tidier.
 
 | Item | State |
 |---|---|
-| Isolated init/replay and leftover checks | verified (`integrity=ok`, `fk_violations=0`, max migration **29**, no `*_old`/`*_new` leftovers) |
+| Isolated init/replay and leftover checks | verified (`integrity=ok`, `fk_violations=0`, max migration **30**, no `*_old`/`*_new` leftovers) |
 | Legacy-upgrade invariants | covered by the rehearsal suite (green) |
 | Rollback compatibility against the *previous* release | verified for the earlier boundary; **must be re-run against `4ef5064` before the production migration** |
-| Production migration 026–029 | **NOT_RUN** — requires the release window and a fresh backup |
+| Production migration 026–030 | **NOT_RUN** — requires the release window and a fresh backup |
 | Post-release backup and monitoring | **NOT_RUN** |
