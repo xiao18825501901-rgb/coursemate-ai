@@ -54,17 +54,24 @@ Column key:
 | **F** ToolIntentCheck | `tool.intent.v1` | `services/agent-api` `ToolExecutor.execute` → `JevToolIntentGate` → `POST /api/jev/tool-intent` → `ToolIntentCheck.authorize` | only model-proposed **write** tool calls (`createTask/updateTask/completeTask/deleteTask`); `searchTask` is read-only and never gated; explicit/read-only actions cost 0 Jev | the user's own turn message + the proposed tool + code-computed permissions + object revision | No (per proposed call) | Choice `CONSISTENT / INCONSISTENT_WITH_INTENT / AMBIGUOUS` | **Wired, opt-in**: `JEV_TOOL_INTENT_MODE=off` (default) makes no HTTP call and keeps the existing synchronous path byte-identical; `advisory` records the verdict on the tool result and still executes; `enforce` blocks a non-`ALLOW` write with `CONFIRMATION_REQUIRED`/`INTENT_REFUSED`. The token-authenticated internal endpoint fails closed (503 without a configured token). | a `CONSISTENT` verdict can never grant a permission the actor lacked; document content is never treated as user authorization; Jev never executes the tool | `REQUIRE_CONFIRMATION` (`intent:unavailable`) — never fail-open | owner + `tasks` (owner-scoped) | `test_jev_tool_intent.py` (12), `test_api_tool_intent.py` (8), agent-api `intent-gate.test.ts` (8) + `executor-intent-gate.test.ts` (6) | NOT_RUN | WIRED (opt-in, default off) |
 | **P2** UserFeedbackTriage | `feedback.category.v1`, `feedback.severity.v1` | `POST /api/feedback` → `FeedbackTriage.submit` | only when a user actively submits a report | the report the user chose to send (body only when `attach_body=true`) | Yes — category + severity decided in one call | Choice category / Score severity | **Wired**: the report is classified and queued for human review; the deterministic backend owns persistence and the queue. | never scans private messages, never profiles a user, never changes a grade, never suspends or deletes | `OTHER` + middle severity (still queued) | owner + `feedback` + course | `test_jev_feedback_triage.py` (17), `test_qa_api.py` | NOT_RUN | WIRED (shadow; in-memory queue + receipt ledger) |
 
-## Host wiring (done in this round)
+## Host wiring
 
-One shared semantic-decision layer is now assembled at application startup and
-threaded through the whole app, instead of each caller building its own gateway:
+One shared semantic-decision layer is assembled at application startup and threaded
+through the whole app, instead of each caller building its own gateway:
 
 `app/main.py::create_app` → `application.state.jev_service` →
-`app/ui_extension/mount.py` → `app/cm_update/integration.py` →
+**`LearningOrchestrator(…, jev=…)`** (which hands it to `AssessmentService` and
+`KnowledgeService`) → `app/ui_extension/mount.py` → `app/cm_update/integration.py` →
 `app/cm_update/app.py::create_app(jev=…)` → `V3DomainAdapter(jev=…)`, and reused by
 `app/api/feedback.py` and `app/api/tool_intent.py`. With no TypeSafe credential the
 `SdkTransport` fails typed (`JevNotConfiguredError`), every definition stays in
 `shadow`, and the deterministic result remains the user-visible one.
+
+The orchestrator was **missing** from that chain until round 26, which made call sites
+6 (pedagogy), 8 (assessment criterion review) and 11 (prerequisite) unreachable in a
+real deployment even though their tests passed with an injected service.
+`tests/test_jev_orchestrator_wiring.py` now pins the whole chain: the orchestrator, its
+`assessments` and its `knowledge` all hold the *same* service object.
 
 ## Rule-12 input budget + provenance
 

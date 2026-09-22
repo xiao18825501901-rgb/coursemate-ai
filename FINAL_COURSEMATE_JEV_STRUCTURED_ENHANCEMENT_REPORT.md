@@ -14,8 +14,8 @@ nothing here claims a quality improvement.
 |---|---|
 | Work tree | `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY` |
 | Branch | `fix/codex-dsh-audit-20260919` |
-| Backend regression SHA | `35ef493` (full backend suite run on this revision) |
-| Current HEAD | `35ef493` — backend, shell and browser suites all re-run on this same revision |
+| Backend regression SHA | `42d83ee` (full backend suite run on this revision) |
+| Current HEAD | `42d83ee` — backend, shell and browser suites all re-run on this same revision |
 | Schema | RAG **29** (001–029; 029 is the proposal-only `entity_relations` store), UI 13, Agent 1 |
 | Live TypeSafe model/calibration version | **none configured** — live Jev is `NOT_RUN` |
 
@@ -79,12 +79,13 @@ work (`extraction.field_grounded.v1`, `evidence.consistency.v1`), three for P1
 
 | Gate | Result |
 |---|---|
-| Full backend regression on `35ef493` | **1163 passed, 0 failed**, 1404.46s, exit 0 (`work/current-change/full_run_round25.log`) |
-| Module suites (A 16, B 20, C 9+wiring 4, D 14+12+7, E/F 29, P2 17) | **128 passed** |
+| Full backend regression on `42d83ee` | **1187 passed, 0 failed**, 1417.19s, exit 0 (`work/current-change/full_run_round26.log`) |
+| Module suites (A 16, B 20, C 9+wiring 4, D 14+12+7, high-impact gate 6, E/F 29, P2 17) | **134 passed** |
+| Host-wiring suite (orchestrator receives the shared service; receipts never stall a business call) | **4 passed** |
 | Twelve call-site suite | **16 passed** |
 | Structured-insertion suites (shadow invariance 6, capability dispatch 10, tool-intent endpoint 8) | **24 passed** |
 | Real-corpus golden suite (incl. the Chinese-alias → English-material case) | **6 passed** |
-| Measurement layer (dataset build, calibration, A/B/C/D/E harness) | **43 passed**; offline ablation exits 0 with verdict `NOT_INTERPRETABLE` |
+| Measurement layer (dataset build, calibration, A/B/C/D/E + the six component arms) | **97 passed**; offline runs exit 0, arms tagged `NON_INTERPRETABLE_PLUMBING_ONLY` |
 | Zero-Laya production guard | **3 passed** |
 | Catalog integrity | green with 19 definitions |
 | Migration 029 on an isolated database | `integrity=ok`, `fk_violations=0`, `max_migration=29`, no `*_old`/`*_new` leftovers |
@@ -92,7 +93,7 @@ work (`extraction.field_grounded.v1`, `evidence.consistency.v1`), three for P1
 | Web app | real `tsc --noEmit` **exit 0**, **68 tests passed** (18 files), build **exit 0** |
 | Browser journeys (real Chrome, isolated identity, real three-service shape) | `ui-refresh.spec.ts` **19/19**, `jev-structured.spec.ts` **2/2**, `coursemate.spec.ts` **4**, `learning.spec.ts` **3** — **28 journeys, 0 failed** |
 | Ruff | clean on every file this round touched (pre-existing debt elsewhere unchanged) |
-| mypy | whole-app runs and reports **1068 pre-existing errors in 38 files** (legacy `ui_extension`/`cm_update`); the whole Jev layer has **6**, all pre-existing in `gateway.py` (5) and `receipt_store.py` (1) |
+| mypy | whole-app runs: **1068 pre-existing errors in 38 files** (legacy `ui_extension`/`cm_update`); the whole Jev layer has **6**, all pre-existing |
 
 The browser gate found one real product bug, which is fixed rather than papered over: a `GET /layout`
 still in flight when the learner moved a reasoning-strength slider overwrote the new value on arrival,
@@ -118,7 +119,7 @@ comment) were corrected without weakening any product assertion.
 | CITATION_AUDIT | **PASS (local, shadow)** | all three layers bound to the teaching path: a deterministic layer-2 verdict that costs zero model calls, a layer-1 re-check through the canonical ACL on a real migrated database (incl. cross-user and cross-course `unauthorized`), the verdict recorded on the card the client receives and marked in the shipped shell, an enforced per-answer budget, and byte-identical cards when no semantic layer is configured. A unit-regex defect that could fabricate a CONTRADICTION was found and fixed |
 | USER_FEEDBACK_TRIAGE | **SOURCE_IMPLEMENTED + LOCAL_INTEGRATED** | module, backend route, shell entry, 17 tests; human review queue only (in-memory — see the disclosed limitation) |
 | LEARNING_PROGRESS · FIVE_QUESTION_ASSESSMENT | **PASS** (local) | regression suites plus the browser assessment journey (start → 5 questions → submit → graded) |
-| LOCAL_REGRESSION | **PASS** | 1163 passed / 0 failed on `35ef493`; backend, shell and all four browser suites re-run on that same revision |
+| LOCAL_REGRESSION | **PASS** | 1187 passed / 0 failed on `42d83ee`; backend, shell and all four browser suites re-run on that same revision |
 | JEV_LIVE_VALIDATION · DEEPSEEK_LIVE_VALIDATION | **NOT_RUN** | no credential, no budget |
 | ABLATION | **NOT_RUN** | harness and 310-sample dataset ready; no labelled live run |
 | BROWSER_ACCEPTANCE | **PASS (local)** | 28 journeys across four suites in real Chrome against the real services, including the Jev-unavailable deployment; production browser acceptance still `NOT_RUN` |
@@ -146,9 +147,18 @@ success, p50/p95 latency, per-provider cost and failure rate — are specified i
   produces the record shape it verifies, and the candidate surfaces are listed with the reason each is
   ruled out. Every other structured module (B, C, D, E, F, feedback) is wired to a real business path
   with a consumer; none of them is promoted out of `shadow`.
-* Module D's high-impact gate (`is_definitive`, "audit the reference solution **before** presenting it")
-  is implemented in the module but not yet bound to the assessment reference-solution path: that path
-  is the next binding, and no claim is made that reference solutions are gated today.
+* Module D's high-impact gate now runs: the reference solution is verified **before** it is used as
+  grading evidence (deterministic layer 1 over its `source_ref` chunks plus the semantic support
+  decision), a negative verdict marks that question `needs_review` with a reason, and no mark, weight,
+  total, grade or coverage value is touched. The semantic half of the gate is recorded as `shadow` until
+  a credential exists, like every other definition.
+* **A production wiring defect was found and fixed this round**: the shared service was never handed to
+  `LearningOrchestrator`, so call site 6 (pedagogy), 8 (criterion review) and 11 (prerequisite) were
+  unreachable in a real deployment even though their tests passed with an injected service. Wiring them
+  also exposed a latent hazard — grading calls the criterion review from inside its own write
+  transaction — so receipt writes are now best-effort under lock contention (250 ms, dropped rather
+  than blocking or raising). The recorded follow-up is to move those semantic calls out of the write
+  transaction (or write receipts on the caller's connection) so a receipt is never dropped.
 * The evidence-consistency conflict note and every D verdict other than the deterministic layer-2 one
   can only appear in mode `on`; with no TypeSafe credential they have never been produced by a live
   decision. What is proven today is that they are *absent* (and the prompt/cards byte-unchanged) in
@@ -163,15 +173,16 @@ success, p50/p95 latency, per-provider cost and failure rate — are specified i
 
 ## 8. What the next round must do
 
-1. Bind `is_definitive` to the high-impact path: the assessment reference solution and grading
-   rationale must be audited **before** they are presented, using the layer-1/2/3 machinery that now
-   exists, and a non-definitive verdict must hold the material rather than publish it.
-2. Decide module **A** explicitly: either wire the `extract_structured_blocks` question-number/part
-   labels *with a real consumer* (structured retrieval distrusting a misassigned 题号, marked only on a
-   real signal, which needs a migration) or leave it `MODULE_ONLY` in the final report. Inventing a
-   field decomposition is not an option.
-3. Add the browser journeys that can exist for the wired modules and record the rest as `NOT_RUN` with
-   the reason (a conflict/citation journey needs a live Jev signal; extraction has no call site).
+1. Move the semantic calls that run inside a business write transaction out of it (or write their
+   receipts on the caller's connection), so the assessment grading path never drops a receipt — the
+   only known place where the ledger and a business transaction contend.
+2. Extend the labelled dataset with samples for the five module definitions that currently report
+   `INSUFFICIENT_SAMPLES` (`extraction.field_grounded.v1`, `entity.relation.v1`,
+   `evidence.consistency.v1`, `teaching.capability.v1`, `tool.intent.v1`) — a sampling task that needs
+   the live model and the owner's budget.
+3. Add the browser journeys that can exist once a credential does (condition conflict, unsupported
+   citation end to end); module A has no call site by decision, and the tool-misexecution journey is
+   impossible while the E2E agent uses the deterministic model client.
 4. Re-run the whole gate on one frozen APPLICATION SHA.
 5. Only then the live gate: TypeSafe credential + bounded budget, DeepSeek key, release window, one
    real login — followed by backup, isolated rehearsal, migration 026–029, immutable release, real

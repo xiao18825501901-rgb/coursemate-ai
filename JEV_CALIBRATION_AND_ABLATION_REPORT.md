@@ -98,11 +98,32 @@ comparison verdict=NOT_INTERPRETABLE
 
 Those numbers exist only to prove the arms are wired and differentiated. **They are not results.**
 
-## 6. Optional components added later
+## 6. Component arms for the six structured modules (implemented, and honest about labels)
 
-`FakeJevTransport`-backed optional modules (extraction verification, entity resolution, evidence
-consistency, citation audit, capability routing, tool-intent check) get their own component ablation
-switches. Like the main arms, they report `NOT_INTERPRETABLE` without real labels and a real Jev.
+Alongside A–E (whose definitions are untouched), the harness now exposes one component arm
+per structured-enhancement module. `--arm all` still means A–E; `--arm all-components` runs the
+six below.
+
+| Arm | Module | Definition turned on | Metric | Status on the frozen dataset |
+|---|---|---|---|---|
+| `M-EXTRACT` | ExtractionVerification | `extraction.field_grounded.v1` | extraction false acceptance / false rejection | `INSUFFICIENT_SAMPLES` |
+| `M-ENTITY` | EntityResolution | `entity.relation.v1` | entity false merge / missed alias / conflict false positive | `INSUFFICIENT_SAMPLES` |
+| `M-CONSISTENCY` | EvidenceConsistency | `evidence.consistency.v1` | condition distinction | `INSUFFICIENT_SAMPLES` |
+| `M-CITATION` | ClaimCitationAudit | `source.supports_claim.v1` + `source.select_span.v1` | citation-support accuracy, unsupported-claim rate (citation, n=42), span-selection accuracy (span_selection, n=16) | **MEASURED** |
+| `M-CAPABILITY` | CapabilityRouter | `teaching.capability.v1` | capability misroute | `INSUFFICIENT_SAMPLES` |
+| `M-TOOL` | ToolIntentCheck | `tool.intent.v1` | tool false allow / false block | `INSUFFICIENT_SAMPLES` |
+
+Five of the six report `INSUFFICIENT_SAMPLES` for **every** module metric and emit **no number**: the
+frozen 310-sample dataset contains zero samples for `extraction.field_grounded.v1`,
+`entity.relation.v1`, `evidence.consistency.v1`, `teaching.capability.v1` and `tool.intent.v1`. The
+intent family labels `intent.next_action.v1` actions (CONTINUE/PAUSE/…), not capability ids, and the
+citation family labels claim-support, not condition distinction — so deriving those labels would mean
+inventing a measurement, which the harness refuses to do. `compare_jev_arms` also refuses a quality
+verdict whenever any contributing arm has an unmeasured metric.
+
+To make those five measurable, the dataset must be extended with labelled samples for their
+definitions (a sampling task that needs the live model and the owner's budget). Until then their
+component arms are plumbing: differentiated, offline, and explicitly unmeasured.
 
 ## 7. What is needed to produce a real result
 
@@ -110,5 +131,7 @@ switches. Like the main arms, they report `NOT_INTERPRETABLE` without real label
 2. DeepSeek key in the backend env plus an approved batch ceiling.
 3. A labelled run on the frozen splits, calibration fitted on the calibration split only, then a
    single evaluation on the test split.
-4. Only then may a definition leave `shadow` — and the promotion is per definition, with the
+4. Labelled samples for the five module definitions above, so their component arms stop reporting
+   `INSUFFICIENT_SAMPLES`.
+5. Only then may a definition leave `shadow` — and the promotion is per definition, with the
    non-inferiority evidence recorded here. Coverage and assessment stay advisory even when enabled.

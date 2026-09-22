@@ -299,6 +299,24 @@ reference solution **before** presenting it) is implemented but not bound to the
 assessment path; module A remains `MODULE_ONLY`; every definition remains `shadow`, so
 `live evidence = NOT_RUN` and no quality claim is made for any of them.
 
+## Round 26 — high-impact gate, the last three call sites, and receipt safety (2026-09-22)
+
+Commit `42d83ee` closes the last two local integration gaps and fixes a wiring defect the
+tests could not see.
+
+| Item | What changed | Evidence |
+|---|---|---|
+| High-impact gate (spec: verify the reference solution **before** the result is presented) | `app/learning/assessments.py` verifies a stored reference solution before grading uses it: layer 1 deterministic (every `source_ref` chunk still exists, is authorized and belongs to the current version — reusing `chunk_source_versions` + the module-D resolver, no copied ACL), layer 3 the semantic support decision, bounded to 8 refs per question. A **negative** verdict marks that question `needs_review` with a machine-readable reason and is re-presented by `_session_view`. No mark/weight/total/grade/coverage value is touched and no submission is blocked. | `test_reference_evidence_verification.py` (6): clean submission unflagged; stale ref flags with its reason and an identical score; shadow/unavailable byte-identical to no-Jev; a real `CONTRADICTED` flags; an empty-ref reference is recorded unverified, not contradicted |
+| **Wiring defect: three of the twelve call sites were unreachable in production** | The shared service was threaded into the UI extension, the run endpoint and both internal APIs, but **never into `LearningOrchestrator`** — where call site 6 (pedagogy), 8 (criterion review) and 11 (prerequisite) live. `app/main.py` now passes it. | `test_jev_orchestrator_wiring.py` asserts the orchestrator, its `assessments` and its `knowledge` all hold the *same* service object |
+| Receipt writes can no longer stall or fail a business operation | The criterion review runs inside the grading write transaction, so a receipt INSERT on a second connection would wait the full 10 s `busy_timeout` and then raise `database is locked` — inside a learner's grading request. `SqlReceiptStore` keeps its own 250 ms timeout and treats a lock/busy conflict as a **dropped receipt** (observability, not authority); a real NOT NULL/CHECK/UNIQUE error still raises. | the same test file: the contended write returns in well under 2 s without raising while another connection holds `BEGIN IMMEDIATE`, and a genuine constraint violation still surfaces |
+| Component ablation for the six modules (spec §10) | Six component arms (`M-EXTRACT`, `M-ENTITY`, `M-CONSISTENCY`, `M-CITATION`, `M-CAPABILITY`, `M-TOOL`) run alongside the untouched A–E. **Only `M-CITATION` has labelled samples**; the other five report `INSUFFICIENT_SAMPLES` and emit no number, because the frozen dataset has zero samples for their definitions. | `test_jev_semantic_component_ablation.py` (14) + an offline `--arm all-components` run tagged `NON_INTERPRETABLE_PLUMBING_ONLY` |
+
+Honest limitations recorded with this round: the semantic half of the high-impact gate is **inert in
+production today** only in the sense that no credential exists — the orchestrator now genuinely receives
+the service, so the calls happen and stay in `shadow`. Receipts written from inside a business
+transaction are best-effort and may be dropped under contention; moving those semantic calls out of the
+write transaction (or writing receipts on the caller's connection) is the recorded follow-up.
+
 ## Resume instructions for a later round
 
 1. Work in `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY`, branch
