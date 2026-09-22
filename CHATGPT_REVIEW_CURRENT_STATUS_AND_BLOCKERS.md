@@ -69,11 +69,11 @@ Claimed **finished and verified on a named revision**:
 
 ## 4. What is NOT finished, and why — by status class
 
-The ledger carries 34 rows (B-01 … B-34) with full detail; the summary:
+The ledger carries 35 rows (B-01 … B-35) with full detail; the summary:
 
 | Status | Count | Representative items |
 |---|---|---|
-| `RESOLVED_WITH_EVIDENCE` | 20 | module-D resolver type errors; missing QA-stream evidence bundle; `is_definitive` having no caller; the five module metrics being uncomputable; the companion dataset's missing split manifest; six documentation claims that did not match the code; the reference-gate note now reaching the shipped UI; the DeepSeek switch-window configuration refusals now pinned by test; the V1↔V2 template-parity question closed by measurement; an owner instruction that named an environment variable no code reads |
+| `RESOLVED_WITH_EVIDENCE` | 21 | module-D resolver type errors; missing QA-stream evidence bundle; `is_definitive` having no caller; the five module metrics being uncomputable; the companion dataset's missing split manifest; six documentation claims that did not match the code; the reference-gate note now reaching the shipped UI; the DeepSeek switch-window configuration refusals now pinned by test; the V1↔V2 template-parity question closed by measurement; an owner instruction that named an environment variable no code reads; a production marker that was written for an artifact set the verifier had just rejected |
 | `LOCAL_IMPLEMENTATION_GAP` (open, mine) | **0** | none — every local gap this audit found is closed with code and a test |
 | `WAITING_CREDENTIAL` | 2 | live Jev validation; live DeepSeek validation |
 | `WAITING_BUDGET` | 1 | a real token/USD ceiling (all current figures are proposals) |
@@ -296,6 +296,29 @@ forbids, so the flag stays `false`.
     invariant set, not that the real corpus has no awkward rows — the rehearsal against the production
     dump is still a release-window step and is listed as such.
 
+15. **Running the publish path locally found a defect in its own safety net.** The same "does this really
+    need the window?" question applies to the frontend publish, and the answer is that its *build and
+    verification* half is local: `netlify.toml` runs
+    `preflight_release_build.mjs && build && verify_release_build.mjs`, and both scripts are gated on
+    `RELEASE_BUILD=1`/`CONTEXT=production`, so I could run the exact command with production-shaped
+    configuration. The preflight passes, the build passes, and the verifier passes writing
+    `build-info.json`. Then I ran the **negative** control — the same command against the real
+    browser-acceptance dist — and it exited 1 listing seven forbidden markers, which is the safety net
+    working. But it also **wrote `build-info.json` anyway**, with `context: production` and
+    `not_for_production: false`, because the write happened before the failure check. That field is
+    precisely what the backend's production gate reads to refuse the offline verification runtime, so the
+    artifact set the verifier had just rejected carried a marker asserting it was production-ready. Impact,
+    stated honestly: in the Netlify pipeline the non-zero exit fails the deploy, so nothing gets published
+    and production was protected by the *pipeline*, not by the marker — the defect is that the marker is
+    self-contradictory and any consumer of it is told the opposite of the verdict. Fixed by writing the
+    marker only after a clean scan (and saying so on the failure path), then verified in both directions:
+    contaminated dist → exit 1 and **no marker**; production-shaped build → exit 0 and a marker whose
+    fields are actually populated. Two things this does *not* prove, and I am not claiming them: the
+    Clerk **application** is unverified because my key is only shape-valid (`pk_live_…`), so a real sign-in
+    remains a release-window check; and the local build ran through `pnpm --filter @coursemate/web run
+    build` rather than `npm run build --workspace @coursemate/web`, because npm is not installed in this
+    environment (the repo does declare npm workspaces). The gates themselves are the same files.
+
 Two of my own first-draft claims were wrong and were corrected in place rather than left standing: I
 first recorded the retrieval re-rank as "40 calls per page, fixable by batching" — it is bounded at
 **16**, and the batching I proposed is not available for that shape (`JevCall` shares one state across
@@ -314,6 +337,7 @@ QA stream would be byte-identical without a credential — `create_app` **always
 | Measurement / module-metric suites | **121 passed** (`test_jev_module_metrics.py` 13, `test_jev_module_split_calibration.py` 8) |
 | Migration, backup/restore and rollback gate (run this round) | **67 passed / 0 failed** across `test_document_versions.py`, `test_four_change_migration.py`, `test_assessment_runtime.py`, `test_backup_restore.py`, `test_backup_ui_extension.py`, `test_monitor_v2.py`, `test_knowledge_registry.py`, `test_database.py` and `test_codex_snapshot_backup.py`. The upgrade path is not just asserted: `test_document_versions.py` builds a **V2** database with course/document/chunk rows, then initialises the same file with `v3_enabled=True` **twice** and asserts the resulting `schema_migrations`, so the additive backfill and the idempotent replay are proven together |
 | The 25 → 30 upgrade rehearsed end to end (run this round, locally) | `scripts/rehearse_v3_migration.py` on a source database built by the **old release's own code** (`4ef5064`, schema 25, one course/document/chunk seeded): real migrations 001–030 applied to a copy with `initialize()` called **twice** → **`old_rows_unchanged: true`** (every fingerprinted table byte-identical before and after by SHA-256, so the upgrade is strictly additive), `integrity=ok`, `foreign_key_violations=0`, `v3_invariants_ok=true` with **52** counters at zero and only the four expected seeds/backfills non-zero (`document_versions=1` backfilled from the seeded document, `documents=1`, `grade_policy_versions=1`, `requirements_grade_policy_seed=1`). Evidence: `work/current-change/rehearsal-25-to-30.clean.json`. **Not covered:** the source is synthetic and one row per table, so the same rehearsal against the real production dump remains a release-window step |
+| Production frontend build, local half (run this round) | The exact Netlify command from `netlify.toml` — `preflight → build → verify` — with production-shaped configuration (`pk_live`-shaped Clerk key, `VITE_UI_API_BASE=https://rag.qqttai.com/ui-extension/api/ui/v1`, `VITE_RAG_API_URL`/`VITE_AGENT_API_URL` on the two documented hosts, `VITE_V3_ENABLED=true`, `VITE_AUTH_TEST_TOKEN` **unset**): preflight **exit 0** ("production configuration checks passed"), build **exit 0**, verify **exit 0** writing `build-info.json` with 8 artifact hashes, `context=production`, `not_for_production=false`, the Clerk field present and all three origins recorded. **Negative control on the real browser-acceptance dist: exit 1** listing seven forbidden markers (`test-session-token`, `VITE_AUTH_TEST_TOKEN`, `http://localhost:`, `localhost:8000/8001`) — the safety net demonstrably blocks the build I use for E2E from ever being published. Deviations stated: the local build ran through `pnpm --filter @coursemate/web run build` because npm is not installed in this environment (the repo does configure npm workspaces), and the Clerk **application** is not verified — the key is shape-valid only, so a real sign-in remains the release-window check |
 | Rollback compatibility against the production release (run this round, locally) | **`ROLLBACK_SAFE_WITH_MIGRATED_DB`**, exit 0 — `scripts/verify_rollback_compat.py` with `--release-tree` pointed at a git worktree of `4ef5064` (the production release, own schema 25). It builds a database with the current code (all migrations to 30) and runs the **old release's own code** against that file: no import or open error, `max_migration=30` seen by code whose own schema is `25`, `integrity=ok`, 0 foreign-key violations, no missing tables or columns, no retyped columns, no narrowed CHECK enums, assessment pool filter unchanged across the four rebuilt tables. Evidence: `work/current-change/rollback-compat-4ef5064.json`. The worktree was a temporary checkout under the system temp directory and was removed afterwards; production was not contacted |
 | ruff | **1815 errors at the pre-change revision and 1815 after** for app+tests, unchanged even with a 221-line test file added (ruff 0.16.2 from the service venv, run **with `services/rag-api` as the working directory** over `app tests`); the new script is additionally clean under the service config, where its siblings in `scripts/` carry 19 pre-existing E402 and 207 E501. It did rise to **1821** mid-round, when the renamed loop variables pushed six lines past the 100-column limit; those were rewrapped in their own commit, so the total is back to 1815 rather than reported as "unchanged" without measuring |
 | mypy | **1004 errors in 32 files** — *not* "unchanged", as my earlier reports claimed: measuring it showed 1077/38 (and 1074/39 at round 30), because my own round-31 work had added 7. Six in-scope defects fixed since, removing 73 errors (1077 → 1004), and **`app/jev/` and `app/evaluation/` now report zero errors**. The remainder is reported by rule, not hidden: 728 of 1004 in `app/cm_update/app.py`, and the bulk are `no-untyped-call` / `no-untyped-def` / `type-arg` |
