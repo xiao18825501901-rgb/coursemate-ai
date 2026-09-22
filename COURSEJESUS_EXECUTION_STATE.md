@@ -82,6 +82,12 @@ localhost screenshot or a `health=200`.
    defects in the conversion script itself were caught by running the checks rather than trusting
    the edit (a wrong relative import depth, and an import inserted inside a comment block that
    broke a file's syntax); the damaged files were restored from git and re-converted.
+10. **Re-verification (round 51)**: the two mutation proofs were re-run on the current revision
+   rather than trusted from the rounds that introduced them — the Canvas guards **8/8 caught**
+   (`mutation-check-canvas.py`) and the campus-scan guards **5/5 caught**
+   (`mutation-check-campus-scan.py`), with both tools restored byte-for-byte and the working tree
+   clean afterwards. This confirms the security and evidence guards still bite after migration 031
+   and the job repository were added; no new code was written this round.
 
 ## 3. Next steps, in order
 
