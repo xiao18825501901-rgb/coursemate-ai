@@ -14,8 +14,8 @@ nothing here claims a quality improvement.
 |---|---|
 | Work tree | `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY` |
 | Branch | `fix/codex-dsh-audit-20260919` |
-| Backend regression SHA | `42d83ee` (full backend suite run on this revision) |
-| Current HEAD | `42d83ee` — backend, shell and browser suites all re-run on this same revision |
+| Backend regression SHA | `b8104d9` (full backend suite run on this revision) |
+| Current HEAD | `b8104d9` — backend, shell and browser suites all re-run on this same revision |
 | Schema | RAG **29** (001–029; 029 is the proposal-only `entity_relations` store), UI 13, Agent 1 |
 | Live TypeSafe model/calibration version | **none configured** — live Jev is `NOT_RUN` |
 
@@ -79,7 +79,7 @@ work (`extraction.field_grounded.v1`, `evidence.consistency.v1`), three for P1
 
 | Gate | Result |
 |---|---|
-| Full backend regression on `42d83ee` | **1187 passed, 0 failed**, 1417.19s, exit 0 (`work/current-change/full_run_round26.log`) |
+| Full backend regression on `b8104d9` | **1189 passed, 0 failed**, 1471.55s, exit 0 (`work/current-change/full_run_round27.log`) |
 | Module suites (A 16, B 20, C 9+wiring 4, D 14+12+7, high-impact gate 6, E/F 29, P2 17) | **134 passed** |
 | Host-wiring suite (orchestrator receives the shared service; receipts never stall a business call) | **4 passed** |
 | Twelve call-site suite | **16 passed** |
@@ -119,7 +119,7 @@ comment) were corrected without weakening any product assertion.
 | CITATION_AUDIT | **PASS (local, shadow)** | all three layers bound to the teaching path: a deterministic layer-2 verdict that costs zero model calls, a layer-1 re-check through the canonical ACL on a real migrated database (incl. cross-user and cross-course `unauthorized`), the verdict recorded on the card the client receives and marked in the shipped shell, an enforced per-answer budget, and byte-identical cards when no semantic layer is configured. A unit-regex defect that could fabricate a CONTRADICTION was found and fixed |
 | USER_FEEDBACK_TRIAGE | **SOURCE_IMPLEMENTED + LOCAL_INTEGRATED** | module, backend route, shell entry, 17 tests; human review queue only (in-memory — see the disclosed limitation) |
 | LEARNING_PROGRESS · FIVE_QUESTION_ASSESSMENT | **PASS** (local) | regression suites plus the browser assessment journey (start → 5 questions → submit → graded) |
-| LOCAL_REGRESSION | **PASS** | 1187 passed / 0 failed on `42d83ee`; backend, shell and all four browser suites re-run on that same revision |
+| LOCAL_REGRESSION | **PASS** | 1189 passed / 0 failed on `b8104d9`; backend, shell and all four browser suites re-run on that same revision |
 | JEV_LIVE_VALIDATION · DEEPSEEK_LIVE_VALIDATION | **NOT_RUN** | no credential, no budget |
 | ABLATION | **NOT_RUN** | harness and 310-sample dataset ready; no labelled live run |
 | BROWSER_ACCEPTANCE | **PASS (local)** | 28 journeys across four suites in real Chrome against the real services, including the Jev-unavailable deployment; production browser acceptance still `NOT_RUN` |
@@ -156,9 +156,10 @@ success, p50/p95 latency, per-provider cost and failure rate — are specified i
   `LearningOrchestrator`, so call site 6 (pedagogy), 8 (criterion review) and 11 (prerequisite) were
   unreachable in a real deployment even though their tests passed with an injected service. Wiring them
   also exposed a latent hazard — grading calls the criterion review from inside its own write
-  transaction — so receipt writes are now best-effort under lock contention (250 ms, dropped rather
-  than blocking or raising). The recorded follow-up is to move those semantic calls out of the write
-  transaction (or write receipts on the caller's connection) so a receipt is never dropped.
+  transaction — which is now solved properly: the receipt store can be handed the caller's open
+  connection (`receipt_connection(...)`), so the receipt is written in that same transaction and commits
+  or rolls back with the grade. Outside such a transaction the write stays best-effort and a lock
+  conflict drops the receipt rather than stalling or failing the operation.
 * The evidence-consistency conflict note and every D verdict other than the deterministic layer-2 one
   can only appear in mode `on`; with no TypeSafe credential they have never been produced by a live
   decision. What is proven today is that they are *absent* (and the prompt/cards byte-unchanged) in

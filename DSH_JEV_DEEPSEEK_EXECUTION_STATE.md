@@ -317,6 +317,20 @@ the service, so the calls happen and stay in `shadow`. Receipts written from ins
 transaction are best-effort and may be dropped under contention; moving those semantic calls out of the
 write transaction (or writing receipts on the caller's connection) is the recorded follow-up.
 
+## Round 27 — receipts become part of the business transaction; deliverables de-staled (2026-09-22)
+
+Commit `b8104d9`.
+
+| Item | What changed |
+|---|---|
+| Receipt atomicity | `SqlReceiptStore` can now be handed the caller's open transaction (`receipt_connection(...)`), so a decision made inside assessment grading writes its receipt **on that connection**: it commits with the grade and rolls back with it. The ledger can no longer describe a decision whose business change did not happen, and there is no lock contention at all in the grading path. Outside such a transaction the write stays best-effort (250 ms, dropped on a lock conflict, never stalling or failing the operation). `tests/test_jev_orchestrator_wiring.py` (6) proves commit, rollback atomicity and that the lending is context-scoped only |
+| Deliverables de-staled | `JEV_BACKEND_ARCHITECTURE_FINAL.md` claimed a four-mode system (`off|shadow|on|advisory`) that the gateway and the receipt CHECK constraint both reject, said the layer writes only receipts (it also writes proposal-only relations), described the pre-module retrieval chain, and still called the call-site wiring "the active workstream". All corrected; the doc now states that `shadow` **is** the advisory state the task describes (the call is made and recorded, the deterministic value is used) and that promotion to `on` is the only behaviour-changing step |
+| New deliverable | `FINAL_COURSEMATE_JEV_DEEPSEEK_PRODUCTION_REPORT.md` — the release-candidate state: frozen revision and its full local evidence, exactly what the release would change in production, the production facts recorded read-only (to be re-verified before the release), everything still `NOT_RUN`, and the ordered release plan with its rollback. Marked at the top as **not** a production acceptance report |
+
+**Verified on one frozen SHA (`b8104d9`):** backend regression **1189 passed / 0 failed**
+(1471.55s, exit 0); browser **28 journeys / 0 failed** across the four suites, in real
+Chrome against the real services.
+
 ## Resume instructions for a later round
 
 1. Work in `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY`, branch

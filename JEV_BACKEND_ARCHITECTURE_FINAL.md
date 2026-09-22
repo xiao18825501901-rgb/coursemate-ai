@@ -45,25 +45,39 @@ not rebuilt because the generation or decision layer changed.
 
 | Rule | Where it is enforced |
 |---|---|
-| Jev never writes grades, LEARNED, permissions, coverage or budgets | `app/jev/**` writes only the receipt table; call-site tests assert learning/grade/coverage row counts are unchanged across a full flow |
+| Jev never writes grades, LEARNED, permissions, coverage or budgets | `app/jev/**` writes exactly two tables: `jev_decision_receipts` (every decision) and `entity_relations` (**proposals only**, `status='PROPOSED'`, nothing on the retrieval path reads or applies them). Call-site tests assert learning/grade/coverage row counts are unchanged across a full flow |
 | Choice may only pick a server-supplied id | `JevGateway._validate` rejects an unknown candidate id with `JEV_INVALID_RESPONSE` |
 | Score/Noul are signals, never marks | `probability_is_grade=false`; no call site multiplies a Score into a mark. `Score × 100` is forbidden by design and by test |
 | Deterministic code owns arithmetic, state and writes | marks 10/15/20/25/30, totals, grade versions, `grade_snapshots`, learning state transitions |
-| Jev failure never breaks the product | typed errors → documented deterministic fallback, one attempt, no retry, labelled as a fallback |
-| Jev never sees unauthorized material | identity + course authorization + file-scope filtering run **before** the call; the payload carries only the fragments one decision needs |
-| The browser never calls TypeSafe | Jev credentials exist only in the backend env; the frontend has no Jev route or key |
+| Jev failure never breaks the product | typed errors → documented deterministic fallback, one attempt, no retry, labelled as a fallback; a receipt that cannot be written is dropped rather than failing the business operation, and inside assessment grading the receipt is written on the caller's own connection so it commits and rolls back with the grade |
+| Jev never sees unauthorized material | identity + course authorization + file-scope filtering run **before** the call; the payload carries only the fragments one decision needs. Module D's evidence resolver repeats that check against the canonical document ACL and answers `unauthorized` instead of leaking |
+| The browser never calls TypeSafe | Jev credentials exist only in the backend env; the frontend has no Jev route or key. The one internal route (`POST /api/jev/tool-intent`) is token-gated and answers 503 when unconfigured |
 
 ## 3. Modes
 
-`off | shadow | on | advisory`, resolved per definition by `JevGateway.mode_for(key)`, default
-`shadow`. In `shadow` the deterministic result is what the user sees and the Jev suggestion is
-recorded in a receipt; `on` uses the Jev value only when it validates; `advisory` surfaces the
-suggestion to a review path without changing the outcome. Promotion is per definition and requires
-calibration evidence — never a global switch, and never a fixed `0.8` threshold.
+`off | shadow | on`, resolved per definition by `JevGateway.mode_for(key)`, default `shadow` — and the
+receipt table's CHECK constraint permits exactly those three.
 
-## 4. The twelve definitions
+* `off` — nothing is sent; the deterministic path runs.
+* `shadow` — the call **is** made and its suggestion is recorded in the receipt ledger (and, at several
+  call sites, as a safe annotation such as `jev_citation_support` or `jev_template_id`), but the
+  deterministic value is what the product uses. This is the "advisory" state the task describes: the
+  suggestion is observable without changing any outcome, which is why no separate `advisory` mode
+  exists — inventing one would have to mean either calling the model (shadow already does) or
+  surfacing the suggestion to a reviewer (the annotation and the `PENDING_REVIEW` paths already do).
+* `on` — the validated suggestion is used, and only within the authority boundary each call site
+  documents.
 
-The catalog (`app/jev/decision_catalog.json`) is the single list; ids and versions are stable.
+Promotion is per definition, requires calibration evidence, and is never a global switch or a fixed
+`0.8` threshold.
+
+## 4. The definitions
+
+The catalog (`app/jev/decision_catalog.json`) is the single list; ids and versions are stable. It holds
+**19** definitions: the twelve cases below plus the seven introduced by the structured-enhancement
+round (`extraction.field_grounded.v1`, `evidence.consistency.v1`, `entity.relation.v1`,
+`teaching.capability.v1`, `tool.intent.v1`, `feedback.category.v1`, `feedback.severity.v1`). All 19 are
+in `shadow`.
 
 | # | Definition | Primitive | Business intent |
 |---|---|---|---|
@@ -87,7 +101,9 @@ when, what the answer changes, the fallback, the tests and the live-evidence sta
 
 ```
 authorized scopes → exact locator → official / private / workspace recall
-  → merge → dedupe → global RRF → Jev rerank → evidence bundle → DeepSeek
+  → merge → dedupe → global RRF → Jev rerank → entity relations (proposals only)
+  → evidence consistency (conflict note) → evidence bundle → DeepSeek
+  → citation audit bound to the message revision → citation cards
 ```
 
 * Jev may only **reorder** what the fusion already authorized; it can neither add nor delete a source.
@@ -96,6 +112,22 @@ authorized scopes → exact locator → official / private / workspace recall
 * Private candidates must be able to outrank official ones; the fusion applies a per-scope recall cap
   before the single global ranking, which is what prevents "official fills top_k first".
 * If Jev times out or is unavailable, the original RRF order stands and the answer still ships.
+* **Entity relations** are written as proposals (migration 029) and never applied: the fused order and
+  the source ids are byte-identical under `off`/`shadow`/unavailable/no-Jev. Query expansion adds the
+  other accepted names of a concept *only when the query itself names that concept*, so an unrelated
+  question is never widened by a course-wide alias list.
+* **Evidence consistency** annotates each source deterministically and surfaces a genuine
+  `SAME_CONTEXT_CONTRADICTION` to the teaching prompt as a bounded note, so DeepSeek explains both
+  sides with every source kept; version and assumption differences are never called conflicts. The
+  prompt is byte-unchanged whenever the decision is not a real signal.
+* **The citation audit** runs after generation: layer 2 is deterministic (a figure the claim asserts
+  that the source never states is `NOT_ADDRESSED…` at zero model cost), layer 1 re-checks existence and
+  authorization at the message revision through the canonical document ACL, and layer 3 is the semantic
+  support decision. Cards are annotated, never dropped or reordered; with no semantic layer configured
+  they are byte-identical to before the audit existed. At most 6 cards per answer bound the cost.
+* **The assessment reference solution** is verified before it is used as grading evidence: a stale,
+  unauthorized or contradicted reference flags that question `needs_review` with a reason, and no mark,
+  weight, total, grade or coverage value is touched.
 
 ## 6. Failure and degradation policy
 
@@ -117,9 +149,10 @@ Detailed credential handling, data-scope rules and the failure matrix live in
 |---|---|
 | DeepSeek-only generation with zero Qwen egress | `DEEPSEEK_TEXT/VISION/AGENT` wiring proven by contract + host-spy tests; live calls `NOT_RUN` |
 | Jev gateway, catalog, receipts, cache, modes | implemented and tested; live TypeSafe calls `NOT_RUN` (no credential) |
-| The 12 call sites | `JEV_CALLSITE_MATRIX.md`; the real business wiring is the round's active workstream |
-| Calibration / A-B-C-D-E ablation | harness + dataset ready; **result `NOT_RUN`** (no live Jev, no labelled run) |
-| Production deployment / acceptance | `NOT_RUN` — requires the credential and release window in `MINIMAL_OWNER_ACTION_CARD.md` |
+| The 12 case call sites | wired and reachable in the production wiring: the single shared service is threaded into `LearningOrchestrator` (pedagogy 6, criterion review 8, prerequisite 11), the UI extension (retrieval, citation, coverage, entity resolution, evidence consistency), the run endpoint (intent, context, template, exercise, capability routing, citation audit) and the two internal APIs; `tests/test_jev_orchestrator_wiring.py` pins the chain. Per-definition entry points, state, fallbacks and tests: `JEV_CALLSITE_MATRIX.md` |
+| The six structured modules | B, C, D, E, F and the P2 feedback module are wired with a consumer; **A is `MODULE_ONLY`** by an investigated decision (no production surface produces the record shape it verifies) |
+| Calibration / A-B-C-D-E ablation | harness, dataset and split manifest ready, the six component arms added; **result `NOT_RUN`** (no live Jev, no labelled run). Five of the six component arms report `INSUFFICIENT_SAMPLES` because the frozen dataset has no samples for their definitions, and the harness refuses to invent a number |
+| Production deployment / acceptance | `NOT_RUN` — requires the credential and release window in `MINIMAL_OWNER_ACTION_CARD.md`; the release-candidate state is in `FINAL_COURSEMATE_JEV_DEEPSEEK_PRODUCTION_REPORT.md` |
 
 No element of this architecture is claimed to improve teaching quality: that requires the ablation to
 run on labelled data with a real Jev, which has not happened.
