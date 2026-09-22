@@ -212,7 +212,7 @@ class SqlReceiptStore:
             cursor = connection.execute(
                 f"DELETE FROM jev_decision_receipts WHERE {' AND '.join(clauses)}", params
             )
-        return cursor.rowcount
+        return int(cursor.rowcount)
 
 
 def _is_lock_conflict(error: sqlite3.OperationalError) -> bool:

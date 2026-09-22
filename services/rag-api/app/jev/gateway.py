@@ -455,7 +455,12 @@ class JevGateway:
         if answer is None:
             raise JevInvalidResponseError(f"{definition.key}: transport returned no answer")
         if definition.primitive == Primitive.CHOICE:
-            authorized = set((criteria or {}).keys())
+            # The request layer already enforces an id -> label mapping for Choice
+            # (``_build_question`` raises JevRequestError otherwise), so a mapping is
+            # the only shape reachable here. Naming the mapping explicitly keeps the
+            # invariant visible to the type checker; a non-mapping would degrade to
+            # the typed invalid_response below rather than raise AttributeError.
+            authorized = set(criteria) if isinstance(criteria, dict) else set()
             if not answer.choice or answer.choice not in authorized:
                 raise JevInvalidResponseError(
                     f"{definition.key}: selected {answer.choice!r} is not an authorized candidate id"
