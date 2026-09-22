@@ -8,8 +8,8 @@ inherited number, and so no module is reported as passing because another module
 
 | Gate | Result | Revision / evidence |
 |---|---|---|
-| Backend regression (rag-api) | **1324 passed / 2 skipped / 0 failed** (1660 s) | frozen `bf31474`, `work/current-change/full_run_round44.log`. The two skips are the optional-SDK constants test and the symlink case (Windows privileges) |
-| Canvas adapter suite (new) | **31 passed / 0 failed** | `tests/test_canvas_read_adapter.py`, mock transport; the full-suite run for this revision is in progress (`full_run_round46.log`) |
+| Backend regression (rag-api) | **1355 passed / 2 skipped / 0 failed** (1689 s, exit 0) | frozen `184d973`, `work/current-change/full_run_round46.log`, `git diff 184d973 -- services benchmarks scripts` empty. The two skips are the optional-SDK constants test and the symlink case (Windows privileges). The run before it was 1324 on `bf31474`, so the delta is exactly the **31** new Canvas adapter tests |
+| Canvas adapter suite (new) | **31 passed / 0 failed** | `tests/test_canvas_read_adapter.py`, mock transport; included in the 1355 above |
 | Canvas adapter guards | **8 of 8 mutations caught**, module restored byte-for-byte | `work/current-change/mutation-check-canvas.py` |
 | Web unit tests | **81 passed / 20 files** | round 45, on the brand rename revision |
 | Web typecheck | `tsc -p tsconfig.app.json` and `tsc -p tsconfig.node.json` both **exit 0** | round 45 |
@@ -69,8 +69,8 @@ exist yet because the UI does not exist yet.
 
 ## 5. Honest limits
 
-* The newest full-suite run (round 46) is in progress while this document is written; the number for
-  it is recorded in `COURSEJESUS_EXECUTION_STATE.md` when it lands.
 * No live or production acceptance has been attempted, so no row above claims one.
 * The 27 journeys from earlier rounds describe earlier revisions; treating them as current would be
   exactly the substitution this project forbids.
+* The newest full-suite number (1355 on `184d973`) includes the Canvas adapter, but the adapter is
+  still only mock-verified: passing tests do not mean a school's Canvas has been contacted.
