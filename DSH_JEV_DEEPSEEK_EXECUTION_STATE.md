@@ -15,6 +15,13 @@ re-initialising anything.
 | PRODUCTION_SHA (live release, not re-verified this round) | `5ba6a3a` |
 | Schema after this round | RAG **28**, UI **13**, Agent **1** |
 
+> **Historical record (rounds 1–30).** The identities above are the round-30 snapshot, not the current
+> tree: HEAD is now `2fd532b`, the RAG schema is **30**, and rounds 31–42 are recorded in
+> `docs/recovery/CURRENT_BLOCKER_LEDGER.md` and `CHATGPT_REVIEW_CURRENT_STATUS_AND_BLOCKERS.md`, which
+> are the current authority (this file's stage sections describe the round they were written in). The
+> per-round sections resume at "Round 27" and end at "Round 30"; the resume instructions at the end
+> still apply.
+
 ## Stage 0 — source reality and input validation · DONE
 
 * Read the whole pack: master prompt, audit plan, `SOURCE_EVIDENCE.md` (S01–S21), both probes,

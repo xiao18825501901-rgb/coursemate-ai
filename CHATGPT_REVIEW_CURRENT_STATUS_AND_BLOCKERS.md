@@ -73,7 +73,7 @@ The ledger carries 40 rows (B-01 … B-40) with full detail; the summary:
 
 | Status | Count | Representative items |
 |---|---|---|
-| `RESOLVED_WITH_EVIDENCE` | 26 | module-D resolver type errors; missing QA-stream evidence bundle; `is_definitive` having no caller; the five module metrics being uncomputable; the companion dataset's missing split manifest; six documentation claims that did not match the code; the reference-gate note now reaching the shipped UI; the DeepSeek switch-window configuration refusals now pinned by test; the V1↔V2 template-parity question closed by measurement; an owner instruction that named an environment variable no code reads; a production marker that was written for an artifact set the verifier had just rejected; the call-site matrix now pinned to the catalog; the service that could not read the TypeSafe credential at all; the live adapter verified against the real SDK wheel; an ablation CLI that produced a fake run labelled `live`; and **a calibration artifact that could not say where its model evidence came from** |
+| `RESOLVED_WITH_EVIDENCE` | 27 | module-D resolver type errors; missing QA-stream evidence bundle; `is_definitive` having no caller; the five module metrics being uncomputable; the companion dataset's missing split manifest; six documentation claims that did not match the code; the reference-gate note now reaching the shipped UI; the DeepSeek switch-window configuration refusals now pinned by test; the V1↔V2 template-parity question closed by measurement; an owner instruction that named an environment variable no code reads; a production marker that was written for an artifact set the verifier had just rejected; the call-site matrix now pinned to the catalog; the service that could not read the TypeSafe credential at all; the live adapter verified against the real SDK wheel; an ablation CLI that produced a fake run labelled `live`; a calibration artifact that could not say where its model evidence came from; and **a rollback check that read the assessment pool filter from one tree, so it could not have reported a changed one** |
 | `LOCAL_IMPLEMENTATION_GAP` (open, mine) | **0** | none — every local gap this audit found is closed with code and a test |
 | `WAITING_CREDENTIAL` | 2 | live Jev validation; live DeepSeek validation |
 | `WAITING_BUDGET` | 1 | a real token/USD ceiling (all current figures are proposals) |
@@ -522,21 +522,32 @@ QA stream would be byte-identical without a credential — `create_app` **always
     says exactly that. A second defect came out of the same reading: `run_old_release` passed `text=True`
     with no encoding, so the release's output was decoded with this machine's locale codec (cp936) — one
     byte the locale cannot decode kills `subprocess`'s reader thread and the tool reports "the previous
-    release printed nothing" instead of the release's real failure. Verified by running it on the real
+    release printed nothing" instead of the release's real failure. A third, smaller defect in the same
+    function was fixed with the test that pins it: its `json.loads(...)` result was returned unchecked, so
+    a release whose output parsed as JSON but was not an object handed `main()` a list and the first
+    `old.get(...)` died with an opaque `AttributeError: 'list' object has no attribute 'get'`; the probe
+    output is now checked and the cause named, which also cleared the file's one pre-existing mypy error
+    (`no-any-return` — measured with `work/current-change/check_mypy_rollback_tool.py` to exist before this
+    round and to surface only under the service's stricter config, since from the repo root the same file
+    reported success). Verified by running it on the real
     artefact: a fresh export of `4ef5064` gives `pool_filter_verdict: UNCHANGED` with detail
     "byte-identical predicate" and empty `rollback_concerns`, and the **same export with one clause added
     to its pool filter** gives `CHANGED` with `rollback_concerns` populated while the database verdict and
     exit code stay as before — a state the old code could not express at all. The corrected tool was also
     re-run against `b05fd294` (own schema 26), the release whose pool filter the earlier Schema-26 report
     asserted was identical: `UNCHANGED`, "byte-identical predicate", empty `rollback_concerns`, verdict
-    `ROLLBACK_SAFE_WITH_MIGRATED_DB` — so that older claim is measured for that pair too. Eight new tests,
-    and the
-    suite was mutation-proved: restoring the pre-fix comparison, hardcoding the field, removing the
-    explicit encoding, or dropping the release-absent branch each fails it (4 of 4 caught). No test had
-    **ever** run this tool before — `tests/test_schema_rollback_compat.py` mentions it only in a docstring,
-    which is how a field that could not say no survived four rounds of being cited as evidence. Honest
-    limit: the comparison is **source text**, not runtime behaviour; two different texts that select the
-    same rows are reported `CHANGED`, and a change made identically in both trees is invisible to it.
+    `ROLLBACK_SAFE_WITH_MIGRATED_DB` — so that older claim is measured for that pair too. Nine new tests, and
+    the suite was mutation-proved: restoring the pre-fix comparison, hardcoding the field, removing the
+    explicit encoding, dropping the release-absent branch, or removing the probe-output check each fails it
+    (5 of 5 caught). No test had **ever** run this tool before — `tests/test_schema_rollback_compat.py`
+    mentions it only in a docstring, which is how a field that could not say no survived four rounds of
+    being cited as evidence. Honest limits: the comparison is **source text**, not runtime behaviour; two
+    different texts that select the same rows are reported `CHANGED`, and a change made identically in both
+    trees is invisible to it. The probe subprocess also runs without a timeout, so a release that hangs
+    blocks the tool instead of being reported. The sibling rehearsal tool
+    (`scripts/rehearse_v3_migration.py`) was checked for the same shape and is genuinely comparison-based —
+    `old_rows_unchanged` is `before == after` around the migration and `v3_invariants_ok` is a 25-term
+    conjunction — so the defect was confined to this one field.
 
     **Why this one matters for the release:** it was in the evidence I would have handed to whoever runs
     the migration window. The verdict itself (can the old release open the migrated database?) was always
@@ -546,12 +557,12 @@ QA stream would be byte-identical without a credential — `create_app` **always
 
 | Gate | Result |
 |---|---|
-| Full backend regression | **1313 passed / 1 skipped / 0 failed** in 1485.14s (exit 0) — `work/current-change/full_run_round42.log`, run on the **frozen** revision `707d32e`, with `git diff 707d32e -- services benchmarks scripts` empty so the run describes the code as shipped. The delta from 1305 is exactly the **8** rollback-tool tests added this round (the tool had none); the one skip is the skip-aware SDK-constants test |
+| Full backend regression | **1314 passed / 1 skipped / 0 failed** in 1534.25s (exit 0) — `work/current-change/full_run_round42b.log`, run on the **frozen** revision `2fd532b`, with `git diff 2fd532b -- services benchmarks scripts` empty so the run describes the code as shipped. The delta from 1305 is exactly the **9** rollback-tool tests added this round (the tool had none); the one skip is the skip-aware SDK-constants test |
 | Calibration artefact provenance (new this round) | Run twice on a synthetic predictions file for the companion dataset: without the flag the artefact records `predictions_provenance: 'UNSTATED'` and the CLI prints the note; with `--predictions-provenance "…"` the text is recorded verbatim; in both cases `predictions_sha256` equals the predictions file's own digest (`d06b9961…`). `scripts/calibrate_jev.py` reports the same 2 pre-existing E402 as its pre-change version from git, so no lint debt was added |
 | DeepSeek canary CLI guards (verified this round, no defect) | Run rather than read: `--allow-billable` with no key → **exit 2** "Missing credential environment variable: DEEPSEEK_API_KEY"; `--allow-billable` with a dummy key and no `--max-cost` → **exit 2** "Refusing provider calls: --max-cost is required for a billable run"; without `--allow-billable` → **exit 0** after printing the ten per-role token ceilings *before* any call. Its preflight returns rather than falling through, and the refusals precede the real `httpx` transport. No network was contacted |
 | Ablation CLI coverage (new this round) | `tests/test_jev_semantic_ablation_cli.py` (3 tests) is the first coverage this entry point has ever had: it asserts the live branch refuses (exit 3, no artefact), that the preflight still refuses without authorization (exit 2, no artefact), and that an offline run records `transport: fake` with `transport_used: deterministic_fake`. Mutation-proved against the pre-fix script read from git, which exits 0 and writes an artefact claiming `live` |
 | Two invariant suites added this round | `tests/test_jev_callsite_matrix.py` (5) pins the §3 deliverable to `app/jev/catalog.py` and `JevGateway.mode_for`; `tests/test_owner_actions_name_real_variables.py` (3) fails if any variable the owner document names is not read through a real mechanism. Both carry a measured mutation proof (5/5 and 3/3 respectively, including the pre-fix gateway read from git) |
-| Rollback-tool comparison (new this round) | `tests/test_rollback_compat_tool.py` (**8 tests**) is the first coverage this tool has ever had: it pins the three pool-filter states, that the field is `false` whenever the two trees were not actually compared, that `main()` still reaches `ROLLBACK_REQUIRES_DB_RESTORE`, and that a release printing non-locale bytes is analysed rather than crashing subprocess's reader thread. Mutation-proved **4 of 4** (`work/current-change/mutation-check-rollback.py`, tool restored byte-for-byte), and run against real exports: `4ef5064` and `b05fd294` both give `pool_filter_verdict: UNCHANGED` with detail "byte-identical predicate" and empty `rollback_concerns`, while the `4ef5064` export with one clause added to its pool filter gives `CHANGED` and lists the concern without changing the database verdict |
+| Rollback-tool comparison (new this round) | `tests/test_rollback_compat_tool.py` (**9 tests**) is the first coverage this tool has ever had: it pins the three pool-filter states, that the field is `false` whenever the two trees were not actually compared, that `main()` still reaches `ROLLBACK_REQUIRES_DB_RESTORE`, that a release printing non-locale bytes is analysed rather than crashing subprocess's reader thread, and that a probe output which parses but is not an object is named instead of returned. Mutation-proved **5 of 5** (`work/current-change/mutation-check-rollback.py`, tool restored byte-for-byte), and run against real exports: `4ef5064` and `b05fd294` both give `pool_filter_verdict: UNCHANGED` with detail "byte-identical predicate" and empty `rollback_concerns`, while the `4ef5064` export with one clause added to its pool filter gives `CHANGED` and lists the concern without changing the database verdict |
 | Browser journeys (real Chrome, real three services, injected identity) | **46 journeys / 0 failed** — `ui-refresh` 19, `jev-structured` 6, `coursemate` 4, `learning` 3 (re-run on `6ba70b0`) **plus `codex-audit` 14** (round 37, on `d656bf7`). The audit suite is isolated: its own fixtures, its own ports (8200/8201/5373), its own web bundle built into the run directory, and a stripped environment ("do not forward account credentials, provider endpoints, or live environment files" is in its config); its Playwright report records **14 expected / 0 unexpected / 0 flaky / 0 skipped**. It had never been part of this report's evidence before, which is itself the finding — the task's gate list asks for the audit journeys and I had been citing four suites, not five |
 | Web app | `tsc --noEmit` exit 0, **73 vitest passed** (18 → 19 files), production build exit 0 |
 | Agent service (`services/agent-api`, TypeScript) | **92 vitest passed / 0 failed** (12 files), `tsc -p tsconfig.json --noEmit` exit 0, production build exit 0 with `dist/src/server.js` emitted — run this round on `cfd0ef1`; the 14 intent-gate tests are `executor-intent-gate.test.ts` (6) + `intent-gate.test.ts` (8), exactly the pair the call-site matrix cites for tool misexecution |
@@ -595,8 +606,8 @@ contract.
 
 Command: `services\rag-api\.venv\Scripts\python.exe -m pytest -q` (earlier rounds added
 `-p no:cacheprovider`; that flag only stops `.pytest_cache` being written and does not affect results)
-Log: `work/current-change/full_run_round42.log` → `1313 passed, 1 skipped, 2 warnings in 1485.14s
-(0:24:45)`, exit 0, on the frozen revision `707d32e`. Only documentation changed after that commit, so
+Log: `work/current-change/full_run_round42b.log` → `1314 passed, 1 skipped, 2 warnings in 1534.25s
+(0:25:34)`, exit 0, on the frozen revision `2fd532b`. Only documentation changed after that commit, so
 this run still describes the services and scripts in the tree. The two warnings are pre-existing
 third-party deprecations (`starlette.testclient` with `httpx`, and an `anyio.abc.BlockingPortal` alias),
 not failures. The skip is named in the log (`tests/test_owner_actions_name_real_variables.py:141`) and is
