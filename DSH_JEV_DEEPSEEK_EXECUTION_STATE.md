@@ -274,6 +274,31 @@ Every definition remains `shadow`; there is still no TypeSafe credential, so
 `live evidence = NOT_RUN` for all 19 definitions and no quality claim is made for
 any of them. Wiring a call site is not evidence of quality.
 
+## Round 25 — module D bound to the teaching path (2026-09-22)
+
+Commit `35ef493` closes the last structured module that had a real surface but no call
+site. All six modules now either reach a business path with a consumer (B, C, D, E, F,
+plus the P2 feedback module) or are honestly `MODULE_ONLY` with the investigation
+recorded (A).
+
+| Item | What changed | Evidence |
+|---|---|---|
+| **D** layer 1 — production resolver | `app/jev/citation_evidence.py::DocumentEvidenceResolver` answers `ok`/`missing`/`unauthorized` against the real store instead of raising, is read-only, version- and locator-aware, bounded, and never returns another course's or user's text. It reuses the canonical ACL (`can_read_document_version` → `_authorize_document_version`) and chunk scope (`ChunkRepository.resolve_document_chunks` → `_source_access`) rather than copying either. | `test_jev_citation_evidence.py` (12) on a real migrated DB: cross-user and cross-course `unauthorized`, version/locator resolution, text bound, and a before/after write check |
+| **D** layer 2 — deterministic | `missing_claim_numbers(claim, evidence_text)`: a figure the claim asserts that the source never states is `NOT_ADDRESSED_IN_AVAILABLE_EVIDENCE` at **zero** model cost. While wiring it, a real defect was found and fixed: the unit regex listed `percent` before `percentage points`, so "7 percentage points" parsed as "7 percent" and could **fabricate** a numeric `CONTRADICTED`. | `test_percentage_points_are_never_read_as_percent`, `test_missing_claim_number_is_detected_deterministically` |
+| **D** layer 3 — bound to the message revision | `cm_update.app.audit_answer_citations` runs after generation, extracts the sentence(s) that actually cite each `[Sn]`, audits them (≤6 cards per answer) and records verdict/layer/claim on the citation card the client already receives. Nothing is dropped, reordered or rewritten; with no semantic layer the cards are **byte-identical**; an audit failure records itself instead of losing the answer. | `test_citation_audit_binding.py` (7): zero-Jev deterministic verdict, shadow annotation, rejection, budget enforcement, failure survival, unchanged cards |
+| **D** consumer | The shipped shell marks only a *real* negative verdict (warning chip + explanatory title) next to the citation; verified/partial/unchecked/legacy cards render exactly as before. | `apps/web/src/ui/citationSupport.test.ts` (4) |
+
+**Verified on one frozen SHA (`35ef493`):** backend regression **1163 passed / 0 failed**
+(1404.46s, exit 0); browser **28 journeys / 0 failed** (`ui-refresh` 19,
+`jev-structured` 2, `coursemate` 4, `learning` 3, in real Chrome against the real
+three services); web 68 tests with clean `tsc` and build; agent-api 92 tests with clean
+`tsc` and build.
+
+Still open and deliberately not claimed: `is_definitive` (audit the assessment
+reference solution **before** presenting it) is implemented but not bound to the
+assessment path; module A remains `MODULE_ONLY`; every definition remains `shadow`, so
+`live evidence = NOT_RUN` and no quality claim is made for any of them.
+
 ## Resume instructions for a later round
 
 1. Work in `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY`, branch

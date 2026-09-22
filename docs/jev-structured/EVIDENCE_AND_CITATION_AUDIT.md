@@ -124,6 +124,27 @@ second citation service** and no new citation definition — it reuses
 
 ---
 
+### A deterministic defect found and fixed while wiring this (round 25)
+
+The unit-aware number check had a real bug that its own docstring claimed not to
+have: the alternation `(%|percent|percentage\s+points?|…)` matches its **first**
+alternative, so `percent` shadowed `percentage points` and "7 percentage points"
+parsed as "7 percent". Against evidence text of "5%" that produced a *fabricated*
+numeric contradiction — the one verdict class that can turn a strong "no" into
+`CONTRADICTED`. The existing test only exercised the literal-quote path
+(`quote="5 percentage points"`), so nothing caught it. Fixed by ordering the
+alternatives longest-first, with:
+
+* `test_percentage_points_are_never_read_as_percent` — different units with different
+  values is `NOT_ADDRESSED_IN_AVAILABLE_EVIDENCE`, never `CONTRADICTED`;
+* `missing_claim_numbers(claim, evidence_text)` — the deterministic half of layer 2
+  for the teaching path, where a citation card carries no verbatim quotation: a
+  figure the claim asserts but the cited source never states is `NOT_ADDRESSED…`,
+  decided in code with **zero** model calls. Unit-aware, so `5%` is never satisfied
+  by `5 percentage points`, and a unitless integer is never treated as an assertion;
+* `test_missing_claim_number_is_detected_deterministically` covers both directions,
+  the unitless case and a Chinese unit (`5℃`).
+
 ## Wiring status (honest, as of this round)
 
 * **Module C — `MODULE_ONLY`.** `app/jev/evidence_consistency.py` is complete and
@@ -134,36 +155,36 @@ second citation service** and no new citation definition — it reuses
   set (where entity relations are already resolved) and the DeepSeek prompt, with
   the rule that a genuine conflict keeps both sources and is explained by DeepSeek
   rather than resolved by deletion.
-* **Module D — partial, with the missing piece identified precisely.** The two definitions it
-  reuses *are* on a real path: `domain.py::_annotate_evidence` →
-  `app/rag/answers.py::evidence_bundle_support` → `callsites.select_citation_span` +
-  `callsites.citation_support` annotates each returned source with `jev_citation_support` /
-  `jev_selected_span` before generation. The three-layer audit module
-  (`app/jev/citation_audit.py`) is **not yet bound** to the answer finalization path, so
-  `SUPPORTED / PARTIALLY_SUPPORTED / CONTRADICTED / NOT_ADDRESSED_IN_AVAILABLE_EVIDENCE /
-  INSUFFICIENT_CONTEXT` verdicts are not produced in the product yet.
+* **Module D — landed (round 25).** Both the pre-generation evidence bundle
+  (`domain.py::_annotate_evidence` → `answers.evidence_bundle_support`) and the
+  post-generation audit on the fixed message revision now run:
 
-  What binding it requires, in order, so the next round does not rediscover it:
-
-  1. **A production `EvidenceResolver`.** `audit_citation` takes one; only
-     `StaticEvidenceResolver` (injected/test) exists today. A real implementation must answer, for an
-     already-authorized caller: does this document id + version exist, is the subject still allowed to
-     read it, and what is the text at that locator (page/section/chunk) with a stable span id. It must
-     return `unauthorized` / `missing` rather than raising, because layer 1 is a *verdict*, not an
-     exception path.
-  2. **A claim→citation binding at the message revision.** The answer text carries `[S1]`-style
-     markers; the audit needs the sentence that makes the claim and the source it cites, recorded
-     against the fixed message revision the shell stores (`cmui_messages.citations` already holds the
-     per-answer citation list).
-  3. **A consumer.** The verdict must reach the learner or the reviewer — a per-citation support label
-     rendered next to the citation chip, and `is_definitive()` gating for high-impact material
-     (assessment reference solutions and grading rationale must be audited **before** they are
-     presented). Adding the verdict without a consumer would be a receipt with extra steps.
-  4. **Shadow invariance.** With Jev off/shadow/unavailable every citation must be annotated exactly
-     as today (`UNVERIFIED`), layers 1–2 keep running (they are deterministic and cost zero Jev), and
-     no answer may be withheld because a semantic verdict is missing.
-* Nothing here is `on`/`advisory`: with no TypeSafe credential every evaluation stays in `shadow`,
-  so `used_jev == False` and the deterministic annotation (`UNVERIFIED`, keep evidence) is what the
+  1. **Production `EvidenceResolver`** — `app/jev/citation_evidence.py::DocumentEvidenceResolver`,
+     constructed per request with the server-derived subject. It reuses the canonical
+     rules rather than copying them: `can_read_document_version` (a non-raising wrapper
+     over `_authorize_document_version`) for the document ACL and
+     `ChunkRepository.resolve_document_chunks` (same `_source_access` scope as every
+     other chunk query) for the text. It answers `ok` / `missing` / `unauthorized`,
+     never raises on those outcomes, never returns another course's or another user's
+     text, is version- and locator-aware, bounds the text, and writes nothing.
+  2. **Claim→citation binding** — `cm_update.app.audit_answer_citations` extracts the
+     sentence(s) that actually cite each `[Sn]` from the generated answer, audits them
+     against the source the learner was shown, and records the verdict, the producing
+     layer and the audited claim on the citation card the client already receives.
+     At most 6 cards per answer bound the per-answer model budget.
+  3. **Consumer** — the shipped shell marks only a *real* negative verdict
+     (`apps/web/src/ui/citationSupport.js`): a contradicted or un-addressed citation
+     gets a warning chip with an explanatory title, while a verified, partial, merely
+     unchecked or legacy card renders exactly as before. High-impact gating
+     (`is_definitive`) remains available to the assessment path; binding the reference
+     solution to it is the next step, not something this round claims.
+  4. **Shadow invariance** — with no semantic layer configured the cards are returned
+     **byte-identical** to before the audit existed (`test_no_semantic_layer_returns_the_cards_unchanged`),
+     layer 2 still decides for free, and a shadow decision annotates without altering
+     or dropping a card. An audit failure records itself on the cards rather than
+     losing an answer that was already generated.
+* Nothing here is `on`/`advisory`: with no TypeSafe credential every evaluation stays
+  in `shadow`, so `used_jev == False` and the deterministic annotation is what the
   business uses.
 
 ## Tests

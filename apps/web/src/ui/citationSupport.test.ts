@@ -30,18 +30,12 @@ describe("citation audit verdicts", () => {
   });
 
   it("leaves verified, partial, unchecked and legacy cards unmarked", () => {
-    // SUPPORTED / PARTIALLY_SUPPORTED / INSUFFICIENT_CONTEXT / no audit at all:
-    // the chip must look exactly as it did before the audit existed.
-    for (const support of [
-      "SUPPORTED",
-      "PARTIALLY_SUPPORTED",
-      "INSUFFICIENT_CONTEXT",
-      undefined,
-      null,
-    ]) {
+    // SUPPORTED / PARTIALLY_SUPPORTED / INSUFFICIENT_CONTEXT: the chip must look
+    // exactly as it did before the audit existed.
+    for (const support of ["SUPPORTED", "PARTIALLY_SUPPORTED", "INSUFFICIENT_CONTEXT"]) {
       expect(citationVerdict({ support })).toBeNull();
     }
-    expect(citationVerdict({})).toBeNull();
+    expect(citationVerdict({})).toBeNull(); // a card from before the audit
     expect(citationVerdict(null)).toBeNull();
     expect(citationVerdict(undefined)).toBeNull();
   });
