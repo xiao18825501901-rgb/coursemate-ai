@@ -151,8 +151,8 @@ class SdkTransport:
     Unconfigured (no ``TYPESAFE_API_KEY`` in the environment and none passed in)
     or missing SDK raises :class:`JevNotConfiguredError` before any network access,
     so the live path is a real adapter that fails typed and never invents a
-    request. ``TYPESAFE_MODEL`` overrides the verified default model id when the
-    account needs a different one.
+    request. ``TYPESAFE_DEFAULT_MODEL`` overrides the model id, which is the name
+    the SDK itself reads, and the default is the SDK's own ``jev-latest``.
     """
 
     def __init__(self, *, api_key: str | None = None, model: str | None = None) -> None:
@@ -162,10 +162,20 @@ class SdkTransport:
         # key explicitly and that still wins. Before this, the guard always
         # fired in the service, so putting the key in the protected env -- the
         # documented owner action -- could not enable the live path at all.
+        # Checked against the 0.7.0 wheel: ``constants.API_KEY_ENV`` is exactly
+        # this name and ``Config.resolve`` reads it, so guard and SDK agree.
         self.api_key = (
             api_key if api_key is not None else os.environ.get("TYPESAFE_API_KEY")
         )
-        resolved_model = model or os.environ.get("TYPESAFE_MODEL") or "jev"
+        # Same wheel, same check, and two earlier errors corrected here: the SDK
+        # reads ``constants.DEFAULT_MODEL_ENV == "TYPESAFE_DEFAULT_MODEL"`` (not
+        # ``TYPESAFE_MODEL``, which no one reads) and its own default model is
+        # ``constants.DEFAULT_MODEL == "jev-latest"`` (not the ``"jev"`` this
+        # adapter used to pin, which would have asked for a model id the SDK
+        # does not default to).
+        resolved_model = (
+            model or os.environ.get("TYPESAFE_DEFAULT_MODEL") or "jev-latest"
+        )
         self.model = resolved_model
         self.model_version = resolved_model
 
