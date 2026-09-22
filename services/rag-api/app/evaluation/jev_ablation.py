@@ -935,23 +935,26 @@ def estimate_input_token_ceilings(
         )
 
     if "retrieval.support.v1" in on_keys:
-        for case in (*cases.retrieval, *cases.locator):
+        retrieval_like: tuple[RetrievalCase | LocatorCase, ...] = (
+            *cases.retrieval, *cases.locator,
+        )
+        for case in retrieval_like:
             for candidate in case.candidates:
                 add("", f"{case.query}\n{candidate.text}")
     if "intent.next_action.v1" in on_keys:
-        for case in cases.trajectory:
-            for turn in case.turns:
+        for trajectory_case in cases.trajectory:
+            for turn in trajectory_case.turns:
                 add("", turn.message)
     if "context.keep_segment.v1" in on_keys:
-        for case in cases.trajectory:
-            add("", f"{case.anchor}\n{case.current_task}\n{case.remaining_scope}")
+        for trajectory_case in cases.trajectory:
+            add("", f"{trajectory_case.anchor}\n{trajectory_case.current_task}\n{trajectory_case.remaining_scope}")
     if "coverage.item_support.v1" in on_keys:
-        for case in cases.coverage:
-            add("", case.accepted_evidence)
+        for coverage_case in cases.coverage:
+            add("", coverage_case.accepted_evidence)
     if "assessment.criterion_review.v1" in on_keys:
-        for case in cases.criterion:
-            for _item in case.criteria:
-                add("", f"{case.reference_solution}\n{case.student_answer}")
+        for criterion_case in cases.criterion:
+            for _item in criterion_case.criteria:
+                add("", f"{criterion_case.reference_solution}\n{criterion_case.student_answer}")
     return ceilings
 
 
@@ -1067,26 +1070,26 @@ def run_ablation(
 
     retrieval_results: list[RetrievalResult] = []
     locator_results: list[LocatorResult] = []
-    for case in cases.retrieval:
-        returned = _run_retrieval(case, service, scope)
+    for retrieval_case in cases.retrieval:
+        returned = _run_retrieval(retrieval_case, service, scope)
         retrieval_results.append(
-            RetrievalResult(case.id, tuple(returned), case.relevant_ids, case.top_k)
+            RetrievalResult(retrieval_case.id, tuple(returned), retrieval_case.relevant_ids, retrieval_case.top_k)
         )
-    for case in cases.locator:
-        returned = _run_retrieval(case, service, scope)
+    for locator_case in cases.locator:
+        returned = _run_retrieval(locator_case, service, scope)
         locator_results.append(
-            LocatorResult(case.id, case.expected_id, case.expected_slot, tuple(returned))
+            LocatorResult(locator_case.id, locator_case.expected_id, locator_case.expected_slot, tuple(returned))
         )
 
     citation_results: list[CitationResult] = []
-    for case in cases.citation:
+    for citation_case in cases.citation:
         decision = service.noul(
             "source.supports_claim.v1",
             state={
-                "claim": case.claim,
-                "source_span": case.source_span,
-                "source_version": case.source_version,
-                "task_scope": case.task_scope,
+                "claim": citation_case.claim,
+                "source_span": citation_case.source_span,
+                "source_version": citation_case.source_version,
+                "task_scope": citation_case.task_scope,
             },
             caller_role="citation",
             cache_scope=scope,
@@ -1094,34 +1097,34 @@ def run_ablation(
         predicted = (
             bool(decision.value >= 0.5)
             if decision.used_jev and isinstance(decision.value, (int, float))
-            else (citation_baseline(case) if citation_baseline is not None else None)
+            else (citation_baseline(citation_case) if citation_baseline is not None else None)
         )
         citation_results.append(
-            CitationResult(case.id, case.label_supported, predicted)
+            CitationResult(citation_case.id, citation_case.label_supported, predicted)
         )
 
     trajectory_results: list[TrajectoryResult] = []
     filterable_kept = 0
     filterable_considered = 0
-    for case in cases.trajectory:
+    for trajectory_case in cases.trajectory:
         final_action: str | None = None
-        for turn in case.turns:
+        for turn in trajectory_case.turns:
             # Explicit commands ("继续" / "暂停" / "做一题" / "交卷" ...) are answered by
             # the deterministic router and never spend a Jev call. This is the shipped
             # behaviour, so arm A's baseline for them is real, not a placeholder.
             explicit = route_explicit_command(
                 turn.message,
-                current_mode=case.current_mode,
-                active_assessment=case.active_assessment,
+                current_mode=trajectory_case.current_mode,
+                active_assessment=trajectory_case.active_assessment,
             )
             if explicit is not None:
                 final_action = explicit
                 continue
             decision = service.next_action(
                 message=turn.message,
-                fixed_anchor=case.fixed_anchor,
-                current_mode=case.current_mode,
-                active_assessment=case.active_assessment,
+                fixed_anchor=trajectory_case.fixed_anchor,
+                current_mode=trajectory_case.current_mode,
+                active_assessment=trajectory_case.active_assessment,
                 caller_role="intent",
                 cache_scope=scope,
             )
@@ -1131,31 +1134,31 @@ def run_ablation(
         # about the *filterable* class (resolved follow-ups, duplicate explanations,
         # unrelated asides) — see the module authority rules.
         anchor_preserved = True
-        for segment in case.filterable_segments:
+        for segment in trajectory_case.filterable_segments:
             filterable_considered += 1
             if service.keep_segment(
                 segment=segment,
-                current_task=case.current_task,
-                fixed_anchor=case.fixed_anchor,
-                remaining_scope=case.remaining_scope,
+                current_task=trajectory_case.current_task,
+                fixed_anchor=trajectory_case.fixed_anchor,
+                remaining_scope=trajectory_case.remaining_scope,
                 caller_role="intent",
                 cache_scope=scope,
             ):
                 filterable_kept += 1
         trajectory_results.append(
-            TrajectoryResult(case.id, case.expected_action, final_action, anchor_preserved)
+            TrajectoryResult(trajectory_case.id, trajectory_case.expected_action, final_action, anchor_preserved)
         )
 
     coverage_results: list[CoverageResult] = []
-    for case in cases.coverage:
+    for coverage_case in cases.coverage:
         decision = service.choice(
             "coverage.item_support.v1",
             candidate_ids=("SUPPORTED", "PARTIAL", "UNSUPPORTED", "UNCERTAIN"),
             state={
-                "saved_delivery": case.accepted_evidence,
-                "required_item": case.required_item,
+                "saved_delivery": coverage_case.accepted_evidence,
+                "required_item": coverage_case.required_item,
                 "valid_spans": [],
-                "node_spec_version": case.spec_version,
+                "node_spec_version": coverage_case.spec_version,
             },
             caller_role="coverage",
             cache_scope=scope,
@@ -1164,19 +1167,19 @@ def run_ablation(
         predicted = (
             decision.value == "SUPPORTED"
             if decision.used_jev
-            else (coverage_baseline(case) if coverage_baseline is not None else None)
+            else (coverage_baseline(coverage_case) if coverage_baseline is not None else None)
         )
-        coverage_results.append(CoverageResult(case.id, case.label_supported, predicted))
+        coverage_results.append(CoverageResult(coverage_case.id, coverage_case.label_supported, predicted))
 
     criterion_results: list[CriterionResult] = []
-    for case in cases.criterion:
-        for item in case.criteria:
+    for criterion_case in cases.criterion:
+        for item in criterion_case.criteria:
             decision = service.criterion_review(
-                frozen_question=case.frozen_question,
+                frozen_question=criterion_case.frozen_question,
                 criterion=item.criterion,
-                reference_solution=case.reference_solution,
-                student_answer=case.student_answer,
-                deterministic_verification=case.deterministic_verification,
+                reference_solution=criterion_case.reference_solution,
+                student_answer=criterion_case.student_answer,
+                deterministic_verification=criterion_case.deterministic_verification,
                 candidate_answer_spans=list(item.acceptable_alternatives),
                 caller_role="assessment",
                 cache_scope=scope,
@@ -1185,21 +1188,21 @@ def run_ablation(
                 _prediction_grades.get(decision.value)
                 if decision.used_jev
                 else (
-                    criterion_baseline(case, item)
+                    criterion_baseline(criterion_case, item)
                     if criterion_baseline is not None
                     else None
                 )
             )
             criterion_results.append(
                 CriterionResult(
-                    case.id, item.id, _CRITERION_LABEL_GRADES[item.label], predicted_grade
+                    criterion_case.id, item.id, _CRITERION_LABEL_GRADES[item.label], predicted_grade
                 )
             )
 
     image_results: list[ImageResult] = []
-    for case in cases.image:
-        predicted_answer = image_predictor(case) if image_predictor is not None else None
-        image_results.append(ImageResult(case.id, case.ground_truth_answer, predicted_answer))
+    for image_case in cases.image:
+        predicted_answer = image_predictor(image_case) if image_predictor is not None else None
+        image_results.append(ImageResult(image_case.id, image_case.ground_truth_answer, predicted_answer))
 
     # Which families compare against a placeholder instead of the shipped pipeline?
     # Explicit commands are routed for real, so `trajectory` is only a placeholder when
