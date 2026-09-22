@@ -78,6 +78,22 @@ Facts for the same window: production is schema **25** and must go to **29** (mi
 the proposal-only `entity_relations` store), the live release is `4ef5064`, and the rollback rehearsal
 will use that real release.
 
+## 3b. Two production risks I found in the read-only verification (2026-09-22T01:59Z)
+
+Both are outside the release's own scope, both need your decision, and neither was caused by this work.
+
+| Finding | Evidence | What I recommend |
+|---|---|---|
+| **The backend services are not enabled at boot.** `coursemate-rag` and `coursemate-agent` declare `WantedBy=multi-user.target` but are `disabled`; `list-dependencies --reverse multi-user.target` shows neither is boot-wired. They are running only because they were started by hand. A reboot would leave nginx up in front of nothing. | `systemctl is-enabled` = `disabled` for both; uptime 15 days, so the risk has not been exercised yet | one zero-downtime command in the release window: `systemctl enable coursemate-rag coursemate-agent`. Say yes and I include it as release step 8; say no and I will leave it untouched and record it as an accepted risk |
+| **Backups are not scheduled, so the readiness monitor reports failure.** The newest snapshot is 32 hours old while the monitor's own policy is 26 hours (`MAX_BACKUP_AGE_SECONDS=93600`), so `coursemate-monitor` (a 5-minute timer) exits non-zero and systemd marks the unit `failed`. Its log is otherwise green: rag healthy, agent healthy, disk 27 GB free. There is no `coursemate-backup.timer`; SRSZQ has one, CourseMate's snapshots are manual. | `journalctl -u coursemate-monitor` shows `{"status": "failing", … "backup": "latest backup is stale (191857s old)"}`; `systemctl list-timers` has no CourseMate backup timer | the release takes a fresh pre-release backup anyway (step 4), which clears the check; decide separately whether to add a scheduled backup timer so it stays clear |
+
+Also confirmed on that pass, so the plan's assumptions hold: `current` → `4ef5064` (also the newest
+release directory), RAG schema 25 with `integrity_check=ok` and 20 courses / 67 documents / 1963 chunks
+/ 16 workspaces, the official CS3481 + GE2324 knowledge nodes present and untouched, uploads 119 MB,
+backups 1.3 GB, disk 27 GB free, TLS valid to November/December 2026, and `qqttai.com` +
+`rag.`/`agent.qqttai.com` answering 200. No `JEV_*`/`TYPESAFE_*` variable exists in the protected env
+yet, and I read only variable **names**, never values.
+
 ## 4. Real login for browser acceptance (blocks `BROWSER_ACCEPTANCE` / `PRODUCTION_ACCEPTANCE`)
 
 Local Playwright journeys against an isolated identity adapter need no login and are being run
@@ -91,3 +107,6 @@ session or a screen-share is enough.
 * No Laya ECS/GPU/CPU node, no Laya deployment, no Laya package — that direction is closed.
 * No new user accounts, no DNS change, no SRSZQ change, no force-push, no old-Singapore writer.
 * No additional budget beyond the Jev batch above and the DeepSeek cap.
+* No production change outside the release window: the read-only verification made **no** changes to
+  the live host (no writes, no restarts, no unit enablement) — the two findings in §3b are reported for
+  your decision instead of being fixed silently.

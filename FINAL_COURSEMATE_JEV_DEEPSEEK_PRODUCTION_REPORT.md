@@ -38,19 +38,45 @@ release plan with its rollback. Anything that has not happened is marked `NOT_RU
 | Frontend | the shell changes from the previous round's build (the "报告问题" entry, the citation-verdict marker, the reasoning-strength save fix). Netlify project `coursemate-ai-qqtt` (`qqttai.com`) |
 | Not changed | DNS, the official CS3481/GE2324 trees, SRSZQ (`8.210.58.22`), any other host |
 
-## 4. Production facts (read-only, recorded in an earlier round — re-verify before the release)
+## 4. Production facts — re-verified read-only on 2026-09-22T01:59Z
 
-The task requires re-confirming these immediately before the production steps; they are
-listed here as the starting point, not as a substitute for that check.
+Gathered live over SSH to the production host with read-only commands only (no writes,
+no restarts, no secret values read — only variable *names*).
 
-| Item | Value as recorded |
+| Item | Verified value |
 |---|---|
-| Web | `qqttai.com`, Netlify project `coursemate-ai-qqtt`, deploy `6ab02278b7fae664934df25d`, branch `main`, authenticated CLI as the project owner |
-| Services | `rag.qqttai.com` / `agent.qqttai.com` → ECS `47.114.34.175` (instance `i-bp1f0vqhds2341pdqqiy`, cn-hangzhou-k, 2 vCPU / 3 GiB) |
-| Live release | `/srv/coursemate/releases/4ef5064`; `coursemate-rag` (uvicorn 127.0.0.1:28000), `coursemate-agent` (node 127.0.0.1:28001), nginx in front |
-| Live data | RAG DB `/srv/coursemate/data/releases/20260919T202006Z/rag.sqlite3` at schema **25**, `integrity_check=ok`; UI store ~3.3 MB; uploads ~119 MB; backups ~1.3 GB under `/srv/coursemate/backups` |
-| Env | `/etc/coursemate/{rag,agent,monitor}.env`, mode 640, `root:coursemate` (no secret is printed in any report) |
-| Model config today | Qwen/Model Studio (`V3_MODEL=qwen3.8-max`, `AGENT_MODEL_NAME=qwen3.8-max`, `OPENAI_CHAT_MODEL=qwen3.7-plus`), embeddings `text-embedding-v4` |
+| Host / instance | `iZbp1f0vqhds2341pdqqiyZ` = instance `i-bp1f0vqhds2341pdqqiy`, region `cn-hangzhou`, uptime 15 days, 2 vCPU / 3.5 GB (2.5 GB available), disk 40 GB with **27 GB free** |
+| Live release | `/srv/coursemate/current` → `/srv/coursemate/releases/4ef5064`, which is also the **newest** release directory (mtime 2026-09-21 01:46) |
+| Services | `coursemate-rag` active (uvicorn 127.0.0.1:28000, started 2026-09-21 02:08 CST), `coursemate-agent` active (127.0.0.1:28001), `nginx` active (80/443), `coursemate-monitor` **unit failed** — see finding 2 |
+| RAG database | `/srv/coursemate/data/releases/20260919T202006Z/rag.sqlite3`, schema **25**, `integrity_check=ok`, 20 courses (2 published), 67 documents, 1963 chunks, 16 workspaces, 44 knowledge nodes across `cs3481` + `ge2324` (the official trees are present and untouched) |
+| Other stores | UI store 3,366,912 bytes (modified 2026-09-22 00:33); agent DB 32,768 bytes; uploads 119 MB; `/srv/coursemate/data` 255 MB |
+| Backups | 10 snapshots, 1.3 GB, newest `20260921-four-changes-final-before-schema13` at 2026-09-21 01:58 — **32 hours old** |
+| Protected env | `/etc/coursemate/{rag,agent,monitor}.env`, mode 640, `root:coursemate`. **No `JEV_*` or `TYPESAFE_*` variable exists yet**; model configuration names present are `V3_MODEL`, `OPENAI_CHAT_MODEL`, `AGENT_MODEL_NAME`, `OPENAI_EMBEDDING_MODEL` (values deliberately not read) |
+| TLS | `qqttai.com` valid to 2026-11-10; `rag.`/`agent.qqttai.com` valid to 2026-12-12; the certbot renew timer is enabled and ran 5 h ago |
+| Public endpoints | `qqttai.com` 200, `rag.qqttai.com/health` 200, `agent.qqttai.com/health` 200 (a status code, not an acceptance) |
+
+### Three production findings that change the release plan
+
+1. **The backend services are not boot-enabled.** `coursemate-rag.service` and
+   `coursemate-agent.service` declare `WantedBy=multi-user.target` but are `disabled`, and
+   `list-dependencies --reverse multi-user.target` confirms neither is boot-wired. They run only
+   because they were started manually. A reboot would leave nginx (enabled) in front of nothing.
+   **Required release step: `systemctl enable` both units** — a zero-downtime change, but a
+   production change, so it belongs to the release window.
+2. **The monitor is failing because backups are stale — correctly.** `coursemate-monitor` runs on a
+   ~5-minute timer and exits non-zero when any check fails, so systemd shows the unit as `failed`.
+   Its own log is the useful part: `rag` healthy, `agent` healthy, `disk` healthy, **`backup` failing
+   ("latest backup is stale (191857s old)")** against `MAX_BACKUP_AGE_SECONDS=93600` (26 hours). The
+   newest snapshot is 32 hours old because **there is no automatic CourseMate backup timer at all**
+   (SRSZQ has one; CourseMate's snapshots are taken manually). The pre-release backup in the plan is
+   therefore mandatory, and the owner should decide whether to add a backup timer so this check can
+   ever pass unattended.
+3. **Something else already listens locally** on 127.0.0.1:8080/8081 and nginx proxies to 18080/18081
+   as well as 28000/28001. Those are not part of this release's path (the release only restarts
+   rag/agent), but they are recorded so a later step does not mistake them for ours.
+
+Everything else matches the previously recorded state, so the plan's assumptions hold — with the two
+additions above.
 
 ## 5. What is verified locally (and therefore is not a production claim)
 
@@ -78,32 +104,37 @@ real services in real Chrome.
 
 ## 7. Release plan (ordered; every step has a rollback)
 
-1. **Re-verify production read-only** (the §4 table) and confirm the previous Singapore
-   writer is stopped, SRSZQ is untouched, and the official CS3481/GE2324 trees are not
-   regenerated.
-2. **Live validation on the frozen revision** (needs the credentials): the DeepSeek
-   canary across its roles, then the Jev canary and the calibration/ablation runs on the
-   frozen splits, inside the printed budget ceiling. If a definition fails its gate it
-   stays in `shadow` — that is a reportable outcome, not a failure to hide.
-3. **Freeze the release**: build the backend artifact, run `verify_release_build.mjs`
-   and the release preflight, and record the SHA.
-4. **Consistent production backup** of all three databases, uploads, share snapshots and
-   the current configuration, with the release SHA and schema version recorded alongside.
-5. **Isolated restore + migration rehearsal**: restore the backup into a separate
-   directory and run migrations 026–029 there, proving `integrity_check=ok`,
-   `foreign_key_check` empty, and that the data survives.
-6. **Real rollback check**: run the *actual* previous release (`4ef5064`) against the
-   migrated database (`verify_rollback_compat.py`) and record the verdict.
-7. **Deploy the immutable backend release** and point `current` at it; restart
-   `coursemate-rag` / `coursemate-agent`; confirm health and a real request path, not just
-   `health=200`.
-8. **Owner places the credentials** in the protected env files only
+1. **Re-verify production read-only** — done 2026-09-22T01:59Z (see §4). Confirmed on that pass: the
+   old Singapore host is not serving CourseMate (the live host is the Hangzhou ECS above), SRSZQ has
+   its own independent backup timer, and the official CS3481/GE2324 nodes are present and untouched.
+   Re-run the same read-only script immediately before the release and compare.
+2. **Live validation on the frozen revision** (needs the credentials): the DeepSeek canary across its
+   roles, then the Jev canary and the calibration/ablation runs on the frozen splits, inside the
+   printed budget ceiling. If a definition fails its gate it stays in `shadow` — that is a reportable
+   outcome, not a failure to hide.
+3. **Freeze the release**: build the backend artifact, run `verify_release_build.mjs` and the release
+   preflight, and record the SHA.
+4. **Consistent production backup** of all three databases, uploads, share snapshots and the current
+   configuration, with the release SHA and schema version recorded alongside. This is not optional
+   housekeeping: the newest existing snapshot is 32 hours old and the monitor is already failing on
+   that (§4 finding 2).
+5. **Isolated restore + migration rehearsal**: restore that fresh backup into a separate directory and
+   run migrations 026–029 there, proving `integrity_check=ok`, `foreign_key_check` empty, and that the
+   data survives.
+6. **Real rollback check**: run the *actual* previous release (`4ef5064`) against the migrated database
+   (`verify_rollback_compat.py`) and record the verdict.
+7. **Deploy the immutable backend release** and point `current` at it; restart `coursemate-rag` /
+   `coursemate-agent`; confirm a real request path, not just `health=200`.
+8. **Enable both backend units for boot** (`systemctl enable coursemate-rag coursemate-agent`) — §4
+   finding 1; without it the next reboot takes the site down.
+9. **Owner places the credentials** in the protected env files only
    (`/etc/coursemate/rag.env`, `agent.env`), never in chat or Git.
-9. **Production frontend build + publish** to `coursemate-ai-qqtt` (`netlify deploy --prod`).
-10. **Real acceptance** with one real sign-in: the journeys in §8 below, on CS3481, GE2324,
-    a private course and a shared course.
-11. **Post-release backup and monitoring**, then the Git push and this report completed
-    with the real rows.
+10. **Production frontend build + publish** to `coursemate-ai-qqtt` (`netlify deploy --prod`).
+11. **Real acceptance** with one real sign-in: the journeys in §8 below, on CS3481, GE2324, a private
+    course and a shared course.
+12. **Post-release backup and monitoring**: take a fresh backup so the monitor's backup check passes,
+    confirm the monitor reports healthy after it, then the Git push and this report completed with the
+    real rows.
 
 Rollback: re-point `current` to the previous release (migrations are additive, so it can
 read the migrated database — the case `verify_rollback_compat.py` checks); if data is
