@@ -1,10 +1,13 @@
 # CANVAS OAUTH AND SCOPES (task B2/B3)
 
-**State of this document.** Round-44 design pass. The protocol facts below were verified against
-Instructure's own documentation this round (markdown endpoints under
-`https://developerdocs.instructure.com/`), and the design decisions follow from them. **No school
-Developer Key exists yet, no OAuth flow has been run, and the production UI does not exist yet** —
-so the Canvas status stays `NOT_CONFIGURED` and will not be reported as connected.
+**State of this document.** Round-44 design pass; **the flow itself was implemented in round 47**
+in `services/rag-api/app/canvas/oauth.py` and is covered by 22 tests (state replay/expiry/forgery,
+denial, exact callback, error classification, identity binding and account replacement, concurrent
+refresh, revocation, redaction). The protocol facts below were verified against Instructure's own
+documentation (markdown endpoints under `https://developerdocs.instructure.com/`), and the design
+decisions follow from them. **No school Developer Key exists yet, no authorisation has been
+performed, and the HTTP routes do not exist yet** — so the Canvas status stays `NOT_CONFIGURED`
+and will not be reported as connected.
 
 ## 1. Why OAuth and not a token box
 
