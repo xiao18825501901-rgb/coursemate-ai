@@ -1195,9 +1195,18 @@ def run_jev_semantic_ablation(
             continue
 
         if family == FAMILY_IMAGE:
-            predicted = image_predictor(sample.state) if image_predictor is not None else None
+            # Deliberately NOT named ``predicted``: this branch carries an answer
+            # *string* (``image_predictor`` returns ``str | None``) while every other
+            # family carries a prediction *mapping* from ``_predict``. Sharing one
+            # name pinned the variable to ``str | None`` for the whole function and
+            # produced all 23 of this module's mypy errors (including the 6 that the
+            # module-metric collectors added in round 31). Renaming is behaviour-free:
+            # this branch appends and ``continue``s.
+            predicted_answer = (
+                image_predictor(sample.state) if image_predictor is not None else None
+            )
             image_results.append(
-                ImageResult(sample.sample_id, str(answer.get("answer", "")), predicted)
+                ImageResult(sample.sample_id, str(answer.get("answer", "")), predicted_answer)
             )
             continue
 

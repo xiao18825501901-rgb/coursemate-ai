@@ -53,7 +53,7 @@ from __future__ import annotations
 
 import json
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -341,13 +341,17 @@ class ImageResult:
 
 
 def recall_at_k(
-    returned_ids: Sequence[str], relevant_ids: Sequence[str], k: int
+    returned_ids: Sequence[str], relevant_ids: Iterable[str], k: int
 ) -> float:
     """Fraction of the labelled relevant ids retrieved within the first ``k`` results.
 
     Computed from the case LABELS only. Empty ``relevant_ids`` is vacuously 1.0
     (nothing to recall), an empty ``returned_ids`` is 0.0, and ``k`` larger than the
     list is handled by clamping to the list length.
+
+    Only ``returned_ids`` is order-sensitive (it is sliced to the top ``k``); the
+    labelled ids are used purely as a membership set, which is why they are typed
+    ``Iterable`` and the callers may pass the ``frozenset`` they store.
     """
     if k <= 0:
         raise ValueError("k must be positive.")
@@ -357,8 +361,12 @@ def recall_at_k(
     return len(relevant.intersection(returned_ids[:k])) / len(relevant)
 
 
-def mrr(returned_ids: Sequence[str], relevant_ids: Sequence[str]) -> float:
-    """Reciprocal rank of the first labelled-relevant id (ties resolve by position)."""
+def mrr(returned_ids: Sequence[str], relevant_ids: Iterable[str]) -> float:
+    """Reciprocal rank of the first labelled-relevant id (ties resolve by position).
+
+    As in ``recall_at_k``, the ranking comes from ``returned_ids`` (order-sensitive)
+    while the labelled ids are only tested for membership.
+    """
     relevant = frozenset(relevant_ids)
     for index, candidate_id in enumerate(returned_ids, start=1):
         if candidate_id in relevant:
