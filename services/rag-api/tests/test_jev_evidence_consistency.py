@@ -17,9 +17,12 @@ from app.jev.errors import JevUnavailableError
 from app.jev.evidence_consistency import (
     COMPATIBLE,
     DIFFERENT_ASSUMPTIONS,
+    EVIDENCE_CONSISTENCY_KEY,
+    RELATIONS,
     SAME_CONTEXT_CONTRADICTION,
     VERSION_OR_TASK_DIFFERENCE,
     check_evidence_consistency,
+    evidence_consistency_definition,
 )
 from app.jev.gateway import FakeTransport, JevGateway
 from app.jev.models import JevAnswer, JevResult
@@ -84,6 +87,45 @@ def scope_for(service):
     return service.scope(
         owner_user_id="user-a", authorization_scope="evidence_consistency", course_id="c"
     )
+
+
+def test_the_registered_definition_is_the_one_the_model_is_shown(tmp_path) -> None:
+    """The catalog owns the vocabulary, and the request must carry exactly that.
+
+    This module used to build its own `DecisionDefinition` and send bare relation ids
+    as the criteria labels, so what the model was shown was not what the catalog
+    registered — and a calibration run would have measured the duplicate instead.
+    """
+    definition = evidence_consistency_definition()
+
+    assert definition.key == EVIDENCE_CONSISTENCY_KEY
+    assert definition.primitive == "Choice"
+    assert set(definition.criteria or {}) == set(RELATIONS)
+    assert definition.required_state == ("left", "right")
+    # The registered criteria are descriptions, not the ids repeated back.
+    assert definition.criteria[SAME_CONTEXT_CONTRADICTION] != SAME_CONTEXT_CONTRADICTION
+    assert definition.instructions.strip()
+
+    database = make_jev_database(tmp_path)
+
+    def responder(call):
+        return JevResult(answers={EVIDENCE_CONSISTENCY_KEY: JevAnswer(choice="COMPATIBLE")})
+
+    service, transport = make_service(
+        database, responder, modes={EVIDENCE_CONSISTENCY_KEY: "on"}
+    )
+    check_evidence_consistency(
+        service,
+        [
+            _candidate("a", document_id="doc-a", content="the derivative of x squared is two x"),
+            _candidate("b", document_id="doc-b", content="the derivative of x squared is two x"),
+        ],
+        scope=scope_for(service),
+    )
+
+    sent = transport.calls[0].questions[EVIDENCE_CONSISTENCY_KEY]
+    assert sent.criteria == definition.criteria
+    assert sent.instructions == definition.instructions
 
 
 def test_exact_targets_and_private_candidates_never_dropped(tmp_path) -> None:

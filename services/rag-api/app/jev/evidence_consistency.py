@@ -54,13 +54,13 @@ from dataclasses import dataclass, field
 from itertools import pairwise
 from typing import Any
 
-from app.jev.catalog import DecisionDefinition
+from app.jev.catalog import DecisionDefinition, Primitive, load_catalog
 from app.jev.gateway import DecisionRequest
 from app.jev.models import CacheScope
 from app.jev.service import SemanticDecisionService
 
-# Pending catalog registration (see report + STRUCTURED_DECISION_CONTRACTS.md).
-# Deliberately NOT added to decision_catalog.json: another workstream registers it.
+# Registered in decision_catalog.json (the catalog owns the vocabulary, the criteria
+# text and the instructions; this module only names it and asserts agreement).
 EVIDENCE_CONSISTENCY_KEY = "evidence.consistency.v1"
 
 SAME_CONTEXT_CONTRADICTION = "SAME_CONTEXT_CONTRADICTION"
@@ -84,35 +84,27 @@ _MAX_SEMANTIC_TEXT_CHARS = 2_000
 # Bounded extra-read candidates surfaced for INSUFFICIENT_EVIDENCE (one read total).
 _MAX_EXTRA_READ_CANDIDATES = 2
 
-# The pending definition, held as a module constant (a real DecisionDefinition, not
-# a catalog entry). It is used to build the DecisionRequest the gateway evaluates,
-# so modes/bounds/receipts still apply exactly like a registered definition.
-_EVIDENCE_CONSISTENCY_DEFINITION = DecisionDefinition(
-    key=EVIDENCE_CONSISTENCY_KEY,
-    primitive="Choice",
-    required_state=("left", "right"),
-    criteria={relation: relation for relation in RELATIONS},
-    instructions=(
-        "Classify the relation between two already-authorized evidence candidates "
-        "about the same concept/value in the same context. SAME_CONTEXT_CONTRADICTION "
-        "only for a genuine conflict under identical assumptions; DIFFERENT_ASSUMPTIONS "
-        "when each is valid under different stated conditions; VERSION_OR_TASK_DIFFERENCE "
-        "when they concern different versions or tasks; COMPATIBLE when both agree or "
-        "complement; INSUFFICIENT_EVIDENCE when the fragments are too thin to judge. "
-        "Never infer a document should be dropped or a permission changed."
-    ),
-    failure_policy="COMPATIBLE (keep both, no conflict escalation).",
-    cache_scope=(
-        "authorization_scope",
-        "course",
-        "workspace",
-        "material_revision",
-        "node_spec_version",
-        "question_definition_hash",
-        "input_hash",
-        "provider_model_version",
-    ),
-)
+def evidence_consistency_definition() -> DecisionDefinition:
+    """The registered ``evidence.consistency.v1`` definition.
+
+    Projected from ``decision_catalog.json`` so the catalog is the single owner of the
+    candidate vocabulary, the criteria text and the instructions — which is what the
+    model is actually shown, and therefore what a calibration run must be measuring.
+    The module's own relation tuple is asserted against it, so a catalog edit that
+    changed what this guard may answer fails loudly here instead of silently widening
+    or narrowing it.
+    """
+    definition = load_catalog().get(EVIDENCE_CONSISTENCY_KEY)
+    if definition.primitive != Primitive.CHOICE:
+        raise ValueError(
+            f"{EVIDENCE_CONSISTENCY_KEY}: expected a Choice, got {definition.primitive!r}"
+        )
+    if set(definition.criteria or {}) != set(RELATIONS):
+        raise ValueError(
+            f"{EVIDENCE_CONSISTENCY_KEY}: catalog candidates "
+            f"{sorted(definition.criteria or {})} != {sorted(RELATIONS)}"
+        )
+    return definition
 
 # Deterministic narrowing signatures.
 _WORD = re.compile(r"[A-Za-z][A-Za-z0-9_-]{2,}|[\u4e00-\u9fff]+")
@@ -356,15 +348,18 @@ def _consistency_decision(
     right_text: str,
     scope: CacheScope | None,
 ) -> ConsistencyDecision:
+    definition = evidence_consistency_definition()
     request = DecisionRequest(
-        definition=_EVIDENCE_CONSISTENCY_DEFINITION,
+        definition=definition,
         state={
             "left": left_text[:_MAX_SEMANTIC_TEXT_CHARS],
             "right": right_text[:_MAX_SEMANTIC_TEXT_CHARS],
         },
         caller_role="evidence_consistency",
         cache_scope=scope or CacheScope(),
-        criteria={relation: relation for relation in RELATIONS},
+        # A Choice request must carry its id→label map, so it is taken from the
+        # registered definition rather than from a second copy of the vocabulary here.
+        criteria=dict(definition.criteria or {}),
     )
     decision = service.gateway.evaluate(request)
     suggestion = decision.suggestion
@@ -499,5 +494,6 @@ __all__ = [
     "VERSION_OR_TASK_DIFFERENCE",
     "check_evidence_consistency",
     "deepseek_conflict_prompt",
+    "evidence_consistency_definition",
     "narrow_candidate_pairs",
 ]
