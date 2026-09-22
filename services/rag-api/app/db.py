@@ -26,9 +26,10 @@ V3_MIGRATIONS = (
     "028_jev_decision_receipts.sql",
     "029_entity_relations.sql",
     "030_feedback_reports.sql",
+    "031_canvas_import.sql",
 )
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 30
+LATEST_V3_SCHEMA_VERSION = 31
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (
