@@ -13,8 +13,8 @@ record there.
 | Branch | `fix/codex-dsh-audit-20260919` |
 | HEAD at the start of this round | `552e809` — working tree clean, 76 commits ahead of `origin`, nothing pushed |
 | Last full backend gate before this round | **1314 passed / 1 skipped / 0 failed** in 1534.25 s on frozen revision `2fd532b` (`work/current-change/full_run_round42b.log`) |
-| Gate **on this round's revision** | **1398 passed / 2 skipped / 0 failed** in 1382.41 s (23:02) on frozen revision `47228c8`, exit 0 (`work/current-change/full_run_round48.log`) — the +21 over the previous run are the import-job state-machine tests; `git diff 47228c8 -- services benchmarks scripts` is empty, so only documentation changed after that commit |
-| Previous round's gate | **1377 passed / 2 skipped / 0 failed** in 1365.43 s on frozen revision `8aae4b2` (`work/current-change/full_run_round47.log`) — the +22 there were the Canvas OAuth flow tests |
+| Gate **on this round's revision** | **1408 passed / 2 skipped / 0 failed** in 1342.96 s (22:22) on frozen revision `8e92aec`, exit 0 (`work/current-change/full_run_round49.log`) — the +10 over the previous run are the Canvas import schema tests; `git diff 8e92aec -- services benchmarks scripts` is empty |
+| Previous round's gate | **1398 passed / 2 skipped / 0 failed** in 1382.41 s on frozen revision `47228c8` (`work/current-change/full_run_round48.log`) — the +21 there were the import-job state-machine tests. Schema is now **31** (`LATEST_V3_SCHEMA_VERSION = 31`, migration `031_canvas_import.sql`) |
 | Running jobs at the start | none (no pytest / Playwright / mypy process was live) |
 | Instruction pack | `D:\UserData\Downloads\CourseJesus_Domain_Canvas_Campus_DSH_Pack\CourseJesus_Domain_Canvas_Campus_Plan`, **SHA-256 verified 6/6** against its own `SHA256_MANIFEST.json` (a first PowerShell check wrongly reported one failure because the shell decoded the CJK filename as GBK and hashed the wrong file — measured with Python before trusting it) |
 | Production | **not contacted in this round at all** — no deploy, no DNS, no Clerk, no database |
