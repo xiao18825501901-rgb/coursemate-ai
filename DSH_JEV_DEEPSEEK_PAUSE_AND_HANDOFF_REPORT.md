@@ -194,7 +194,7 @@ The immediately preceding full run on the previous HEAD (`bdb1aa7` + docs) **com
 | `integrity_check` | `ok` |
 | `foreign_key_check` | 0 violations |
 | Rollback | `ROLLBACK_SAFE_WITH_MIGRATED_DB` — previous release runs against Schema 28 |
-| Old-client compatibility | verified: no missing/retyped column, no narrowed CHECK enum, identical pool filter |
+| Old-client compatibility | verified: no missing/retyped column, no narrowed CHECK enum, identical pool filter (the pool-filter clause was **not** measured at the time — the tool read it from one tree only; corrected in round 42, see ledger B-41 and `work/current-change/rollback-compat-4ef5064-r42.json`) |
 
 ---
 
@@ -377,7 +377,7 @@ NOT RUN were not executed.
 | Production DB writes | **0** | no production database was opened |
 | Model / region / token usage | none | no usage to report |
 | Estimated cost | **0** | no paid call |
-| Budget approval | **none requested/obtained** — see `MINIMAL_OWNER_ACTION_CARD.md` |
+| Budget approval | **none requested/obtained** | see `MINIMAL_OWNER_ACTION_CARD.md` |
 
 Offline fakes were used only inside tests and the offline harness; they are never presented as real
 calls. The ablation artifact is stamped with the "EXAMPLE_NOT_LABELLED_FOR_RESULTS" dataset status.

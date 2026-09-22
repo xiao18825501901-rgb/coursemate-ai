@@ -187,7 +187,14 @@ asserted:
   Schema-28 database and reports `integrity=ok` / `fk_violations=0`; the release's own schema is
   Schema 26 while it sees 28; **no table missing, no column missing, no column retyped, no CHECK
   enum narrowed**; the assessment pool filter string is identical, so old and new code select the
-  same question pool.
+  same question pool. *(Round 42: this clause was **unmeasured** when written — the tool's
+  `pool_filter_unchanged` field was read from the current tree only and could not have reported a
+  difference (ledger B-41); it now compares both trees. Re-run with the corrected tool, against a
+  database built by the current code — schema 30 rather than 28, the same comparison shape — for
+  `b05fd294` **and** for `4ef5064`: both give `pool_filter_verdict: UNCHANGED`, detail
+  "byte-identical predicate", both extracted predicates recorded and `rollback_concerns` empty,
+  verdict `ROLLBACK_SAFE_WITH_MIGRATED_DB`, exit 0
+  (`work/current-change/rollback-compat-{b05fd294,4ef5064}-r42.json`).)*
 * Permanent guard — `tests/test_schema_rollback_compat.py` (5 passed) freezes the pre-027 column,
   table and enum snapshot, so a later migration that drops a column or narrows an enum fails the
   suite.
