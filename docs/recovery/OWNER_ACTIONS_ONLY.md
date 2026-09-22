@@ -10,7 +10,7 @@ technical item; #3 and #4 are one-way-door decisions for the release.
 | # | Action | Unlocks | Cost | Reversible? |
 |---|---|---|---|---|
 | 1 | Put a TypeSafe Jev credential into the backend's protected env | live Jev validation, calibration, all ablations, any promotion out of `shadow` | paid per call | yes (remove the var) |
-| 2 | Put a DeepSeek API key into the same protected env + approve a token ceiling | DeepSeek live acceptance, and the full real-user teaching path | paid per call | yes |
+| 2 | Put a DeepSeek API key into the same protected env (**exact variable names differ per service — see Action 2**) + approve a token ceiling | DeepSeek live acceptance, and the full real-user teaching path | paid per call | yes |
 | 3 | Approve a production window (or explicitly defer it) | deployment, migration rehearsal, real acceptance | infra only | yes, but a deploy writes data — see rollback |
 | 4 | Answer one product question about document-side extraction | closes the last local design gap | free | yes |
 
@@ -73,16 +73,61 @@ so the product keeps its current behaviour.
 **Read or write?** Generation calls only. Embeddings are a separate contract and are **not**
 re-embedded as part of this work.
 
-**Existing access — what I checked.** No DeepSeek variable exists in the production env files. The
-canary CLI (`app/evaluation/deepseek_canary.py`) and its preflight (which prints a token ceiling
-*before* calling) are already in the repo and ready to run.
+**Existing access — what I checked.** No DeepSeek credential variable exists in the production env
+files, and no `TYPESAFE_*`/`JEV_*` either. Note the distinction that the variable table below makes
+concrete: the *variables that will carry* the switch (`V3_MODEL`, `RAG_CHAT_MODEL`,
+`AGENT_MODEL_NAME`, and their key/base-url companions) **do** exist and currently hold the Qwen path,
+so this action re-points them rather than adding new ones. The canary CLI
+(`app/evaluation/deepseek_canary.py`) and its preflight (which prints a token ceiling *before* calling)
+are already in the repo and ready to run.
 
-**Which app to open / where to type it.** Same protected path as Action 1 — add to
-`/etc/coursemate/rag.env` (and `/etc/coursemate/agent.env` if the agent should generate too):
+**Which app to open / where to type it.** Same protected path as Action 1. **The variable names differ
+per service — this matters more than it looks.** An earlier version of this document said
+`DEEPSEEK_API_KEY`, which **no code in this repository reads**; in the RAG service an unrecognised
+variable name is silently ignored (its settings model sets `extra="ignore"`), so that single line would
+have produced no error and no switch. Corrected from the code, one service at a time:
 
-```
-DEEPSEEK_API_KEY=<your key>
-```
+| Service (systemd unit) | Variables to set | Where |
+|---|---|---|
+| `rag-api` — V3 teaching/generation path (`coursemate-rag`) | `V3_MODEL=deepseek-flash`, `V3_MODEL_API_KEY=<your key>`, and either **remove** `V3_MODEL_BASE_URL` or set it to `https://api.deepseek.com` | `/etc/coursemate/rag.env` |
+| `rag-api` — grounded QA / answer role (same unit) | `DEEPSEEK_CHAT_API_KEY=<your key>` | `/etc/coursemate/rag.env` |
+| `rag-api` — the UI backend API (same unit) | `CMUI_PROVIDER_MODE=deepseek`, `CMUI_DEEPSEEK_API_KEY=<your key>`, **and `CMUI_ALLOW_BILLABLE=true`** (optionally `CMUI_DEEPSEEK_MODEL`, `CMUI_DEEPSEEK_BASE_URL`) | `/etc/coursemate/rag.env` |
+| `agent-api` (TypeScript, `coursemate-agent`) | `AGENT_MODEL_NAME=deepseek-flash`, `AGENT_MODEL_API_KEY=<your key>`, with `AGENT_PROVIDER_MODE` left at `openai` (its `deterministic` value never calls a provider) | `/etc/coursemate/agent.env` |
+
+`CMUI_ALLOW_BILLABLE=true` is the **money switch** and is not optional for the UI backend: without it
+five generation endpoints answer `402`, and the provider itself raises `BILLING_NOT_AUTHORIZED` (the
+coverage reviewer's own message is "enable CMUI_ALLOW_BILLABLE only after the budget is approved"). It
+exists precisely so that spending is an explicit, revocable decision rather than a side effect of
+setting a mode — so setting it *is* the ceiling approval, and I will not set it before you give the
+number.
+
+**This is a re-pointing, not an addition.** Production already has `V3_MODEL`, `RAG_CHAT_MODEL`,
+`AGENT_MODEL_NAME` (and the matching key/base-url variables) carrying the Qwen path, so the switch
+changes existing values. I will re-read the current variable *names* immediately before the window —
+if any name has changed since my read-only check, I will tell you rather than guess.
+
+**Every wrong combination fails loudly instead of silently generating on the wrong provider** — I
+verified each of these in the code, and this round added tests that pin the fourth:
+
+* `V3_MODEL=deepseek-flash` with a Model Studio base URL → `503 MODEL_ENDPOINT_INVALID`, "Use the
+  official DeepSeek base URL".
+* `V3_MODEL=deepseek-flash` with no key → `503 MODEL_LIVE_BLOCKED`, "Configure the explicit model
+  endpoint key" (the key variable is `V3_MODEL_API_KEY`, not `V3_MODEL`-adjacent guesses).
+* `AGENT_MODEL_NAME=deepseek-flash` without an allowlisted DeepSeek endpoint → the agent refuses to
+  start (`"deepseek-flash requires the official DeepSeek base URL"`).
+* `CMUI_PROVIDER_MODE=deepseek` with a non-DeepSeek host, a `/v1` path, a missing key, or any model
+  other than `deepseek-flash` → the UI backend refuses to **boot**, before it opens its database.
+* `CMUI_PROVIDER_MODE=deepseek` with billing not authorised → generation answers `402`, the provider
+  raises `BILLING_NOT_AUTHORIZED`, and nothing is spent.
+
+The one silent case is a **misspelled variable name** in the RAG service, because unknown keys are
+ignored there. That is why the table above names them exactly; if a step seems to do nothing, tell me
+and I will read the running configuration's variable *names* rather than asking you for values.
+
+**For my own verification runs:** the canary CLI takes the credential variable as an argument
+(`--api-key-env`), so I will point it at whichever of the names above holds the key on the host, rather
+than assuming a name. It prints the token ceiling and refuses to call anything without an explicit
+budget flag, so nothing is spent by running it in preflight mode.
 
 **The ceiling I need from you (a number, not a key).** I will not start without it. Current proposal,
 all of which is a **request, not an approval** — nothing inherited, nothing already spent (spend to

@@ -62,10 +62,30 @@ quality — that requires the labelled ablation, which is also `NOT_RUN`.
 
 ## 5. Blockers
 
-`DEEPSEEK_API_KEY` (and the confirmed alias) placed by the owner in `/etc/coursemate/rag.env` and
-`/etc/coursemate/agent.env` on the production host, plus an approved batch ceiling. Until then the
-local suites, the canary preflight and the whole structured-enhancement layer continue to be developed
-and verified offline, exactly as they have been.
+**Corrected 2026-09-22 (round 34).** What stood here was: *"`DEEPSEEK_API_KEY` (and the confirmed alias)
+placed by the owner in `/etc/coursemate/rag.env` and `/etc/coursemate/agent.env` on the production
+host, plus an approved batch ceiling."* That is **wrong for the production services**, and the hedge
+"and the confirmed alias" was the tell that the name had not been checked. `DEEPSEEK_API_KEY` is the
+**canary CLI's** default — `scripts/run_deepseek_canary.py` sets
+`DEFAULT_API_KEY_ENV = "DEEPSEEK_API_KEY"` and reads it with `os.environ.get(args.api_key_env)`, so it
+is overridable with `--api-key-env` — and **no production service reads that name**. The names the
+services actually read, verified in code:
+
+| Service (unit) | Variables | Where it is read |
+|---|---|---|
+| `rag-api`, V3 teaching path (`coursemate-rag`) | `V3_MODEL`, `V3_MODEL_API_KEY`, `V3_MODEL_BASE_URL` | `app/learning/provider.py` (`settings.v3_model*`) |
+| `rag-api`, grounded QA role (same unit) | `DEEPSEEK_CHAT_API_KEY` | `app/config.py::deepseek_chat_api_key` |
+| `rag-api`, UI backend API (same unit) | `CMUI_PROVIDER_MODE`, `CMUI_DEEPSEEK_API_KEY` | `app/cm_update/config.py` |
+| `agent-api` (`coursemate-agent`) | `AGENT_MODEL_NAME`, `AGENT_MODEL_API_KEY` | `services/agent-api/src/config.ts` |
+
+The failure mode is why this mattered: the RAG service's pydantic settings set `extra="ignore"`, so an
+unrecognised variable name there is ignored **silently** — no error, no switch. (The `CMUI_*` service is
+the opposite: a missing credential there refuses to boot, and those refusals are now pinned by 33 tests.)
+The canary itself is run with `--api-key-env` set to whichever variable actually holds the key.
+
+The blocker itself is unchanged: a DeepSeek credential in the production env under the names above, plus
+an approved batch ceiling. Until then the local suites, the canary preflight and the whole
+structured-enhancement layer continue to be developed and verified offline, exactly as they have been.
 
 ## 6. Production model switch (separate, and gated)
 

@@ -69,11 +69,11 @@ Claimed **finished and verified on a named revision**:
 
 ## 4. What is NOT finished, and why — by status class
 
-The ledger carries 28 rows with full detail; the summary:
+The ledger carries 34 rows (B-01 … B-34) with full detail; the summary:
 
 | Status | Count | Representative items |
 |---|---|---|
-| `RESOLVED_WITH_EVIDENCE` | 17 | module-D resolver type errors; missing QA-stream evidence bundle; `is_definitive` having no caller; the five module metrics being uncomputable; the companion dataset's missing split manifest; six documentation claims that did not match the code; and the reference-gate note now reaching the shipped UI |
+| `RESOLVED_WITH_EVIDENCE` | 20 | module-D resolver type errors; missing QA-stream evidence bundle; `is_definitive` having no caller; the five module metrics being uncomputable; the companion dataset's missing split manifest; six documentation claims that did not match the code; the reference-gate note now reaching the shipped UI; the DeepSeek switch-window configuration refusals now pinned by test; the V1↔V2 template-parity question closed by measurement; an owner instruction that named an environment variable no code reads |
 | `LOCAL_IMPLEMENTATION_GAP` (open, mine) | **0** | none — every local gap this audit found is closed with code and a test |
 | `WAITING_CREDENTIAL` | 2 | live Jev validation; live DeepSeek validation |
 | `WAITING_BUDGET` | 1 | a real token/USD ceiling (all current figures are proposals) |
@@ -81,7 +81,8 @@ The ledger carries 28 rows with full detail; the summary:
 | `WAITING_OWNER_DECISION` | 3 | document-side extraction surface; backup timer; Netlify publish method |
 | `WAITING_PRODUCTION_APPROVAL` | 4 | boot-enable the two service units; the model switch; the migration/backup rehearsal; the push |
 | `QUALITY_NOT_DEMONSTRATED` | 1 | no definition may leave `shadow` until a measured quality gate exists |
-| `LIVE_PROVIDER_FAILED` / `UPSTREAM_UNAVAILABLE` | 0 | no live call has failed, because none has been attempted |
+| `LIVE_PROVIDER_FAILED` | 0 | no live call has failed, because none has been attempted |
+| `UPSTREAM_UNAVAILABLE` | 1 | the V2 visual render check: the source 16-template Word pack is not on this machine and there is no renderer (no LibreOffice, no `soffice`) |
 
 Distinctions the ledger keeps explicit, because collapsing them is how a report lies:
 
@@ -133,6 +134,61 @@ Distinctions the ledger keeps explicit, because collapsing them is how a report 
    defects, and that is recorded too: `image_transcription.v1` is a deliberately supported non-catalog
    case set (the harness validates it separately), and the capability catalog's `handler` strings are
    documented metadata, not dispatch.
+7. **The DeepSeek switch-window configuration refusals were pinned by no test — now they are.** This
+   is the class of gap that hides best: the code was *correct*, so nothing failed. `Settings.validate()`
+   refuses a DeepSeek environment with a non-`api.deepseek.com` host, a `/v1` or region path, a
+   non-HTTPS URL, an embedded credential, a missing backend key, or any model other than
+   `deepseek-flash`; and it requires the three preflight pricing values in production. The Qwen
+   equivalents were pinned by `test_production_budget_config.py`; the DeepSeek branch had **no** test
+   at all — zero hits for all four error strings across the test tree, and the single test that built a
+   `provider_mode="deepseek"` settings object used valid values, so no rejection path had ever run.
+   Loosening the host allowlist or the model pin would have passed the entire suite. 33 new tests pin
+   every rejection by exact message, plus two positive controls (a valid DeepSeek environment both
+   validates and boots through `create_app`), and two ordering facts that were previously assumed:
+   validation happens **before** the database is opened and before any provider is chosen, so a bad
+   switch-window environment fails at boot and leaves no half-initialised data directory. I checked the
+   tests are not vacuous by measurement rather than assertion: with the DeepSeek validator replaced by
+   a no-op, a Qwen host is *accepted* — so the allowlist is genuinely what rejects it.
+8. **A parity question I opened last round was closed by measuring, and the answer was "add no test".**
+   V1 template bodies show 11 `第N步` markers and V2 shows 1, which looked like a lost section. Across
+   all 14 professional templates the top-level section numbers are **identical** in both versions
+   (`5,6,7,8,9,10`), the `第N步` drop is **uniform** the whole way down, and each surviving V2
+   occurrence is a prose mention inside a sentence rather than a heading; V2 additionally *adds* a
+   subsection (`5.6`) and renumbers the step flow into `10.x`. The versions are deliberately
+   non-parallel, so a parity test would have encoded a false invariant — and a version loose enough to
+   pass would still pass with every section body emptied. None was added, and the measurement is
+   recorded instead.
+
+One item was recorded rather than substituted: the V2 templates have never been **rendered**, only
+checked structurally and by marker (`visual_render_validation_performed_this_turn: false`). That is now
+carried as `UPSTREAM_UNAVAILABLE` with its two concrete reasons — the original 16-template Word pack is
+not on this machine (only `CS3481(1).doc` remains, under `02_ORIGINAL_DSH_DELIVERY/reference/` and
+`work/ui-refresh-inputs/`) and there is no renderer (no LibreOffice, no `soffice` on `PATH`). Replacing a
+render check with a structural one and calling it validation is precisely the substitution this project
+forbids, so the flag stays `false`.
+
+9. **The owner instruction I wrote in the previous round was not executable, and this is the most
+   consequential thing I fixed.** Action 2 of `docs/recovery/OWNER_ACTIONS_ONLY.md` told the owner to put
+   `DEEPSEEK_API_KEY` into the protected env. **No code in the repository reads that name.** Checking it
+   against the three services turned up three *different* naming schemes that the switch must satisfy:
+   the UI backend reads `CMUI_PROVIDER_MODE` / `CMUI_DEEPSEEK_API_KEY` through `os.getenv`; the RAG
+   service's pydantic settings read bare uppercased field names, so the V3 teaching path needs
+   `V3_MODEL=deepseek-flash` plus `V3_MODEL_API_KEY`, and the grounded QA role needs
+   `DEEPSEEK_CHAT_API_KEY`; the TypeScript agent reads `AGENT_MODEL_NAME` plus `AGENT_MODEL_API_KEY`. The
+   dangerous part was the failure mode: that pydantic model sets `extra="ignore"`, so a misspelled
+   variable is **silently ignored** — the owner would have typed the line, seen nothing happen, and had
+   no error to report. I also corrected a second misleading claim in the same section: "no DeepSeek
+   variable exists in production" is true only of the *credential* variable; the variables that will
+   carry the switch already exist holding the Qwen path, so the action is a **re-pointing, not an
+   addition**. A second prerequisite was missing from the same instruction: `CMUI_ALLOW_BILLABLE=true`,
+   without which five UI generation endpoints answer `402` and the provider raises
+   `BILLING_NOT_AUTHORIZED` — so even a perfectly named key would have generated nothing. That variable
+   is the project's deliberate money switch, and the document now says so. The document carries a
+   verified per-service table. The reassuring half, also verified
+   in code rather than assumed: every wrong *combination* fails loudly instead of generating on the
+   wrong provider — `503 MODEL_ENDPOINT_INVALID` for a DeepSeek model with a Model Studio URL,
+   `503 MODEL_LIVE_BLOCKED` when `V3_MODEL_API_KEY` is missing, the agent's refusal to start without an
+   allowlisted endpoint, and the UI backend's refusal to boot (pinned by the 33 new tests above).
 
 Two of my own first-draft claims were wrong and were corrected in place rather than left standing: I
 first recorded the retrieval re-rank as "40 calls per page, fixable by batching" — it is bounded at
@@ -145,22 +201,41 @@ QA stream would be byte-identical without a credential — `create_app` **always
 
 | Gate | Result |
 |---|---|
-| Full backend regression | **1260 passed / 0 failed** in 1589.54s (exit 0) — `work/current-change/full_run_round32.log`, on `74100ed`. Rounds 31–32 added no backend code after it (verified: `git diff 74100ed -- services` is empty) |
+| Full backend regression | **1293 passed / 0 failed** in 1408.76s (exit 0) — `work/current-change/full_run_round33.log`, on `46ed926`. The delta from 1260 is exactly the 33 new config-guard tests; application code is unchanged (`git diff 74100ed -- services/rag-api/app benchmarks` is empty), and only documentation changed after the measured commit |
 | Browser journeys (real Chrome, real three services, injected identity) | **32 journeys / 0 failed** — `ui-refresh` 19, `jev-structured` 6, `coursemate` 4, `learning` 3 (re-run on `6ba70b0`) |
 | Web app | `tsc --noEmit` exit 0, **73 vitest passed** (18 → 19 files), production build exit 0 |
 | Measurement / module-metric suites | **121 passed** (`test_jev_module_metrics.py` 13, `test_jev_module_split_calibration.py` 8) |
-| ruff | **1815 errors at the pre-change revision and 1815 after** for app+tests (measured against a `git worktree`, not asserted); the new script is additionally clean under the service config, where its siblings in `scripts/` carry 19 pre-existing E402 and 207 E501 |
+| ruff | **1815 errors at the pre-change revision and 1815 after** for app+tests, unchanged even with a 221-line test file added (ruff 0.16.2 from the service venv, run **with `services/rag-api` as the working directory** over `app tests`); the new script is additionally clean under the service config, where its siblings in `scripts/` carry 19 pre-existing E402 and 207 E501 |
 | mypy | `app/jev/citation_evidence.py` is clean; the whole-app count of pre-existing legacy errors is unchanged |
 
+**A lint trap I fell into and corrected, recorded because it produced a wrong verdict.** The same file
+lints *differently* depending on the working directory even when the config is passed explicitly with
+`--config`: ruff resolves its project root — and therefore `per-file-ignores` and `src` handling — from
+the invocation. Checking the new test file from the repository root reported "All checks passed", so I
+accepted an import-sorting autofix; run from `services/rag-api` (the canonical cwd, and the one the
+1815 figure comes from) that same autofix had *introduced* one `I001` error. I found it only because I
+re-measured the total instead of trusting the single-file result: it read 1816, not 1815. Fixed under
+the canonical invocation, file re-verified clean, total back to 1815, and the test file re-run after
+the fix (33 passed).
+
 The regression delta is exactly accounted for at every step: 1235 → 1252 (4 QA tests + 13 metric
-tests) → 1260 (8 split/calibration tests); the web delta 68 → 73 is the 5 reference-note tests.
+tests) → 1260 (8 split/calibration tests) → **1293** (33 config-guard tests); the web delta 68 → 73 is
+the 5 reference-note tests. No test was renamed, skipped or weakened to reach any of these numbers, and
+no threshold was lowered.
 
 ### 6.1 Backend regression
 
-Command: `services\rag-api\.venv\Scripts\python.exe -m pytest -q -p no:randomly`
-Log: `work/current-change/full_run_round32.log` → `1260 passed, 2 warnings in 1589.54s (0:26:29)`, exit 0,
-on `74100ed`. No backend file has changed since (`git diff 74100ed -- services` is empty), so this run
-still describes the backend at HEAD.
+Command: `services\rag-api\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider`
+Log: `work/current-change/full_run_round33.log` → `1293 passed, 2 warnings in 1408.76s (0:23:28)`,
+exit 0, on `46ed926`. Only documentation changed after that commit, so this run still describes the
+services in the tree. The two warnings are pre-existing third-party deprecations
+(`starlette.testclient` with `httpx`, and an `anyio.abc.BlockingPortal` alias), not failures.
+
+Evidence hygiene, stated because it tripped me up while re-reading: these logs are **UTF-16LE**
+(PowerShell's `Tee-Object`), as are the earlier rounds' logs, so a UTF-8 reader shows them as spaced-out
+mojibake. Every log was decoded and diffed before being cited here — the three files have distinct
+SHA-256 hashes and each carries its own summary (`1252` / `1260` / `1293`), which is not something the
+byte counts alone would show, since all three happen to be the same length.
 
 ### 6.2 Browser journeys
 
