@@ -10,12 +10,21 @@ release can still open, read and write the migrated schema:
 * does the old code import and ``Database.initialize()`` without error?
 * are any tables or columns the old code expects missing, retyped or made NOT NULL?
 * did any CHECK enum *narrow* (which would reject rows the old code still writes)?
-* is the assessment pool filter unchanged, so old and new code select the same pool?
+* is the assessment pool filter the same in both trees, so old and new code select
+  the same pool? This one is a source-text comparison of
+  ``app/learning/assessments.py`` in the release tree against the same file in this
+  tree (``pool_filter_verdict``); it is not a runtime observation, and an
+  unextractable predicate is reported as ``UNDETERMINED``, never as unchanged.
 
 Exit code 0 means the previous release can run against the migrated database, so a
 code-only rollback is viable. Exit code 3 means it cannot, and the rollback must
 restore the pre-migration database backup. Either way the database backup remains
 the primary rollback path; this only tells the operator which one is required.
+
+The pool filter is reported separately from the verdict: anything other than
+``UNCHANGED`` is a behavioural difference that needs an owner decision, so it is
+listed in ``rollback_concerns`` and deliberately does *not* change the exit code,
+because a changed pool filter does not mean the database has to be restored.
 
 Usage:
     python scripts/verify_rollback_compat.py --release-tree <path-to-previous-release>
@@ -42,6 +51,14 @@ REBUILT_TABLES = (
     "learning_model_call_reservations",
 )
 ENUM = re.compile(r"(\w+)\s+IN\s*\(([^)]*)\)")
+# The assessment pool filter the two trees must agree on. It is matched as source
+# text, because the release tree's source is the only record of what the release
+# actually selected.
+POOL_FILTER = re.compile(
+    r"validation_status='VALIDATED'[^;]{0,200}?verification_method!='MODEL_ONLY'",
+    re.DOTALL,
+)
+ASSESSMENTS_SOURCE = pathlib.Path("app") / "learning" / "assessments.py"
 
 # Runs inside a subprocess with the OLD release's code on sys.path, so its imports
 # can never be shadowed by the current tree. It does two independent things:
@@ -133,6 +150,12 @@ def run_old_release(service: pathlib.Path, database_path: pathlib.Path) -> dict[
         [sys.executable, str(script), str(service), str(database_path)],
         capture_output=True,
         text=True,
+        # The release's own code may print anything, and this machine's locale codec
+        # is not UTF-8: without an explicit encoding a single non-locale byte in the
+        # release's output kills subprocess's reader thread and the tool reports
+        # "printed nothing" instead of the release's real failure mode.
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     lines = [line for line in completed.stdout.strip().splitlines() if line.strip()]
@@ -143,15 +166,50 @@ def run_old_release(service: pathlib.Path, database_path: pathlib.Path) -> dict[
     return json.loads(lines[-1])
 
 
-def current_pool_filter() -> str:
-    """The pool filter both releases must share, as written in the current source."""
-    source = (NEW_SERVICE / "app" / "learning" / "assessments.py").read_text(encoding="utf-8")
-    match = re.search(
-        r"validation_status='VALIDATED'[^;]{0,200}?verification_method!='MODEL_ONLY'",
-        source,
-        re.DOTALL,
-    )
+def pool_filter_in(root: pathlib.Path) -> str:
+    """The assessment pool-filter predicate as written in ``root``'s source, or ""."""
+    path = root / ASSESSMENTS_SOURCE
+    if not path.is_file():
+        return ""
+    match = POOL_FILTER.search(path.read_text(encoding="utf-8"))
     return match.group(0) if match else ""
+
+
+def _normalise_sql(fragment: str) -> str:
+    return re.sub(r"\s+", " ", fragment).strip()
+
+
+def compare_pool_filters(
+    release_root: pathlib.Path, current_root: pathlib.Path
+) -> tuple[str, str, str, str]:
+    """Compare the two trees' pool filters.
+
+    Returns ``(verdict, release_filter, current_filter, detail)`` where verdict is
+    one of ``UNCHANGED``, ``CHANGED`` or ``UNDETERMINED``. A predicate that cannot
+    be found on either side yields ``UNDETERMINED``: "the two filters agree" is not
+    something an unextractable filter can support, and silently reporting the
+    current tree's own filter as if it had been compared is a false assurance - the
+    operator would read ``pool_filter_unchanged: true`` on a release whose filter
+    was never even located.
+    """
+    release = pool_filter_in(release_root)
+    current = pool_filter_in(current_root)
+    if not release or not current:
+        where = " or ".join(
+            name for name, value in (("release", release), ("current", current)) if not value
+        )
+        location = ASSESSMENTS_SOURCE.as_posix()
+        return (
+            "UNDETERMINED",
+            release,
+            current,
+            f"pool-filter predicate not found in the {where} source of {location}",
+        )
+    if release == current:
+        return "UNCHANGED", release, current, "byte-identical predicate"
+    if _normalise_sql(release) == _normalise_sql(current):
+        return "UNCHANGED", release, current, "identical after whitespace normalisation"
+    return "CHANGED", release, current, "the two predicates select different pools"
 
 
 def main() -> int:
@@ -185,7 +243,12 @@ def main() -> int:
         "columns_missing_for_release": [],
         "columns_retyped_for_release": [],
         "check_enums_narrowed": [],
-        "pool_filter_unchanged": True,
+        "pool_filter_verdict": None,
+        "pool_filter_unchanged": None,
+        "pool_filter_release": None,
+        "pool_filter_current": None,
+        "pool_filter_detail": None,
+        "rollback_concerns": [],
         "reasons": [],
     }
 
@@ -262,17 +325,40 @@ def main() -> int:
         if report[key]:
             report["reasons"].append(f"{key}: {report[key]}")
 
+    # The pool filter is compared between the two trees rather than read from this
+    # one. It deliberately does NOT feed `reasons`: a different pool filter means the
+    # rollback changes behaviour, not that the migrated database is unusable, and
+    # `reasons` drives the "restore the backup" verdict.
+    (
+        pool_verdict,
+        pool_release,
+        pool_current,
+        pool_detail,
+    ) = compare_pool_filters(service, NEW_SERVICE)
+    report["pool_filter_verdict"] = pool_verdict
+    report["pool_filter_unchanged"] = pool_verdict == "UNCHANGED"
+    report["pool_filter_release"] = pool_release
+    report["pool_filter_current"] = pool_current
+    report["pool_filter_detail"] = pool_detail
+    if pool_verdict != "UNCHANGED":
+        report["rollback_concerns"].append(
+            f"assessment pool filter {pool_verdict}: {pool_detail}"
+        )
+
     # Rebuilt tables are the risky ones: name them explicitly in the verdict.
     report["rebuilt_tables_checked"] = list(REBUILT_TABLES)
     report["verdict"] = (
         "ROLLBACK_SAFE_WITH_MIGRATED_DB" if not report["reasons"]
         else "ROLLBACK_REQUIRES_DB_RESTORE"
     )
-    report["pool_filter_unchanged"] = bool(current_pool_filter())
     report["note"] = (
         "A code-only rollback is viable when the verdict is "
         "ROLLBACK_SAFE_WITH_MIGRATED_DB; the pre-migration database backup remains "
-        "the primary rollback path either way."
+        "the primary rollback path either way. The verdict covers schema and code "
+        "compatibility with the migrated database only: pool_filter_verdict != "
+        "UNCHANGED means the two releases select different assessment pools (or the "
+        "predicate could not be located, reported as UNDETERMINED), which is listed "
+        "in rollback_concerns and needs an owner decision."
     )
 
     payload = json.dumps(report, indent=2, ensure_ascii=False)
