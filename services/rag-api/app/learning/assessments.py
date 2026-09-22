@@ -10,6 +10,13 @@ from uuid import uuid4
 from app.db import Database
 from app.errors import ApiError
 from app.jev import callsites
+from app.jev.citation_audit import (
+    CONTRADICTED,
+    REJECTED,
+    CitationRequest,
+    audit_citation,
+)
+from app.jev.citation_evidence import DocumentEvidenceResolver
 from app.jev.service import SemanticDecisionService
 from app.learning.models import (
     AssessmentAnswer,
@@ -29,6 +36,12 @@ SOURCE_ORDER = (
     "EXTERNAL_INSPIRED",
 )
 DETERMINISTIC_TYPES = {"MCQ_SINGLE", "NUMERIC"}
+
+# A reference-solution verification never changes a mark — it can only flag
+# ``needs_review``. The number of source refs checked per question is bounded so
+# grading latency and cost stay predictable (one semantic call per verified step,
+# at most REFERENCE_VERIFY_MAX_REFS refs per question).
+REFERENCE_VERIFY_MAX_REFS = 8
 
 
 def encode(value: object) -> str:
@@ -507,6 +520,14 @@ class AssessmentService:
                         }
                         if reference is not None
                         else None
+                    ),
+                    "reference_verification": self._verify_reference_solution(
+                        connection,
+                        workspace,
+                        str(row["question_revision_id"]),
+                        node_id=str(session["node_id"]),
+                        spec_version=int(session["spec_version"]),
+                        include_semantic=False,
                     ),
                 }
             questions.append(question)
@@ -1147,6 +1168,163 @@ class AssessmentService:
             (question_revision_id,),
         ).fetchone()
 
+    # --------------------------------------- reference-solution verification
+    @staticmethod
+    def _reference_layer1(
+        connection: sqlite3.Connection,
+        workspace: sqlite3.Row,
+        resolver: DocumentEvidenceResolver,
+        chunk_id: str,
+    ) -> dict[str, Any]:
+        """Deterministic existence / currency / authorization for one source_ref.
+
+        Existence and currency reuse the same ``chunk_source_versions`` lookup as
+        ``LearningOrchestrator.evidence_version`` (never the ACL SQL); authorization
+        and course scoping are delegated to the read-only
+        :class:`DocumentEvidenceResolver`, which returns ``ok``/``missing``/
+        ``unauthorized`` and never raises.
+        """
+        row = connection.execute(
+            "SELECT chunks.document_id AS document_id, document_versions.version AS version "
+            "FROM chunks "
+            "JOIN chunk_source_versions AS csv ON csv.chunk_id = chunks.id "
+            "JOIN document_versions ON document_versions.id = csv.document_version_id "
+            "WHERE chunks.id = ?",
+            (chunk_id,),
+        ).fetchone()
+        if row is None:
+            return {"ref": chunk_id, "status": "missing", "document_id": None, "version": None}
+        current = connection.execute(
+            "SELECT MAX(version) FROM document_versions WHERE document_id = ?",
+            (row["document_id"],),
+        ).fetchone()[0]
+        if current is None or int(row["version"]) != int(current):
+            return {
+                "ref": chunk_id,
+                "status": "stale",
+                "document_id": str(row["document_id"]),
+                "version": str(row["version"]),
+            }
+        evidence = resolver.resolve(
+            document_id=str(row["document_id"]),
+            version=str(current),
+            location=chunk_id,
+        )
+        return {
+            "ref": chunk_id,
+            "status": evidence.status,
+            "document_id": str(row["document_id"]),
+            "version": str(current),
+        }
+
+    def _verify_reference_solution(
+        self,
+        connection: sqlite3.Connection,
+        workspace: sqlite3.Row,
+        question_revision_id: str,
+        *,
+        node_id: str,
+        spec_version: int,
+        include_semantic: bool,
+    ) -> dict[str, Any]:
+        """Verify a stored reference solution before it is presented as evidence.
+
+        Layer 1 (deterministic, zero Jev calls): every source_ref chunk must still
+        exist, be authorized for this learner's workspace, and be the current
+        document version. Layer 3 (semantic, only when configured and requested):
+        one ``audit_citation`` per verified step decides whether the cited chunk
+        supports the step's ``result`` text; only ``CONTRADICTED``/``REJECTED``
+        is a negative verdict (``INSUFFICIENT_CONTEXT``/``NOT_ADDRESSED…`` are not).
+
+        A negative verdict is returned so the caller can flag ``needs_review`` —
+        it never changes a mark, weight, total, grade or coverage value. A
+        reference with no source_refs at all is recorded honestly as
+        ``reference_evidence_unverified`` and is never treated as a contradiction.
+        """
+        unverified = {
+            "verdict": "reference_evidence_unverified",
+            "verified": False,
+            "negative": False,
+            "reason": None,
+            "refs": [],
+        }
+        reference = self.reference_solution(connection, question_revision_id)
+        if reference is None:
+            return unverified
+        steps = json.loads(reference["steps_json"])
+        source_refs = [str(ref) for ref in json.loads(reference["source_refs_json"])]
+        if not source_refs:
+            return unverified
+
+        resolver = DocumentEvidenceResolver(
+            self.db,
+            owner_user_id=str(workspace["owner_user_id"]),
+            course_id=str(workspace["course_id"]),
+        )
+        refs: list[dict[str, Any]] = []
+        checked: set[str] = set()
+        semantic_steps: set[str] = set()
+        for step in steps:
+            if len(refs) >= REFERENCE_VERIFY_MAX_REFS:
+                break
+            step_id = str(step.get("step_id") or "")
+            result_text = str(step.get("result") or "").strip()
+            for ref_id in (str(ref) for ref in (step.get("source_refs") or [])):
+                if len(refs) >= REFERENCE_VERIFY_MAX_REFS:
+                    break
+                if ref_id in checked:
+                    continue
+                checked.add(ref_id)
+                layer1 = self._reference_layer1(connection, workspace, resolver, ref_id)
+                record: dict[str, Any] = {"ref": ref_id, "status": layer1["status"]}
+                refs.append(record)
+                if (
+                    include_semantic
+                    and self.jev is not None
+                    and layer1["status"] == "ok"
+                    and result_text
+                    and step_id not in semantic_steps
+                ):
+                    semantic_steps.add(step_id)
+                    audit = audit_citation(
+                        self.jev,
+                        CitationRequest(
+                            claim=result_text,
+                            document_id=str(layer1["document_id"]),
+                            version=str(layer1["version"]),
+                            location=ref_id,
+                        ),
+                        resolver=resolver,
+                        scope=self.jev.scope(
+                            owner_user_id=str(workspace["owner_user_id"]),
+                            authorization_scope="assessment",
+                            course_id=str(workspace["course_id"]),
+                            workspace_id=str(workspace["id"]),
+                            node_id=node_id,
+                            spec_version=spec_version,
+                        ),
+                    )
+                    # Only a real (mode "on") verdict is recorded; shadow/off/
+                    # unavailable stay byte-identical to the no-Jev path.
+                    if audit.used_jev:
+                        record["semantic"] = audit.label
+        if any(item["status"] == "unauthorized" for item in refs):
+            verdict = "reference_evidence_unauthorized"
+        elif any(item["status"] in {"stale", "missing"} for item in refs):
+            verdict = "reference_evidence_stale"
+        elif any(item.get("semantic") in (CONTRADICTED, REJECTED) for item in refs):
+            verdict = "reference_contradicted"
+        else:
+            verdict = "verified"
+        negative = verdict != "verified"
+        return {
+            "verdict": verdict,
+            "verified": not negative,
+            "negative": negative,
+            "reason": verdict if negative else None,
+            "refs": refs,
+        }
+
     def explanation_context(
         self,
         connection: sqlite3.Connection,
@@ -1445,6 +1623,7 @@ class AssessmentService:
         total = 0.0
         any_needs_review = False
         weak_evidence_ids: list[str] = []
+        reference_verifications: dict[str, dict[str, Any]] = {}
         for question in prepared["questions"]:
             attempt = connection.execute(
                 "SELECT * FROM assessment_question_attempts "
@@ -1467,6 +1646,18 @@ class AssessmentService:
             question_total = 0.0
             feedback_parts: list[str] = []
             question_needs_review = False
+            # Verify the stored reference solution BEFORE it is presented as
+            # grading evidence. A negative verdict only flags ``needs_review`` —
+            # it never touches the mark, weight, total, grade or coverage.
+            reference_verification = self._verify_reference_solution(
+                connection,
+                workspace,
+                str(question["question_revision_id"]),
+                node_id=str(session["node_id"]),
+                spec_version=int(session["spec_version"]),
+                include_semantic=True,
+            )
+            reference_verifications[str(question["id"])] = reference_verification
             for criterion in question["rubric"]:
                 if self._is_deterministic(question):
                     fraction = 1.0 if correct else 0.0
@@ -1542,6 +1733,8 @@ class AssessmentService:
                     weak_evidence_ids.append(evidence_id)
                 question_needs_review = question_needs_review or needs_review
                 feedback_parts.append(feedback)
+            if reference_verification["negative"]:
+                question_needs_review = True
             total += question_total
             any_needs_review = any_needs_review or question_needs_review
             connection.execute(
@@ -1638,7 +1831,17 @@ class AssessmentService:
                         "Assessment evidence marked one or more rubric criteria WEAK.",
                     ),
                 )
-        return self._session_view(connection, workspace, session_id)
+        result = self._session_view(connection, workspace, session_id)
+        # Attach the grading-time verification record (including any real semantic
+        # verdict) so a reviewer sees exactly which refs were checked and what each
+        # returned. Deterministic-only views (``view``) keep the Layer-1 record.
+        for question in result["questions"]:
+            if "review" not in question:
+                continue
+            verification = reference_verifications.get(str(question["id"]))
+            if verification is not None:
+                question["review"]["reference_verification"] = verification
+        return result
 
     def assist(
         self,

@@ -118,9 +118,17 @@ def create_app(
         JevGateway(receipt_store=SqlReceiptStore(database))
     )
     if resolved_settings.v3_enabled:
+        # The learning orchestrator gets the same shared service: pedagogy (call
+        # site 6), the assessment criterion review (8) and the prerequisite review
+        # (11) live in here, and without it those three call sites would never be
+        # reached in a real deployment. Shadow is the default mode, so this changes
+        # no user-visible result; the receipt store above is deliberately
+        # best-effort because grading calls the criterion review from inside its own
+        # write transaction.
         application.state.learning = LearningOrchestrator(
             database, resolved_settings,
-            HybridRetriever(ChunkRepository(database), embedding_provider)
+            HybridRetriever(ChunkRepository(database), embedding_provider),
+            jev=application.state.jev_service,
         )
         application.state.official_knowledge_draft_builder = OfficialKnowledgeDraftBuilder(
             database, resolved_settings, application.state.learning
