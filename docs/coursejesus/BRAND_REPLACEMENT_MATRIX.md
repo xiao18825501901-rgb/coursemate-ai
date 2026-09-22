@@ -1,28 +1,36 @@
 # BRAND REPLACEMENT MATRIX (task A1)
 
-**State of this document.** Produced in round 44 by
-`work/current-change/scan_brand_surface.py` over the current work tree (HEAD `552e809`). It is a
-**scan**, not a replacement: no user-visible string has been changed yet, and this file exists so
-the replacement is done surface by surface instead of as a repository-wide byte replace, which the
-pack explicitly forbids ("不要逐字节全仓 replace").
+**State of this document.** Round-44 scan, **updated in round 45 when the visible rename actually
+happened for the web app and the agent service**. The scan method and the class split below are
+unchanged; §2 and §5 now record what was converted, and §6 records what is honestly still old.
 
 Target brand: **CourseJesus** / **耶课稣** / `coursejesus.com`, API hosts `rag.coursejesus.com`
-and `agent.coursejesus.com`. Today `耶课稣` appears **0** times and `coursejesus` appears **2**
-times (both inside the new CourseJesus tooling added this round), so every visible surface is
-still to do.
+and `agent.coursejesus.com`.
+
+**Round-45 result, measured on the built artifacts rather than on the source:** the web app now
+carries one brand source (`apps/web/src/brand.ts`), both HTML entries and the PWA manifest are
+generated from it, and the shipped bundle contains **no** user-visible old-brand text — the only
+remaining `CourseMate` strings are the compatibility identifiers (§3). The guard test
+`apps/web/tests/brand.test.ts` fails if any file outside an explicit remainder list prints the old
+name, so a new page cannot reintroduce it.
 
 ## 1. Where the old name actually is (measured)
 
-| Pattern | Occurrences | Areas | Largest areas |
-|---|---|---|---|
-| `CourseMate` | 481 | 38 | `docs` 150, `apps/web` 113, `services/rag-api` 59, `archive` 41 |
-| `coursemate` (lowercase) | 515 | 32 | `docs` 275, `archive` 43, several top-level reports |
-| `COURSEMATE` (uppercase) | 62 | 20 | `docs` 27, reports, `scripts` 3, `apps/web` 3 |
-| `qqttai` (current domain) | 169 | 17 | `docs` 100, `scripts` 34, `services/rag-api` 2 |
-| `coursejesus` | 2 | 1 | `scripts` (this round's tooling) |
-| `耶课稣` | 0 | 0 | — |
+Round-44 baseline, and the round-45 values after the visible rename:
 
-**31 user-visible files** currently carry the old name. The heaviest are listed in §3.
+| Pattern | Round 44 | Round 45 | Areas | Largest areas |
+|---|---|---|---|---|
+| `CourseMate` | 481 | 466 | 39 | `docs` 158, `apps/web` 90, `services/rag-api` 59, `archive` 41 |
+| `coursemate` (lowercase) | 515 | 522 | 34 | `docs` 281, `archive` 43, several top-level reports |
+| `COURSEMATE` (uppercase) | 62 | 62 | 20 | `docs` 27, reports, `scripts` 3, `apps/web` 3 |
+| `qqttai` (current domain) | 169 | 169 | 17 | `docs` 100, `scripts` 34, `services/rag-api` 2 |
+| `coursejesus` | 2 | 26 | — | the new brand source, tooling and documents |
+| `耶课稣` | 0 | 6 | — | the brand source, the manifest/description and this document set |
+
+The repo-wide totals barely move because most occurrences are history, identifiers and
+compatibility names — which is exactly why the class split below, not the headline count, is the
+actionable view. `apps/web` fell from 113 to 90: the visible strings are gone, and what remains
+there is compatibility identifiers, code comments and test assertions.
 
 ## 2. Class A — must change (user-visible)
 
@@ -37,10 +45,10 @@ still to do.
 | Notifications / templates / docs entry points | notification templates, README, help pages, current product docs | the pack lists these explicitly |
 | Canonical / OpenGraph / sitemap | wherever `qqttai.com` is canonical today (`docs` 100 + `scripts` 34 occurrences) | domain migration, see `DOMAIN_AND_CLERK_MIGRATION.md` |
 
-**Missing asset, found by the scan:** `apps/web/public/manifest.json` **does not exist**. The pack
-requires `manifest name/short_name` to be updated, so a PWA manifest has to be *created* (name,
-short_name, theme/background colour, icon set) rather than edited. `favicon` must be checked in
-the same pass; the icon itself is `PENDING_ASSET` until the owner supplies artwork.
+**Missing asset, found by the scan:** `apps/web/public/manifest.json` **did not exist**, so there
+was no PWA manifest to edit. Round 45 therefore *generated* one — `manifest.webmanifest`, emitted
+at build time from the brand source with name/short_name/theme colour/icons — instead of patching a
+file that was not there. `favicon` was already present and is reused as the interim icon.
 
 ## 3. Class B — must survive (history, compatibility, identity)
 
@@ -71,7 +79,9 @@ saved user data, which the pack forbids in the same sentence that requires the v
 
 1. A single brand/URL configuration source provides English name, Chinese name, canonical origin,
    API origins, logo path and support name; front end, meta, manifest, notification templates and
-   help text **read it** instead of hard-coding.
+   help text **read it** instead of hard-coding. Implemented in round 45 as
+   `apps/web/src/brand.ts`; the documents use `%BRAND_*%` placeholders that the Vite plugin
+   substitutes, and a leftover placeholder fails the build.
 2. The visible rename and the domain migration are separate steps with separate evidence
    (`DOMAIN_AND_CLERK_MIGRATION.md`).
 3. Every Class B entry gets an explicit compatibility note in this file when it is touched for
@@ -84,8 +94,24 @@ saved user data, which the pack forbids in the same sentence that requires the v
 
 * The counts above are line/occurrence counts from a text scan of tracked text files; they show
   where work is, not how many edits it will take.
-* `docs` dominates the raw totals (150 + 275 + 27). Most of that is Class B history, which is why
-  the *user-visible* list in §2/§3 is the actionable one — a "481 occurrences" headline would
+* `docs` dominates the raw totals. Most of that is Class B history, which is why the
+  *user-visible* list in §2/§3 is the actionable one — a "466 occurrences" headline would
   overstate the work and a "0 files changed" style report would understate it.
-* No string has been replaced yet, so `BRAND_UI` remains **NOT_STARTED** in
-  `COURSEJESUS_EXECUTION_STATE.md`. This file is the plan and the measured baseline.
+* Converted in round 45 and verified on the built artifacts: both documents, the manifest, the
+  shell and pages, the legacy shell, and the agent service's prompt/log. The guard test in
+  `apps/web/tests/brand.test.ts` enforces this for the web app and the agent service sources.
+* **Still old in round 45, and listed rather than implied:** the operations scripts and `ops/`
+  material (37 occurrences), the historical reports and `docs/` (Class B by decision, not by
+  omission), and `services/rag-api`. The backend is **not** only compatibility names — it carries
+  real identity strings, found while checking whether the rename could break a backend test:
+  the FastAPI titles (`CourseMate RAG API`, `CourseMate UI Update API`), the Chinese teacher
+  prompts in `app/cm_update/provider.py` (`你是 CourseMate 教师。…`, which shape generated teaching
+  text), the default display name `CourseMate 同学`, two database-guard error messages, and the
+  tutor prompt pinned by `tests/test_tutor_prompt.py` (`assert instructions.startswith("You are
+  CourseMate")`). Converting those means changing the prompt and its test **together**, which is
+  why it is a separate step rather than a side effect of the front-end pass. None of them is a web
+  page, and all 41 tests covering them pass unchanged in round 45.
+* **Notification/e-mail templates** the pack names are still to be written; they do not exist yet,
+  so there is nothing to convert — the same source will feed them when they are created.
+* **Logo:** `BRAND.logoStatus` is `PENDING_ASSET` in code, and the interim mark is the repository's
+  existing `favicon.svg` — not the owner's artwork, and not presented as final.

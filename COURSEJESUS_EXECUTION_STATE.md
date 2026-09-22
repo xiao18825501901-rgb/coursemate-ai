@@ -26,8 +26,8 @@ uncommitted work, and the running cwd was not renamed.
 
 | Code | Status | Evidence / reason |
 |---|---|---|
-| `BRAND_UI` | **NOT_STARTED** (baseline measured) | Old name still on 31 user-visible files; scan in `docs/coursejesus/BRAND_REPLACEMENT_MATRIX.md` (481 `CourseMate` + 515 `coursemate` + 62 `COURSEMATE`). Nothing changed yet |
-| `LOGO_ASSETS` | **PENDING_ASSET** | No artwork supplied. Scan also found `apps/web/public/manifest.json` **absent**, so the PWA manifest has to be created, not edited |
+| `BRAND_UI` | **IN_PROGRESS (web + agent done, guarded)** | One brand source `apps/web/src/brand.ts`; both HTML entries and the PWA manifest are generated from it (the manifest did not exist before); 17 front-end files and the agent service's prompt/log now render the new name; `apps/web/tests/brand.test.ts` (8 tests) fails if any source file outside an explicit remainder list prints the old name. Verified on the **built bundle**: `dist/index.html` → `<title>CourseJesus</title>`, `dist/ui.html` → `<title>CourseJesus 学习空间</title>`, `manifest.webmanifest` → `CourseJesus`, no placeholder leftovers, and the only `CourseMate` strings left in the bundle are the compatibility identifiers. **Real Chrome: 19/19 ui-refresh journeys pass** on that build. Still old, and listed: `ops/` + scripts (37), `docs/` (history by decision), and the **backend identity strings** — the two FastAPI titles, the Chinese teacher prompts in `app/cm_update/provider.py`, the default display name `CourseMate 同学`, two DB-guard messages, and the tutor prompt pinned by `tests/test_tutor_prompt.py` (prompt and test must change together). Notification/e-mail templates do not exist yet |
+| `LOGO_ASSETS` | **PENDING_ASSET** | No artwork supplied. The interim mark is the repository's existing `favicon.svg`; `BRAND.logoStatus` says `PENDING_ASSET` in code rather than implying a final logo. The manifest had to be created, not edited |
 | `REPOSITORY_RENAME` | **NOT_STARTED** (target identified) | `git remote -v` → `https://github.com/xiao18825501901-rgb/coursemate-ai.git`. Renaming to `coursejesus` is a platform action; see `OWNER_ACTIONS_ONLY_COURSEJESUS.md` |
 | `DOMAIN_DNS_TLS` | **RECON_DONE (read-only)** | `coursejesus.com` is delegated to **Aliyun HiChina DNS** (`dns17/dns18.hichina.com`) with **no** `www` or apex records yet; the current `qqttai.com` zone is on **Cloudflare**, apex → Netlify, `www` CNAME → `coursemate-ai-qqtt.netlify.app` (the site to reuse), `rag`/`agent` → `47.114.34.175`. Front end 200 and www→apex 301 live; the API host resets the TLS handshake from this machine and answers `403 Server: Beaver` (Aliyun WAF) on HTTP. Details and the honest limits: `docs/coursejesus/DOMAIN_AND_CLERK_MIGRATION.md` |
 | `CLERK_DOMAIN_AND_USER_CONTINUITY` | **NOT_INSPECTED** | No Clerk instance has been read yet; requirement is the same Production instance and same user subject |
@@ -76,13 +76,17 @@ localhost screenshot or a `health=200`.
    endpoints cannot be reached from this machine (TLS reset; `403 Server: Beaver` on HTTP). The
    API result is recorded as an observation with its limits — it is not proof the API is down for
    real users, and it is not a licence to route around it via the old domain.
+9. **The visible brand rename (round 45)**: one brand source plus the build-time wiring described
+   in the `BRAND_UI` row, verified on the built bundle and with 19/19 real-Chrome journeys. Two
+   defects in the conversion script itself were caught by running the checks rather than trusting
+   the edit (a wrong relative import depth, and an import inserted inside a comment block that
+   broke a file's syntax); the damaged files were restored from git and re-converted.
 
 ## 3. Next steps, in order
 
-1. **Brand config source (A1)**: one module providing name/中文名/canonical+API origins/logo
-   path/support name; wire the shell, `index.html`, package metadata and the visible pages to it;
-   add the missing PWA manifest; keep Class B names intact. Then a test that fails if a *new*
-   user-visible file hard-codes the old name.
+1. **Brand completion (A1)**: convert the operations scripts and `ops/` material, write the
+   notification/e-mail templates from the same source, and re-run the browser journeys on the new
+   build. The web app itself is done and guarded.
 2. **Canvas read-only adapter (B)**: port the skill's discovery/pagination/file logic into a
    stateless adapter with injected connection context and token provider, preserving the upstream
    licence and the owner's local patch; add context-injection tests and negative tests for the
