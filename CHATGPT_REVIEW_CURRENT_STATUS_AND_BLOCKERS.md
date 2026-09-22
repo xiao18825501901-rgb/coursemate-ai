@@ -69,11 +69,11 @@ Claimed **finished and verified on a named revision**:
 
 ## 4. What is NOT finished, and why — by status class
 
-The ledger carries 38 rows (B-01 … B-38) with full detail; the summary:
+The ledger carries 39 rows (B-01 … B-39) with full detail; the summary:
 
 | Status | Count | Representative items |
 |---|---|---|
-| `RESOLVED_WITH_EVIDENCE` | 24 | module-D resolver type errors; missing QA-stream evidence bundle; `is_definitive` having no caller; the five module metrics being uncomputable; the companion dataset's missing split manifest; six documentation claims that did not match the code; the reference-gate note now reaching the shipped UI; the DeepSeek switch-window configuration refusals now pinned by test; the V1↔V2 template-parity question closed by measurement; an owner instruction that named an environment variable no code reads; a production marker that was written for an artifact set the verifier had just rejected; the call-site matrix now pinned to the catalog; the service that could not read the TypeSafe credential at all; and **the live adapter verified against the real SDK wheel, which exposed two wrong model values** |
+| `RESOLVED_WITH_EVIDENCE` | 25 | module-D resolver type errors; missing QA-stream evidence bundle; `is_definitive` having no caller; the five module metrics being uncomputable; the companion dataset's missing split manifest; six documentation claims that did not match the code; the reference-gate note now reaching the shipped UI; the DeepSeek switch-window configuration refusals now pinned by test; the V1↔V2 template-parity question closed by measurement; an owner instruction that named an environment variable no code reads; a production marker that was written for an artifact set the verifier had just rejected; the call-site matrix now pinned to the catalog; the service that could not read the TypeSafe credential at all; the live adapter verified against the real SDK wheel; and **an ablation CLI that produced a fake run labelled `live`** |
 | `LOCAL_IMPLEMENTATION_GAP` (open, mine) | **0** | none — every local gap this audit found is closed with code and a test |
 | `WAITING_CREDENTIAL` | 2 | live Jev validation; live DeepSeek validation |
 | `WAITING_BUDGET` | 1 | a real token/USD ceiling (all current figures are proposals) |
@@ -443,6 +443,26 @@ forbids, so the flag stays `false`.
     two numbers meant a mis-mapping in the metric-to-decision table — they do not: each metric is mapped
     to the definition it reads, which is exactly what the docstring says.
 
+22. **A `live` ablation run was produced by the fake transport, and the artefact said `live`.** Following the
+    same "check the path the live gate will actually take" thread, I read the sibling CLI that runs the six
+    component arms. Its `--transport live` branch called the runner with `FakeJevTransport()`, justified by a
+    comment saying the branch was "unreachable after `_live_preflight`". That is true only while the
+    credentials are **absent**: `_live_preflight` passes when both `TYPESAFE_API_KEY` and `DEEPSEEK_API_KEY`
+    are set and `--allow-billable` is given — precisely the situation the owner is being asked to create.
+    Reproduced before touching anything, with dummy keys set and no call made: the CLI exited **0**, ran the
+    fake transport, and wrote a 6,594-byte artefact whose top-level `transport` field said **`live`** while
+    each arm line said `deterministic_fake`. That is the substitution this project forbids, sitting on the
+    exact path the live gate would take. Fixed three ways, because the fix should not depend on one guard:
+    the live branch refuses with exit 3 and a named reason and writes nothing; the payload records
+    `transport_used` beside the requested `transport`; and the CLI refuses to write at all if those two
+    disagree. Verified by running both paths — live now exits 3 with no file, offline exits 0 and records
+    `transport: fake` / `transport_used: deterministic_fake` — and mutation-proved against the pre-fix script
+    read from git, which returns 0 and writes the artefact claiming `live`, so the new test fails on it.
+    **The reason it survived is worth stating:** nothing ran this CLI. Four suites reference the ablation
+    module and all of them import it rather than the command line, so the file had no coverage at all.
+    `tests/test_jev_semantic_ablation_cli.py` now drives `main()` directly (3 tests), covering both
+    refusals and the recorded transport. The sibling A–E CLI was checked and does **not** share the defect.
+
 Two of my own first-draft claims were wrong and were corrected in place rather than left standing: I
 first recorded the retrieval re-rank as "40 calls per page, fixable by batching" — it is bounded at
 **16**, and the batching I proposed is not available for that shape (`JevCall` shares one state across
@@ -454,7 +474,8 @@ QA stream would be byte-identical without a credential — `create_app` **always
 
 | Gate | Result |
 |---|---|
-| Full backend regression | **1301 passed / 1 skipped / 0 failed** in 1614.72s (exit 0) — `work/current-change/full_run_round39.log`, run on the **frozen** revision `e3cdc51`, with `git diff e3cdc51 -- services/rag-api benchmarks` empty so the run describes the code as shipped. The one skip is deliberate: the test that pins our TypeSafe names to the SDK's own constants skips while the optional package is absent and activates where it is installed |
+| Full backend regression | **1304 passed / 1 skipped / 0 failed** in 1544.60s (exit 0) — `work/current-change/full_run_round40.log`, run on the **frozen** revision `5497aa3`, with `git diff 5497aa3 -- services/rag-api benchmarks scripts` empty so the run describes the code as shipped. The delta from 1301 is exactly the 3 CLI tests added this round; the one skip is the skip-aware SDK-constants test |
+| Ablation CLI coverage (new this round) | `tests/test_jev_semantic_ablation_cli.py` (3 tests) is the first coverage this entry point has ever had: it asserts the live branch refuses (exit 3, no artefact), that the preflight still refuses without authorization (exit 2, no artefact), and that an offline run records `transport: fake` with `transport_used: deterministic_fake`. Mutation-proved against the pre-fix script read from git, which exits 0 and writes an artefact claiming `live` |
 | Two invariant suites added this round | `tests/test_jev_callsite_matrix.py` (5) pins the §3 deliverable to `app/jev/catalog.py` and `JevGateway.mode_for`; `tests/test_owner_actions_name_real_variables.py` (3) fails if any variable the owner document names is not read through a real mechanism. Both carry a measured mutation proof (5/5 and 3/3 respectively, including the pre-fix gateway read from git) |
 | Browser journeys (real Chrome, real three services, injected identity) | **46 journeys / 0 failed** — `ui-refresh` 19, `jev-structured` 6, `coursemate` 4, `learning` 3 (re-run on `6ba70b0`) **plus `codex-audit` 14** (round 37, on `d656bf7`). The audit suite is isolated: its own fixtures, its own ports (8200/8201/5373), its own web bundle built into the run directory, and a stripped environment ("do not forward account credentials, provider endpoints, or live environment files" is in its config); its Playwright report records **14 expected / 0 unexpected / 0 flaky / 0 skipped**. It had never been part of this report's evidence before, which is itself the finding — the task's gate list asks for the audit journeys and I had been citing four suites, not five |
 | Web app | `tsc --noEmit` exit 0, **73 vitest passed** (18 → 19 files), production build exit 0 |
@@ -498,12 +519,12 @@ contract.
 ### 6.1 Backend regression
 
 Command: `services\rag-api\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider`
-Log: `work/current-change/full_run_round39.log` → `1301 passed, 1 skipped, 2 warnings in 1614.72s
-(0:26:54)`, exit 0, on the frozen revision `e3cdc51`. Only documentation changed after that commit, so
-this run still describes the services in the tree. The two warnings are pre-existing third-party
-deprecations (`starlette.testclient` with `httpx`, and an `anyio.abc.BlockingPortal` alias), not failures.
-The skip is named in the log (`tests/test_owner_actions_name_real_variables.py:141`) and is the
-skip-aware SDK-constants test described above; it is the only skip in the run.
+Log: `work/current-change/full_run_round40.log` → `1304 passed, 1 skipped, 2 warnings in 1544.60s
+(0:25:44)`, exit 0, on the frozen revision `5497aa3`. Only documentation changed after that commit, so
+this run still describes the services and scripts in the tree. The two warnings are pre-existing
+third-party deprecations (`starlette.testclient` with `httpx`, and an `anyio.abc.BlockingPortal` alias),
+not failures. The skip is named in the log (`tests/test_owner_actions_name_real_variables.py:141`) and is
+the skip-aware SDK-constants test; it is the only skip in the run.
 
 Evidence hygiene, stated because it tripped me up while re-reading: these logs are **UTF-16LE**
 (PowerShell's `Tee-Object`), as are the earlier rounds' logs, so a UTF-8 reader shows them as spaced-out

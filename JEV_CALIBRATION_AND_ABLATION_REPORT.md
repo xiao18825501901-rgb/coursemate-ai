@@ -232,6 +232,15 @@ Evidence: `work/current-change/semantic-arms-companion-r39.json` (companion run)
 `work/current-change/semantic-arms-r39.json` (frozen run), both produced by
 `scripts/run_jev_semantic_ablation.py --arm all-components --transport fake`.
 
+**Before running this CLI live, read this.** `--transport live` on
+`run_jev_semantic_ablation.py` now **refuses** (exit 3, no output written): the CLI has no live predictor
+wiring, and until round 40 it fell through to the fake transport while labelling the artefact `live` — with
+both credentials present and `--allow-billable`, which is exactly the live-gate condition. The live Jev
+transport exists for the A–E arms in `scripts/run_jev_ablation.py`; the six component arms need live
+predictors that do not exist yet, so a live component-arm run has to be built first rather than faked. Every
+ablation artefact now records `transport_used` beside the requested `transport`, and the CLI refuses to write
+if the two disagree.
+
 ## 7. What is needed to produce a real result
 
 1. `TYPESAFE_API_KEY` in the backend env (owner) **and** `typesafe-sdk==0.7.0` installed in the service
