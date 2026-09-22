@@ -1,0 +1,225 @@
+{
+ "split_version": "1",
+ "grouping": [
+  "document_id",
+  "node_id",
+  "question_family"
+ ],
+ "splits": {
+  "train": {
+   "count": 28,
+   "sample_ids": [
+    "jevm-0003",
+    "jevm-0004",
+    "jevm-0005",
+    "jevm-0007",
+    "jevm-0008",
+    "jevm-0011",
+    "jevm-0012",
+    "jevm-0015",
+    "jevm-0016",
+    "jevm-0017",
+    "jevm-0018",
+    "jevm-0020",
+    "jevm-0022",
+    "jevm-0023",
+    "jevm-0030",
+    "jevm-0031",
+    "jevm-0032",
+    "jevm-0033",
+    "jevm-0034",
+    "jevm-0038",
+    "jevm-0040",
+    "jevm-0041",
+    "jevm-0042",
+    "jevm-0043",
+    "jevm-0044",
+    "jevm-0046",
+    "jevm-0048",
+    "jevm-0049"
+   ]
+  },
+  "calibration": {
+   "count": 10,
+   "sample_ids": [
+    "jevm-0001",
+    "jevm-0002",
+    "jevm-0006",
+    "jevm-0014",
+    "jevm-0025",
+    "jevm-0026",
+    "jevm-0027",
+    "jevm-0029",
+    "jevm-0037",
+    "jevm-0045"
+   ]
+  },
+  "test": {
+   "count": 11,
+   "sample_ids": [
+    "jevm-0009",
+    "jevm-0010",
+    "jevm-0013",
+    "jevm-0019",
+    "jevm-0021",
+    "jevm-0024",
+    "jevm-0028",
+    "jevm-0035",
+    "jevm-0036",
+    "jevm-0039",
+    "jevm-0047"
+   ]
+  }
+ },
+ "group_keys": {
+  "doc-cs3481-capability|node-cap-01|capability": [
+   "jevm-0022"
+  ],
+  "doc-cs3481-capability|node-cap-02|capability": [
+   "jevm-0023"
+  ],
+  "doc-cs3481-capability|node-cap-03|capability": [
+   "jevm-0024"
+  ],
+  "doc-cs3481-capability|node-cap-04|capability": [
+   "jevm-0025"
+  ],
+  "doc-cs3481-capability|node-cap-05|capability": [
+   "jevm-0026"
+  ],
+  "doc-cs3481-capability|node-cap-06|capability": [
+   "jevm-0027"
+  ],
+  "doc-cs3481-capability|node-cap-07|capability": [
+   "jevm-0028"
+  ],
+  "doc-cs3481-consistency|node-cons-01|consistency": [
+   "jevm-0008"
+  ],
+  "doc-cs3481-consistency|node-cons-02|consistency": [
+   "jevm-0009"
+  ],
+  "doc-cs3481-consistency|node-cons-03|consistency": [
+   "jevm-0010"
+  ],
+  "doc-cs3481-consistency|node-cons-04|consistency": [
+   "jevm-0011"
+  ],
+  "doc-cs3481-consistency|node-cons-05|consistency": [
+   "jevm-0012"
+  ],
+  "doc-cs3481-consistency|node-cons-06|consistency": [
+   "jevm-0013"
+  ],
+  "doc-cs3481-consistency|node-cons-07|consistency": [
+   "jevm-0014"
+  ],
+  "doc-cs3481-entity|node-ent-01|entity_relation": [
+   "jevm-0015"
+  ],
+  "doc-cs3481-entity|node-ent-02|entity_relation": [
+   "jevm-0016"
+  ],
+  "doc-cs3481-entity|node-ent-03|entity_relation": [
+   "jevm-0017"
+  ],
+  "doc-cs3481-entity|node-ent-04|entity_relation": [
+   "jevm-0018"
+  ],
+  "doc-cs3481-entity|node-ent-05|entity_relation": [
+   "jevm-0019"
+  ],
+  "doc-cs3481-entity|node-ent-06|entity_relation": [
+   "jevm-0020"
+  ],
+  "doc-cs3481-entity|node-ent-07|entity_relation": [
+   "jevm-0021"
+  ],
+  "doc-cs3481-extraction|node-extr-01|extraction": [
+   "jevm-0001"
+  ],
+  "doc-cs3481-extraction|node-extr-02|extraction": [
+   "jevm-0002"
+  ],
+  "doc-cs3481-extraction|node-extr-03|extraction": [
+   "jevm-0003"
+  ],
+  "doc-cs3481-extraction|node-extr-04|extraction": [
+   "jevm-0004"
+  ],
+  "doc-cs3481-extraction|node-extr-05|extraction": [
+   "jevm-0005"
+  ],
+  "doc-cs3481-extraction|node-extr-06|extraction": [
+   "jevm-0006"
+  ],
+  "doc-cs3481-extraction|node-extr-07|extraction": [
+   "jevm-0007"
+  ],
+  "doc-cs3481-feedback|node-fcat-01|feedback_category": [
+   "jevm-0036"
+  ],
+  "doc-cs3481-feedback|node-fcat-02|feedback_category": [
+   "jevm-0037"
+  ],
+  "doc-cs3481-feedback|node-fcat-03|feedback_category": [
+   "jevm-0038"
+  ],
+  "doc-cs3481-feedback|node-fcat-04|feedback_category": [
+   "jevm-0039"
+  ],
+  "doc-cs3481-feedback|node-fcat-05|feedback_category": [
+   "jevm-0040"
+  ],
+  "doc-cs3481-feedback|node-fcat-06|feedback_category": [
+   "jevm-0041"
+  ],
+  "doc-cs3481-feedback|node-fcat-07|feedback_category": [
+   "jevm-0042"
+  ],
+  "doc-cs3481-feedback|node-fsev-01|feedback_severity": [
+   "jevm-0043"
+  ],
+  "doc-cs3481-feedback|node-fsev-02|feedback_severity": [
+   "jevm-0044"
+  ],
+  "doc-cs3481-feedback|node-fsev-03|feedback_severity": [
+   "jevm-0045"
+  ],
+  "doc-cs3481-feedback|node-fsev-04|feedback_severity": [
+   "jevm-0046"
+  ],
+  "doc-cs3481-feedback|node-fsev-05|feedback_severity": [
+   "jevm-0047"
+  ],
+  "doc-cs3481-feedback|node-fsev-06|feedback_severity": [
+   "jevm-0048"
+  ],
+  "doc-cs3481-feedback|node-fsev-07|feedback_severity": [
+   "jevm-0049"
+  ],
+  "doc-cs3481-tool|node-tool-01|tool_intent": [
+   "jevm-0029"
+  ],
+  "doc-cs3481-tool|node-tool-02|tool_intent": [
+   "jevm-0030"
+  ],
+  "doc-cs3481-tool|node-tool-03|tool_intent": [
+   "jevm-0031"
+  ],
+  "doc-cs3481-tool|node-tool-04|tool_intent": [
+   "jevm-0032"
+  ],
+  "doc-cs3481-tool|node-tool-05|tool_intent": [
+   "jevm-0033"
+  ],
+  "doc-cs3481-tool|node-tool-06|tool_intent": [
+   "jevm-0034"
+  ],
+  "doc-cs3481-tool|node-tool-07|tool_intent": [
+   "jevm-0035"
+  ]
+ },
+ "content_hash": "909945f15d0f6e8e5337b3310e68dfbb89509595c394a4a38a0d9442019df842",
+ "note": "Splits are assigned by (document_id, node_id, question_family) group, never by row: the same underlying question with different numbers shares one group and therefore one split. A fitted temperature is only valid against this exact content_hash."
+}

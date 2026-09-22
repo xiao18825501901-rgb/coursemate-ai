@@ -106,12 +106,12 @@ six below.
 
 | Arm | Module | Definition turned on | Metric | Status on the frozen dataset |
 |---|---|---|---|---|
-| `M-EXTRACT` | ExtractionVerification | `extraction.field_grounded.v1` | extraction false acceptance / false rejection | `INSUFFICIENT_SAMPLES` |
-| `M-ENTITY` | EntityResolution | `entity.relation.v1` | entity false merge / missed alias / conflict false positive | `INSUFFICIENT_SAMPLES` |
-| `M-CONSISTENCY` | EvidenceConsistency | `evidence.consistency.v1` | condition distinction | `INSUFFICIENT_SAMPLES` |
+| `M-EXTRACT` | ExtractionVerification | `extraction.field_grounded.v1` | extraction false acceptance / false rejection | `INSUFFICIENT_SAMPLES` (see §6.1 — this dataset has none) |
+| `M-ENTITY` | EntityResolution | `entity.relation.v1` | entity false merge / missed alias / conflict false positive | `INSUFFICIENT_SAMPLES` (see §6.1) |
+| `M-CONSISTENCY` | EvidenceConsistency | `evidence.consistency.v1` | condition distinction | `INSUFFICIENT_SAMPLES` (see §6.1) |
 | `M-CITATION` | ClaimCitationAudit | `source.supports_claim.v1` + `source.select_span.v1` | citation-support accuracy, unsupported-claim rate (citation, n=42), span-selection accuracy (span_selection, n=16) | **MEASURED** |
-| `M-CAPABILITY` | CapabilityRouter | `teaching.capability.v1` | capability misroute | `INSUFFICIENT_SAMPLES` |
-| `M-TOOL` | ToolIntentCheck | `tool.intent.v1` | tool false allow / false block | `INSUFFICIENT_SAMPLES` |
+| `M-CAPABILITY` | CapabilityRouter | `teaching.capability.v1` | capability misroute | `INSUFFICIENT_SAMPLES` (see §6.1) |
+| `M-TOOL` | ToolIntentCheck | `tool.intent.v1` | tool false allow / false block | `INSUFFICIENT_SAMPLES` (see §6.1) |
 
 Five of the six report `INSUFFICIENT_SAMPLES` for **every** module metric and emit **no number**: the
 frozen 310-sample dataset contains zero samples for `extraction.field_grounded.v1`,
@@ -124,6 +124,67 @@ verdict whenever any contributing arm has an unmeasured metric.
 To make those five measurable, the dataset must be extended with labelled samples for their
 definitions (a sampling task that needs the live model and the owner's budget). Until then their
 component arms are plumbing: differentiated, offline, and explicitly unmeasured.
+
+### 6.1 Round 31: the companion dataset, and the reason it was not enough on its own
+
+Five of those arms were refusing for **two** reasons, and only one of them was data:
+
+* **the runner had no result collection for those families at all** — `extraction_false_acceptance`,
+  `entity_false_merge`, `condition_distinction`, `capability_misroute`, `tool_false_allow/block`
+  could not be computed for *any* dataset. All ten module metrics (plus two for P2 feedback) are now
+  implemented, each with its population stated in the docstring and its denominator published in
+  `metric_denominators`, so a `0.0` over an empty population cannot be read as a clean result;
+* **the frozen dataset had no labels for them**, and it is immutable (its `content_hash` and split
+  are pinned by test). A **companion** dataset was therefore added rather than an edit:
+  `benchmarks/jev-module-judgments.dataset.json` — 49 samples, 7 per definition, for exactly the
+  seven definitions that had none; tiers 6 `OBJECTIVE_VERIFIED` (each naming a deterministic rule
+  checked in the code), 41 `SOURCE_REVIEWED`, 2 `DISPUTED` (both readings recorded) and **zero
+  `SILVER_DEEPSEEK`**, because no model was called.
+
+With both fixed, the arms report `MEASURED` over the companion dataset:
+
+| Arm | Metric | Status (companion dataset) |
+|---|---|---|
+| `M-EXTRACT` | extraction false acceptance / false rejection | **MEASURED** (n=7 each) |
+| `M-ENTITY` | entity false merge / missed alias / conflict false positive | **MEASURED** (n=7 each) |
+| `M-CONSISTENCY` | condition distinction | **MEASURED** (n=7) |
+| `M-CAPABILITY` | capability misroute | **MEASURED** (n=7) |
+| `M-TOOL` | tool false allow / false block | **MEASURED** (n=7 each) |
+| (none) | feedback category accuracy / severity MAE | **MEASURED** (n=7 each; P2 has no component arm) |
+
+**Computable is not the same as interpretable.** Every one of those numbers comes from the
+deterministic fake transport, so the run stays `NON_INTERPRETABLE_PLUMBING_ONLY` and
+`compare_jev_arms` still refuses a quality verdict. The values prove the metric discriminates; they
+say nothing about a model.
+
+### 6.2 The companion split manifest, and two limitations it makes visible in code
+
+The companion dataset initially had no split manifest, which made it unreachable for the calibrator
+(whose contract is "fit only on the held-out calibration split, refuse when there is none").
+`scripts/build_jev_module_split.py` now builds `benchmarks/jev-module-judgments.split.json` from the
+same code as the frozen manifest (`build_split_manifest`) and is idempotent — it verifies instead of
+rewriting, and a difference is a hard error rather than a silent change to a pinned split.
+
+The manifest records `train 28 / calibration 10 / test 11`, and `split_coverage()` prints both
+limitations explicitly rather than letting a reader assume full coverage:
+
+* **`entity.relation.v1` has no calibration-split sample** → its temperature cannot be fitted until
+  it has more groups. This also corrects a false claim in the code: `assign_split`'s docstring used
+  to promise that "every definition contributes to every split", which a hash-based assignment
+  cannot guarantee. The docstring now says what the function does.
+* **`extraction.field_grounded.v1` has no test-split sample** → nothing is held out to evaluate it
+  on yet.
+
+Two provenance defects were fixed at the same time, both exposed by making the dataset
+configurable: the artifact used to record the *frozen* manifest name and dataset path even when
+fitting a companion set (`split_ref` / `dataset_path` now name the files actually used), which would
+have pinned an artifact to a split it never saw.
+
+Finally, the calibration path is proven to run over the companion dataset end to end:
+`calibrate_jev.py --dataset … --split …` produced an artifact with `n_calibration = 10`, 5 buckets
+and the companion `content_hash`. **The predictions in that run were synthetic** (a flat
+distribution written by the test), which is why ECE is unchanged before and after — that run
+demonstrates the plumbing, and is not a calibration result.
 
 ## 7. What is needed to produce a real result
 

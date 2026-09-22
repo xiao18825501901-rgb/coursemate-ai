@@ -601,13 +601,71 @@ _SPLIT_PATTERN = ("train", "train", "train", "calibration", "test")
 def assign_split(group_key: tuple[str, str, str]) -> str:
     """Deterministically assign a split for a group key (never per row).
 
-    Groups are ordered by their canonical key and assigned to
-    train/calibration/test in a 3:1:1 repeating pattern per definition, so every
-    definition contributes to every split while the whole (document, node, family)
-    group stays atomic — the same underlying question with different numbers cannot
-    land in two splits because it shares one group key.
+    The assignment is a **hash** of the group key taken modulo the 3:1:1
+    train/calibration/test pattern, so it is stable and independent of row order, and the
+    whole (document, node, family) group always lands in one split — the same underlying
+    question with different numbers cannot be split across two of them.
+
+    It does **not** guarantee that every definition (or every language, or every family)
+    contributes to every split. That guarantee is not available from a hash, and the
+    earlier wording here claimed it: with few groups a definition can easily draw no
+    calibration group at all, which makes its thresholds unfittable until more groups
+    exist. Use :func:`split_coverage` to see that per definition instead of assuming it.
     """
     return _split_for_ordered_index(_ordered_group_index(group_key))
+
+
+def judgments_from_dataset(payload: Mapping[str, Any]) -> list[JevJudgment]:
+    """Parse a validated dataset payload into judgments (one per sample)."""
+    return [
+        _parse_judgment(raw, f"sample #{index}")
+        for index, raw in enumerate(payload["samples"])
+    ]
+
+
+def split_coverage(samples: Sequence[JevJudgment]) -> dict[str, dict[str, int]]:
+    """Per-definition sample counts per split, including the zeros.
+
+    Report-only: it answers "can this definition's thresholds even be fitted?" before a
+    calibration run is attempted. Every definition present in ``samples`` appears in the
+    result with all three splits listed, so a missing calibration split shows up as an
+    explicit ``0`` rather than as a definition that quietly vanishes from a table.
+    """
+    coverage: dict[str, dict[str, int]] = {}
+    for sample in samples:
+        per_split = coverage.setdefault(
+            sample.definition_id, {name: 0 for name in SPLIT_NAMES}
+        )
+        per_split[assign_split(sample.group_key)] += 1
+    return coverage
+
+
+def unfittable_definitions(samples: Sequence[JevJudgment]) -> tuple[str, ...]:
+    """Definitions with no calibration-split sample (their thresholds cannot be fitted)."""
+    return tuple(
+        sorted(
+            definition_id
+            for definition_id, per_split in split_coverage(samples).items()
+            if per_split["calibration"] == 0
+        )
+    )
+
+
+def unevaluated_definitions(samples: Sequence[JevJudgment]) -> tuple[str, ...]:
+    """Definitions with no test-split sample (nothing held out to evaluate them on).
+
+    The symmetric limitation to :func:`unfittable_definitions`: a definition with no
+    calibration sample cannot have a threshold fitted, and one with no test sample cannot
+    be reported against a held-out split — both are facts about the dataset, not about the
+    model, and both are surfaced rather than left for a reader to notice.
+    """
+    return tuple(
+        sorted(
+            definition_id
+            for definition_id, per_split in split_coverage(samples).items()
+            if per_split["test"] == 0
+        )
+    )
 
 
 def _ordered_group_index(group_key: tuple[str, str, str]) -> int:
@@ -1063,7 +1121,7 @@ def run_jev_semantic_ablation(
     """
     modes = arm_modes(arm)
     dataset_status = str(dataset.get("dataset_status", DATASET_STATUS_EXAMPLE))
-    samples = [_parse_judgment(raw, f"sample #{i}") for i, raw in enumerate(dataset["samples"])]
+    samples = judgments_from_dataset(dataset)
 
     retrieval_results: list[RetrievalResult] = []
     locator_results: list[LocatorResult] = []

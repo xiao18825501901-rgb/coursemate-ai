@@ -29,7 +29,7 @@ from app.evaluation.jev_calibration import (
 )
 from app.evaluation.jev_semantic_ablation import (
     SPLIT_NAMES,
-    JevJudgment,
+    judgments_from_dataset,
     validate_split_leakage,
 )
 
@@ -64,20 +64,23 @@ def _split_map(samples, manifest):
     return assignment
 
 
-def fit_and_write(predictions_path: Path, out: Path) -> dict:
-    dataset = json.loads(DATASET_PATH.read_text(encoding="utf-8"))
-    manifest = json.loads(SPLIT_PATH.read_text(encoding="utf-8"))
-    samples = [
-        JevJudgment(
-            sample_id=s["sample_id"], definition_id=s["definition_id"],
-            definition_version=s["definition_version"], language=s["language"],
-            option_count=s["option_count"], document_id=s["document_id"],
-            node_id=s["node_id"], question_family=s["question_family"],
-            label_tier=s["label_tier"], label_evidence=s["label_evidence"],
-            state=s["state"], questions=s["questions"], label=s["label"], split="",
-        )
-        for s in dataset["samples"]
-    ]
+def fit_and_write(
+    predictions_path: Path,
+    out: Path,
+    *,
+    dataset_path: Path | None = None,
+    split_path: Path | None = None,
+) -> dict:
+    """Fit and write the artifact. ``dataset_path``/``split_path`` default to the frozen pair.
+
+    They exist so a companion dataset (the round-31 module-judgment set) can be calibrated
+    with the same maths and the same leakage validation instead of being unreachable: the
+    contract is unchanged — fit only on the held-out calibration split, refuse when there
+    is none, and refuse when a calibration row has no prediction.
+    """
+    dataset = json.loads((dataset_path or DATASET_PATH).read_text(encoding="utf-8"))
+    manifest = json.loads((split_path or SPLIT_PATH).read_text(encoding="utf-8"))
+    samples = judgments_from_dataset(dataset)
     validate_split_leakage(samples, manifest)
     assignment = _split_map(samples, manifest)
 
@@ -131,14 +134,18 @@ def fit_and_write(predictions_path: Path, out: Path) -> dict:
             "Refusing to write: no calibration-split predictions available."
         )
 
+    source_dataset = dataset_path or DATASET_PATH
+    source_split = split_path or SPLIT_PATH
     artifact = fit_temperatures_by_bucket(
         records,
         fitted_on_split="calibration",
         dataset_content_hash=manifest["content_hash"],
-        split_ref=str(SPLIT_PATH.name),
+        # Provenance must name the files actually used: recording the frozen paths while
+        # fitting a companion dataset would pin the artifact to a split it never saw.
+        split_ref=str(source_split.name),
     )
     payload = artifact.to_dict()
-    payload["dataset_path"] = str(DATASET_PATH)
+    payload["dataset_path"] = str(source_dataset)
     payload["predictions_path"] = str(predictions_path)
     payload["n_calibration"] = len(records)
     payload["precision_note"] = PRECISION_LIMITATION_NOTE
@@ -167,12 +174,26 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--predictions", type=Path, required=True)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument(
+        "--dataset",
+        type=Path,
+        default=None,
+        help="dataset JSON (default: the frozen benchmarks/jev-judgments.dataset.json)",
+    )
+    parser.add_argument(
+        "--split",
+        type=Path,
+        default=None,
+        help="split manifest (default: the frozen benchmarks/jev-calibration.split.json)",
+    )
     args = parser.parse_args()
     if args.out.exists() or args.out.with_name(f".{args.out.name}.partial").exists():
         print("Refusing to overwrite an existing calibration artifact or partial checkpoint.")
         return 2
     try:
-        payload = fit_and_write(args.predictions, args.out)
+        payload = fit_and_write(
+            args.predictions, args.out, dataset_path=args.dataset, split_path=args.split
+        )
     except ValueError as error:
         print(f"Calibration preflight failed: {error}")
         return 2
