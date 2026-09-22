@@ -94,11 +94,18 @@ const info = {
   release_sha: gitSha,
   artifacts: assets,
 };
-writeFileSync(path.join(distDir, "build-info.json"), JSON.stringify(info, null, 2) + "\n");
-
 if (failures.length > 0) {
+  // Write NOTHING here. The backend's production gate reads this marker's
+  // `not_for_production` field, so a marker written for an artifact set this run
+  // just rejected would assert the opposite of the verdict: a dist containing
+  // `test-session-token` and localhost API fallbacks would carry
+  // `not_for_production: false`. A failed verification fails the deploy, so there
+  // is no build to describe.
   console.error("Production artifact verification FAILED:");
   for (const failure of failures) console.error(`  - ${failure}`);
+  console.error("build-info.json was NOT written.");
   process.exit(1);
 }
+
+writeFileSync(path.join(distDir, "build-info.json"), JSON.stringify(info, null, 2) + "\n");
 console.log(`verify: ${assets.length} artifacts scanned, build-info.json written (sha ${gitSha}).`);
