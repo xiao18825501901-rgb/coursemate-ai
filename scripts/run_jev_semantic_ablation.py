@@ -1,4 +1,4 @@
-"""Run the A/B/C/D/E Jev ablation offline (plumbing) or live (billable, gated).
+"""Run the A/B/C/D/E Jev ablation (plus the six component arms) offline or live.
 
 Offline mode (``--transport fake``, the default) needs zero credentials and produces a
 result tagged ``NON_INTERPRETABLE_PLUMBING_ONLY``; :func:`compare_jev_arms` then
@@ -6,6 +6,11 @@ returns ``NOT_INTERPRETABLE`` and no quality claim is possible. Live mode requir
 ``--allow-billable`` and a configured Jev service + DeepSeek key; neither exists in
 this environment, so a live run is refused rather than faked. Nothing here can cost
 money without the explicit ``--allow-billable`` flag.
+
+Arms: ``--arm A|B|C|D|E`` (the historical nesting), ``--arm M-EXTRACT|M-ENTITY|
+M-CONSISTENCY|M-CITATION|M-CAPABILITY|M-TOOL`` (the six structured-enhancement
+component arms), ``--arm all`` (A–E), or ``--arm all-components`` (the six component
+arms).
 """
 
 from __future__ import annotations
@@ -20,8 +25,10 @@ ROOT = Path(__file__).resolve().parents[1]
 RAG_SERVICE = ROOT / "services" / "rag-api"
 sys.path.insert(0, str(RAG_SERVICE))
 
-from app.evaluation.jev_semantic_ablation import (
+from app.evaluation.jev_semantic_ablation import (  # noqa: E402 -- after sys.path bootstrap
     ARM_NAMES,
+    COMPONENT_ARM_NAMES,
+    INSUFFICIENT_SAMPLES,
     FakeJevTransport,
     compare_jev_arms,
     deterministic_fake_jev_predictor,
@@ -41,7 +48,16 @@ def _write_json_atomically(path: Path, payload: dict) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--arm", choices=[*ARM_NAMES, "all"], default="all")
+    parser.add_argument(
+        "--arm",
+        choices=[*ARM_NAMES, *COMPONENT_ARM_NAMES, "all", "all-components"],
+        default="all",
+        help=(
+            "Which arm(s) to run: A–E (the historical nesting), the six component arms "
+            "(M-EXTRACT/M-ENTITY/M-CONSISTENCY/M-CITATION/M-CAPABILITY/M-TOOL), 'all' "
+            "for the A–E arms, or 'all-components' for the six component arms."
+        ),
+    )
     parser.add_argument("--dataset", type=Path, default=DATASET_PATH)
     parser.add_argument("--transport", choices=["fake", "live"], default="fake")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
@@ -81,6 +97,16 @@ def _summarize_arm(summary: dict) -> None:
         f"criterion_error={_fmt(metrics.get('criterion_error'))} "
         f"mainline={_fmt(metrics.get('mainline_recovery_rate'))}"
     )
+    component = summary.get("component")
+    if component:
+        for name, metric in component.get("metrics", {}).items():
+            if metric.get("status") == INSUFFICIENT_SAMPLES:
+                print(f"    {name}=INSUFFICIENT_SAMPLES ({metric.get('samples', 0)} samples)")
+            else:
+                print(
+                    f"    {name}={_fmt(metric.get('value'))} "
+                    f"(status={metric.get('status')}, samples={metric.get('samples')})"
+                )
 
 
 def _fmt(value) -> str:
@@ -105,7 +131,12 @@ def main() -> int:
         print(f"Ablation preflight failed: {error}")
         return 2
 
-    arms = list(ARM_NAMES) if args.arm == "all" else [args.arm]
+    if args.arm == "all":
+        arms = list(ARM_NAMES)
+    elif args.arm == "all-components":
+        arms = list(COMPONENT_ARM_NAMES)
+    else:
+        arms = [args.arm]
     arm_summaries = []
     for arm in arms:
         if args.transport == "fake":

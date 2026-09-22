@@ -33,26 +33,45 @@ field trimming → Jev call**. A decision is never made on a payload that skippe
 ## 3. Authority limits
 
 Jev cannot write grades, LEARNED, coverage, permissions or budgets; it cannot open a transaction,
-execute SQL beyond the receipt table, or generate user-visible teaching text. The only table the layer
-writes is `jev_decision_receipts` (migration 028). Call-site tests assert that learning/grade/coverage
-row counts are unchanged across a fully wired flow.
+execute SQL beyond its own stores, or generate user-visible teaching text. The layer writes exactly two
+tables: `jev_decision_receipts` (migration 028, every decision) and `entity_relations` (migration 029,
+**proposals only**, `status='PROPOSED'` — the semantic layer can never write `ACCEPTED`/`REJECTED`, and
+nothing on the retrieval path reads, merges, renames, reorders or deletes anything because of a row
+there). Call-site tests assert that learning/grade/coverage row counts are unchanged across a fully
+wired flow, and a database *without* migration 029 still retrieves the identical deterministic order
+(`test_relation_bookkeeping_never_breaks_retrieval_without_the_store`).
 
 Probability semantics are part of the safety story, not a detail: a Score is an ordered level, a Noul
 is a probability, and neither is a mark, a mastery level, a permission or a completion state.
 `probability_is_grade=false` is a contract, not a comment, and a Jev confidence is never authorization.
 
+Two module-specific boundaries are enforced in code and proven by test:
+
+* **Evidence resolution (module D).** The production resolver is read-only, is constructed per request
+  with the server-derived subject, reuses the canonical document ACL (`can_read_document_version` →
+  `_authorize_document_version`) and chunk scope (`_source_access`) rather than copying either, answers
+  `ok`/`missing`/`unauthorized` instead of raising, and bounds the text it can hand to a model. Tests
+  prove another user's private document and another course's document both come back `unauthorized` with
+  empty text on a real migrated database.
+* **Tool intent (module F).** The guard can only ever *withhold* a write: a `CONSISTENT` verdict cannot
+  grant a permission the actor lacked, read-only tool calls are never gated, and the mode defaults to
+  `off`, where no HTTP call is made at all and the existing synchronous path is byte-identical.
+
 ## 4. Failure matrix
 
 | Condition | Deterministic behaviour | User impact |
 |---|---|---|
-| Jev timeout / unavailable | original RRF for retrieval; MUST_KEEP + recent window for context; template default for pedagogy; `PENDING_REVIEW` for coverage; existing review for assessment | none — the product keeps working |
+| Jev timeout / unavailable | original RRF for retrieval; MUST_KEEP + recent window for context; template default for pedagogy; `PENDING_REVIEW` for coverage; existing review for assessment; `INSUFFICIENT_CONTEXT` for a citation card; no conflict note; the capability baseline for routing | none — the product keeps working |
 | Jev returns an unknown candidate id | rejected (`JEV_INVALID_RESPONSE`) and the deterministic value is used | none |
 | Jev returns non-finite / out-of-range numbers | rejected, fallback recorded | none |
 | Input exceeds the decision budget | deterministic fallback; the half-question is never sent | none |
 | Circuit breaker open | fail fast for the cooldown, fallback recorded, no retry storm | none |
-| Repeated identical failure | one attempt per decision; receipts record outcomes; no automatic paid retry | none |
+| Repeated identical failure | one attempt per decision; receipts record outcomes; no automatic paid retry; identical claim+source states de-duplicate to one call | none |
 | Coverage service down | `PENDING_REVIEW` — the student is never marked "not learned" | a review item appears instead of a wrong state |
 | Assessment criterion review down | marks come from the existing grader/review path; never zero because a tool failed | grading completes |
+| Citation audit fails outright | the citation cards are returned un-annotated with `audit_error` recorded on them; the answer is still delivered | none — an audit can never lose an answer that was already generated |
+| Cited document is stale, missing or unauthorized at the message revision | the card is annotated (`REJECTED` + reason); the citation is never silently dropped | the learner sees an explicit "not verifiable" marker |
+| Tool-intent guard unavailable (enforce mode) | `CONFIRMATION_REQUIRED`, the write does not run, the model is told to ask the user | the learner is asked to confirm instead of a silent write |
 | Receipt write fails | the decision still degrades deterministically; the failure is logged without payload contents | none |
 
 Every fallback is labelled (`path=fallback:<reason>`) so a result is never presented as a Jev decision
@@ -69,7 +88,12 @@ payload.
 
 * One attempt per decision, no automatic retry, no automatic paid escalation.
 * Independent questions on one state are batched into a single call; dependent decisions run in later
-  rounds; deterministic rules cost **0** Jev calls.
+  rounds; deterministic rules cost **0** Jev calls. Explicit commands (继续/只回答/做一题/交卷) are
+  answered by the deterministic router and never reach the model at all — proven by asserting the
+  receipt count is 0.
+* Per-answer bounds are enforced, not assumed: the citation audit checks at most 6 cards per answer and
+  the test asserts the transport call count matches, and identical claim+source states de-duplicate to a
+  single call at the gateway.
 * Before any billable run the harness prints the call count, per-definition input-token ceilings, the
   price applied and the combined ceiling, and refuses to start when the ceiling exceeds `--max-cost`.
 * A Jev outage never triggers a silent surge of DeepSeek calls: generation still obeys the user's
@@ -77,11 +101,16 @@ payload.
 
 ## 7. Local-attack surface
 
-There is no public Jev endpoint: the service is private and the model node (had the abandoned Laya
-direction continued) was never created. The layer accepts no client-supplied schema: definition ids
+The layer exposes **one** internal endpoint, added for the tool-intent guard:
+`POST /api/jev/tool-intent` in the RAG service. Its defence is explicit and tested: a constant-time
+comparison against `JEV_TOOL_INTENT_TOKEN` (never logged, never echoed), **503 when that token is not
+configured** so an unconfigured deployment cannot be called at all, 401 on a mismatch, and a bounded
+pydantic body (message/tool/permission/revision lengths plus a serialized `tool_arguments` cap). It
+returns a verdict and writes nothing except the Jev receipt. Everything else is private: definitions
 and versions are server-managed, candidate ids are server-generated, and request size, candidate count
 and definition version are validated server-side. There is no URL-fetch or file-read capability in the
-layer, so a model answer cannot be turned into an SSRF, an arbitrary read or a command.
+layer, so a model answer cannot be turned into an SSRF, an arbitrary read or a command — and the
+evidence resolver of module D reads only already-authorized local rows.
 
 ## 8. Verification status
 
@@ -89,7 +118,10 @@ layer, so a model answer cannot be turned into an SSRF, an arbitrary read or a c
 |---|---|
 | Zero Qwen egress from the migrated provider paths | host-spy tests |
 | Jev cannot invent a candidate / write state | gateway + wiring tests |
-| Failure paths degrade deterministically | gateway/callsite tests with a failing fake transport |
+| Jev writes only its receipts and proposal-only relations | `test_schema_rollback_compat.py` additive-table list, entity-relation tests, no-state-write invariant test |
+| Failure paths degrade deterministically | gateway/callsite tests with a failing fake transport; byte-identity tests for shadow/off/unavailable/no-Jev in modules B and C |
+| The citation audit cannot leak or lose anything | `test_jev_citation_evidence.py` (cross-user and cross-course `unauthorized`), `test_citation_audit_binding.py` (byte-identical cards with no semantic layer; failure recorded, answer kept) |
+| The tool-intent endpoint fails closed | `test_api_tool_intent.py` (503 without a configured token, 401 on mismatch, bounded body) |
 | Keys never appear in artifacts | canary/ablation artifact assertions |
 | **Live** TypeSafe behaviour, retry/pricing reality, and real fallback rates | **`NOT_RUN`** — no credential; no live evidence is claimed |
 

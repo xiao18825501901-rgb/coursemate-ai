@@ -44,6 +44,25 @@ Arms (versioned; the older A/B/C/D JeV report definitions are untouched):
 ``corpus.quality.v1`` stay on the shipped DeepSeek/deterministic path in every arm
 and are measured as separate families (classification, exercise, prerequisite,
 corpus quality) — Jev never replaces them in this workstream.
+
+Component arms (the six structured-enhancement modules, §10 of the task spec) are
+separate on/off switches against the same arm-A baseline; they never replace or
+redefine A–E and are **not** part of the strict nesting:
+
+* ``M-EXTRACT``    = ExtractionVerification (``extraction.field_grounded.v1``)
+* ``M-ENTITY``     = EntityResolution (``entity.relation.v1``)
+* ``M-CONSISTENCY``= EvidenceConsistency (``evidence.consistency.v1``)
+* ``M-CITATION``   = ClaimCitationAudit (``source.supports_claim.v1``,
+  ``source.select_span.v1``)
+* ``M-CAPABILITY`` = CapabilityRouter (``teaching.capability.v1``)
+* ``M-TOOL``       = ToolIntentCheck (``tool.intent.v1``)
+
+Each component arm reports, per module metric, either a reused A–E metric computed
+from the labelled samples that exist for its decision definition, or the explicit
+``INSUFFICIENT_SAMPLES`` marker when the dataset carries no such labels — it never
+invents a number. Only ``M-CITATION`` has labelled samples in the frozen dataset
+(``citation`` + ``span_selection`` families); the other five report
+``INSUFFICIENT_SAMPLES`` for every module metric.
 """
 
 from __future__ import annotations
@@ -89,6 +108,27 @@ from app.learning.intent_commands import route_explicit_command
 # --------------------------------------------------------------------------- arms
 
 ARM_NAMES: tuple[str, ...] = ("A", "B", "C", "D", "E")
+
+# The six structured-enhancement component arms, measured against the same arm-A
+# baseline. They are separate on/off switches and are deliberately NOT part of the
+# A ⊂ B ⊂ C ⊂ D ⊂ E nesting: a component arm turns on exactly its own module's Jev
+# decision definition key(s) and leaves every other key (including all eight A–E
+# keys) off, so the historical arms are never redefined by adding a component arm.
+COMPONENT_ARM_NAMES: tuple[str, ...] = (
+    "M-EXTRACT",
+    "M-ENTITY",
+    "M-CONSISTENCY",
+    "M-CITATION",
+    "M-CAPABILITY",
+    "M-TOOL",
+)
+
+# The full registry the CLI selects from: the historical arms plus the six components.
+ALL_ARM_NAMES: tuple[str, ...] = ARM_NAMES + COMPONENT_ARM_NAMES
+
+# Marker for a component metric whose decision definition has no labelled samples in
+# the dataset. A component arm reports this instead of inventing a number.
+INSUFFICIENT_SAMPLES = "INSUFFICIENT_SAMPLES"
 
 # The specific Jev definition keys each arm turns "on"; everything else stays on the
 # shipped DeepSeek/deterministic path. Validated against the live catalog in arm_modes.
@@ -137,6 +177,60 @@ _NON_JEV_DEFINITIONS = frozenset(
     }
 )
 
+# The decision definition key(s) each component module turns "on". Everything else
+# stays off, so a component arm is the arm-A baseline plus exactly that module.
+_COMPONENT_ARM_ON_KEYS: dict[str, frozenset[str]] = {
+    "M-EXTRACT": frozenset({"extraction.field_grounded.v1"}),
+    "M-ENTITY": frozenset({"entity.relation.v1"}),
+    "M-CONSISTENCY": frozenset({"evidence.consistency.v1"}),
+    "M-CITATION": frozenset({"source.supports_claim.v1", "source.select_span.v1"}),
+    "M-CAPABILITY": frozenset({"teaching.capability.v1"}),
+    "M-TOOL": frozenset({"tool.intent.v1"}),
+}
+
+# Human-readable module name behind each component arm (traceability only).
+_COMPONENT_ARM_MODULES: dict[str, str] = {
+    "M-EXTRACT": "ExtractionVerification",
+    "M-ENTITY": "EntityResolution",
+    "M-CONSISTENCY": "EvidenceConsistency",
+    "M-CITATION": "ClaimCitationAudit",
+    "M-CAPABILITY": "CapabilityRouter",
+    "M-TOOL": "ToolIntentCheck",
+}
+
+# Each component metric is computed from the labelled samples of exactly one decision
+# definition key. Metrics that reuse the shared A–E implementations keep the SAME
+# metric keys the runner already emits (``citation_support_accuracy``,
+# ``unsupported_claim_rate``, ``span_selection_accuracy``); the module-specific
+# metrics with no A–E counterpart are named for what they would measure and are
+# reported as ``INSUFFICIENT_SAMPLES`` when the dataset carries no such labels.
+_COMPONENT_ARM_METRICS: dict[str, tuple[tuple[str, str], ...]] = {
+    "M-EXTRACT": (
+        ("extraction_false_acceptance", "extraction.field_grounded.v1"),
+        ("extraction_false_rejection", "extraction.field_grounded.v1"),
+    ),
+    "M-ENTITY": (
+        ("entity_false_merge", "entity.relation.v1"),
+        ("entity_missed_alias", "entity.relation.v1"),
+        ("entity_conflict_false_positive", "entity.relation.v1"),
+    ),
+    "M-CONSISTENCY": (
+        ("condition_distinction", "evidence.consistency.v1"),
+    ),
+    "M-CITATION": (
+        ("citation_support_accuracy", "source.supports_claim.v1"),
+        ("unsupported_claim_rate", "source.supports_claim.v1"),
+        ("span_selection_accuracy", "source.select_span.v1"),
+    ),
+    "M-CAPABILITY": (
+        ("capability_misroute", "teaching.capability.v1"),
+    ),
+    "M-TOOL": (
+        ("tool_false_allow", "tool.intent.v1"),
+        ("tool_false_block", "tool.intent.v1"),
+    ),
+}
+
 
 def validate_arm_nesting() -> None:
     """Fail loudly if A ⊂ B ⊂ C ⊂ D ⊂ E no longer holds (strict subset on the on keys)."""
@@ -149,13 +243,18 @@ def arm_modes(arm: str) -> dict[str, str]:
     """Return the full per-key mode map for ``arm`` ("on" for Jev, "off" otherwise).
 
     The key list comes from the real catalog; the arm-defining keys are validated
-    against it so a future catalog edit cannot silently break an arm.
+    against it so a future catalog edit cannot silently break an arm. The A–E arms
+    nest strictly (validated here); the six component arms are separate on/off
+    switches that turn on exactly their own module key(s).
     """
-    if arm not in ARM_NAMES:
-        raise ValueError(f"Unknown ablation arm {arm!r}; expected one of {ARM_NAMES}.")
-    validate_arm_nesting()
+    if arm in ARM_NAMES:
+        validate_arm_nesting()
+        on_keys = _ARM_ON_KEYS[arm]
+    elif arm in COMPONENT_ARM_NAMES:
+        on_keys = _COMPONENT_ARM_ON_KEYS[arm]
+    else:
+        raise ValueError(f"Unknown ablation arm {arm!r}; expected one of {ALL_ARM_NAMES}.")
     definitions = load_catalog().definitions
-    on_keys = _ARM_ON_KEYS[arm]
     unknown = sorted(on_keys - set(definitions))
     if unknown:
         raise ValueError(f"Arm {arm!r} references keys absent from the catalog: {unknown}.")
@@ -724,6 +823,43 @@ class _RankedQuery:
     top_k: int
 
 
+def _component_report(
+    arm: str, samples: Sequence[JevJudgment], metrics: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Build the honest component-arm report: measured metrics vs INSUFFICIENT_SAMPLES.
+
+    For every metric the module owns, count the labelled samples whose
+    ``definition_id`` matches the metric's decision key. A metric with samples is
+    reported ``MEASURED`` (its value is the shared runner's own metric when the key
+    exists there); a metric with zero labelled samples is reported
+    ``INSUFFICIENT_SAMPLES`` and carries no numeric value.
+    """
+    spec = _COMPONENT_ARM_METRICS[arm]
+    counts: dict[str, int] = {metric: 0 for metric, _ in spec}
+    for sample in samples:
+        definition_id = sample.definition_id
+        for metric, key in spec:
+            if definition_id == key:
+                counts[metric] += 1
+
+    per_metric: dict[str, dict[str, Any]] = {}
+    insufficient: list[str] = []
+    for metric, _key in spec:
+        count = counts[metric]
+        if metric in metrics and count > 0:
+            per_metric[metric] = {"status": "MEASURED", "samples": count, "value": metrics[metric]}
+        else:
+            per_metric[metric] = {"status": INSUFFICIENT_SAMPLES, "samples": count}
+            insufficient.append(metric)
+
+    return {
+        "module": _COMPONENT_ARM_MODULES[arm],
+        "on_keys": sorted(_COMPONENT_ARM_ON_KEYS[arm]),
+        "metrics": per_metric,
+        "insufficient_samples": sorted(insufficient),
+    }
+
+
 def run_jev_semantic_ablation(
     dataset: Mapping[str, Any],
     arm: str,
@@ -1018,7 +1154,7 @@ def run_jev_semantic_ablation(
         "image_answer_accuracy": image_answer_accuracy(image_results),
         "latency_summary": latency_summary([]),
     }
-    return {
+    result = {
         "arm": arm,
         "modes": modes,
         "transport": kind,
@@ -1063,6 +1199,9 @@ def run_jev_semantic_ablation(
             "image": [_image_asdict(r) for r in image_results],
         },
     }
+    if arm in COMPONENT_ARM_NAMES:
+        result["component"] = _component_report(arm, samples, metrics)
+    return result
 
 
 def _predict(
@@ -1231,12 +1370,34 @@ def compare_jev_arms(
     Reuses the JeV harness's refusal semantics exactly (``jev_ablation.compare_arms``):
     a fake transport, an unlabelled dataset, or any placeholder baseline forces
     ``NOT_INTERPRETABLE``, and ``request_quality=True`` raises. This wrapper adds the
-    Jev-specific ``jev_unavailable`` refusals and computes the DeepSeek call delta
-    against arm A when the comparison is interpretable.
+    Jev-specific ``jev_unavailable`` refusals, refuses a quality verdict whenever a
+    component arm reports ``INSUFFICIENT_SAMPLES`` for any of its module metrics, and
+    computes the DeepSeek call delta against arm A when the comparison is interpretable.
     """
     verdict = compare_arms(runs, request_quality=request_quality)
     if verdict.get("verdict") != "INTERPRETABLE":
         return verdict
+
+    # A component arm whose module-specific metric has no labelled samples must never
+    # feed a quality verdict: INSUFFICIENT_SAMPLES is a refusal, exactly like a fake
+    # transport or a placeholder baseline.
+    insufficient = {
+        arm: sorted(run.get("component", {}).get("insufficient_samples") or [])
+        for arm, run in sorted(runs.items())
+        if run.get("component", {}).get("insufficient_samples")
+    }
+    if insufficient:
+        if request_quality:
+            raise ValueError(
+                "Refusing a quality claim: component arm(s) report INSUFFICIENT_SAMPLES "
+                f"{insufficient}; no module-specific metric was measured."
+            )
+        return {
+            "verdict": "NOT_INTERPRETABLE",
+            "reason": "INSUFFICIENT_SAMPLES in component arm(s)",
+            "insufficient_samples": insufficient,
+            "arms": sorted(runs),
+        }
 
     # Live + labelled + real baselines: attach the DeepSeek call delta vs arm A and the
     # Jev self-hosted resource delta, without making any improvement claim.
