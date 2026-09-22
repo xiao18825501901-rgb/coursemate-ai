@@ -155,6 +155,13 @@ QA stream would be byte-identical without a credential — `create_app` **always
 The regression delta is exactly accounted for at every step: 1235 → 1252 (4 QA tests + 13 metric
 tests) → 1260 (8 split/calibration tests); the web delta 68 → 73 is the 5 reference-note tests.
 
+### 6.1 Backend regression
+
+Command: `services\rag-api\.venv\Scripts\python.exe -m pytest -q -p no:randomly`
+Log: `work/current-change/full_run_round32.log` → `1260 passed, 2 warnings in 1589.54s (0:26:29)`, exit 0,
+on `74100ed`. No backend file has changed since (`git diff 74100ed -- services` is empty), so this run
+still describes the backend at HEAD.
+
 ### 6.2 Browser journeys
 
 Command: `pnpm exec playwright test -c playwright.<ui|jev|config|v3>.config.ts` (four suites, real Chrome
