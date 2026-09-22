@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from typing import Any
 
 from .steps import answer_steps_parse
 
@@ -16,7 +17,10 @@ EXERCISE_VERSION_V2 = "exercise.v2"
 EXERCISE_VERSION_V1 = "exercise.v1"
 LEGACY_ANSWER_MARKER = "【标准答案】"
 
-EXERCISE_RESPONSE_FORMAT = {
+# Annotated as a JSON mapping so nested keys stay indexable: left to inference,
+# the heterogeneous literal makes mypy join the array-valued entries to
+# ``Collection[str]`` and reject ``["json_schema"]["schema"]``.
+EXERCISE_RESPONSE_FORMAT: dict[str, Any] = {
     "type": "json_schema",
     "json_schema": {
         "name": "coursemate_exercise_v2",

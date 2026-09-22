@@ -163,7 +163,7 @@ class SdkTransport:
                 "TypeSafe API key is not configured; the live Jev path is unavailable."
             )
         try:
-            from typesafe_sdk import Choice, Noul, Score, TypeSafeClient  # type: ignore
+            from typesafe_sdk import Choice, Noul, Score, TypeSafeClient
         except ImportError as exc:  # pragma: no cover - depends on environment
             raise JevUnavailableError(
                 "typesafe-sdk is not installed; cannot reach the live Jev API."
@@ -172,9 +172,12 @@ class SdkTransport:
         questions: dict[str, Any] = {}
         for key, question in call.questions.items():
             if question.primitive == Primitive.CHOICE:
+                choice_criteria = (
+                    question.criteria if isinstance(question.criteria, dict) else {}
+                )
                 questions[key] = Choice(
                     instructions=question.instructions,
-                    criteria=dict(question.criteria or {}),
+                    criteria=dict(choice_criteria),
                 )
             elif question.primitive == Primitive.SCORE:
                 questions[key] = Score(
@@ -325,7 +328,9 @@ class JevGateway:
                 definition, scope, provider_model_version=provider_model_version
             )
             if cached is not None:
-                suggestion = self._suggestion_from_cache(definition, cached)
+                suggestion: JevAnswer | None = self._suggestion_from_cache(
+                    definition, cached
+                )
                 return Decision(
                     definition_key=definition.key,
                     mode=mode,
@@ -403,7 +408,8 @@ class JevGateway:
                 criteria=dict(criteria),
             )
         if definition.primitive == Primitive.SCORE:
-            levels = [definition.criteria[level] for level in definition.score_levels]
+            score_criteria = definition.criteria or {}
+            levels = [score_criteria[level] for level in definition.score_levels]
             return JevQuestion(
                 key=request.definition.key,
                 primitive=Primitive.SCORE,

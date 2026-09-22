@@ -248,8 +248,8 @@ def fit_temperature(
         raise ValueError("fit_temperature requires at least one row of logits.")
     if not grid:
         raise ValueError("grid must be non-empty.")
-    best_t = None
-    best_nll = None
+    best_t: float | None = None
+    best_nll: float | None = None
     for t in grid:
         nll = temperature_nll(logits, labels, float(t))
         if best_nll is None or nll < best_nll - 1e-12 or (
@@ -257,7 +257,9 @@ def fit_temperature(
         ):
             best_t = float(t)
             best_nll = nll
-    return float(best_t)
+    # ``grid`` is non-empty (checked above), so the loop always assigns best_t.
+    assert best_t is not None
+    return best_t
 
 
 # ----------------------------------------------------------------------------- buckets
