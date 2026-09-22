@@ -154,6 +154,7 @@ def create_app(
         top_k=resolved_settings.top_k,
         max_context_chars=resolved_settings.max_context_chars,
         teaching_profiles=teaching_profile_service,
+        jev=application.state.jev_service,
     )
     cors_origins = [resolved_settings.web_origin]
     cors_methods = ["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"]

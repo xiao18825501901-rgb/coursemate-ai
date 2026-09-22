@@ -18,6 +18,15 @@ this store keeps its own short timeout and treats a lock conflict as a dropped
 receipt: the decision itself is unaffected, the business operation never stalls
 and never fails. Anything other than a lock/busy error is still raised, because a
 real schema or data bug must not hide behind a best-effort write.
+
+**Absent ledger.** The one schema error that is *not* a bug is the table simply not
+existing yet: the receipts table arrives with migration 028, which belongs to the
+V3 migration set, so a V2-only deployment — and the window in which new code is
+running before its migration has been applied — has a working database without it.
+Raising there would turn a deployment ordering detail into a failed learner
+request, so a missing table is treated like a lock conflict: the lookup reports a
+cache miss and the write drops the receipt. Every other ``OperationalError`` still
+propagates.
 """
 
 from __future__ import annotations
@@ -74,6 +83,11 @@ INSERT INTO jev_decision_receipts(
 """
 
 
+def _is_absent_ledger(error: sqlite3.OperationalError) -> bool:
+    """Is this the receipts table simply not existing yet (migration 028 unapplied)?"""
+    return "no such table" in str(error).lower()
+
+
 def _receipt_row(receipt: Receipt) -> tuple[Any, ...]:
     return (
         receipt.id,
@@ -108,7 +122,13 @@ class SqlReceiptStore:
         #    receipt is atomic with the business change and cannot contend with it.
         active = _ACTIVE_CONNECTION.get()
         if active is not None:
-            active.execute(_INSERT_RECEIPT, _receipt_row(receipt))
+            try:
+                active.execute(_INSERT_RECEIPT, _receipt_row(receipt))
+            except sqlite3.OperationalError as error:
+                # Unapplied migration: the caller's business transaction must still
+                # commit, so the receipt is dropped rather than the grading failing.
+                if not _is_absent_ledger(error):
+                    raise
             return
         # 2. Otherwise its own connection, best-effort: a lock conflict drops the
         #    receipt rather than stalling or failing the decision.
@@ -118,8 +138,9 @@ class SqlReceiptStore:
                 connection.execute(_INSERT_RECEIPT, _receipt_row(receipt))
         except sqlite3.OperationalError as error:
             # Another connection holds the write lock (the caller's own transaction is
-            # the normal case). Drop the receipt, keep the decision.
-            if "locked" not in str(error).lower() and "busy" not in str(error).lower():
+            # the normal case), or the ledger table has not been migrated in yet.
+            # Drop the receipt, keep the decision.
+            if not _is_absent_ledger(error) and not _is_lock_conflict(error):
                 raise
 
     def lookup(
@@ -142,12 +163,19 @@ class SqlReceiptStore:
             clauses.append(f"{column} IS ?")
             params.append(values[column])
         where = " AND ".join(clauses)
-        with self.database.connect() as connection:
-            row = connection.execute(
-                f"SELECT output_json, model_version FROM jev_decision_receipts "
-                f"WHERE {where} ORDER BY created_at DESC, rowid DESC LIMIT 1",
-                params,
-            ).fetchone()
+        try:
+            with self.database.connect() as connection:
+                row = connection.execute(
+                    f"SELECT output_json, model_version FROM jev_decision_receipts "
+                    f"WHERE {where} ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                    params,
+                ).fetchone()
+        except sqlite3.OperationalError as error:
+            # An unmigrated ledger means there is nothing to serve from cache — never
+            # a reason to fail the decision that was about to be made.
+            if _is_absent_ledger(error):
+                return None
+            raise
         if row is None:
             return None
         try:
@@ -185,6 +213,12 @@ class SqlReceiptStore:
                 f"DELETE FROM jev_decision_receipts WHERE {' AND '.join(clauses)}", params
             )
         return cursor.rowcount
+
+
+def _is_lock_conflict(error: sqlite3.OperationalError) -> bool:
+    """Another writer holds the database (the caller's own transaction, normally)."""
+    message = str(error).lower()
+    return "locked" in message or "busy" in message
 
 
 def _scope_values(cache_scope: CacheScope, provider_model_version: str | None) -> dict[str, Any]:

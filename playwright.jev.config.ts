@@ -124,5 +124,25 @@ export default defineConfig({
       stdout: "ignore",
       stderr: "ignore",
     },
+    {
+      // The shipped *legacy* pages resolve the RAG API from the value baked into
+      // the build (`localhost:8000`), while the refreshed shell uses same-origin
+      // `/api` through the proxy above. The module-A journey drives the legacy QA
+      // page — the one shipped surface whose own request stream carries the
+      // reference-verification report — so the same build output is served once
+      // more on that baked origin, proxying to the same backend. No product or
+      // release artifact is involved: this is the local acceptance deployment only.
+      command: `"${nodeExecutable}" "${path.join(repositoryRoot, "scripts", "serve_web_dist.mjs")}" "${path.join(repositoryRoot, "apps", "web", "dist")}" 8000`,
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        COURSEMATE_API_PROXY: "http://127.0.0.1:8100",
+      },
+      url: "http://127.0.0.1:8000/",
+      reuseExistingServer: false,
+      timeout: 90_000,
+      stdout: "ignore",
+      stderr: "ignore",
+    },
   ],
 });

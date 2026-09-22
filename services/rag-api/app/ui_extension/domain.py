@@ -43,6 +43,7 @@ from app.jev.evidence_consistency import (
     VERSION_OR_TASK_DIFFERENCE,
     check_evidence_consistency,
 )
+from app.jev.reference_verification import verify_query_reference
 from app.jev.service import SemanticDecisionService
 from app.learning.coverage_review import CoverageReviewer, NullCoverageReviewer
 from app.learning.models import (
@@ -897,11 +898,30 @@ class V3DomainAdapter:
         groups: list[ScopedCandidates] = [ScopedCandidates(scope="official", hits=official_hits)]
         # Structured exact retrieval reuses the legacy QA locator parser so an
         # explicit "file.pdf page 3 question 2" reference is recalled precisely
-        # instead of being left to similarity search.
+        # instead of being left to similarity search. That reference is a HARD
+        # filter on chunk metadata in both the official and the private scope, so
+        # the label it carries is verified first (module A): deterministic checks
+        # over the label and its locator, then Jev over the learner's own words.
+        # Only an affirmative defect removes a label, and removing one can only
+        # ever take a filter away. With Jev off/shadow/unavailable the
+        # deterministic reference is used unchanged and a receipt is recorded.
         try:
-            reference = parse_query_reference(raw_query)
+            parsed_reference = parse_query_reference(raw_query)
         except Exception:  # pragma: no cover - parser is defensive
-            reference = None
+            parsed_reference = None
+        reference_verification: dict[str, Any] | None = None
+        reference = parsed_reference
+        if parsed_reference is not None:
+            verified = verify_query_reference(
+                raw_query,
+                parsed_reference,
+                service=self.jev,
+                owner_user_id=subject,
+                authorization_scope="official",
+                course_id=course_id,
+            )
+            reference = verified.reference
+            reference_verification = verified.as_dict()
         if reference is not None:
             structured: list[Any] = []
             if workspace is not None:
@@ -1015,6 +1035,10 @@ class V3DomainAdapter:
                 # byte-identical under off/shadow/unavailable and with no Jev).
                 "jev_consistency": consistency_signal.get(entry.chunk_id, COMPATIBLE),
             }
+            if reference_verification is not None:
+                # How the exact locator that produced this recall was verified, so
+                # a rendered citation can be traced to the label behind it.
+                source["jev_reference"] = reference_verification
             partners = conflict_partners.get(entry.chunk_id)
             if partners:
                 source["jev_conflict_with"] = sorted(

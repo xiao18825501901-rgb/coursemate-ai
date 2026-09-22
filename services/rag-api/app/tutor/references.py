@@ -20,6 +20,10 @@ class QueryReference:
     question_part: str | None = None
     page_number: int | None = None
     slide_number: int | None = None
+    # Character span of the question label inside :func:`normalize_query` output.
+    # It is the locator the extraction verifier checks the label against, so a
+    # reference always carries where in the query it was read from.
+    question_span: tuple[int, int] | None = None
 
 
 FILE_REFERENCE = re.compile(
@@ -35,9 +39,18 @@ KIND_PATTERNS: tuple[tuple[DocumentKind, re.Pattern[str]], ...] = (
     (DocumentKind.PRACTICE, re.compile(r"practice[_\s-]*(?:problem[s]?)?[_\s-]*0*(\d+)", re.I)),
 )
 QUESTION = re.compile(
-    r"(?:(?:question|quest(?:ion)?|q)\s*(?P<number_en>[0-9]+|[ivxlcdm]+)"
-    r"|第\s*(?P<number_zh>[0-9]+|[ivxlcdm]+)\s*题)"
-    r"(?:\s*[\(\uFF08]?\s*(?P<part>[a-z]|\d+)\s*[\)\uFF09]?)?",
+    r"(?:(?:question|quest(?:ion)?|q)\s*(?P<number_en>[0-9]+|[ivxlcdm]+(?![a-z0-9]))"
+    r"|第\s*(?P<number_zh>[0-9]+|[ivxlcdm]+(?![a-z0-9]))\s*题)"
+    # A sub-part is read only when it is *delimited*: either parenthesised
+    # ("Question 1(b)", "Q3(2)") or a standalone token separated from the number
+    # by whitespace and not glued to a following word ("q 2 b"). A bare letter
+    # that continues a word is prose, not a part: "question 5 have to do with
+    # chapter 2" must not yield part "h", and "q mean in this context" must not
+    # yield the roman number "M". Getting this wrong is not cosmetic — the
+    # reference becomes an exact-locator SQL filter, so an invented part letter
+    # can pin retrieval onto the wrong sub-question.
+    r"(?:\s*[\(\uFF08]\s*(?P<paren_part>[a-z]|\d+)\s*[\)\uFF09]"
+    r"|\s+(?P<bare_part>[a-z]|\d+)(?![a-z0-9]))?",
     re.IGNORECASE,
 )
 PAGE = re.compile(
@@ -64,8 +77,13 @@ def _document_kind(text: str) -> tuple[DocumentKind | None, str | None]:
     return None, None
 
 
+def normalize_query(query: str) -> str:
+    """Collapse whitespace the way the reference parser (and its spans) see it."""
+    return " ".join(query.strip().split())
+
+
 def parse_query_reference(query: str) -> QueryReference:
-    normalized = " ".join(query.strip().split())
+    normalized = normalize_query(query)
     file_match = FILE_REFERENCE.search(normalized)
     document = file_match.group("filename").strip() if file_match else None
     kind, document_number = _document_kind(document or normalized)
@@ -75,14 +93,16 @@ def parse_query_reference(query: str) -> QueryReference:
     question_number = _matched_number(question)
     page_number = _matched_number(page)
     slide_number = _matched_number(slide)
+    question_part = None
+    if question is not None:
+        question_part = question.group("paren_part") or question.group("bare_part")
     return QueryReference(
         document=document,
         document_kind=kind,
         document_number=document_number,
         question_number=question_number.upper() if question_number else None,
-        question_part=question.group("part").casefold()
-        if question and question.group("part")
-        else None,
+        question_part=question_part.casefold() if question_part else None,
         page_number=int(page_number) if page_number else None,
         slide_number=int(slide_number) if slide_number else None,
+        question_span=(question.start(), question.end()) if question is not None else None,
     )

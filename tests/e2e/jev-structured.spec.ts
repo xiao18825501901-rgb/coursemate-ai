@@ -16,10 +16,18 @@
  *      (`used_jev: false`, a deterministic/fallback path), the learner still gets
  *      a complete answer, and nothing in the learning state is fabricated.
  *
- * Journeys for modules A (extraction), C (evidence consistency) and the
- * three-layer audit of D are deliberately absent: those modules are not wired to
- * a business path yet, so there is no product behaviour to assert. They are
- * recorded as NOT_RUN in JEV_CALLSITE_MATRIX.md rather than faked here.
+ * Journeys are included for module A (extraction verification) and the
+ * Jev-unavailable deployment. Modules C (evidence consistency) and the three-layer
+ * audit of D have browser coverage of *behaviour* only where the deterministic
+ * provider can show it; their Jev-dependent verdicts (`SAME_CONTEXT_CONTRADICTION`,
+ * an unsupported citation) need a live signal and are recorded as NOT_RUN in
+ * JEV_CALLSITE_MATRIX.md rather than faked here.
+ *
+ * One honest limit worth stating: the deterministic test provider never emits
+ * citation markers, so `.citation-list`-level data is filled from the retrieved
+ * sources but a run's `citations` array is always empty in every suite. Module A's
+ * per-source report is therefore asserted through the shipped QA page's own
+ * request (`POST /api/qa/chat`), whose `meta` event carries it.
  */
 
 import { expect, test } from "@playwright/test";
@@ -220,4 +228,186 @@ test("with no TypeSafe credential every decision degrades and teaching still wor
   await expect(
     page.locator(".learning-pane.pane-teach .pane-messages, .learning-pane.pane-teach .message-list"),
   ).toBeVisible();
+});
+
+type FieldReport = {
+  field: string;
+  value: string;
+  status: string;
+  verdict: string | null;
+  path: string;
+  used_jev: boolean;
+  trusted: boolean;
+};
+
+type ReferenceReport = {
+  questioned: boolean;
+  fields: FieldReport[];
+  dropped: string[];
+  needs_review: string[];
+  jev_calls: number;
+};
+
+/**
+ * Where the QA page's own chat streams are tee'd for the assertion.
+ *
+ * `sessionStorage` rather than a page variable on purpose: the page navigates to
+ * the conversation URL as soon as the first answer lands, which discards both page
+ * variables and Playwright's buffered `response.text()`. Session storage survives
+ * the navigation and is cleared with the browser context, so each journey starts
+ * empty.
+ */
+const CHAT_CAPTURE_KEY = "__cm_qa_chat_bodies";
+
+/**
+ * Tee the QA page's own `POST /api/qa/chat` responses without altering them.
+ *
+ * Reading the tee *incrementally* is the point. `response.clone().text()` looks
+ * simpler but rejects with `AbortError` in this page: the shell aborts the stream as
+ * soon as it sees the terminal `done` event, so a whole-body read never completes.
+ * The report rides on the very first frame (`meta`), so the reader accumulates
+ * chunks and stores them the moment the report appears, then stops.
+ */
+async function installChatCapture(page: import("@playwright/test").Page): Promise<void> {
+  await page.addInitScript((key: string) => {
+    const original = window.fetch.bind(window);
+    const log = (entry: string) => {
+      const stored = JSON.parse(sessionStorage.getItem(`${key}_log`) ?? "[]") as string[];
+      stored.push(entry);
+      sessionStorage.setItem(`${key}_log`, JSON.stringify(stored));
+    };
+    const record = (text: string) => {
+      const stored = JSON.parse(sessionStorage.getItem(key) ?? "[]") as string[];
+      stored.push(text);
+      sessionStorage.setItem(key, JSON.stringify(stored));
+    };
+    window.fetch = async (...args: Parameters<typeof fetch>) => {
+      const input = args[0];
+      const url =
+        typeof input === "string" ? input : input instanceof Request ? input.url : "";
+      log(`request ${url}`);
+      const response = await original(...args);
+      log(`response ${response.status} ${url}`);
+      if (url.endsWith("/api/qa/chat")) {
+        const reader = response.clone().body?.getReader();
+        if (reader) {
+          const decoder = new TextDecoder();
+          void (async () => {
+            let text = "";
+            try {
+              for (;;) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                text += decoder.decode(value, { stream: true });
+                if (text.includes('"referenceVerification"')) {
+                  record(text);
+                  log(`captured ${text.length}`);
+                  await reader.cancel();
+                  return;
+                }
+              }
+              log(`stream ended with ${text.length} chars and no report`);
+            } catch (error: unknown) {
+              log(`capture stopped after ${text.length} chars: ${String(error)}`);
+            }
+          })();
+        }
+      }
+      return response;
+    };
+  }, CHAT_CAPTURE_KEY);
+}
+
+/** Ask one question in the shipped QA page and return its verification report. */
+async function askQaPage(
+  page: import("@playwright/test").Page,
+  question: string,
+): Promise<ReferenceReport> {
+  await page.getByLabel("Ask a course question").fill(question);
+  await page.getByRole("button", { name: "Ask", exact: true }).click();
+
+  const deadline = Date.now() + 90_000;
+  let last = "";
+  while (Date.now() < deadline) {
+    const raw = await page.evaluate((key) => sessionStorage.getItem(key), CHAT_CAPTURE_KEY);
+    if (raw) {
+      const bodies = JSON.parse(raw) as string[];
+      last = bodies[bodies.length - 1] ?? "";
+      if (last.includes('"referenceVerification"')) {
+        const metaLine = last
+          .split("\n")
+          .find(
+            (line) => line.startsWith("data:") && line.includes('"referenceVerification"'),
+          );
+        expect(metaLine, `no meta event carried the report:\n${last.slice(0, 400)}`).toBeTruthy();
+        const meta = JSON.parse(String(metaLine).replace(/^data:\s*/, "")) as {
+          referenceVerification: ReferenceReport;
+        };
+        return meta.referenceVerification;
+      }
+    }
+    await page.waitForTimeout(250);
+  }
+  const diagnostics = await page.evaluate(
+    (key) => sessionStorage.getItem(`${key}_log`) ?? "[]",
+    CHAT_CAPTURE_KEY,
+  );
+  throw new Error(
+    `the QA page never reported a verification (capture: ${last.length} chars, ` +
+      `traffic: ${diagnostics})`,
+  );
+}
+
+test("the shipped page verifies a named question reference before filtering on it", async ({
+  page,
+}) => {
+  await installChatCapture(page);
+  await page.goto("/qa/ge2324");
+  await expect(page.getByRole("heading", { level: 1, name: "Ask your material" })).toBeVisible();
+
+  // A named question with a sub-part: both labels are judged, neither is dropped,
+  // and with no credential nothing claims they were verified by a model.
+  const named = await askQaPage(page, "assignment_2.pdf Question 1(b) 说明了什么？");
+  expect(named.questioned).toBe(true);
+  expect(named.fields.map((field) => field.field).sort()).toEqual([
+    "question_number",
+    "question_part",
+  ]);
+  expect(named.fields.map((field) => field.value).sort()).toEqual(["1", "b"]);
+  expect(named.dropped).toEqual([]);
+  for (const field of named.fields) {
+    expect(field.used_jev).toBe(false);
+    expect(field.verdict).toBe(null);
+    expect(field.status).toBe("NEEDS_REVIEW");
+    expect(field.path.startsWith("fallback:")).toBe(true);
+    expect(field.trusted).toBe(true);
+  }
+  // The answer still arrived, grounded in the material the learner named.
+  await expect(page.locator(".message-assistant").last()).toBeVisible();
+  await expect(page.locator(".citation-list").last()).toBeVisible();
+});
+
+test("prose that merely follows the number is not a sub-part", async ({ page }) => {
+  await installChatCapture(page);
+  await page.goto("/qa/ge2324");
+  await expect(page.getByRole("heading", { level: 1, name: "Ask your material" })).toBeVisible();
+
+  // "question 5 have …" used to become the exact-locator filter `question_part='h'`,
+  // which suppressed the exact hits for question 5.
+  const prose = await askQaPage(page, "What does question 5 have to do with chapter 2?");
+  expect(prose.questioned).toBe(true);
+  expect(prose.fields.map((field) => field.field)).toEqual(["question_number"]);
+  expect(prose.fields[0].value).toBe("5");
+  expect(prose.dropped).toEqual([]);
+});
+
+test("a question that names no question spends nothing", async ({ page }) => {
+  await installChatCapture(page);
+  await page.goto("/qa/ge2324");
+  await expect(page.getByRole("heading", { level: 1, name: "Ask your material" })).toBeVisible();
+
+  const plain = await askQaPage(page, "聚类分析是什么意思");
+  expect(plain.questioned).toBe(false);
+  expect(plain.fields).toEqual([]);
+  expect(plain.jev_calls).toBe(0);
 });

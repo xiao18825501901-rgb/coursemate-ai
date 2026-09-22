@@ -1,9 +1,11 @@
-"""The 12 real business call sites the CourseMate layer invokes.
+"""The real business call sites the CourseMate layer invokes.
 
-These are thin, business-facing wrappers over :class:`SemanticDecisionService`.
-They are what the business modules import — not the gateway, not the service
-directly — so a decision can never be reached except through its one documented
-call site.
+This is the 12 case-derived decisions plus the structured-enhancement modules
+that have a real business consumer (today: extraction field grounding, used by
+the exact-locator reference path). They are thin, business-facing wrappers over
+:class:`SemanticDecisionService`. They are what the business modules import — not
+the gateway, not the service directly — so a decision can never be reached except
+through its one documented call site.
 
 Each function takes ``service`` (a :class:`SemanticDecisionService`, or ``None``
 to run the fully deterministic path with zero Jev calls) plus business-shaped
@@ -22,6 +24,7 @@ sending a half-question.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from app.jev.service import (
@@ -326,10 +329,82 @@ def assess_corpus_quality(
     return int(result.value)
 
 
+@dataclass(frozen=True)
+class FieldGrounded:
+    """One ``extraction.field_grounded.v1`` judgment with its provenance.
+
+    Unlike the other call sites this returns provenance next to the value: the
+    extraction path must distinguish "the model says nothing is wrong" from "the
+    model never answered", because only the first may be treated as grounded and
+    the second has to stay under review. ``verdict`` is always a catalog
+    candidate; ``UNCERTAIN`` is the deterministic value.
+    """
+
+    verdict: str
+    used_jev: bool
+    mode: str
+    path: str
+    fallback_reason: str | None
+    receipt_id: str | None
+    input_hash: str | None
+
+
+def verify_extraction_field(
+    service: SemanticDecisionService | None,
+    *,
+    question_id: str,
+    part_id: str | None,
+    field_name: str,
+    candidate_value: Any,
+    unit: str | None,
+    supplied_text: str,
+    source_region: dict[str, Any],
+    scope: Any,
+) -> FieldGrounded:
+    """13. Extraction field grounding: judge a parsed field against its own text.
+
+    Returns a catalog candidate, or ``UNCERTAIN`` — never an acceptance — when
+    there is no service, in shadow/off mode, on timeout, or when the model does
+    not answer. The value vocabulary is the catalog's, so a caller cannot widen
+    it, and nothing here writes, repairs or re-reads anything.
+    """
+    if service is None:
+        return FieldGrounded(
+            verdict="UNCERTAIN",
+            used_jev=False,
+            mode="off",
+            path="fallback:no_service",
+            fallback_reason="no_service",
+            receipt_id=None,
+            input_hash=None,
+        )
+    result = service.field_grounded(
+        question_id=question_id, part_id=part_id, field_name=field_name,
+        candidate_value=candidate_value, unit=unit, supplied_text=supplied_text,
+        source_region=source_region, caller_role="extraction", cache_scope=scope,
+    )
+    choice = result.value
+    verdict = (
+        str(choice)
+        if result.used_jev and isinstance(choice, str) and choice
+        else "UNCERTAIN"
+    )
+    return FieldGrounded(
+        verdict=verdict,
+        used_jev=result.used_jev,
+        mode=result.mode,
+        path=result.path,
+        fallback_reason=result.fallback_reason,
+        receipt_id=result.receipt_id,
+        input_hash=result.input_hash,
+    )
+
+
 __all__ = [
     "SUPPORTED",
     "UNSUPPORTED",
     "UNVERIFIED",
+    "FieldGrounded",
     "assess_corpus_quality",
     "bounded_state",
     "citation_support",
@@ -343,4 +418,5 @@ __all__ = [
     "select_exercise_prototype",
     "select_pedagogy_method",
     "select_prerequisite",
+    "verify_extraction_field",
 ]

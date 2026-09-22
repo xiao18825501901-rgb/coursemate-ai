@@ -8,6 +8,8 @@ from uuid import uuid4
 from app.course_access import require_course_access
 from app.db import Database
 from app.errors import ApiError
+from app.jev.reference_verification import verify_query_reference
+from app.jev.service import SemanticDecisionService
 from app.rag.answers import AnswerProvider
 from app.rag.prompt import build_context_with_hits, build_turn_input, build_tutor_instructions
 from app.rag.retrieval import HybridRetriever
@@ -87,6 +89,7 @@ class QaService:
         top_k: int,
         max_context_chars: int,
         teaching_profiles: TeachingProfileService | None = None,
+        jev: SemanticDecisionService | None = None,
     ) -> None:
         self.database = database
         self.retriever = retriever
@@ -94,6 +97,9 @@ class QaService:
         self.top_k = top_k
         self.max_context_chars = max_context_chars
         self.teaching_profiles = teaching_profiles or TeachingProfileService(database)
+        # Non-authoritative semantic-decision layer. None (the default) disables
+        # Jev entirely and the deterministic pipeline is byte-identical to before.
+        self.jev = jev
 
     def require_course(
         self,
@@ -111,6 +117,9 @@ class QaService:
 
     def retrieval_diagnostics(self, *, course_id: str, question: str) -> dict[str, object]:
         self.require_course(course_id)
+        # Deliberately the plain parser: this is a read-only report of what the
+        # locator parser extracted, it has no learner identity to scope a semantic
+        # judgment under, and it must not spend a model call to describe itself.
         reference = parse_query_reference(question)
         diagnostics = self.retriever.diagnose(
             course_id=course_id,
@@ -476,6 +485,20 @@ class QaService:
         rewrite = rewrite_retrieval_query(question, history)
         retrieval_query = rewrite.query if route.uses_course_retrieval else question
         query_reference = parse_query_reference(retrieval_query)
+        # Module A on the locator the learner named: it becomes a HARD filter on
+        # chunk metadata (and turns on example mode), so the label is verified
+        # before it is trusted. Deterministic checks first, then Jev over the
+        # learner's own words; only an affirmative defect removes a label, and
+        # with Jev off/shadow/unavailable the parsed reference is used unchanged.
+        reference_verification = verify_query_reference(
+            retrieval_query,
+            query_reference,
+            service=self.jev,
+            owner_user_id=owner_user_id,
+            authorization_scope="official",
+            course_id=course_id,
+        )
+        query_reference = reference_verification.reference
         is_referenced_example = query_reference.question_number is not None
         example_mode = (
             "direct" if is_referenced_example and DIRECT_ANSWER.search(question) else "guided"
@@ -532,6 +555,9 @@ class QaService:
             "retrievalStrategy": retrieval_strategy,
             "teachingApproach": teaching_approach.value if teaching_approach else None,
             "exampleMode": example_mode,
+            # The locator that was actually used, and why it differs from the raw
+            # parse (empty when the message named no question at all).
+            "referenceVerification": reference_verification.as_dict(),
         }
         profile_prompt, profile_version = self.teaching_profiles.prompt_for_conversation(
             course_id, conversation_id

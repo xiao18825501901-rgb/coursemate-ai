@@ -29,13 +29,16 @@ submissions and grading revisions stay separate, and a reference solution is
 prepared without reading student answers (the semantic state for a reference
 solution never carries student-answer fields).
 
-The intended new decision definition is ``extraction.field_grounded.v1`` with
-candidates ``GROUNDED / WRONG_FIELD / NEGATION_LOST / CONSTRAINT_LOST /
-SOURCE_INSUFFICIENT / UNCERTAIN``. It is **not** registered in
-``decision_catalog.json`` here (that is owned by another workstream): this module
-holds the id/version as module constants and builds the :class:`DecisionDefinition`
-locally so the gateway can run it today. See the catalog-registration request in
-``docs/jev-structured/SOURCE_EXTRACTION_AND_ENTITY_RELATIONS.md``.
+The decision definition is ``extraction.field_grounded.v1`` with candidates
+``GROUNDED / WRONG_FIELD / NEGATION_LOST / CONSTRAINT_LOST / SOURCE_INSUFFICIENT /
+UNCERTAIN``. It is registered in ``decision_catalog.json`` (19 definitions), and
+:func:`field_grounded_definition` projects it from there rather than carrying a
+second copy of the vocabulary; the candidate tuple below exists so a caller can
+assert the agreement.
+
+The semantic judgment goes through the ``callsites.verify_extraction_field`` call
+site, so an extraction decision is observable and budgeted exactly like the other
+business decisions, and never reaches the transport directly.
 
 Degradation is typed and safe: Jev unavailable / invalid / oversized / off / shadow
 falls back to the deterministic result plus ``NEEDS_REVIEW`` wherever the decision
@@ -52,10 +55,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
 
-from app.jev.catalog import DecisionDefinition, Primitive
+from app.jev import callsites
+from app.jev.catalog import DecisionDefinition, Primitive, load_catalog
 from app.jev.errors import JevError, JevRequestError
 from app.jev.gateway import Decision, DecisionRequest, JevGateway
 from app.jev.models import CacheScope, owner_scope_hash
+from app.jev.service import SemanticDecisionService
 
 # --------------------------------------------------------------------------- #
 # Definition constants (the catalog owner registers these; we only *use* them)
@@ -145,20 +150,35 @@ _EXTRACTION_SCOPE = "extraction"
 
 
 def field_grounded_definition() -> DecisionDefinition:
-    """The ``extraction.field_grounded.v1`` definition the catalog would hold.
+    """The registered ``extraction.field_grounded.v1`` definition.
 
-    Built from module constants so the gateway can run it *today* without the
-    catalog being edited here; the registration request is recorded in the doc.
+    Projected from ``decision_catalog.json`` so the catalog stays the single owner
+    of the vocabulary, instructions and failure policy. The module constants below
+    are then asserted against it: this guard's whole job is to stop a wrong field
+    from reaching teaching, so a catalog edit that silently changed what the guard
+    is allowed to answer must fail loudly here instead.
     """
-    return DecisionDefinition(
-        key=EXTRACTION_FIELD_GROUNDED_KEY,
-        primitive=Primitive.CHOICE,
-        required_state=FIELD_GROUNDED_REQUIRED_STATE,
-        criteria=dict(FIELD_GROUNDED_CRITERIA),
-        instructions=FIELD_GROUNDED_INSTRUCTIONS,
-        failure_policy="NEEDS_REVIEW; never a confident acceptance",
-        cache_scope=_FIELD_GROUNDED_CACHE_SCOPE,
-    )
+    definition = load_catalog().get(EXTRACTION_FIELD_GROUNDED_KEY)
+    if definition.primitive != Primitive.CHOICE:
+        raise ValueError(
+            f"{EXTRACTION_FIELD_GROUNDED_KEY}: expected a Choice, got {definition.primitive!r}"
+        )
+    if set(definition.criteria or {}) != set(FIELD_GROUNDED_CANDIDATES):
+        raise ValueError(
+            f"{EXTRACTION_FIELD_GROUNDED_KEY}: catalog candidates "
+            f"{sorted(definition.criteria or {})} != {sorted(FIELD_GROUNDED_CANDIDATES)}"
+        )
+    if definition.required_state != FIELD_GROUNDED_REQUIRED_STATE:
+        raise ValueError(
+            f"{EXTRACTION_FIELD_GROUNDED_KEY}: catalog required_state "
+            f"{definition.required_state} != {FIELD_GROUNDED_REQUIRED_STATE}"
+        )
+    if definition.cache_scope != _FIELD_GROUNDED_CACHE_SCOPE:
+        raise ValueError(
+            f"{EXTRACTION_FIELD_GROUNDED_KEY}: catalog cache_scope "
+            f"{definition.cache_scope} != {_FIELD_GROUNDED_CACHE_SCOPE}"
+        )
+    return definition
 
 
 # --------------------------------------------------------------------------- #
@@ -564,21 +584,53 @@ class VerificationResult:
     repair_budget_remaining: int
 
 
+@dataclass(frozen=True)
+class Judgment:
+    """What the verifier needs to keep from one semantic attempt.
+
+    Both the gateway path and the business call-site path normalise into this, so
+    a result can report its receipt, its input digest and its mode without the
+    caller knowing which route produced it.
+    """
+
+    receipt_id: str | None
+    input_hash: str | None
+    mode: str
+
+
+# The service reports a fallback in its own vocabulary (``shadow``/``off``/
+# ``timeout``/...); map it onto the module's typed reasons. An unmapped reason is
+# never silently treated as success.
+_SERVICE_FALLBACKS: dict[str, FallbackReason] = {
+    "no_service": FallbackReason.NO_SERVICE,
+    "off": FallbackReason.JEV_OFF,
+    "shadow": FallbackReason.JEV_SHADOW,
+    "timeout": FallbackReason.JEV_TIMEOUT,
+    "not_configured": FallbackReason.JEV_NOT_CONFIGURED,
+    "invalid_response": FallbackReason.JEV_INVALID_RESPONSE,
+}
+
+
 class ExtractionVerifier:
     """Orchestrates deterministic-first, Jev-on-residue, bounded-repair verification.
 
     ``gateway`` may be ``None`` for the fully deterministic path (zero Jev calls;
-    the semantic residue then degrades to ``NEEDS_REVIEW``). ``repair_budget`` is
-    the caller's remaining allowance for repair model calls; ``repair_allowed`` is
-    the user-mode gate. A repair is *planned* here (a single, region-scoped step)
-    and its model call is executed by the generation provider — never by this
-    module, which only ever reaches the Jev gateway.
+    the semantic residue then degrades to ``NEEDS_REVIEW``). ``service`` — a
+    :class:`SemanticDecisionService`, mutually exclusive in practice with
+    ``gateway`` — routes the same judgment through the
+    ``callsites.verify_extraction_field`` business call site instead, which is how
+    production reaches it. ``repair_budget`` is the caller's remaining allowance
+    for repair model calls; ``repair_allowed`` is the user-mode gate. A repair is
+    *planned* here (a single, region-scoped step) and its model call is executed by
+    the generation provider — never by this module, which only ever reaches the
+    Jev layer.
     """
 
     def __init__(
         self,
         *,
         gateway: JevGateway | None = None,
+        service: SemanticDecisionService | None = None,
         source_registry: SourceRegistry | None = None,
         field_specs: dict[str, FieldSpec] | None = None,
         repair_budget: int = 1,
@@ -588,6 +640,7 @@ class ExtractionVerifier:
         part_number_pattern: str = DEFAULT_PART_NUMBER_PATTERN,
     ) -> None:
         self.gateway = gateway
+        self.service = service
         self.source_registry = source_registry
         self.field_specs = field_specs or {}
         self.repair_budget = repair_budget
@@ -638,14 +691,14 @@ class ExtractionVerifier:
         if record.unreadable:
             return self._needs_review(record, FallbackReason.UNREADABLE_REGION, verdict=None)
 
-        verdict, decision, reason = self._judge(record, cache_scope)
+        verdict, judgment, reason = self._judge(record, cache_scope)
         if verdict is None:
             assert reason is not None
             return self._needs_review(
                 record,
                 reason,
                 verdict=None,
-                decision=decision,
+                judgment=judgment,
             )
 
         if verdict is Verdict.GROUNDED:
@@ -659,20 +712,20 @@ class ExtractionVerifier:
                 repair_request=None,
                 fallback_reason=None,
                 path="jev",
-                receipt_id=decision.receipt_id if decision is not None else None,
-                input_hash=decision.input_hash if decision is not None else None,
+                receipt_id=judgment.receipt_id if judgment is not None else None,
+                input_hash=judgment.input_hash if judgment is not None else None,
                 repair_budget_remaining=self.repair_budget,
             )
 
         if verdict is Verdict.UNCERTAIN:
             return self._needs_review(
-                record, FallbackReason.JEV_UNCERTAIN, verdict=verdict, decision=decision
+                record, FallbackReason.JEV_UNCERTAIN, verdict=verdict, judgment=judgment
             )
 
         may_repair, refuse_reason = self._may_repair(record)
         if not may_repair:
             assert refuse_reason is not None
-            return self._needs_review(record, refuse_reason, verdict=verdict, decision=decision)
+            return self._needs_review(record, refuse_reason, verdict=verdict, judgment=judgment)
 
         self._spend_repair(record)
         request = self._build_repair_request(record, verdict)
@@ -686,8 +739,8 @@ class ExtractionVerifier:
             repair_request=request,
             fallback_reason=None,
             path="flagged_repair",
-            receipt_id=decision.receipt_id if decision is not None else None,
-            input_hash=decision.input_hash if decision is not None else None,
+            receipt_id=judgment.receipt_id if judgment is not None else None,
+            input_hash=judgment.input_hash if judgment is not None else None,
             repair_budget_remaining=self.repair_budget,
         )
 
@@ -721,24 +774,65 @@ class ExtractionVerifier:
 
     def _judge(
         self, record: ExtractionRecord, cache_scope: CacheScope | None
-    ) -> tuple[Verdict | None, Decision | None, FallbackReason | None]:
-        """Run the Jev ``extraction.field_grounded.v1`` choice over the residue only."""
-        if self.gateway is None:
-            return None, None, FallbackReason.NO_SERVICE
-
+    ) -> tuple[Verdict | None, Judgment | None, FallbackReason | None]:
+        """Run the ``extraction.field_grounded.v1`` choice over the residue only."""
         state = self._residue_state(record)
         if len(json.dumps(state, default=str)) > self.max_state_chars:
             return None, None, FallbackReason.INPUT_TOO_LONG
+        if self.service is not None:
+            return self._judge_via_callsite(record, state, cache_scope)
+        return self._judge_via_gateway(record, state, cache_scope)
+
+    def _judge_via_callsite(
+        self,
+        record: ExtractionRecord,
+        state: dict[str, Any],
+        cache_scope: CacheScope | None,
+    ) -> tuple[Verdict | None, Judgment | None, FallbackReason | None]:
+        """Judge through the business call site (production path)."""
+        assert self.service is not None
+        grounded = callsites.verify_extraction_field(
+            self.service,
+            question_id=record.question_id,
+            part_id=record.part_id,
+            field_name=record.field_name,
+            candidate_value=record.candidate_value,
+            unit=record.unit,
+            supplied_text=record.supplied_text or "",
+            source_region=state["source_region"],
+            scope=cache_scope or self._default_scope(),
+        )
+        judgment = Judgment(
+            receipt_id=grounded.receipt_id,
+            input_hash=grounded.input_hash,
+            mode=grounded.mode,
+        )
+        if grounded.used_jev:
+            verdict = _VERDICT_BY_VALUE.get(grounded.verdict)
+            if verdict is None:
+                return None, judgment, FallbackReason.JEV_INVALID_RESPONSE
+            return verdict, judgment, None
+        reason = _SERVICE_FALLBACKS.get(
+            grounded.fallback_reason or "", FallbackReason.JEV_UNAVAILABLE
+        )
+        return None, judgment, reason
+
+    def _judge_via_gateway(
+        self,
+        record: ExtractionRecord,
+        state: dict[str, Any],
+        cache_scope: CacheScope | None,
+    ) -> tuple[Verdict | None, Judgment | None, FallbackReason | None]:
+        """Judge through a caller-supplied gateway (tests, standalone pipelines)."""
+        if self.gateway is None:
+            return None, None, FallbackReason.NO_SERVICE
 
         definition = field_grounded_definition()
         request = DecisionRequest(
             definition=definition,
             state=state,
             caller_role="extraction",
-            cache_scope=cache_scope
-            or CacheScope(
-                owner_scope_hash=owner_scope_hash(_EXTRACTION_OWNER, _EXTRACTION_SCOPE)
-            ),
+            cache_scope=cache_scope or self._default_scope(),
             criteria=dict(FIELD_GROUNDED_CRITERIA),
             instructions=FIELD_GROUNDED_INSTRUCTIONS,
         )
@@ -749,13 +843,24 @@ class ExtractionVerifier:
         except JevError:
             return None, None, FallbackReason.JEV_UNAVAILABLE
 
+        judgment = Judgment(
+            receipt_id=decision.receipt_id,
+            input_hash=decision.input_hash,
+            mode=decision.mode,
+        )
         if decision.mode == "on" and decision.outcome == "ok" and decision.suggestion is not None:
             choice = decision.suggestion.choice
             verdict = _VERDICT_BY_VALUE.get(choice) if choice is not None else None
             if verdict is None:
-                return None, decision, FallbackReason.JEV_INVALID_RESPONSE
-            return verdict, decision, None
-        return None, decision, self._fallback_for(decision)
+                return None, judgment, FallbackReason.JEV_INVALID_RESPONSE
+            return verdict, judgment, None
+        return None, judgment, self._fallback_for(decision)
+
+    @staticmethod
+    def _default_scope() -> CacheScope:
+        return CacheScope(
+            owner_scope_hash=owner_scope_hash(_EXTRACTION_OWNER, _EXTRACTION_SCOPE)
+        )
 
     @staticmethod
     def _residue_state(record: ExtractionRecord) -> dict[str, Any]:
@@ -860,20 +965,20 @@ class ExtractionVerifier:
         reason: FallbackReason,
         *,
         verdict: Verdict | None,
-        decision: Decision | None = None,
+        judgment: Judgment | None = None,
     ) -> VerificationResult:
         return VerificationResult(
             status=Status.NEEDS_REVIEW,
             record=record.as_dict(),
             verdict=verdict,
             used_jev=False,
-            jev_calls=1 if decision is not None and decision.mode != "off" else 0,
+            jev_calls=1 if judgment is not None and judgment.mode != "off" else 0,
             deterministic_failures=(),
             repair_request=None,
             fallback_reason=reason,
             path=f"fallback:{reason.value}",
-            receipt_id=decision.receipt_id if decision is not None else None,
-            input_hash=decision.input_hash if decision is not None else None,
+            receipt_id=judgment.receipt_id if judgment is not None else None,
+            input_hash=judgment.input_hash if judgment is not None else None,
             repair_budget_remaining=self.repair_budget,
         )
 
@@ -896,6 +1001,9 @@ __all__ = [
     "FieldSpec",
     "FIELD_GROUNDED_CANDIDATES",
     "FIELD_GROUNDED_CRITERIA",
+    "FIELD_GROUNDED_INSTRUCTIONS",
+    "FIELD_GROUNDED_REQUIRED_STATE",
+    "Judgment",
     "MAX_REPAIR_STEPS_PER_RECORD",
     "RecordRole",
     "RepairRequest",

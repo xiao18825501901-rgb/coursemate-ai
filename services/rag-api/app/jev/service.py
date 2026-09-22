@@ -72,6 +72,9 @@ _MUST_KEEP: dict[str, tuple[str, ...]] = {
     "exercise.prototype.v1": ("node", "eligible_prototypes"),
     "graph.prerequisite.v1": ("current_node", "allowed_predecessor_nodes"),
     "corpus.quality.v1": ("document_fragment", "parse_flags"),
+    "extraction.field_grounded.v1": (
+        "candidate_value", "supplied_text", "field_name", "question_id",
+    ),
 }
 
 
@@ -920,6 +923,48 @@ class SemanticDecisionService:
         elif isinstance(result.value, str) and result.value.isdigit():
             result.value = int(result.value)
         return result
+
+    # ------------------------------------------------------------- extraction
+
+    def field_grounded(
+        self,
+        *,
+        question_id: str,
+        part_id: str | None,
+        field_name: str,
+        candidate_value: Any,
+        unit: str | None,
+        supplied_text: str,
+        source_region: dict[str, Any],
+        caller_role: str,
+        cache_scope: CacheScope,
+        deterministic: str = "UNCERTAIN",
+    ) -> DecisionResult:
+        """extraction.field_grounded.v1: does the already-read field belong here?
+
+        The candidate vocabulary is read from the catalog entry itself, so a
+        caller can neither widen nor rename it, and the deterministic fallback is
+        ``UNCERTAIN`` — an unresolved field is never reported as accepted.
+        """
+        definition_key = "extraction.field_grounded.v1"
+        criteria = dict(self.catalog.get(definition_key).criteria or {})
+        return self._choice_bounded(
+            definition_key,
+            fields={
+                "question_id": question_id,
+                "part_id": part_id,
+                "field_name": field_name,
+                "candidate_value": candidate_value,
+                "unit": unit,
+                "supplied_text": supplied_text,
+                "source_region": source_region,
+            },
+            candidate_ids=tuple(criteria),
+            candidate_labels=criteria,
+            caller_role=caller_role,
+            cache_scope=cache_scope,
+            deterministic=deterministic,
+        )
 
     # ------------------------------------------------------------------ internals
 
