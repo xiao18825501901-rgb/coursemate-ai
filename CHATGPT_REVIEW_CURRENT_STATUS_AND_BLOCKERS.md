@@ -259,6 +259,43 @@ forbids, so the flag stays `false`.
     is a fact about this environment, not a defect: the import is guarded by `try/except ImportError`
     raising `JevUnavailableError`, which the suite exercises.
 
+14. **The one gate item that was still resting on historical evidence now has a current answer — including
+    the rollback check against the real production release.** The §12 gate list ends with migration,
+    backup/restore and rollback compatibility, and my evidence for it was a script output recorded on
+    `6e65396`. Two things are now measured rather than inherited. First, the suites themselves: **67
+    passed / 0 failed** on the frozen revision, and the upgrade path is exercised from a genuinely older
+    schema — `test_document_versions.py` builds a **V2** database with rows, initialises it with
+    `v3_enabled=True` **twice**, and asserts the resulting `schema_migrations`, which proves the additive
+    backfill and the idempotent replay in one test. Second, and more usefully, I produced **local rollback
+    evidence against the actual production release**: `scripts/verify_rollback_compat.py` takes a
+    `--release-tree`, so I made a temporary git worktree of `4ef5064` (which exists in this repository
+    and declares `LATEST_V3_SCHEMA_VERSION = 25`, matching production) and pointed the tool at it. It
+    builds a database with the current code, then runs the **old release's own code** against that
+    migrated file. Verdict: **`ROLLBACK_SAFE_WITH_MIGRATED_DB`**, exit 0 — the old release imports and
+    opens the schema-30 database with `integrity=ok`, zero foreign-key violations, no missing tables or
+    columns, no retyped columns, no narrowed CHECK enums, and an unchanged assessment pool filter. So if
+    the migration has to be undone, the code-only path is viable; the pre-migration backup stays the
+    primary path regardless. Nothing touched production: the worktree was under the system temp directory
+    and has been removed. This is the kind of item that looks like it "needs the release window" and in
+    fact had a locally executable half, which is the pattern this round was looking for.
+
+    The same reasoning then produced the rehearsal itself. `scripts/rehearse_v3_migration.py` needs a
+    `--source` database, which I had assumed meant the production snapshot — but the requirement is only
+    that it be a database *at the older schema*, and the old release's own code can build one. So I used
+    the `4ef5064` worktree to create a schema-25 database (its own `Database(settings)` API, one course,
+    document and chunk seeded through the columns that schema actually requires), removed the worktree,
+    and ran the rehearsal from the current tree. It copies the file, applies the real migration files
+    001–030 and calls `initialize()` **twice**. Result: **`old_rows_unchanged: true`** — every
+    fingerprinted table is byte-identical before and after by SHA-256, which is what "additive migration"
+    is supposed to mean and is stronger than checking that the DDL ran; `integrity=ok`;
+    `foreign_key_violations=0`; `v3_invariants_ok=true` with 52 counters at zero and only the four
+    expected seeds/backfills non-zero (`document_versions=1` backfilled from the seeded document,
+    `documents=1`, `grade_policy_versions=1`, `requirements_grade_policy_seed=1`). Evidence:
+    `work/current-change/rehearsal-25-to-30.clean.json`. **The limitation is stated, not glossed:** the
+    source is synthetic and has one row per table, so this proves the *schema* upgrade path and the
+    invariant set, not that the real corpus has no awkward rows — the rehearsal against the production
+    dump is still a release-window step and is listed as such.
+
 Two of my own first-draft claims were wrong and were corrected in place rather than left standing: I
 first recorded the retrieval re-rank as "40 calls per page, fixable by batching" — it is bounded at
 **16**, and the batching I proposed is not available for that shape (`JevCall` shares one state across
@@ -275,6 +312,9 @@ QA stream would be byte-identical without a credential — `create_app` **always
 | Web app | `tsc --noEmit` exit 0, **73 vitest passed** (18 → 19 files), production build exit 0 |
 | Agent service (`services/agent-api`, TypeScript) | **92 vitest passed / 0 failed** (12 files), `tsc -p tsconfig.json --noEmit` exit 0, production build exit 0 with `dist/src/server.js` emitted — run this round on `cfd0ef1`; the 14 intent-gate tests are `executor-intent-gate.test.ts` (6) + `intent-gate.test.ts` (8), exactly the pair the call-site matrix cites for tool misexecution |
 | Measurement / module-metric suites | **121 passed** (`test_jev_module_metrics.py` 13, `test_jev_module_split_calibration.py` 8) |
+| Migration, backup/restore and rollback gate (run this round) | **67 passed / 0 failed** across `test_document_versions.py`, `test_four_change_migration.py`, `test_assessment_runtime.py`, `test_backup_restore.py`, `test_backup_ui_extension.py`, `test_monitor_v2.py`, `test_knowledge_registry.py`, `test_database.py` and `test_codex_snapshot_backup.py`. The upgrade path is not just asserted: `test_document_versions.py` builds a **V2** database with course/document/chunk rows, then initialises the same file with `v3_enabled=True` **twice** and asserts the resulting `schema_migrations`, so the additive backfill and the idempotent replay are proven together |
+| The 25 → 30 upgrade rehearsed end to end (run this round, locally) | `scripts/rehearse_v3_migration.py` on a source database built by the **old release's own code** (`4ef5064`, schema 25, one course/document/chunk seeded): real migrations 001–030 applied to a copy with `initialize()` called **twice** → **`old_rows_unchanged: true`** (every fingerprinted table byte-identical before and after by SHA-256, so the upgrade is strictly additive), `integrity=ok`, `foreign_key_violations=0`, `v3_invariants_ok=true` with **52** counters at zero and only the four expected seeds/backfills non-zero (`document_versions=1` backfilled from the seeded document, `documents=1`, `grade_policy_versions=1`, `requirements_grade_policy_seed=1`). Evidence: `work/current-change/rehearsal-25-to-30.clean.json`. **Not covered:** the source is synthetic and one row per table, so the same rehearsal against the real production dump remains a release-window step |
+| Rollback compatibility against the production release (run this round, locally) | **`ROLLBACK_SAFE_WITH_MIGRATED_DB`**, exit 0 — `scripts/verify_rollback_compat.py` with `--release-tree` pointed at a git worktree of `4ef5064` (the production release, own schema 25). It builds a database with the current code (all migrations to 30) and runs the **old release's own code** against that file: no import or open error, `max_migration=30` seen by code whose own schema is `25`, `integrity=ok`, 0 foreign-key violations, no missing tables or columns, no retyped columns, no narrowed CHECK enums, assessment pool filter unchanged across the four rebuilt tables. Evidence: `work/current-change/rollback-compat-4ef5064.json`. The worktree was a temporary checkout under the system temp directory and was removed afterwards; production was not contacted |
 | ruff | **1815 errors at the pre-change revision and 1815 after** for app+tests, unchanged even with a 221-line test file added (ruff 0.16.2 from the service venv, run **with `services/rag-api` as the working directory** over `app tests`); the new script is additionally clean under the service config, where its siblings in `scripts/` carry 19 pre-existing E402 and 207 E501. It did rise to **1821** mid-round, when the renamed loop variables pushed six lines past the 100-column limit; those were rewrapped in their own commit, so the total is back to 1815 rather than reported as "unchanged" without measuring |
 | mypy | **1004 errors in 32 files** — *not* "unchanged", as my earlier reports claimed: measuring it showed 1077/38 (and 1074/39 at round 30), because my own round-31 work had added 7. Six in-scope defects fixed since, removing 73 errors (1077 → 1004), and **`app/jev/` and `app/evaluation/` now report zero errors**. The remainder is reported by rule, not hidden: 728 of 1004 in `app/cm_update/app.py`, and the bulk are `no-untyped-call` / `no-untyped-def` / `type-arg` |
 

@@ -5,7 +5,7 @@ precise close condition instead of a general "waiting for authorization".
 
 **Audited revision.** branch `fix/codex-dsh-audit-20260919`, audited at HEAD
 `7e2e4db7cf99d85f92a82c9f97d72729fdaa5162` ("Record round 30's final revision and correct three
-stale deliverable claims", 2026-09-22 13:31 +08:00), working tree clean, **56 commits ahead of
+stale deliverable claims", 2026-09-22 13:31 +08:00), working tree clean, **57 commits ahead of
 `origin` and not pushed**. Application/production SHA in production is `4ef5064`; production has
 **never** been touched by this work (read-only checks only).
 
@@ -31,7 +31,24 @@ layer's type errors). The gate below was re-run on the **frozen** revision `169b
 * mypy **1077 → 1004 errors in 32 files**, and **`app/jev/` + `app/evaluation/` now report zero errors**:
   the six remaining in-scope errors this round's B-10 named (`gateway.py` 4, `jev_calibration.py` 1,
   `deepseek_canary.py` 1 — the last caused by an untyped literal in `exercise_contract.py`) are fixed,
-  not deferred. What is left is legacy `cm_update`/`ui_extension` debt, reported per rule in B-10.
+  not deferred. What is left is legacy `cm_update`/`ui_extension` debt, reported per rule in B-10;
+* **migration / backup / restore gate: 67 passed / 0 failed** on the frozen revision, including an
+  upgrade from a genuinely older schema (`test_document_versions.py` builds a **V2** database with rows,
+  initialises it with `v3_enabled=True` **twice** and asserts the resulting `schema_migrations`);
+* **the 25 → 30 upgrade rehearsed end to end on a database built by the old release's own code**
+  (`4ef5064`, schema 25, with a course/document/chunk seeded): real migrations 001–030 applied to a copy,
+  `initialize()` called twice, and the result is `old_rows_unchanged: true` — every fingerprinted table
+  byte-identical before and after by SHA-256 — plus `integrity=ok`, `foreign_key_violations=0` and
+  `v3_invariants_ok=true` with 52 counters at zero (`work/current-change/rehearsal-25-to-30.clean.json`).
+  The source is synthetic (one row per table), so the rehearsal against the real production dump remains
+  a release-window step;
+* **rollback compatibility against the real production release, verified locally:** with
+  `--release-tree` pointed at a git worktree of `4ef5064` (own schema 25),
+  `scripts/verify_rollback_compat.py` returns **`ROLLBACK_SAFE_WITH_MIGRATED_DB`** — the old release
+  imports and opens a schema-30 database with `integrity=ok`, 0 foreign-key violations, no missing
+  tables or columns, no retyped columns and no narrowed CHECK enums, so a code-only rollback is viable
+  (`work/current-change/rollback-compat-4ef5064.json`). The temporary worktree was removed afterwards;
+  production was not contacted.
 
 The backend delta is exactly accounted for at every step: 1235 → 1252 (4 QA + 13 metric tests) →
 1260 (8 split/calibration tests) → **1293** (33 config-guard tests). No test was renamed, skipped or
@@ -106,7 +123,7 @@ in to production. Each row states which of those it is.
 | B-24 | No CourseMate backup timer exists (SRSZQ has one, untouched) | `coursemate-monitor` reports `failed` because its own backup check sees a snapshot older than `MAX_BACKUP_AGE_SECONDS` (191857 s vs 93600). Adding a timer is a production change | `WAITING_OWNER_DECISION` |
 | B-25 | Qwen → DeepSeek model switch | Needs one release window; production currently runs Qwen only (`V3_MODEL=qwen3.8-max`, `RAG_CHAT_MODEL=qwen3.8-max`, `AGENT_MODEL_NAME=qwen3.8-max`) + Qwen embeddings `text-embedding-v4` | `WAITING_PRODUCTION_APPROVAL` |
 | B-26 | Netlify publish method for the frontend | Publish method unchosen; current deploy `6ab02278b7fae664934df25d` | `WAITING_OWNER_DECISION` |
-| B-27 | Production migration rehearsal + backup + rollback against `4ef5064` | Requires the release window; rehearsal must run on an isolated restore, not production | `WAITING_PRODUCTION_APPROVAL` |
+| B-27 | Production migration rehearsal + backup + rollback against `4ef5064` | **Partly closed locally in round 36; the part that needs production still waits.** Locally proven now: (i) the migration/upgrade gate is **67 passed / 0 failed** on the frozen revision, including the upgrade from a genuinely older schema — `test_document_versions.py` builds a **V2** database with rows, then initialises it with `v3_enabled=True` **twice** and asserts the resulting `schema_migrations`, so additive backfill and idempotent replay are proven together; (ii) **rollback compatibility against the real production release is verified**: `scripts/verify_rollback_compat.py` with `--release-tree` pointed at a git worktree of `4ef5064` (its own schema is 25) returns **`ROLLBACK_SAFE_WITH_MIGRATED_DB`**, exit 0 — the old release imports and opens a schema-30 database with `integrity=ok`, 0 foreign-key violations, no missing tables/columns, no retyped columns and no narrowed CHECK enums, so a code-only rollback is viable (`work/current-change/rollback-compat-4ef5064.json`). Still waiting: the rehearsal against the **real production snapshot**, which the §15 sequence puts after the consistent backup and isolated restore, and the post-migration production check. **Added in the same round:** the rehearsal itself has now run locally against a source built by the **old release's own code** (`4ef5064`, schema 25) with a course/document/chunk seeded — real migrations 001–030 applied to a copy, `initialize()` called **twice** — giving `old_rows_unchanged: true` (every fingerprinted table byte-identical by SHA-256, so the upgrade is strictly additive), `integrity=ok`, `foreign_key_violations=0`, `v3_invariants_ok=true` with 52 counters at zero and only the four expected seeds/backfills non-zero (`work/current-change/rehearsal-25-to-30.clean.json`). The honest limit: that source is synthetic and one row per table, so the *real data dump* rehearsal is still outstanding | `WAITING_PRODUCTION_APPROVAL` for the snapshot half; the local half is `RESOLVED_WITH_EVIDENCE` |
 | B-28 | Push the 42 local commits | Explicitly not done: no push without approval. Everything is committed locally | `WAITING_PRODUCTION_APPROVAL` |
 
 ---
