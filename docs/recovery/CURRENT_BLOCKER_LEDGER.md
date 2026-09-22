@@ -89,8 +89,8 @@ in to production. Each row states which of those it is.
 
 | Status | Count | IDs |
 |---|---|---|
-| `RESOLVED_WITH_EVIDENCE` | 16 | round 31: B-05, B-06, B-08, B-09, B-10, B-13, B-15…B-20, B-29, B-30; already closed and re-verified: B-14, B-21, B-22 |
-| `LOCAL_IMPLEMENTATION_GAP` (open, mine) | 1 | B-11 (surface `definitive` in the shipped UI) |
+| `RESOLVED_WITH_EVIDENCE` | 17 | round 31/32: B-05, B-06, B-08…B-11, B-13, B-15…B-20, B-29, B-30; already closed and re-verified: B-14, B-21, B-22 |
+| `LOCAL_IMPLEMENTATION_GAP` (open, mine) | **0** | none — every local gap this audit found is closed with code and a test |
 | `WAITING_CREDENTIAL` | 2 | B-01, B-02 |
 | `WAITING_BUDGET` | 1 | B-03 |
 | `WAITING_PLATFORM_ACCESS` | 1 | B-04 |

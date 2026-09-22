@@ -17,7 +17,7 @@ status class) and `docs/recovery/OWNER_ACTIONS_ONLY.md` (the four things only th
 | Git root | `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY` |
 | Branch | `fix/codex-dsh-audit-20260919` |
 | HEAD at audit start | `7e2e4db7cf99d85f92a82c9f97d72729fdaa5162` ("Record round 30's final revision and correct three stale deliverable claims", 2026-09-22 13:31 +08:00) |
-| Revision this round produced | `33c3fef` — everything in §5, with the gate in §6 re-run on that tree (`git diff HEAD -- services/rag-api benchmarks` is empty) |
+| Revision this round produced | `6ba70b0` — the reference-solution gate's result now renders in the shipped shell (apps/web + the E2E spec only; `git diff HEAD -- services` is empty, so the backend regression below still describes the backend) |
 | Working tree | clean at audit start |
 | Remote | **42 commits ahead of `origin`, nothing pushed** (no push without approval) |
 | Application SHA in production | `4ef5064` — **untouched by this work**; production has only ever been read |
@@ -73,8 +73,8 @@ The ledger carries 28 rows with full detail; the summary:
 
 | Status | Count | Representative items |
 |---|---|---|
-| `RESOLVED_WITH_EVIDENCE` (this round) | 14 | module-D resolver type errors; missing QA-stream evidence bundle; `is_definitive` having no caller; the five module metrics being uncomputable; six documentation claims that did not match the code |
-| `LOCAL_IMPLEMENTATION_GAP` (open, mine) | 1 | the `definitive` flag is in the API but the shipped UI does not render it yet |
+| `RESOLVED_WITH_EVIDENCE` | 17 | module-D resolver type errors; missing QA-stream evidence bundle; `is_definitive` having no caller; the five module metrics being uncomputable; the companion dataset's missing split manifest; six documentation claims that did not match the code; and the reference-gate note now reaching the shipped UI |
+| `LOCAL_IMPLEMENTATION_GAP` (open, mine) | **0** | none — every local gap this audit found is closed with code and a test |
 | `WAITING_CREDENTIAL` | 2 | live Jev validation; live DeepSeek validation |
 | `WAITING_BUDGET` | 1 | a real token/USD ceiling (all current figures are proposals) |
 | `WAITING_PLATFORM_ACCESS` | 1 | one real sign-in for production acceptance |
@@ -145,19 +145,15 @@ QA stream would be byte-identical without a credential — `create_app` **always
 
 | Gate | Result |
 |---|---|
-| Full backend regression | **1252 passed / 0 failed** in 1681.27s (exit 0) — `work/current-change/full_run_round31.log` |
-| Browser journeys (real Chrome, real three services, injected identity) | **32 journeys / 0 failed** — `ui-refresh` 19, `jev-structured` 6, `coursemate` 4, `learning` 3 |
-| Measurement / module-metric suites | **113 passed** (`test_jev_module_metrics.py` 13 of them) |
-| ruff | **1815 errors at the pre-change revision and 1815 after** — identical, measured against a `git worktree` of `7e2e4db` rather than asserted |
-| mypy | `app/jev/citation_evidence.py` is now clean (`mypy app/jev/citation_evidence.py` → no issues); the whole-app count of pre-existing legacy errors is unchanged by this round |
+| Full backend regression | **1260 passed / 0 failed** in 1589.54s (exit 0) — `work/current-change/full_run_round32.log`, on `74100ed`. Rounds 31–32 added no backend code after it (verified: `git diff 74100ed -- services` is empty) |
+| Browser journeys (real Chrome, real three services, injected identity) | **32 journeys / 0 failed** — `ui-refresh` 19, `jev-structured` 6, `coursemate` 4, `learning` 3 (re-run on `6ba70b0`) |
+| Web app | `tsc --noEmit` exit 0, **73 vitest passed** (18 → 19 files), production build exit 0 |
+| Measurement / module-metric suites | **121 passed** (`test_jev_module_metrics.py` 13, `test_jev_module_split_calibration.py` 8) |
+| ruff | **1815 errors at the pre-change revision and 1815 after** for app+tests (measured against a `git worktree`, not asserted); the new script is additionally clean under the service config, where its siblings in `scripts/` carry 19 pre-existing E402 and 207 E501 |
+| mypy | `app/jev/citation_evidence.py` is clean; the whole-app count of pre-existing legacy errors is unchanged |
 
-The regression delta is exactly accounted for: 1235 → 1252 = the 4 new QA tests (25→29 in
-`tests/test_qa_api.py`) plus the 13 new tests in `tests/test_jev_module_metrics.py`.
-
-### 6.1 Backend regression
-
-Command: `services\rag-api\.venv\Scripts\python.exe -m pytest -q -p no:randomly`
-Log: `work/current-change/full_run_round31.log` → `1252 passed, 2 warnings in 1681.27s (0:28:01)`, exit 0.
+The regression delta is exactly accounted for at every step: 1235 → 1252 (4 QA tests + 13 metric
+tests) → 1260 (8 split/calibration tests); the web delta 68 → 73 is the 5 reference-note tests.
 
 ### 6.2 Browser journeys
 
