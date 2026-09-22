@@ -140,6 +140,61 @@ test("the shipped shell reports the capability it dispatched", async ({ page, re
   expect(teaching.id).not.toBe(answerOnly.id);
 });
 
+test("the shipped shell can file a problem report without leaving the lesson", async ({
+  page,
+}) => {
+  await page.goto("/app#/course/cs3481/learn");
+  await expect(page.locator(".workspace-columns")).toBeVisible();
+
+  await page.getByRole("button", { name: /报告问题/ }).first().click();
+  const dialog = page.locator(".modal");
+  await expect(dialog).toBeVisible();
+
+  // The privacy contract is visible in the UI: identifiers only until the user opts
+  // in, and the free-text note is only reachable once they do. A disabled field is
+  // the honest presentation of "this needs consent", and it is what keeps the form
+  // from sending a body the server would refuse.
+  const note = dialog.getByRole("textbox").last();
+  await expect(note).toBeDisabled();
+  await dialog.getByRole("checkbox").check();
+  await expect(note).toBeEnabled();
+  await note.fill("第 2 步的公式看起来不对");
+
+  await dialog.locator("select").selectOption("ANSWER_WRONG");
+  const submitted = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname.endsWith("/api/feedback") &&
+      response.request().method() === "POST",
+  );
+  await dialog.getByRole("button", { name: /提交报告/ }).click();
+  const response = await submitted;
+  expect(response.status()).toBe(201);
+
+  // What the shell sent: the user's own note and the conversation body only because
+  // they ticked the consent box — the same contract the server enforces.
+  const payload = response.request().postDataJSON() as {
+    attach_body?: boolean;
+    report_text?: string | null;
+    category?: string | null;
+  };
+  expect(payload.attach_body).toBe(true);
+  expect(payload.report_text).toContain("公式");
+  expect(payload.category).toBe("ANSWER_WRONG");
+
+  // What the server answered: a queued report with its key, triage suggestion and the
+  // durable row id — not a fabricated success.
+  const body = (await response.json()) as {
+    report_id?: string;
+    report_key?: string;
+    suggested_queue?: string;
+    path?: string;
+  };
+  expect(body.report_id ?? "").toMatch(/^feedback_/);
+  expect(body.report_key ?? "").not.toBe("");
+  expect(body.path ?? "").toMatch(/^(jev|fallback:)/);
+  await expect(dialog).toBeHidden({ timeout: 15_000 });
+});
+
 test("with no TypeSafe credential every decision degrades and teaching still works", async ({
   page,
   request,
