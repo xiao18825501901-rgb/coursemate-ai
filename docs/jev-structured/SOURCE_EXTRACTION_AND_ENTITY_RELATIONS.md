@@ -378,12 +378,29 @@ Host wiring: one shared `SemanticDecisionService` is built in
    Cross-check: `grep` for `ExtractionRecord | ExtractionVerifier | FieldSpec | verify_extraction`
    across `services/rag-api/app` matches **only** `app/jev/extraction.py` itself.
 
-   **Recorded decision for the next round (so it is not re-litigated):** either (a) wire the
-   `extract_structured_blocks` question-number/part labels *with a real consumer* — an outcome that
-   makes structured retrieval distrust a misassigned 题号, marked only when a real Jev signal says the
-   label does not belong to that block (so shadow/off keeps today's behaviour byte-identical), which
-   needs a migration for the per-entry outcome; or (b) leave module A `MODULE_ONLY` and state that in
-   the final report. Inventing a field-decomposition layer purely to justify a call site is not an
-   option.
+   **Decision (round 26, final): option (b) — module A stays `MODULE_ONLY`.** Reasons, so this is not
+   re-litigated:
+
+   * the only surface close enough is `extract_structured_blocks`, whose "fields" are the deterministic
+     regex labels `question_number` / `question_part` written into `chunks.metadata_json` and
+     backfilled into `problem_index_entries`. Those labels have **no per-field review slot** and, more
+     importantly, **no consumer that would act on one**: structured retrieval already protects the
+     exact locator deterministically (`tests/test_real_course_golden.py` proves `Question 1(b)` and
+     `Question 3(2)` resolve exactly and stay course-isolated), and a review-only annotation that
+     nobody reads is precisely the "a helper exists" pattern this project refuses to count;
+   * adding a real consumer would mean making structured retrieval *distrust* a label — a behaviour
+     change to the exact-locator path, which is the one place the task explicitly says must never be
+     displaced. It would need a migration, and it would risk the reliability guarantee that is already
+     tested on real course files;
+   * the DeepSeek-Vision path (`ProblemSolutionOutput.question_transcription` / `conditions`) is
+     generated natural-language text with no field/value/unit schema, so wiring module A there would
+     require inventing the field-decomposition layer the task forbids, and there is no per-field
+     persistence slot to record a `NEEDS_REVIEW` outcome even if it existed.
+
+   The module, its 16 tests and its catalog definition stay in place: if CourseMate later gains a real
+   field-level extraction surface (for example a structured question/table parser whose fields feed
+   something a user sees), wiring it is a small, well-defined change. Until then it is reported as
+   `MODULE_ONLY` in every deliverable, and no behaviour is claimed for it.
+
 
 

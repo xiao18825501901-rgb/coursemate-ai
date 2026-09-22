@@ -9,15 +9,18 @@ reversed — and what must never be lost.
 
 | Item | Value |
 |---|---|
-| Source schema target (RAG) | **28** — `app/db.py::LATEST_V3_SCHEMA_VERSION`, migrations 001–028 |
+| Source schema target (RAG) | **29** — `app/db.py::LATEST_V3_SCHEMA_VERSION`, migrations 001–029 |
 | Jev receipts | `028_jev_decision_receipts.sql` (executed, historical; never rewritten) |
-| UI schema | 13 (unchanged this round) |
+| Entity relations | `029_entity_relations.sql` — the proposal-only store for module B. Note the number was previously used by the cancelled Laya migration, which was removed and archived under `archive/laya-superseded-20260922/`; this 029 is a different, additive migration and must not be confused with it |
+| UI schema | 13 (unchanged) |
 | Agent schema | 1 (unchanged) |
-| Withdrawn | migration 029 existed only for the cancelled Laya direction; it was removed and is archived under `archive/laya-superseded-20260922/` |
-| Production (verified read-only this round) | **25** — the live database is `/srv/coursemate/data/releases/20260919T202006Z/rag.sqlite3`, `integrity_check=ok`, migrations 001–025 |
+| Production (verified read-only) | **25** — the live database is `/srv/coursemate/data/releases/20260919T202006Z/rag.sqlite3`, `integrity_check=ok`, migrations 001–025 |
 
-Production therefore needs **25 → 28** (026 learning start events, 027 assessment preparation, 028 Jev
-receipts). There is no 029.
+Production therefore needs **25 → 29** (026 learning start events, 027 assessment preparation,
+028 Jev receipts, 029 the entity-relation proposal store). Because 029 is additive and its only writer
+is the retrieval path's proposal bookkeeping — which degrades to "nothing recorded" when the table is
+absent (`test_relation_bookkeeping_never_breaks_retrieval_without_the_store`) — a release that is
+rolled back after the migration still runs against the migrated database.
 
 ## 2. Rules for new state
 
@@ -81,8 +84,8 @@ make a report look tidier.
 
 | Item | State |
 |---|---|
-| Isolated init/replay and leftover checks | verified this session (`integrity=ok`, `fk=0`, max 28, no leftovers) |
+| Isolated init/replay and leftover checks | verified (`integrity=ok`, `fk_violations=0`, max migration **29**, no `*_old`/`*_new` leftovers) |
 | Legacy-upgrade invariants | covered by the rehearsal suite (green) |
 | Rollback compatibility against the *previous* release | verified for the earlier boundary; **must be re-run against `4ef5064` before the production migration** |
-| Production migration 026–028 | **NOT_RUN** — requires the release window and a fresh backup |
+| Production migration 026–029 | **NOT_RUN** — requires the release window and a fresh backup |
 | Post-release backup and monitoring | **NOT_RUN** |

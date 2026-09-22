@@ -84,13 +84,29 @@ case call sites with a successful `FakeTransport` in `on` mode and asserts
 learning/grade/coverage row counts are unchanged while the only writes are the Jev
 receipts (plus, for entity resolution, the proposal-only `entity_relations` store).
 
+## Browser journeys: what exists, what cannot exist yet, and why
+
+The task lists seven journeys to add. Five of them exist or are covered at a lower
+layer with a real assertion; two cannot be written truthfully today because the
+behaviour they would assert does not happen in any reachable runtime mode. Every row
+says which, so a missing journey is never mistaken for a passing one.
+
+| Task item | Status | Where it is actually verified |
+|---|---|---|
+| Skill selection (capability choice) | **EXISTS** | `tests/e2e/jev-structured.spec.ts` — the shipped shell's own create-run response reports `direct_qa`/`teaching_flow=false` for "只回答" and `node_lesson`/`teaching_flow=true` for a normal teaching message, and both runs reach `completed` |
+| Jev unavailable / safe degradation | **EXISTS** | same file: the suite runs with **no** TypeSafe credential on purpose; every decision reports `used_jev=false` and the teaching run still completes with citations and no error. Also the whole 19-journey `ui-refresh.spec.ts`, which runs against the same shadow deployment |
+| Alias retrieval (Chinese alias → English material) | **EXISTS at the retrieval boundary, deliberately not as a browser journey** | `tests/test_real_course_golden.py` on the **real GE2324 corpus**: the Chinese question has no lexical hit, and with the registry's accepted alias it reaches `assignment_2.pdf`. A browser journey cannot show this in the E2E environment because the deterministic stub embeddings answer any query with *some* similarity, so the citation list is not a discriminator; asserting it there would be a weaker claim dressed as a stronger one |
+| Tool misexecution (a wrong side-effecting tool call) | **EXISTS at the real execution boundary** | agent-api `test/executor-intent-gate.test.ts` + `test/intent-gate.test.ts` (14 tests): write tools gated, `searchTask` never gated, `enforce` blocks with `CONFIRMATION_REQUIRED`, `off` byte-identical. A browser journey is impossible today because the E2E agent runs the **deterministic** model client, which never proposes a tool call — there would be nothing to block |
+| Extraction verification | **CANNOT EXIST** | module A is `MODULE_ONLY`: no production surface produces the record it verifies (see the module table). A journey asserting it would be fiction |
+| Condition conflict | **CANNOT EXIST YET** | the conflict note requires a real `SAME_CONTEXT_CONTRADICTION`, which only a live TypeSafe decision can produce (mode `on`). What is provable today is the *absence*: `test_jev_evidence_consistency_wiring.py` proves the prompt is byte-unchanged under off/shadow/unavailable/no-Jev. The journey becomes possible the moment a real credential exists |
+| Unsupported citation | **PARTIALLY EXISTS** | the deterministic half is proven without any credential (`test_citation_audit_binding.py`: a figure the claim asserts but the source never states is flagged with **zero** model calls; an unauthorized citation is `REJECTED`), and the shell's marker is unit-tested (`citationSupport.test.ts`). The semantic half (`NOT_ADDRESSED`/`CONTRADICTED` from a real decision) needs the live credential, so the end-to-end journey is `NOT_RUN` |
+
 ## Still open (not claimed as done)
 
-1. **Modules A, C and the three-layer audit of D are `MODULE_ONLY`.** They are
-   implemented and tested but not yet invoked from ingestion/parse, the evidence-pack
-   step, or post-generation citation binding. No business effect is claimed for them.
-   **A browser journey cannot exist for them yet**, and none was written: a journey
-   that asserts behaviour no call site produces would be fiction.
+1. **Module A is `MODULE_ONLY` after a full investigation** (no production surface produces the record it
+   verifies; every candidate is listed with the reason it is ruled out in
+   `docs/jev-structured/SOURCE_EXTRACTION_AND_ENTITY_RELATIONS.md` §9.4). Modules B, C, D, E, F and the
+   P2 feedback module are wired with a consumer; none of them is promoted out of `shadow`.
 2. **`retrieval.support.v1` is one call per candidate.** The SDK
    `system_one(state, questions)` supports several questions per call; a multi-question
    `evaluate` on `JevGateway` would batch it (the transport contract was not touched).
