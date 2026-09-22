@@ -190,6 +190,57 @@ forbids, so the flag stays `false`.
    `503 MODEL_LIVE_BLOCKED` when `V3_MODEL_API_KEY` is missing, the agent's refusal to start without an
    allowlisted endpoint, and the UI backend's refusal to boot (pinned by the 33 new tests above).
 
+10. **A number I had reported as "unchanged" was wrong, and re-measuring it exposed two real defects.**
+    Both this report and the ledger stated that the whole-app mypy count was unchanged, without
+    re-running it since round 30. I ran it: **1077 errors in 38 files**, not 1074/39 — my own round-31
+    module-metric collectors had added **+7** to `app/evaluation/jev_semantic_ablation.py` while the
+    resolver fix removed 4. The seven were not cosmetic. `run_jev_semantic_ablation` reused a single
+    variable `predicted` for two different payloads: the image branch assigns the answer **string**
+    returned by `image_predictor` (`Callable[..., str | None]`), while every other family assigns a
+    prediction **mapping** from `_predict` (`dict[str, Any] | None`). Because the string assignment came
+    first, mypy pinned the name to `str | None` and **21 mapping uses** — `.get`, `_choice_prediction`,
+    `_coverage_bool`, `_criterion_grade` — were never type-checked at all; a wrong payload there would
+    have surfaced as a runtime crash in a measurement run. Renamed that branch to `predicted_answer`,
+    matching the `ImageResult` field it feeds (behaviour-free: the branch appends and `continue`s). The
+    second defect is in `recall_at_k`/`mrr`, which declared `relevant_ids: Sequence[str]` while every
+    caller passes the `frozenset` the case objects store — only `returned_ids` is order-sensitive (it is
+    sliced to the top *k* and ranked), so the label parameter is now `Iterable[str]` with the asymmetry
+    documented. Net effect: **1077 → 1010 errors in 35 files**, with `jev_semantic_ablation.py` (23 → 0),
+    `jev_ablation.py` (40 → 0) and `receipt_store.py` (1 → 0) all clean. The ablation harness's 40 were
+    the same defect class — twelve loops in one function reused the single name `case` across seven
+    unrelated dataclasses — and since that file underpins every future calibration claim, I proved the
+    rename behaviour-free instead of asserting it: the ablation CLI was run before and after, the raw
+    outputs differ only in `latency_summary`, **a control run of the unmodified code differs from itself
+    by exactly the same 12 lines**, and with the timings stripped all three runs canonicalise to one
+    identical hash. Two things I am deliberately *not* claiming: the remaining debt is not "gone" (728
+    of the 1010 sit in `app/cm_update/app.py`), and the cleanup is not complete — **5 in-scope errors
+    remain and are named** (`app/jev/gateway.py` 4, `app/evaluation/jev_calibration.py` 1).
+
+11. **One more claim of mine was wrong, and checking it is what caught it.** The `app/jev/gateway.py`
+    error looked like a latent crash: `authorized = set((criteria or {}).keys())` would raise
+    `AttributeError` for a list, and the surrounding handler catches only `JevInvalidResponseError`, so
+    the decision path would fail untyped. I wrote two tests asserting that a list of candidate ids is
+    accepted — **both failed**, because `_build_question` already rejects a non-mapping for a Choice
+    primitive with a typed `JevRequestError`; the list never reaches that line. I deleted both tests
+    rather than adjusting them to pass, and what is committed is type-narrowing with the invariant named
+    in the comment, which for an unreachable non-mapping degrades to the typed `invalid_response` instead
+    of an untyped `AttributeError`. The `receipt_store.py` change was plain accuracy: `invalidate()`
+    declared `-> int` and returned `cursor.rowcount`, which the sqlite3 stubs type as `Any`. This is the
+    third time this round that re-measuring something I had already reported changed the answer, which is
+    the reason the evidence table above names its command, its log path and its revision for every row.
+
+12. **A required gate had no evidence at all, and is now measured: the agent service.** The task's gate
+    list includes "Agent tests" and "Agent build", and the evidence table in this report covered the
+    backend, the browser, the web app, the measurement suites, ruff and mypy — but never
+    `services/agent-api`, even though the tool-intent guard (the thing that blocks a wrong side-effecting
+    tool call) lives there and is cited by the call-site matrix. It has 12 test files: **92 vitest passed
+    / 0 failed**, `tsc -p tsconfig.json --noEmit` exit 0, production build exit 0, and the 14 intent-gate
+    tests are exactly the pair the matrix points at. I also verified the §18 deliverable set rather than
+    assuming it: all 16 documents exist and none is a stub (the smallest is 51 lines, the largest 465).
+    Verification, not construction, is the honest headline here — the round's *new* code is small; what
+    changed is that four defects it found are fixed and three previously-unmeasured gates now have
+    numbers.
+
 Two of my own first-draft claims were wrong and were corrected in place rather than left standing: I
 first recorded the retrieval re-rank as "40 calls per page, fixable by batching" — it is bounded at
 **16**, and the batching I proposed is not available for that shape (`JevCall` shares one state across
@@ -201,12 +252,13 @@ QA stream would be byte-identical without a credential — `create_app` **always
 
 | Gate | Result |
 |---|---|
-| Full backend regression | **1293 passed / 0 failed** in 1408.76s (exit 0) — `work/current-change/full_run_round33.log`, on `46ed926`. The delta from 1260 is exactly the 33 new config-guard tests; application code is unchanged (`git diff 74100ed -- services/rag-api/app benchmarks` is empty), and only documentation changed after the measured commit |
+| Full backend regression | **1293 passed / 0 failed** in 1610.00s (exit 0) — `work/current-change/full_run_round34b.log`, run on the **frozen** revision `edc7e10`, with `git diff edc7e10 -- services/rag-api/app benchmarks` empty so the run describes the code as shipped. The delta from 1260 is exactly the 33 config-guard tests |
 | Browser journeys (real Chrome, real three services, injected identity) | **32 journeys / 0 failed** — `ui-refresh` 19, `jev-structured` 6, `coursemate` 4, `learning` 3 (re-run on `6ba70b0`) |
 | Web app | `tsc --noEmit` exit 0, **73 vitest passed** (18 → 19 files), production build exit 0 |
+| Agent service (`services/agent-api`, TypeScript) | **92 vitest passed / 0 failed** (12 files), `tsc -p tsconfig.json --noEmit` exit 0, production build exit 0 with `dist/src/server.js` emitted — run this round on `cfd0ef1`; the 14 intent-gate tests are `executor-intent-gate.test.ts` (6) + `intent-gate.test.ts` (8), exactly the pair the call-site matrix cites for tool misexecution |
 | Measurement / module-metric suites | **121 passed** (`test_jev_module_metrics.py` 13, `test_jev_module_split_calibration.py` 8) |
-| ruff | **1815 errors at the pre-change revision and 1815 after** for app+tests, unchanged even with a 221-line test file added (ruff 0.16.2 from the service venv, run **with `services/rag-api` as the working directory** over `app tests`); the new script is additionally clean under the service config, where its siblings in `scripts/` carry 19 pre-existing E402 and 207 E501 |
-| mypy | `app/jev/citation_evidence.py` is clean; the whole-app count of pre-existing legacy errors is unchanged |
+| ruff | **1815 errors at the pre-change revision and 1815 after** for app+tests, unchanged even with a 221-line test file added (ruff 0.16.2 from the service venv, run **with `services/rag-api` as the working directory** over `app tests`); the new script is additionally clean under the service config, where its siblings in `scripts/` carry 19 pre-existing E402 and 207 E501. It did rise to **1821** mid-round, when the renamed loop variables pushed six lines past the 100-column limit; those were rewrapped in their own commit, so the total is back to 1815 rather than reported as "unchanged" without measuring |
+| mypy | **1010 errors in 35 files** — *not* "unchanged", as my earlier reports claimed: measuring it this round showed 1077/38 (and 1074/39 at round 30), because my own round-31 work had added 7. Four in-scope defects fixed since, removing 67 errors (1077 → 1010) and leaving `app/jev/citation_evidence.py`, `app/evaluation/jev_semantic_ablation.py`, `app/evaluation/jev_ablation.py` and `app/jev/receipt_store.py` all clean. The remainder is reported by rule, not hidden: 728 of 1010 in `app/cm_update/app.py`, and the bulk are `no-untyped-call` / `no-untyped-def` / `type-arg`. **Only 5 in-scope errors remain**, each named: `app/jev/gateway.py` 4 and `app/evaluation/jev_calibration.py` 1 |
 
 **A lint trap I fell into and corrected, recorded because it produced a wrong verdict.** The same file
 lints *differently* depending on the working directory even when the config is passed explicitly with
@@ -218,6 +270,16 @@ re-measured the total instead of trusting the single-file result: it read 1816, 
 the canonical invocation, file re-verified clean, total back to 1815, and the test file re-run after
 the fix (33 passed).
 
+**A second tooling trap, recorded for the same reason: an editor write silently converted a whole file
+to CRLF.** These Python sources are LF-only, and `core.autocrlf=false` is used for every git command
+here, so a CRLF rewrite shows up as a whole-file diff. It happened twice: `jev_semantic_ablation.py`
+first appeared as a **3545-line** change for a 13-line edit, and later `app/jev/gateway.py` as a
+**571-line** change for two one-line edits. Both were caught before the numbers were reported by
+checking `git diff --stat` against the intended change rather than trusting it, and both were normalised
+back to LF byte-wise, after which the real diffs were 13 and 7 lines. The practical rule this round
+adopted: after editing any Python file, compare `git diff --stat` with the size of the change you meant
+to make, and audit the line endings of every modified file before committing.
+
 The regression delta is exactly accounted for at every step: 1235 → 1252 (4 QA tests + 13 metric
 tests) → 1260 (8 split/calibration tests) → **1293** (33 config-guard tests); the web delta 68 → 73 is
 the 5 reference-note tests. No test was renamed, skipped or weakened to reach any of these numbers, and
@@ -226,16 +288,21 @@ no threshold was lowered.
 ### 6.1 Backend regression
 
 Command: `services\rag-api\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider`
-Log: `work/current-change/full_run_round33.log` → `1293 passed, 2 warnings in 1408.76s (0:23:28)`,
-exit 0, on `46ed926`. Only documentation changed after that commit, so this run still describes the
-services in the tree. The two warnings are pre-existing third-party deprecations
+Log: `work/current-change/full_run_round34b.log` → `1293 passed, 2 warnings in 1610.00s (0:26:49)`,
+exit 0, on the frozen revision `edc7e10`. Only documentation changed after that commit, so this run
+still describes the services in the tree. The two warnings are pre-existing third-party deprecations
 (`starlette.testclient` with `httpx`, and an `anyio.abc.BlockingPortal` alias), not failures.
 
 Evidence hygiene, stated because it tripped me up while re-reading: these logs are **UTF-16LE**
 (PowerShell's `Tee-Object`), as are the earlier rounds' logs, so a UTF-8 reader shows them as spaced-out
-mojibake. Every log was decoded and diffed before being cited here — the three files have distinct
-SHA-256 hashes and each carries its own summary (`1252` / `1260` / `1293`), which is not something the
-byte counts alone would show, since all three happen to be the same length.
+mojibake. Every log was decoded and diffed before being cited here. Five exist and each carries its own
+summary — `full_run_round31.log` `1252` (1681.27s), `round32` `1260` (1589.54s), `round33` `1293`
+(1408.76s), `round34` `1293` (1493.21s) and `round34b` `1293` (1610.00s) — with distinct SHA-256 hashes,
+which is not something the byte counts alone would show, since all five happen to be exactly 4832 bytes.
+One of them is deliberately superseded and is kept rather than deleted: `round34` was green, but I then
+changed `jev_ablation.py` to fix the lint debt the rename had introduced, so I re-ran the whole suite on
+the frozen revision and `round34b` is the run the table above cites. A green run that no longer describes
+the tree is not evidence for the tree.
 
 ### 6.2 Browser journeys
 
