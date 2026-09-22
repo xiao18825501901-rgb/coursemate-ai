@@ -163,7 +163,16 @@ def run_old_release(service: pathlib.Path, database_path: pathlib.Path) -> dict[
         raise RuntimeError(
             f"the previous release printed nothing (stderr={completed.stderr[-400:]})"
         )
-    return json.loads(lines[-1])
+    parsed: Any = json.loads(lines[-1])
+    if not isinstance(parsed, dict):
+        # The probe prints one JSON object. Anything else means the release's own code
+        # printed a line that happens to parse as JSON (or the probe itself failed), and
+        # main() would then die on old.get(...) with an opaque AttributeError instead of
+        # naming the cause.
+        raise RuntimeError(
+            f"the previous release's probe did not print a JSON object: {str(parsed)[:200]}"
+        )
+    return parsed
 
 
 def pool_filter_in(root: pathlib.Path) -> str:

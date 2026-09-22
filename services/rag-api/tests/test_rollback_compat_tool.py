@@ -134,6 +134,19 @@ def test_compare_reports_undetermined_when_the_release_has_no_predicate(
     assert "not found in the release or current source" in detail
 
 
+def test_run_old_release_names_a_probe_that_did_not_print_an_object(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A release that prints parseable non-object JSON must not crash the report.
+
+    ``main()`` immediately does ``old.get(...)``, so returning a list would die with an
+    opaque ``AttributeError`` instead of naming the cause.
+    """
+    monkeypatch.setattr(tool, "OLD_PROBE", "print('[1, 2, 3]')\n")
+    with pytest.raises(RuntimeError, match="did not print a JSON object"):
+        tool.run_old_release(tmp_path / "service", tmp_path / "migrated.sqlite3")
+
+
 def _fake_release_tree(root: pathlib.Path, *, config: str, db: str) -> pathlib.Path:
     """A release tree that satisfies the tool's layout check but is not the app."""
     service = root / "release" / "services" / "rag-api"
