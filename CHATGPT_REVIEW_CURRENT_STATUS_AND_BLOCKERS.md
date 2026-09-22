@@ -319,6 +319,34 @@ forbids, so the flag stays `false`.
     build` rather than `npm run build --workspace @coursemate/web`, because npm is not installed in this
     environment (the repo does declare npm workspaces). The gates themselves are the same files.
 
+16. **A whole browser suite was missing from my evidence, and running it passed.** The task's gate list
+    says to run the existing `coursemate`, `learning`, `ui-refresh` **and audit** journeys. I had been
+    citing four suites and 32 journeys; `tests/e2e/codex-audit.spec.ts` — 14 journeys — had never
+    appeared in any evidence table of mine. It is the most isolated suite in the repository: its
+    Playwright config builds its own web bundle into a per-run directory, starts its own fixtures on
+    its own ports (8200/8201/5373), runs with a deliberately stripped environment that excludes
+    credentials and provider endpoints, and drives real Chrome. Result on the current revision:
+    **14 passed in 1.9 minutes, exit 0**, with its report recording 14 expected / 0 unexpected /
+    0 flaky / 0 skipped — and it covers journeys nothing else in the set does (normal vs Thinking
+    routing through the integrated services, the late-Pair race, campus auto-access, the calendar's
+    Node task store, keyboard reachability of the composer and upload actions, non-modal step windows,
+    cross-account sharing, and a 100-character course name). My browser evidence is therefore
+    **46 journeys across five suites**, and the repo's own `apps/web/dist` was untouched by the run
+    (verified by digest, since the suite builds elsewhere).
+
+17. **Two more deliverables carried stale "current state" numbers and are corrected.** Having found
+    this pattern in the status report last round, I swept the other §18 deliverables for it rather than
+    assuming they were fine. The genuinely stale ones were
+    `DSH_JEV_DEEPSEEK_EXECUTION_STATE.md` — the file the task tells a resuming round to read first —
+    whose gate table still read 1235 passed, 1074/39 mypy, 68 web tests on `6e65396`, and
+    `FINAL_COURSEMATE_JEV_DEEPSEEK_PRODUCTION_REPORT.md`, whose "frozen revision and its evidence"
+    table claimed the same revision and the same wrong mypy sentence. Both now carry a dated block with
+    the current numbers, the earlier values kept beside them, and an explicit note that the mypy
+    "none in a file this revision changed" claim was disproven by re-measurement. The remaining
+    documents that mention `MODULE_ONLY`, "not wired" or "pending catalog registration" are **not**
+    stale: each already carries a dated correction banner, which is exactly what the audit checks were
+    for, so they were left alone.
+
 Two of my own first-draft claims were wrong and were corrected in place rather than left standing: I
 first recorded the retrieval re-rank as "40 calls per page, fixable by batching" — it is bounded at
 **16**, and the batching I proposed is not available for that shape (`JevCall` shares one state across
@@ -331,7 +359,7 @@ QA stream would be byte-identical without a credential — `create_app` **always
 | Gate | Result |
 |---|---|
 | Full backend regression | **1293 passed / 0 failed** in 1577.08s (exit 0) — `work/current-change/full_run_round35.log`, run on the **frozen** revision `169bd57`, with `git diff 169bd57 -- services/rag-api benchmarks` empty so the run describes the code as shipped. The delta from 1260 is exactly the 33 config-guard tests |
-| Browser journeys (real Chrome, real three services, injected identity) | **32 journeys / 0 failed** — `ui-refresh` 19, `jev-structured` 6, `coursemate` 4, `learning` 3 (re-run on `6ba70b0`) |
+| Browser journeys (real Chrome, real three services, injected identity) | **46 journeys / 0 failed** — `ui-refresh` 19, `jev-structured` 6, `coursemate` 4, `learning` 3 (re-run on `6ba70b0`) **plus `codex-audit` 14** (round 37, on `d656bf7`). The audit suite is isolated: its own fixtures, its own ports (8200/8201/5373), its own web bundle built into the run directory, and a stripped environment ("do not forward account credentials, provider endpoints, or live environment files" is in its config); its Playwright report records **14 expected / 0 unexpected / 0 flaky / 0 skipped**. It had never been part of this report's evidence before, which is itself the finding — the task's gate list asks for the audit journeys and I had been citing four suites, not five |
 | Web app | `tsc --noEmit` exit 0, **73 vitest passed** (18 → 19 files), production build exit 0 |
 | Agent service (`services/agent-api`, TypeScript) | **92 vitest passed / 0 failed** (12 files), `tsc -p tsconfig.json --noEmit` exit 0, production build exit 0 with `dist/src/server.js` emitted — run this round on `cfd0ef1`; the 14 intent-gate tests are `executor-intent-gate.test.ts` (6) + `intent-gate.test.ts` (8), exactly the pair the call-site matrix cites for tool misexecution |
 | Measurement / module-metric suites | **121 passed** (`test_jev_module_metrics.py` 13, `test_jev_module_split_calibration.py` 8) |

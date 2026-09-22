@@ -15,10 +15,14 @@ layer's type errors). The gate below was re-run on the **frozen** revision `169b
 `git diff 169bd57 -- services benchmarks` **empty** (only documentation changed after it). Verified on it:
 
 * backend **1293 passed / 0 failed** (1577.08 s, exit 0, `work/current-change/full_run_round35.log`);
-* browser **32 journeys / 0 failed** in real Chrome (`ui-refresh` 19, `jev-structured` 6,
-  `coursemate` 4, `learning` 3 — re-run on `6ba70b0`; `apps/` + `tests/e2e/` are unchanged since,
-  verified by `git diff 6ba70b0 -- apps tests/e2e`), and the seven further journeys the task asks for
-  are classified per item in `JEV_CALLSITE_MATRIX.md` rather than assumed;
+* browser **46 journeys / 0 failed in real Chrome across five suites**: `ui-refresh` 19,
+  `jev-structured` 6, `coursemate` 4, `learning` 3 (re-run on `6ba70b0`; `apps/` + `tests/e2e/` are
+  unchanged since, verified by `git diff 6ba70b0 -- apps tests/e2e`), plus the isolated **`codex-audit`
+  14** run in round 37 — that suite had never been in this ledger's evidence, it brings its own
+  fixture/app/ports (8200/8201/5373) and builds its own web bundle, and its report records **14
+  expected / 0 unexpected / 0 flaky / 0 skipped** (`work/codex-audit/browser-1790085060907-11488`). The
+  seven further journeys the task asks for are classified per item in `JEV_CALLSITE_MATRIX.md` rather
+  than assumed;
 * **agent service `services/agent-api`: 92 vitest passed / 0 failed** (12 files),
   `tsc -p tsconfig.json --noEmit` exit 0 and a production build exit 0 — a gate the earlier evidence
   table had **omitted entirely**; unchanged since (`git diff cfd0ef1 -- services/agent-api` empty);

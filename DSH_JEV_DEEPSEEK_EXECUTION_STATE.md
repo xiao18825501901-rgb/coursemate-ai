@@ -337,7 +337,7 @@ Commit `b8104d9`.
 | Item | What changed |
 |---|---|
 | Receipt atomicity | `SqlReceiptStore` can now be handed the caller's open transaction (`receipt_connection(...)`), so a decision made inside assessment grading writes its receipt **on that connection**: it commits with the grade and rolls back with it. The ledger can no longer describe a decision whose business change did not happen, and there is no lock contention at all in the grading path. Outside such a transaction the write stays best-effort (250 ms, dropped on a lock conflict, never stalling or failing the operation). `tests/test_jev_orchestrator_wiring.py` (6) proves commit, rollback atomicity and that the lending is context-scoped only |
-| Deliverables de-staled | `JEV_BACKEND_ARCHITECTURE_FINAL.md` claimed a four-mode system (`off|shadow|on|advisory`) that the gateway and the receipt CHECK constraint both reject, said the layer writes only receipts (it also writes proposal-only relations), described the pre-module retrieval chain, and still called the call-site wiring "the active workstream". All corrected; the doc now states that `shadow` **is** the advisory state the task describes (the call is made and recorded, the deterministic value is used) and that promotion to `on` is the only behaviour-changing step |
+| Deliverables de-staled | `JEV_BACKEND_ARCHITECTURE_FINAL.md` claimed a four-mode system (`off\|shadow\|on\|advisory`) that the gateway and the receipt CHECK constraint both reject, said the layer writes only receipts (it also writes proposal-only relations), described the pre-module retrieval chain, and still called the call-site wiring "the active workstream". All corrected; the doc now states that `shadow` **is** the advisory state the task describes (the call is made and recorded, the deterministic value is used) and that promotion to `on` is the only behaviour-changing step |
 | New deliverable | `FINAL_COURSEMATE_JEV_DEEPSEEK_PRODUCTION_REPORT.md` — the release-candidate state: frozen revision and its full local evidence, exactly what the release would change in production, the production facts recorded read-only (to be re-verified before the release), everything still `NOT_RUN`, and the ordered release plan with its rollback. Marked at the top as **not** a production acceptance report |
 
 **Verified on one frozen SHA (`b8104d9`):** backend regression **1189 passed / 0 failed**
@@ -382,6 +382,36 @@ wired, and the reason the earlier decision was wrong is part of the record.
 | **Two further real defects found while testing** | (1) **Cross-user cache leak**: the first version took the cache scope from the *optional* decision service, so a run without one fell back to a single server-internal scope and served one learner's judgment to another. `owner_user_id`/`authorization_scope` are now required and the scope is derived from the caller; `test_cache_scope_is_owner_scoped_and_never_crosses_users` reproduces the leak and pins the fix. (2) **The layer could fail a learner request**: `SqlReceiptStore.lookup` raised `sqlite3.OperationalError: no such table: jev_decision_receipts` when its own ledger was absent (a V2-only schema, or new code running before migration 028) — it surfaced as two `test_qa_api.py` failures in the first full regression of this round. An absent ledger is now a cache miss plus a dropped receipt, while every other SQLite error still propagates. |
 | **One more latent hazard closed** | The module's single default repair allowance left the *second* label unplanned, so an exhausted allowance could have kept a label the model called wrong as a filter. Disposal is **verdict-driven** rather than status-driven, and the surface is built with one allowance per label. |
 | **A third definition was still a duplicate of its catalog entry** | `evidence_consistency.py` built its own `DecisionDefinition` and sent `{relation: relation}` as the criteria labels, so the model was shown bare ids while the catalog registered descriptions — and a calibration run would have measured the duplicate rather than the registered entry. The module now projects the catalog definition and sends its criteria/instructions, with the relation vocabulary asserted against the catalog; `test_the_registered_definition_is_the_one_the_model_is_shown` pins both. The three documentation sections still describing a "pending registration request" are corrected. |
+
+> ## Current state — read this before the table below
+>
+> **Added 2026-09-22 (rounds 31–37).** The verification table further down is the record for the
+> revision `6e65396`; it is **not** the current state, and one of its rows was wrong. Re-measured on
+> later revisions:
+>
+> | Gate | Now | Then (`6e65396`) |
+> |---|---|---|
+> | Backend regression | **1293 passed / 0 failed**, 1577.08s, exit 0 — `work/current-change/full_run_round35.log`, frozen revision `169bd57`, with `git diff 169bd57 -- services rag-api benchmarks` empty | 1235 passed / 0 failed |
+> | Browser journeys | **46 journeys / 0 failed across five suites**: `ui-refresh` 19, `jev-structured` 6, `coursemate` 4, `learning` 3 (re-run on `6ba70b0`) and **`codex-audit` 14** (run on `d656bf7`, isolated run dir `work/codex-audit/browser-1790085060907-11488`, its own report recording 14 expected / 0 unexpected / 0 flaky) | 32 journeys |
+> | Web app | `tsc` 0, **73 tests** (19 files), build 0 | 68 tests |
+> | agent-api | `tsc --noEmit` 0, **92 tests**, build 0 | 92 tests |
+> | ruff | **1815** for `app` + `tests`, unchanged | 1815 |
+> | mypy | **1004 errors in 32 files**, and **`app/jev/` + `app/evaluation/` are at zero** | the row below reads 1074/39 |
+> | Schema | still **30**; all **19** definitions still `shadow`; no live call made | same |
+>
+> **The wrong row, stated plainly:** the table's mypy line claims "1074 errors in 39 files, none in a
+> file this round changed or added". Re-measuring showed **1077 in 38**: the round-31 module-metric
+> collectors had themselves added seven errors to `app/evaluation/jev_semantic_ablation.py`. Those, and
+> five more found later, are fixed; the accounting is `docs/recovery/CURRENT_BLOCKER_LEDGER.md` B-10.
+> The same "unchanged" wording appeared in `CHATGPT_REVIEW_CURRENT_STATUS_AND_BLOCKERS.md` and in
+> `FINAL_COURSEMATE_JEV_STRUCTURED_ENHANCEMENT_REPORT.md`, and was corrected in both.
+>
+> Two further pieces of evidence were produced after this table was written and are not in it: the
+> **25 → 30 migration rehearsal** on a database built by the production release's own code
+> (`old_rows_unchanged: true`, every fingerprinted table byte-identical by SHA-256), and the
+> **rollback-compatibility check against release `4ef5064`** (`ROLLBACK_SAFE_WITH_MIGRATED_DB`).
+> Both are recorded in `docs/recovery/CURRENT_BLOCKER_LEDGER.md` B-27, and the publish path's local
+> half in B-35.
 
 **Verified on one frozen SHA (`6e65396`)** — every number below comes from a run on the
 tree that was committed, and `git diff HEAD -- services/rag-api tests` is empty:

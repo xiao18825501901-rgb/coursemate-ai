@@ -17,22 +17,29 @@ release plan with its rollback. Anything that has not happened is marked `NOT_RU
 
 ## 2. Frozen revision and its evidence
 
+**Re-measured 2026-09-22 (rounds 31–37).** The rows below are current as of the frozen revision named
+in the first row; where a number changed, the earlier value is kept beside it so the change is
+auditable. One claim in the previous version of this table was **wrong** and is corrected in place: the
+mypy row said "none in a file the current revision changed or added", and re-measuring showed the
+opposite — the round-31 work had added seven errors of its own (`docs/recovery/CURRENT_BLOCKER_LEDGER.md`
+B-10).
+
 | Item | Value |
 |---|---|
-| Revision | `6e65396` (branch `fix/codex-dsh-audit-20260919`) — supersedes `b8104d9`/`5be2d0a`, which this report cited while rounds 28–30 were still landing |
-| Backend regression | **1235 passed / 0 failed** in 1467.07s (`work/current-change/full_run_round30_final2.log`); `git diff HEAD -- services/rag-api tests` is empty, so the run describes the committed revision |
-| Browser journeys | 32 / 32 in real Chrome against the real three services (ui-refresh 19, jev-structured 6, coursemate 4, learning 3) |
-| Web app | `tsc --noEmit` 0, 68 unit tests, production build 0 |
-| agent-api | `tsc --noEmit` 0, 92 unit tests, build 0 |
+| Revision | `169bd57` (branch `fix/codex-dsh-audit-20260919`) — the revision the current gate ran on; supersedes `6e65396`, which superseded `b8104d9`/`5be2d0a` |
+| Backend regression | **1293 passed / 0 failed** in 1577.08s (`work/current-change/full_run_round35.log`); `git diff 169bd57 -- services/rag-api benchmarks` is empty, so the run describes the committed revision. Previously **1235 passed / 0 failed** in 1467.07s on `6e65396` — the delta is +17 (QA + module-metric), +8 (split/calibration) and +33 (DeepSeek switch-window config guards) |
+| Browser journeys | **46 / 46 in real Chrome against the real services**: `ui-refresh` 19, `jev-structured` 6, `coursemate` 4, `learning` 3, plus the isolated **`codex-audit` 14** (run on `d656bf7`; its own report records 14 expected / 0 unexpected / 0 flaky / 0 skipped) |
+| Web app | `tsc --noEmit` 0, **73 unit tests** (19 files), production build 0 (was 68 tests) |
+| agent-api | `tsc --noEmit` 0, **92 unit tests**, build 0 |
 | Schema in source | RAG **30** (`LATEST_V3_SCHEMA_VERSION`), UI 13, Agent 1 |
-| Ruff / mypy | measured against a `git worktree` of the previous revision: ruff **1815 in both**, so no lint debt was added; whole-app mypy reports **1074 pre-existing** errors in 39 legacy `ui_extension`/`cm_update` files, none in a file the current revision changed or added |
+| Ruff / mypy | ruff **1815 for `app` + `tests`, before and after** the later revisions, so no lint debt was added; whole-app mypy is **1004 errors in 32 files**, with **`app/jev/` and `app/evaluation/` at zero**. What remains is legacy `ui_extension`/`cm_update` debt (728 of the 1004 in `app/cm_update/app.py`), reported by rule rather than hidden. The earlier "1074 in 39" figure was the pre-correction measurement |
 
 ## 3. What the release would change in production
 
 | Change | Detail |
 |---|---|
 | Backend code | the Jev semantic-decision layer (19 definitions, all in `shadow`), the six structured-enhancement modules, the single shared decision layer threaded through the orchestrator/UI extension/run endpoint/internal APIs, and the receipt, entity-relation and feedback-queue stores |
-| Database | schema **25 → 30**: 026 learning-start events, 027 assessment preparation reference, 028 Jev decision receipts, 029 proposal-only entity relations, 030 the durable feedback queue. All additive; a release rolled back after the migration still runs (verified by the rollback-compatibility guard, and by the properties that a missing 029 store degrades to "nothing recorded" and a missing 030 store only means feedback cannot be queued) |
+| Database | schema **25 → 30**: 026 learning-start events, 027 assessment preparation reference, 028 Jev decision receipts, 029 proposal-only entity relations, 030 the durable feedback queue. All additive — and now **measured rather than asserted**: the 25 → 30 rehearsal on a database built by the release's own code gives `old_rows_unchanged: true` (every fingerprinted table byte-identical before and after by SHA-256) with `integrity=ok`, `foreign_key_violations=0` and all 52 invariant counters at zero except the four expected seeds/backfills; and the rollback guard re-run against release `4ef5064` returns **`ROLLBACK_SAFE_WITH_MIGRATED_DB`** (the old release opens a schema-30 database with no missing or retyped columns and no narrowed CHECK enums), so a code-only rollback is viable. A missing 029 store still degrades to "nothing recorded" and a missing 030 store only means feedback cannot be queued |
 | Generative path | **only if the owner supplies a DeepSeek key**: every generative role moves from Qwen/Model Studio to DeepSeek. Without the key the deployment keeps answering exactly as it does today |
 | Semantic path | **only if the owner supplies a TypeSafe credential**: definitions can leave `shadow` for `advisory`/`on`, per definition, after the calibration gate. Without it every decision stays in `shadow` and the deterministic result remains user-visible |
 | Frontend | the shell changes from the previous round's build (the "报告问题" entry, the citation-verdict marker, the reasoning-strength save fix). Netlify project `coursemate-ai-qqtt` (`qqttai.com`) |
