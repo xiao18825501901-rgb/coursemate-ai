@@ -3,6 +3,15 @@
 **Purpose.** One row per unclosed item, so every remaining gap has an owner, a reason, and a
 precise close condition instead of a general "waiting for authorization".
 
+**Scope note (round 44).** The three appended CourseJesus work streams (brand/domain, Canvas private
+import, campus course expansion) are recorded separately in `COURSEJESUS_EXECUTION_STATE.md` and
+`docs/coursejesus/*` rather than as rows here, because they are different work from this ledger's
+DeepSeek/Jev items. They did add code to the same tree: the revision after `2fd532b` (`bf31474`)
+carries the campus inventory tool and its tests, with **1324 passed / 2 skipped / 0 failed** in
+1660.36 s (`work/current-change/full_run_round44.log`), and the second skip is that tool's
+symlink-creation case. Everything below still describes the Jev/DeepSeek work on the revision named
+in each row.
+
 **Audited revision.** branch `fix/codex-dsh-audit-20260919`, audited at HEAD
 `7e2e4db7cf99d85f92a82c9f97d72729fdaa5162` ("Record round 30's final revision and correct three
 stale deliverable claims", 2026-09-22 13:31 +08:00), working tree clean, **76 commits ahead of
