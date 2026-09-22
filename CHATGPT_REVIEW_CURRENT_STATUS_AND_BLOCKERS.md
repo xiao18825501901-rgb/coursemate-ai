@@ -69,11 +69,11 @@ Claimed **finished and verified on a named revision**:
 
 ## 4. What is NOT finished, and why — by status class
 
-The ledger carries 35 rows (B-01 … B-35) with full detail; the summary:
+The ledger carries 37 rows (B-01 … B-37) with full detail; the summary:
 
 | Status | Count | Representative items |
 |---|---|---|
-| `RESOLVED_WITH_EVIDENCE` | 21 | module-D resolver type errors; missing QA-stream evidence bundle; `is_definitive` having no caller; the five module metrics being uncomputable; the companion dataset's missing split manifest; six documentation claims that did not match the code; the reference-gate note now reaching the shipped UI; the DeepSeek switch-window configuration refusals now pinned by test; the V1↔V2 template-parity question closed by measurement; an owner instruction that named an environment variable no code reads; a production marker that was written for an artifact set the verifier had just rejected |
+| `RESOLVED_WITH_EVIDENCE` | 23 | module-D resolver type errors; missing QA-stream evidence bundle; `is_definitive` having no caller; the five module metrics being uncomputable; the companion dataset's missing split manifest; six documentation claims that did not match the code; the reference-gate note now reaching the shipped UI; the DeepSeek switch-window configuration refusals now pinned by test; the V1↔V2 template-parity question closed by measurement; an owner instruction that named an environment variable no code reads; a production marker that was written for an artifact set the verifier had just rejected; the call-site matrix now pinned to the catalog; and **the service that could not read the TypeSafe credential at all while the document claimed the SDK was already installed** |
 | `LOCAL_IMPLEMENTATION_GAP` (open, mine) | **0** | none — every local gap this audit found is closed with code and a test |
 | `WAITING_CREDENTIAL` | 2 | live Jev validation; live DeepSeek validation |
 | `WAITING_BUDGET` | 1 | a real token/USD ceiling (all current figures are proposals) |
@@ -363,6 +363,41 @@ forbids, so the flag stays `false`.
     read-only/backup/deploy sequence, and "no execution without approval" — is stated in the banner so
     nothing useful is thrown away with the stale parts.
 
+18. **The deliverable that proves the twelve call sites are real had no test, and the test found a
+    defect on its first run.** `JEV_CALLSITE_MATRIX.md` is what the task asks for in place of "a helper
+    exists": one row per definition saying where it is really called from, what state it reads, what it
+    changes and what happens when Jev is absent. Nothing connected that file to the repository — the only
+    reference to it in the whole test tree was a comment inside an E2E spec. It was accurate when I
+    measured it (all 19 catalog definitions present, no phantom ids, Table 1 numbering the twelve, the
+    count and version matching), but a drift would have been invisible. `tests/test_jev_callsite_matrix.py`
+    now pins coverage, absence of phantoms, Table 1's contents, the stated count and catalog version, and
+    the "all `shadow`" claim *through `JevGateway.mode_for`* so it follows from code. Two things worth
+    reporting about writing it: my first draft asserted the table's row order matched the task's list, the
+    test failed, and the right fix was to **drop the assertion** — the matrix deliberately numbers by
+    pipeline position, and enforcing the task's order would have been a false invariant dressed as
+    rigour. And non-vacuity is measured: five mutations of a copy of the matrix (row removed, phantom
+    added, count changed, numbered row dropped, id misspelled) are each caught, 0 missed.
+
+19. **The live Jev gate was not one credential away from working, and the owner was told it was.** This is
+    the most consequential thing this round found. `SdkTransport` accepts the key **only** as a
+    constructor argument — `def __init__(self, *, api_key: str | None = None, model: str = "jev")` — and
+    `call()` raises the typed `JevNotConfiguredError` when it is falsy. The gateway constructs it as
+    `SdkTransport()`, with **no arguments**. So nothing in the service ever read `TYPESAFE_API_KEY`: the
+    owner could have placed the key in `/etc/coursemate/rag.env` exactly as instructed, restarted, and
+    the live path would still have refused every call. And the same document said the SDK was "already a
+    dependency, vendored under `services/rag-api`", which is false — `requirements.txt` carries
+    `#   typesafe-sdk==0.7.0` **commented out** as an optional extra, and `find_spec("typesafe_sdk")` is
+    `None`. So the gate needed three things, not one, and two of them were missing. I found it by writing
+    the invariant the previous round's defect implied — *every variable the owner document names must be
+    read by real code*, where "read" means an actual env accessor or settings field, so a name that
+    appears only in a docstring counts as unread. Fixed in code: the adapter resolves the credential from
+    the environment, an explicitly passed key still wins, and `TYPESAFE_MODEL` overrides the default model
+    id. Proven by running it rather than by reading it: with the variable set, `SdkTransport()` passes the
+    guard and the next failure is only `JevUnavailableError: typesafe-sdk is not installed`; unset, the
+    typed `JevNotConfiguredError` still fires; `TYPESAFE_MODEL=jev-2` shows up in `transport.model`. The
+    mutation proof includes the pre-fix file read from git: it *mentions* `TYPESAFE_API_KEY` in a
+    docstring and does **not** read it, which is precisely the failure the new test would have reported.
+
 Two of my own first-draft claims were wrong and were corrected in place rather than left standing: I
 first recorded the retrieval re-rank as "40 calls per page, fixable by batching" — it is bounded at
 **16**, and the batching I proposed is not available for that shape (`JevCall` shares one state across
@@ -374,7 +409,8 @@ QA stream would be byte-identical without a credential — `create_app` **always
 
 | Gate | Result |
 |---|---|
-| Full backend regression | **1293 passed / 0 failed** in 1577.08s (exit 0) — `work/current-change/full_run_round35.log`, run on the **frozen** revision `169bd57`, with `git diff 169bd57 -- services/rag-api benchmarks` empty so the run describes the code as shipped. The delta from 1260 is exactly the 33 config-guard tests |
+| Full backend regression | **1301 passed / 0 failed** in 1543.33s (exit 0) — `work/current-change/full_run_round38.log`, run on the **frozen** revision `b10fe07`, with `git diff b10fe07 -- services/rag-api benchmarks` empty so the run describes the code as shipped. The delta from 1293 is exactly the 8 tests added this round (5 call-site-matrix tests, 3 owner-document tests) |
+| Two invariant suites added this round | `tests/test_jev_callsite_matrix.py` (5) pins the §3 deliverable to `app/jev/catalog.py` and `JevGateway.mode_for`; `tests/test_owner_actions_name_real_variables.py` (3) fails if any variable the owner document names is not read through a real mechanism. Both carry a measured mutation proof (5/5 and 3/3 respectively, including the pre-fix gateway read from git) |
 | Browser journeys (real Chrome, real three services, injected identity) | **46 journeys / 0 failed** — `ui-refresh` 19, `jev-structured` 6, `coursemate` 4, `learning` 3 (re-run on `6ba70b0`) **plus `codex-audit` 14** (round 37, on `d656bf7`). The audit suite is isolated: its own fixtures, its own ports (8200/8201/5373), its own web bundle built into the run directory, and a stripped environment ("do not forward account credentials, provider endpoints, or live environment files" is in its config); its Playwright report records **14 expected / 0 unexpected / 0 flaky / 0 skipped**. It had never been part of this report's evidence before, which is itself the finding — the task's gate list asks for the audit journeys and I had been citing four suites, not five |
 | Web app | `tsc --noEmit` exit 0, **73 vitest passed** (18 → 19 files), production build exit 0 |
 | Agent service (`services/agent-api`, TypeScript) | **92 vitest passed / 0 failed** (12 files), `tsc -p tsconfig.json --noEmit` exit 0, production build exit 0 with `dist/src/server.js` emitted — run this round on `cfd0ef1`; the 14 intent-gate tests are `executor-intent-gate.test.ts` (6) + `intent-gate.test.ts` (8), exactly the pair the call-site matrix cites for tool misexecution |
@@ -407,15 +443,17 @@ adopted: after editing any Python file, compare `git diff --stat` with the size 
 to make, and audit the line endings of every modified file before committing.
 
 The regression delta is exactly accounted for at every step: 1235 → 1252 (4 QA tests + 13 metric
-tests) → 1260 (8 split/calibration tests) → **1293** (33 config-guard tests); the web delta 68 → 73 is
-the 5 reference-note tests. No test was renamed, skipped or weakened to reach any of these numbers, and
-no threshold was lowered.
+tests) → 1260 (8 split/calibration tests) → 1293 (33 config-guard tests) → **1301** (5 call-site-matrix
+tests + 3 owner-document tests); the web delta 68 → 73 is the 5 reference-note tests. No test was
+renamed, skipped or weakened to reach any of these numbers, no threshold was lowered, and the two tests
+I drafted for the gateway in an earlier round were **deleted** when they were found to assert a false
+contract.
 
 ### 6.1 Backend regression
 
 Command: `services\rag-api\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider`
-Log: `work/current-change/full_run_round35.log` → `1293 passed, 2 warnings in 1577.08s (0:26:17)`,
-exit 0, on the frozen revision `169bd57`. Only documentation changed after that commit, so this run
+Log: `work/current-change/full_run_round38.log` → `1301 passed, 2 warnings in 1543.33s (0:25:43)`,
+exit 0, on the frozen revision `b10fe07`. Only documentation changed after that commit, so this run
 still describes the services in the tree. The two warnings are pre-existing third-party deprecations
 (`starlette.testclient` with `httpx`, and an `anyio.abc.BlockingPortal` alias), not failures.
 

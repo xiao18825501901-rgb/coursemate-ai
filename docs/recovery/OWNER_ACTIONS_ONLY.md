@@ -21,10 +21,28 @@ technical item; #3 and #4 are one-way-door decisions for the release.
 **Why it must be you.** The key authorises paid model calls against *your* TypeSafe account. I cannot
 create an account, accept terms, or pay on your behalf, and the key must never travel through chat.
 
-**Exact platform.** TypeSafe (`docs.typesafe.ai`). The SDK is already a dependency: `typesafe-sdk`
-0.7.0, vendored under `services/rag-api` (the adapter is `app/jev/gateway.py::SdkTransport`, which
-lazy-imports it and fails **typed** — `JevNotConfiguredError` — when the key is absent, before any
-network access).
+**Exact platform.** TypeSafe (`docs.typesafe.ai`). The adapter is
+`app/jev/gateway.py::SdkTransport`, which lazy-imports the SDK and fails **typed** — `JevNotConfiguredError`
+when no credential is present, `JevUnavailableError` when the SDK is missing — before any network access.
+
+**Two things are needed, and one of them was wrong until this round.** Written down plainly, because
+both were defects in the previous version of this document:
+
+1. **The credential variable.** The adapter used to accept the key **only** as a constructor argument,
+   while the gateway builds `SdkTransport()` with no arguments — so the service never read
+   `TYPESAFE_API_KEY` and *no* environment change could have enabled the live path. That is **fixed in
+   code** (`SdkTransport` now resolves the key from the environment, an explicitly passed key still
+   wins, and `TYPESAFE_MODEL` overrides the default model id). Verified by running it: with the variable
+   set the guard passes and the next failure is only the missing SDK; without it the typed
+   `JevNotConfiguredError` still fires.
+2. **The SDK itself is not installed.** This document previously said the SDK was "already a dependency,
+   vendored under `services/rag-api`" — that was **false**. `services/rag-api/requirements.txt` carries
+   it **commented out** as an optional extra (`#   typesafe-sdk==0.7.0`), and it is absent from the venv
+   (checked: `importlib.util.find_spec("typesafe_sdk")` is `None`). So the key alone is not enough: the
+   package must be installed into the service's virtualenv as part of the same change, otherwise every
+   live call fails typed with `JevUnavailableError: typesafe-sdk is not installed`. I can do that
+   installation when you approve the window, or you can; it is one `pip install` against the pinned
+   version, and it is reversible.
 
 **Read or write?** Read-only usage: the adapter asks typed questions and records the answers in
 `jev_decision_receipts`. It writes nothing to your TypeSafe account beyond the calls themselves.
