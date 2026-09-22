@@ -174,8 +174,11 @@ success, p50/p95 latency, per-provider cost and failure rate — are specified i
   `question_number='M'`), and that phantom label became a hard chunk-metadata filter. It suppressed
   legitimate exact recall and could pin retrieval onto a wrong sub-question. Fixed at the parser, with
   the prose cases pinned as regression tests; the module-A wiring above is what made the defect visible.
-* Whole-app mypy is now honest rather than green: 1068 pre-existing errors in 38 files. That debt is
-  inherited legacy code and is **not** cleaned up in this round.
+* Whole-app mypy is now honest rather than green: **1074 errors in 39 files** (the same count as the
+  evidence table above; 6 of them arrived with rounds 25–29 in `citation_evidence.py` and
+  `cm_update/app.py`, and round 30 added none). That debt is inherited legacy code and is **not**
+  cleaned up in this round, apart from the module-D resolver, whose four errors were fixed in round
+  31 (`app/jev/citation_evidence.py` is now mypy-clean).
 * Production browser acceptance, production deployment and production acceptance have not run.
 
 ## 8. What the next round must do

@@ -1,5 +1,22 @@
 # Existing → New mapping (structured enhancement round)
 
+> **Dated document — read it as the round-7 plan, not as current status.** Everything below was
+> accurate when written ("what this round changes" = round 7). Three statements were later overtaken
+> by events and are corrected here rather than silently edited in place:
+>
+> * module C — line "not wired; documented for the other workstream editing `domain._retrieve`" is
+>   **stale**: C is wired and consumed (round 24) — see `EVIDENCE_AND_CITATION_AUDIT.md` §"Wiring
+>   status" and `tests/test_jev_evidence_consistency_wiring.py`;
+> * module D — "not wired into `qa.py` this round" is **still true for the legacy QA stream**; D *is*
+>   wired on the UI path (`domain._retrieve` pre-generation bundle + `cm_update.audit_answer_citations`
+>   post-generation). The QA-stream caller is an open item in `CURRENT_BLOCKER_LEDGER.md`;
+> * module A — "not owned by this round" is **stale**: A is wired (round 30) to the query-side
+>   exact-locator label, and the `MODULE_ONLY` decision was reversed; see
+>   `SOURCE_EXTRACTION_AND_ENTITY_RELATIONS.md` §9.
+>
+> Current status for every module lives in `JEV_CALLSITE_MATRIX.md` (table 2) and
+> `FINAL_COURSEMATE_JEV_STRUCTURED_ENHANCEMENT_REPORT.md` §5.
+
 One entry per capability. Each entry records the **existing function**, its **real
 call point**, **what was missing**, **what this round changes**, the **deterministic
 rules**, the **Jev judgment**, **how the result affects business behaviour**, the

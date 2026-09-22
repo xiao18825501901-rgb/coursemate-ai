@@ -105,6 +105,11 @@ journey. Assessment results never create coverage; low grades never remove it.
 * Schema additions in this round: RAG **026** (learning start events), **027** (assessment
   preparation + widened `verification_method` enum including the `AI_REVIEWED` diagnostic
   channel), **028** (Jev decision receipts). UI schema unchanged at **13**.
+  **⚠ Two later migrations exist as of round 31: `029` (proposal-only `entity_relations`) and `030`
+  (`feedback_reports`, the durable user-feedback queue), so `LATEST_V3_SCHEMA_VERSION = 30` and a
+  production migration must apply **026–030**, not 026–028.** Current database facts live in
+  `docs/jev-structured/MIGRATION_AND_ROLLBACK.md` and
+  `FINAL_COURSEMATE_JEV_DEEPSEEK_PRODUCTION_REPORT.md` §3.
 * The 027 table rebuild drops and recreates **all ten** triggers that reference the rebuilt tables
   (including triggers defined on other tables, e.g. `validate_assessment_rubric_context`,
   `freeze_valid_assessment_blueprint`, `validate_assessment_question_attempt`,

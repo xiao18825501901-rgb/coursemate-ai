@@ -2,8 +2,14 @@
 
 Per-definition contract for the semantic-decision layer. Shared facts first, then
 one block per definition. The two new ids — `evidence.consistency.v1` (module C)
-and `extraction.field_grounded.v1` (module A, another workstream) — are marked
-**pending catalog registration** with their exact proposed entry.
+and `extraction.field_grounded.v1` (module A, another workstream) — were marked
+**pending catalog registration** with their exact proposed entry when this file was
+written.
+
+> **Both are now registered (round 30).** `decision_catalog.json` holds 19 definitions, and both
+> modules project their catalog entry instead of carrying a local copy — see the "Registration —
+> done" section at the end of this file. The two section headings below still say "pending catalog
+> registration"; treat that phrase as the round-7 state, not as current status.
 
 ## Shared facts (all definitions)
 

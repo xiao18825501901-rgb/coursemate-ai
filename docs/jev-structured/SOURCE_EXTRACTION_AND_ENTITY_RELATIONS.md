@@ -2,8 +2,15 @@
 
 This document has two halves. The first — **Module A: ExtractionVerification** — is
 owned by the extraction workstream and is complete below. The second —
-**Entity Relations** — is owned by nobody yet and is left as a clearly marked
-stub at the end.
+**Entity Relations** — was left as a stub when this file was written.
+
+> **Corrected in round 31.** The sentence above used to read "is owned by nobody yet and is left as
+> a clearly marked stub at the end". Entity resolution (module B) **landed in rounds 23–24**: it is
+> implemented in `app/jev/entity_resolution.py`, wired into `V3DomainAdapter._retrieve` (per-concept
+> query expansion plus `CourseEntityResolver.resolve`), and it persists relations as `PROPOSED` rows
+> in `entity_relations` (migration 029). Module A's `MODULE_ONLY` decision was likewise reversed in
+> round 30 and its wiring is recorded in §9 below. The stub text is kept as the historical record of
+> what was planned, not as current status.
 
 ---
 

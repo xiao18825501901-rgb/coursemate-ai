@@ -115,17 +115,37 @@ says which, so a missing journey is never mistaken for a passing one.
    once the *query-side* exact-locator surface was found (the round-26 investigation had only looked at
    document-side field records); the full reasoning, the reproduced parser defect and the disposal rule
    are in `docs/jev-structured/SOURCE_EXTRACTION_AND_ENTITY_RELATIONS.md` §9.4.
-2. **`retrieval.support.v1` is one call per candidate.** The SDK
-   `system_one(state, questions)` supports several questions per call; a multi-question
-   `evaluate` on `JevGateway` would batch it (the transport contract was not touched).
-3. **`app/services/qa.py::QaService.stream` still calls the locator parser directly for its
-   evidence bundle** (its reference path *is* verified through module A since round 30, and
-   `app/api/feedback.py` / `app/api/tool_intent.py` reuse the shared service), but
-   `answers.evidence_bundle_support` remains invoked only from `domain._retrieve`.
-4. **Live Jev validation, calibration and the A/B/C/D/E ablation have not run** for any
+2. **`retrieval.support.v1` costs one call per non-exact candidate, bounded at 16.** The bound is
+   `DEFAULT_MAX_EVAL_CANDIDATES = 16`, so a retrieval page costs at most 16 rerank calls — *not* one per
+   candidate in an unbounded page. **Corrected in round 31:** an earlier version of this line said a
+   multi-question `evaluate` "would batch it". Checking the transport contract shows that is not
+   available for this shape: `JevCall` is "one shared state, one or more questions" with the definition
+   key as the question key, so several questions per call is only possible *over one shared state* —
+   and per-candidate scoring has a different state per candidate. `evaluate_batch` loops `evaluate`, so
+   it would not reduce transport calls either. The bound is the real cost control; if
+   `DEFAULT_MAX_EVAL_CANDIDATES` is ever raised, this line and the cost estimate must move with it.
+3. **Live Jev validation, calibration and the A/B/C/D/E ablation have not run** for any
    row: no TypeSafe credential exists in this environment. Every `live evidence` cell
    above is `NOT_RUN`, and no quality claim is made anywhere for a definition that has
    only produced shadow receipts.
+
+### Closed in round 31
+
+* **`QaService.stream` now runs the same module-D evidence bundle as the UI path.** A new private
+  `QaService._evidence_bundle` builds `S1..Sn` spans from the hits the learner will see, calls
+  `answers.evidence_bundle_support`, and annotates the citation cards — at most two calls (select one
+  span, judge that span) whatever the page size. `answers.evidence_bundle_support` therefore has
+  **two** production callers. With the layer genuinely absent (`jev=None`) the cards are byte-identical
+  to before; with a configured-but-uncredentialed layer they carry `jev_citation_support: UNVERIFIED`
+  and `jev_selected_span: false` — the same honest shape the UI path has produced since round 25.
+  Pinned by four tests in `tests/test_qa_api.py`.
+* **`is_definitive` has a caller.** The assessment high-impact gate reports `definitive` (a real
+  `SUPPORTED`/`CONTRADICTED` verdict) separately from `verified` (layer 1 found nothing wrong), using
+  `citation_audit.is_definitive` as the single source of that rule. See
+  `docs/jev-structured/EVIDENCE_AND_CITATION_AUDIT.md` §"Wiring status" item 4.
+* **Module D's resolver is mypy-clean.** `app/jev/citation_evidence.py` had four real type errors
+  (`RetrievalAccess` receiving `str` where `Literal["official","mine"]` is required, and three
+  `no-any-return`); it now reports no issues. The remaining whole-app mypy debt is untouched legacy code.
 
 ## Browser evidence per wired module
 

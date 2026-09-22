@@ -5,7 +5,7 @@ made anywhere in this round; nothing here is a live quality result.
 
 | Module | File | New definition | Registered in catalog? |
 |---|---|---|---|
-| C — `EvidenceConsistency` | `app/jev/evidence_consistency.py` | `evidence.consistency.v1` (Choice) | **No — pending** (module constant) |
+| C — `EvidenceConsistency` | `app/jev/evidence_consistency.py` | `evidence.consistency.v1` (Choice) | **Yes** (round 30: the module projects the catalog entry; see "The definition is registered…" below) |
 | D — `ClaimCitationAudit` | `app/jev/citation_audit.py` | _none_ (reuses `source.supports_claim.v1` + `source.select_span.v1`) | n/a |
 
 ---
@@ -151,16 +151,23 @@ alternatives longest-first, with:
 * `test_missing_claim_number_is_detected_deterministically` covers both directions,
   the unitless case and a Chinese unit (`5℃`).
 
-## Wiring status (honest, as of this round)
+## Wiring status (honest, as of round 31)
 
-* **Module C — `MODULE_ONLY`.** `app/jev/evidence_consistency.py` is complete and
-  tested, and `evidence.consistency.v1` is registered in the catalog (19
-  definitions), but **no retrieval/evidence-pack call site invokes it yet**. No
-  business effect is claimed for it. The intended insertion point remains the
-  evidence-pack step in `V3DomainAdapter._retrieve`, between the fused candidate
-  set (where entity relations are already resolved) and the DeepSeek prompt, with
-  the rule that a genuine conflict keeps both sources and is explained by DeepSeek
-  rather than resolved by deletion.
+> This section used to say **Module C — `MODULE_ONLY`** and "no retrieval/evidence-pack call site
+> invokes it yet". That was true when written (round 25) and is **no longer true**: C was wired in
+> round 24 — before this file's round-25 wording was added — and the stale paragraph survived until
+> round 31. Current facts, each with its check:
+
+* **Module C — landed and consumed (round 24).** `V3DomainAdapter._retrieve` calls
+  `check_evidence_consistency(...)` over the already-authorized fused candidates, between the
+  rerank/citation annotation and the `sources` list. Every source carries a deterministic
+  `jev_consistency` signal, and a genuine `SAME_CONTEXT_CONTRADICTION` additionally attaches
+  `jev_conflict_with`, which `app/cm_update/provider.py::conflict_note` turns into a bounded
+  instruction in the three teaching prompt builders — so DeepSeek explains **both** sides and no
+  source is dropped. `DIFFERENT_ASSUMPTIONS` / `VERSION_OR_TASK_DIFFERENCE` are never described as a
+  conflict. Evidence: `services/rag-api/tests/test_jev_evidence_consistency_wiring.py` (4 tests,
+  including byte-identity of `sources` across off/shadow/unavailable/no-Jev) and
+  `tests/test_jev_evidence_consistency.py` (14).
 * **Module D — landed (round 25).** Both the pre-generation evidence bundle
   (`domain.py::_annotate_evidence` → `answers.evidence_bundle_support`) and the
   post-generation audit on the fixed message revision now run:
@@ -181,10 +188,19 @@ alternatives longest-first, with:
   3. **Consumer** — the shipped shell marks only a *real* negative verdict
      (`apps/web/src/ui/citationSupport.js`): a contradicted or un-addressed citation
      gets a warning chip with an explanatory title, while a verified, partial, merely
-     unchecked or legacy card renders exactly as before. High-impact gating
-     (`is_definitive`) remains available to the assessment path; binding the reference
-     solution to it is the next step, not something this round claims.
-  4. **Shadow invariance** — with no semantic layer configured the cards are returned
+     unchecked or legacy card renders exactly as before.
+  4. **High-impact gating is now bound (round 31).** The assessment path's
+     `_verify_reference_solution` reports `verified` (layer 1 found nothing wrong) and
+     `definitive` (`is_definitive(...)`: a real `SUPPORTED`/`CONTRADICTED` verdict) as
+     **separate** fields, and uses `citation_audit.is_definitive` as the single source
+     of that rule instead of carrying its own copy. With no credential layer 3 never
+     runs, so every reference solution is `verified=True, definitive=False` — reporting
+     only `verified` would have let an unchecked reference look like a checked one.
+     Pinned by `services/rag-api/tests/test_reference_evidence_verification.py`
+     (clean → `definitive is False`; a real `on`-mode contradiction → `definitive is
+     True`). The shipped UI does not yet render this flag; that is recorded as an open
+     item, not claimed as done.
+  5. **Shadow invariance** — with no semantic layer configured the cards are returned
      **byte-identical** to before the audit existed (`test_no_semantic_layer_returns_the_cards_unchanged`),
      layer 2 still decides for free, and a shadow decision annotates without altering
      or dropping a card. An audit failure records itself on the cards rather than
