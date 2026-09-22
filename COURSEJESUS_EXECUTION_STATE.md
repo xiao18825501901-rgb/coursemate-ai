@@ -28,7 +28,7 @@ uncommitted work, and the running cwd was not renamed.
 | `BRAND_UI` | **NOT_STARTED** (baseline measured) | Old name still on 31 user-visible files; scan in `docs/coursejesus/BRAND_REPLACEMENT_MATRIX.md` (481 `CourseMate` + 515 `coursemate` + 62 `COURSEMATE`). Nothing changed yet |
 | `LOGO_ASSETS` | **PENDING_ASSET** | No artwork supplied. Scan also found `apps/web/public/manifest.json` **absent**, so the PWA manifest has to be created, not edited |
 | `REPOSITORY_RENAME` | **NOT_STARTED** (target identified) | `git remote -v` → `https://github.com/xiao18825501901-rgb/coursemate-ai.git`. Renaming to `coursejesus` is a platform action; see `OWNER_ACTIONS_ONLY_COURSEJESUS.md` |
-| `DOMAIN_DNS_TLS` | **NOT_INSPECTED** | No DNS/zone/TLS read has been performed yet. `coursejesus.com` is owned by the owner (Aliyun); `qqttai.com` is the current domain (169 references) |
+| `DOMAIN_DNS_TLS` | **RECON_DONE (read-only)** | `coursejesus.com` is delegated to **Aliyun HiChina DNS** (`dns17/dns18.hichina.com`) with **no** `www` or apex records yet; the current `qqttai.com` zone is on **Cloudflare**, apex → Netlify, `www` CNAME → `coursemate-ai-qqtt.netlify.app` (the site to reuse), `rag`/`agent` → `47.114.34.175`. Front end 200 and www→apex 301 live; the API host resets the TLS handshake from this machine and answers `403 Server: Beaver` (Aliyun WAF) on HTTP. Details and the honest limits: `docs/coursejesus/DOMAIN_AND_CLERK_MIGRATION.md` |
 | `CLERK_DOMAIN_AND_USER_CONTINUITY` | **NOT_INSPECTED** | No Clerk instance has been read yet; requirement is the same Production instance and same user subject |
 | `OLD_DOMAIN_COMPATIBILITY` | **NOT_STARTED** | 30-day compatibility window is the plan; nothing configured |
 | `CANVAS_SKILL_REUSE` | **RECON_DONE, ADAPTATION_NOT_STARTED** | Local checkout `D:\Hp\Documents\canvas-study-assistant-skill` at `f05ffae8` (2026-09-20) with **one local modification: `canvas_study/runtime.py`**, which must be preserved; 16 Python files; `LICENSE` present, `NOTICE` absent; `README.md`/`SKILL.md`/`SECURITY.md` present |
@@ -70,6 +70,11 @@ localhost screenshot or a `health=200`.
 7. **Measured the brand surface** for task A1 and wrote the replacement matrix (which surfaces
    must change, which must survive, which need a per-case decision), including the finding that no
    PWA manifest exists yet.
+8. **Read-only domain reconnaissance** (no writes anywhere): authoritative providers for both
+   domains, the live site's Netlify subdomain, the API host address, and the fact that the API
+   endpoints cannot be reached from this machine (TLS reset; `403 Server: Beaver` on HTTP). The
+   API result is recorded as an observation with its limits — it is not proof the API is down for
+   real users, and it is not a licence to route around it via the old domain.
 
 ## 3. Next steps, in order
 
