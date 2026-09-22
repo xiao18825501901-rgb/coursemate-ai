@@ -947,7 +947,11 @@ def estimate_input_token_ceilings(
                 add("", turn.message)
     if "context.keep_segment.v1" in on_keys:
         for trajectory_case in cases.trajectory:
-            add("", f"{trajectory_case.anchor}\n{trajectory_case.current_task}\n{trajectory_case.remaining_scope}")
+            add(
+                "",
+                f"{trajectory_case.anchor}\n{trajectory_case.current_task}"
+                f"\n{trajectory_case.remaining_scope}",
+            )
     if "coverage.item_support.v1" in on_keys:
         for coverage_case in cases.coverage:
             add("", coverage_case.accepted_evidence)
@@ -1073,12 +1077,22 @@ def run_ablation(
     for retrieval_case in cases.retrieval:
         returned = _run_retrieval(retrieval_case, service, scope)
         retrieval_results.append(
-            RetrievalResult(retrieval_case.id, tuple(returned), retrieval_case.relevant_ids, retrieval_case.top_k)
+            RetrievalResult(
+                retrieval_case.id,
+                tuple(returned),
+                retrieval_case.relevant_ids,
+                retrieval_case.top_k,
+            )
         )
     for locator_case in cases.locator:
         returned = _run_retrieval(locator_case, service, scope)
         locator_results.append(
-            LocatorResult(locator_case.id, locator_case.expected_id, locator_case.expected_slot, tuple(returned))
+            LocatorResult(
+                locator_case.id,
+                locator_case.expected_id,
+                locator_case.expected_slot,
+                tuple(returned),
+            )
         )
 
     citation_results: list[CitationResult] = []
@@ -1146,7 +1160,12 @@ def run_ablation(
             ):
                 filterable_kept += 1
         trajectory_results.append(
-            TrajectoryResult(trajectory_case.id, trajectory_case.expected_action, final_action, anchor_preserved)
+            TrajectoryResult(
+                trajectory_case.id,
+                trajectory_case.expected_action,
+                final_action,
+                anchor_preserved,
+            )
         )
 
     coverage_results: list[CoverageResult] = []
@@ -1169,7 +1188,9 @@ def run_ablation(
             if decision.used_jev
             else (coverage_baseline(coverage_case) if coverage_baseline is not None else None)
         )
-        coverage_results.append(CoverageResult(coverage_case.id, coverage_case.label_supported, predicted))
+        coverage_results.append(
+            CoverageResult(coverage_case.id, coverage_case.label_supported, predicted)
+        )
 
     criterion_results: list[CriterionResult] = []
     for criterion_case in cases.criterion:
@@ -1202,7 +1223,9 @@ def run_ablation(
     image_results: list[ImageResult] = []
     for image_case in cases.image:
         predicted_answer = image_predictor(image_case) if image_predictor is not None else None
-        image_results.append(ImageResult(image_case.id, image_case.ground_truth_answer, predicted_answer))
+        image_results.append(
+            ImageResult(image_case.id, image_case.ground_truth_answer, predicted_answer)
+        )
 
     # Which families compare against a placeholder instead of the shipped pipeline?
     # Explicit commands are routed for real, so `trajectory` is only a placeholder when
