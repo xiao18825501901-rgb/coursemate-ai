@@ -221,6 +221,10 @@ def test_clean_submission_is_unchanged_and_unflagged(tmp_path: Path) -> None:
     assert verification["negative"] is False
     assert verification["reason"] is None
     assert verification["refs"] == [{"ref": "chunk-official", "status": "ok"}]
+    # With no semantic layer configured, layer 1 is all that ran: the reference is
+    # "nothing wrong found", NOT "a decision confirmed it". Reporting only `verified`
+    # would let an unchecked reference look like a checked one.
+    assert verification["definitive"] is False
 
 
 def test_stale_reference_flags_needs_review_but_score_identical(tmp_path: Path) -> None:
@@ -315,6 +319,9 @@ def test_real_contradiction_flags_needs_review_in_on_mode(tmp_path: Path) -> Non
     assert verification["verdict"] == "reference_contradicted"
     assert verification["reason"] == "reference_contradicted"
     assert verification["negative"] is True
+    # A real `on`-mode verdict is exactly what `is_definitive` means, so this one is
+    # definitive as well as negative — the two flags answer different questions.
+    assert verification["definitive"] is True
     assert verification["refs"] == [
         {"ref": "chunk-official", "status": "ok", "semantic": "CONTRADICTED"}
     ]

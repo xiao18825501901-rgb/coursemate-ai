@@ -7,6 +7,9 @@ from fastapi import Request
 from fastapi.testclient import TestClient
 
 from app.config import Settings
+from app.jev.gateway import FakeTransport, JevGateway
+from app.jev.models import JevAnswer, JevResult
+from app.jev.service import SemanticDecisionService
 from app.main import create_app
 from app.rag.prompt import QA_INSTRUCTIONS, build_context
 from app.rag.types import SearchHit
@@ -783,3 +786,135 @@ def test_retrieval_diagnostics_report_exact_locator_candidates(tmp_path: Path) -
     assert body["structuredCandidates"][0]["channels"] == ["locator"]
     assert body["keywordCandidates"] == []
     assert body["vectorCandidates"] == []
+
+
+# --------------------------------------------------------------------------- #
+# Module D on the legacy QA stream (round 31)
+# --------------------------------------------------------------------------- #
+
+SELECT_KEY = "source.select_span.v1"
+SUPPORT_KEY = "source.supports_claim.v1"
+QA_QUESTION = "Please explain Question 1(a) of assignment_2.md"
+
+
+def _seed_grounded_course(client: TestClient) -> None:
+    client.headers["Authorization"] = "Bearer admin-token"
+    assert (
+        client.post(
+            "/api/courses",
+            json={"id": "ge2324", "name": "GE2324", "description": "Data mining"},
+        ).status_code
+        == 201
+    )
+    uploaded = client.post(
+        "/api/courses/ge2324/documents",
+        files={
+            "file": (
+                "assignment_2.md",
+                b"# Assignment 2\n\nQuestion 1\nShared table.\n"
+                b"(a) Calculate the centroid.\n(c) Explain convergence.",
+                "text/markdown",
+            )
+        },
+    )
+    assert uploaded.status_code == 202
+
+
+_UNSET = object()
+
+
+def _qa_citations(
+    provider: FakeAnswerProvider, tmp_path: Path, *, jev: object = _UNSET
+) -> list[dict]:
+    with make_client(tmp_path, provider) as client:
+        _seed_grounded_course(client)
+        if jev is not _UNSET:
+            # The same reference `app/main.py` passes at construction; assigning it
+            # here is the documented seam for a test that needs a specific layer.
+            client.app.state.qa_service.jev = jev
+        response = client.post(
+            "/api/qa/chat",
+            json={"courseId": "ge2324", "question": QA_QUESTION},
+            headers={"Authorization": "Bearer token-a"},
+        )
+        assert response.status_code == 200, response.text
+        events = parse_sse(response.text)
+    return [data for name, data in events if name == "citation"]
+
+
+def test_qa_without_a_semantic_layer_adds_no_citation_keys(tmp_path: Path) -> None:
+    """With the layer genuinely absent the cards are exactly what they were before."""
+    citations = _qa_citations(FakeAnswerProvider(["Centroid first."]), tmp_path, jev=None)
+
+    assert citations, "the grounded path must return citations"
+    for card in citations:
+        assert "jev_citation_support" not in card
+        assert "jev_selected_span" not in card
+
+
+def test_qa_with_an_unconfigured_layer_reports_unverified(tmp_path: Path) -> None:
+    """The real production shape: the layer exists, no credential, so nothing is claimed.
+
+    `create_app` always builds a service, so "no credential" is *not* "no layer". Two
+    annotations therefore appear with honest fallback values — the same shape
+    `domain._annotate_evidence` has produced on the UI path since round 25. What must
+    never happen is a card claiming a verified span or a supported claim.
+    """
+    citations = _qa_citations(FakeAnswerProvider(["Centroid first."]), tmp_path)
+
+    assert citations
+    for card in citations:
+        assert card["jev_citation_support"] == "UNVERIFIED"
+        assert card["jev_selected_span"] is False
+
+
+def test_qa_citations_are_annotated_from_the_evidence_bundle(tmp_path: Path) -> None:
+    """With a real decision the selected span is marked and the verdict recorded."""
+
+    def responder(call: object) -> object:
+        return JevResult(
+            answers={
+                SELECT_KEY: JevAnswer(choice="S1"),
+                SUPPORT_KEY: JevAnswer(noul=0.9),
+            }
+        )
+
+    service = SemanticDecisionService(
+        JevGateway(
+            transport=FakeTransport(responder),
+            modes={SELECT_KEY: "on", SUPPORT_KEY: "on"},
+        )
+    )
+    citations = _qa_citations(FakeAnswerProvider(["Centroid first."]), tmp_path, jev=service)
+
+    assert citations
+    assert citations[0]["jev_citation_support"] == "SUPPORTED"
+    assert citations[0]["jev_selected_span"] is True
+    assert all(card["jev_selected_span"] is False for card in citations[1:])
+    # Two calls for the bundle whatever the page size: select one span, judge that
+    # span. (Other definitions may also record, e.g. module A on the question label.)
+    keys = [record.definition_key for record in service.records]
+    assert keys.count(SELECT_KEY) == 1
+    assert keys.count(SUPPORT_KEY) == 1
+
+
+def test_qa_stays_honest_under_shadow(tmp_path: Path) -> None:
+    """Shadow is the catalog default: the suggestion is recorded, never applied."""
+
+    def responder(call: object) -> object:
+        return JevResult(
+            answers={
+                SELECT_KEY: JevAnswer(choice="S1"),
+                SUPPORT_KEY: JevAnswer(noul=0.9),
+            }
+        )
+
+    service = SemanticDecisionService(JevGateway(transport=FakeTransport(responder)))
+    citations = _qa_citations(FakeAnswerProvider(["Centroid first."]), tmp_path, jev=service)
+
+    assert citations
+    for card in citations:
+        # callsites answer UNVERIFIED on any fallback, so nothing is claimed even
+        # though the transport returned a confident-looking suggestion.
+        assert card["jev_citation_support"] == "UNVERIFIED"
+        assert card["jev_selected_span"] is False

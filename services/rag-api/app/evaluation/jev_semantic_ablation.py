@@ -201,9 +201,19 @@ _COMPONENT_ARM_MODULES: dict[str, str] = {
 # Each component metric is computed from the labelled samples of exactly one decision
 # definition key. Metrics that reuse the shared A–E implementations keep the SAME
 # metric keys the runner already emits (``citation_support_accuracy``,
-# ``unsupported_claim_rate``, ``span_selection_accuracy``); the module-specific
-# metrics with no A–E counterpart are named for what they would measure and are
-# reported as ``INSUFFICIENT_SAMPLES`` when the dataset carries no such labels.
+# ``unsupported_claim_rate``, ``span_selection_accuracy``); the module-specific metrics
+# are computed by the helpers below (added in round 31, when the companion dataset
+# finally supplied their labels) and are still reported as ``INSUFFICIENT_SAMPLES`` if a
+# dataset carries none of the relevant labels.
+#
+# Two of these metrics are CONDITIONAL on a label class (``extraction_false_acceptance``
+# on defect-labelled samples, ``extraction_false_rejection`` on grounded ones,
+# ``entity_false_merge``/``entity_missed_alias``/``entity_conflict_false_positive`` and
+# ``tool_false_allow``/``tool_false_block`` likewise). A conditional rate with an empty
+# denominator is reported as 0.0 for arithmetic safety, so every such metric also
+# publishes its denominator in ``metric_denominators`` — read the pair, never the rate
+# alone. The same reasoning is why ``condition_distinction`` is scored only over the
+# labels it is about.
 _COMPONENT_ARM_METRICS: dict[str, tuple[tuple[str, str], ...]] = {
     "M-EXTRACT": (
         ("extraction_false_acceptance", "extraction.field_grounded.v1"),
@@ -315,6 +325,16 @@ FAMILY_PREREQUISITE = "prerequisite"
 FAMILY_CORPUS_QUALITY = "corpus_quality"
 FAMILY_TRAJECTORY = "trajectory"
 FAMILY_IMAGE = "image"
+# Structured-enhancement module families (round 31). The companion dataset
+# (benchmarks/jev-module-judgments.dataset.json) supplies their labels, which is what
+# lets the module-specific metrics below be computed at all.
+FAMILY_EXTRACTION = "extraction"
+FAMILY_CONSISTENCY = "consistency"
+FAMILY_ENTITY = "entity_relation"
+FAMILY_CAPABILITY = "capability"
+FAMILY_TOOL_INTENT = "tool_intent"
+FAMILY_FEEDBACK_CATEGORY = "feedback_category"
+FAMILY_FEEDBACK_SEVERITY = "feedback_severity"
 
 # Image transcription is not one of the 12 Jev/Jev definitions: it is DeepSeek vision,
 # handled outside the semantic layer. It has its own (single) family and answer shape.
@@ -726,6 +746,164 @@ def choice_accuracy(results: Sequence[ChoiceResult]) -> float:
     return correct / len(results)
 
 
+# --------------------------------------------------------------------------- module
+# metrics
+#
+# Each helper states its population and its definition, because a rate whose population
+# is implicit is exactly how a metric starts lying. Every helper returns 0.0 for an
+# empty population (arithmetic safety) and the caller publishes the denominators in
+# ``metric_denominators`` so the rate is never read on its own.
+
+#: Labels that say the extracted field is NOT trustworthy, i.e. the guard must not accept it.
+EXTRACTION_DEFECT_LABELS = frozenset(
+    {"WRONG_FIELD", "NEGATION_LOST", "CONSTRAINT_LOST", "SOURCE_INSUFFICIENT"}
+)
+
+#: Entity labels that mean "these two are the same thing under a different name".
+ENTITY_SAME_LABELS = frozenset({"SAME_CONCEPT", "ALIAS"})
+
+#: Entity labels that mean "do not merge these"; `DIFFERENT` is the hard separation.
+ENTITY_DISTINCT_LABELS = frozenset({"DIFFERENT"})
+
+#: The two evidence labels that are about a difference of condition/version, not a conflict.
+CONDITION_DIFFERENCE_LABELS = frozenset(
+    {"DIFFERENT_ASSUMPTIONS", "VERSION_OR_TASK_DIFFERENCE"}
+)
+
+
+def _rate(numerator: int, denominator: int) -> float:
+    return numerator / denominator if denominator else 0.0
+
+
+def extraction_false_acceptance(results: Sequence[ChoiceResult]) -> float:
+    """Of the fields a reviewer flagged as defective, how many did we accept?
+
+    Population: samples whose label is in :data:`EXTRACTION_DEFECT_LABELS`. Numerator:
+    those where the prediction was ``GROUNDED``. A high value is the dangerous
+    direction — a wrong field reaching teaching — so this is the metric that must be
+    right before module A is allowed to act on anything.
+    """
+    population = [r for r in results if r.label_choice in EXTRACTION_DEFECT_LABELS]
+    return _rate(
+        sum(1 for r in population if r.predicted_choice == "GROUNDED"), len(population)
+    )
+
+
+def extraction_false_rejection(results: Sequence[ChoiceResult]) -> float:
+    """Of the fields a reviewer confirmed, how many did we refuse to accept?
+
+    Population: samples labelled ``GROUNDED``. Numerator: everything that is not
+    ``GROUNDED`` (a defect verdict or an abstention). This is the annoyance direction:
+    dropping a locator that was fine.
+    """
+    population = [r for r in results if r.label_choice == "GROUNDED"]
+    return _rate(
+        sum(1 for r in population if r.predicted_choice != "GROUNDED"), len(population)
+    )
+
+
+def entity_false_merge(results: Sequence[ChoiceResult]) -> float:
+    """Of the pairs a reviewer said must NOT be merged, how many did we merge?
+
+    Population: labels outside :data:`ENTITY_SAME_LABELS` (i.e. ``DIFFERENT``,
+    ``RELATED_NOT_SAME``, ``QUESTION_VARIANT``, ``DOCUMENT_VERSION_RELATION``,
+    ``UNCERTAIN``). Numerator: predictions in :data:`ENTITY_SAME_LABELS` — treating an
+    alias or a same-concept verdict as identity when none was warranted.
+    """
+    population = [r for r in results if r.label_choice not in ENTITY_SAME_LABELS]
+    return _rate(
+        sum(1 for r in population if r.predicted_choice in ENTITY_SAME_LABELS),
+        len(population),
+    )
+
+
+def entity_missed_alias(results: Sequence[ChoiceResult]) -> float:
+    """Of the pairs a reviewer called an alias, how many did we fail to call an alias?
+
+    Population: label ``ALIAS``. Numerator: anything else. A miss here costs recall on
+    the "Chinese term reaches English material" behaviour, not correctness.
+    """
+    population = [r for r in results if r.label_choice == "ALIAS"]
+    return _rate(
+        sum(1 for r in population if r.predicted_choice != "ALIAS"), len(population)
+    )
+
+
+def entity_conflict_false_positive(results: Sequence[ChoiceResult]) -> float:
+    """Of the pairs a reviewer said are the same or related, how many did we declare different?
+
+    Population: labels in :data:`ENTITY_SAME_LABELS` plus ``RELATED_NOT_SAME``.
+    Numerator: prediction ``DIFFERENT``. This is the "invented conflict" direction: the
+    reader would be told two sources disagree when they do not.
+    """
+    population = [
+        r
+        for r in results
+        if r.label_choice in ENTITY_SAME_LABELS or r.label_choice == "RELATED_NOT_SAME"
+    ]
+    return _rate(
+        sum(1 for r in population if r.predicted_choice in ENTITY_DISTINCT_LABELS),
+        len(population),
+    )
+
+
+def condition_distinction(results: Sequence[ChoiceResult]) -> float:
+    """Of the pairs that differ by condition/version, how many did we place correctly?
+
+    Population: labels in :data:`CONDITION_DIFFERENCE_LABELS`. This is deliberately NOT
+    an accuracy over all pairs: the question the spec asks is whether a difference of
+    assumption or of version is kept apart from a genuine contradiction and from
+    ``COMPATIBLE``. Collapsing either way is a failure, and both count against this one
+    number rather than being split into two rates nobody agreed on.
+    """
+    population = [r for r in results if r.label_choice in CONDITION_DIFFERENCE_LABELS]
+    return _rate(
+        sum(1 for r in population if r.predicted_choice == r.label_choice),
+        len(population),
+    )
+
+
+def capability_misroute(results: Sequence[ChoiceResult]) -> float:
+    """Fraction of capabilities dispatched that the label did not call for.
+
+    Population: every labelled capability sample. Numerator: prediction != label,
+    including an abstention. Every offered candidate is one this endpoint actually
+    serves, so "misroute" here means choosing the wrong one of the legal options (or
+    refusing to choose) rather than dispatching something that cannot run — for the
+    latter the arm would have to be handed a catalog it is not allowed to offer.
+    """
+    return _rate(
+        sum(1 for r in results if r.predicted_choice != r.label_choice), len(results)
+    )
+
+
+def tool_false_allow(results: Sequence[ChoiceResult]) -> float:
+    """Of the writes the user did NOT authorise, how many did we let through?
+
+    Population: label ``INCONSISTENT_WITH_INTENT``. Numerator: prediction
+    ``CONSISTENT``. ``AMBIGUOUS`` is not counted as an allow: it is the confirmation
+    path, not a pass. This is the safety-critical direction for module F.
+    """
+    population = [r for r in results if r.label_choice == "INCONSISTENT_WITH_INTENT"]
+    return _rate(
+        sum(1 for r in population if r.predicted_choice == "CONSISTENT"), len(population)
+    )
+
+
+def tool_false_block(results: Sequence[ChoiceResult]) -> float:
+    """Of the writes the user DID authorise, how many did we refuse?
+
+    Population: label ``CONSISTENT``. Numerator: prediction
+    ``INCONSISTENT_WITH_INTENT``. Being blocked from a legitimate, explicit action is
+    the cost of over-blocking, and the spec names it as its own metric.
+    """
+    population = [r for r in results if r.label_choice == "CONSISTENT"]
+    return _rate(
+        sum(1 for r in population if r.predicted_choice == "INCONSISTENT_WITH_INTENT"),
+        len(population),
+    )
+
+
 def score_level_mae(results: Sequence[ScoreLevelResult]) -> float:
     """Mean absolute error over ordinal score levels; ``None`` prediction is full error."""
     if not results:
@@ -902,6 +1080,16 @@ def run_jev_semantic_ablation(
     corpus_results: list[ScoreLevelResult] = []
     trajectory_results: list[TrajectoryResult] = []
     image_results: list[ImageResult] = []
+    # Structured-enhancement module collections (round 31). The companion dataset
+    # supplies these families; without it they stay empty and every metric below is
+    # reported as INSUFFICIENT_SAMPLES by the component report.
+    extraction_results: list[ChoiceResult] = []
+    consistency_results: list[ChoiceResult] = []
+    entity_results: list[ChoiceResult] = []
+    capability_results: list[ChoiceResult] = []
+    tool_intent_results: list[ChoiceResult] = []
+    feedback_category_results: list[ChoiceResult] = []
+    feedback_severity_results: list[ScoreLevelResult] = []
 
     # Placeholder tracking mirrors the JeV harness: a family whose non-Jev baseline
     # was not injected (so arm A falls back to abstention / a default constant) is a
@@ -1101,6 +1289,63 @@ def run_jev_semantic_ablation(
                     sample.option_count - 1,
                 )
             )
+        elif family == FAMILY_EXTRACTION:
+            extraction_results.append(
+                ChoiceResult(
+                    sample.sample_id,
+                    str(answer["choice"]),
+                    _choice_prediction(predicted),
+                )
+            )
+        elif family == FAMILY_CONSISTENCY:
+            consistency_results.append(
+                ChoiceResult(
+                    sample.sample_id,
+                    str(answer["choice"]),
+                    _choice_prediction(predicted),
+                )
+            )
+        elif family == FAMILY_ENTITY:
+            entity_results.append(
+                ChoiceResult(
+                    sample.sample_id,
+                    str(answer["choice"]),
+                    _choice_prediction(predicted),
+                )
+            )
+        elif family == FAMILY_CAPABILITY:
+            capability_results.append(
+                ChoiceResult(
+                    sample.sample_id,
+                    str(answer["choice"]),
+                    _choice_prediction(predicted),
+                )
+            )
+        elif family == FAMILY_TOOL_INTENT:
+            tool_intent_results.append(
+                ChoiceResult(
+                    sample.sample_id,
+                    str(answer["choice"]),
+                    _choice_prediction(predicted),
+                )
+            )
+        elif family == FAMILY_FEEDBACK_CATEGORY:
+            feedback_category_results.append(
+                ChoiceResult(
+                    sample.sample_id,
+                    str(answer["choice"]),
+                    _choice_prediction(predicted),
+                )
+            )
+        elif family == FAMILY_FEEDBACK_SEVERITY:
+            feedback_severity_results.append(
+                ScoreLevelResult(
+                    sample.sample_id,
+                    int(answer["score_index"]),
+                    predicted.get("score_index") if predicted else None,
+                    sample.option_count - 1,
+                )
+            )
 
     # Build retrieval ranking results from the grouped per-candidate scores.
     for query in ranked_queries.values():
@@ -1152,7 +1397,55 @@ def run_jev_semantic_ablation(
         "corpus_quality_mae": score_level_mae(corpus_results),
         "mainline_recovery_rate": mainline_recovery_rate(trajectory_results),
         "image_answer_accuracy": image_answer_accuracy(image_results),
+        # Structured-enhancement module metrics (round 31). Read each conditional rate
+        # together with its denominator in ``metric_denominators`` below.
+        "extraction_false_acceptance": extraction_false_acceptance(extraction_results),
+        "extraction_false_rejection": extraction_false_rejection(extraction_results),
+        "entity_false_merge": entity_false_merge(entity_results),
+        "entity_missed_alias": entity_missed_alias(entity_results),
+        "entity_conflict_false_positive": entity_conflict_false_positive(entity_results),
+        "condition_distinction": condition_distinction(consistency_results),
+        "capability_misroute": capability_misroute(capability_results),
+        "tool_false_allow": tool_false_allow(tool_intent_results),
+        "tool_false_block": tool_false_block(tool_intent_results),
+        "feedback_category_accuracy": choice_accuracy(feedback_category_results),
+        "feedback_severity_mae": score_level_mae(feedback_severity_results),
         "latency_summary": latency_summary([]),
+    }
+    # The population behind every conditional metric, published so a rate is never read
+    # alone: 0.0 with a denominator of 0 means "nothing to measure", not "no errors".
+    metric_denominators = {
+        "extraction_false_acceptance": sum(
+            1 for r in extraction_results if r.label_choice in EXTRACTION_DEFECT_LABELS
+        ),
+        "extraction_false_rejection": sum(
+            1 for r in extraction_results if r.label_choice == "GROUNDED"
+        ),
+        "entity_false_merge": sum(
+            1 for r in entity_results if r.label_choice not in ENTITY_SAME_LABELS
+        ),
+        "entity_missed_alias": sum(
+            1 for r in entity_results if r.label_choice == "ALIAS"
+        ),
+        "entity_conflict_false_positive": sum(
+            1
+            for r in entity_results
+            if r.label_choice in ENTITY_SAME_LABELS or r.label_choice == "RELATED_NOT_SAME"
+        ),
+        "condition_distinction": sum(
+            1 for r in consistency_results if r.label_choice in CONDITION_DIFFERENCE_LABELS
+        ),
+        "capability_misroute": len(capability_results),
+        "tool_false_allow": sum(
+            1
+            for r in tool_intent_results
+            if r.label_choice == "INCONSISTENT_WITH_INTENT"
+        ),
+        "tool_false_block": sum(
+            1 for r in tool_intent_results if r.label_choice == "CONSISTENT"
+        ),
+        "feedback_category_accuracy": len(feedback_category_results),
+        "feedback_severity_mae": len(feedback_severity_results),
     }
     result = {
         "arm": arm,
@@ -1176,7 +1469,15 @@ def run_jev_semantic_ablation(
             "corpus_quality": len(corpus_results),
             "trajectory": len(trajectory_results),
             "image": len(image_results),
+            "extraction": len(extraction_results),
+            "consistency": len(consistency_results),
+            "entity_relation": len(entity_results),
+            "capability": len(capability_results),
+            "tool_intent": len(tool_intent_results),
+            "feedback_category": len(feedback_category_results),
+            "feedback_severity": len(feedback_severity_results),
         },
+        "metric_denominators": metric_denominators,
         "jev_calls": jev_calls,
         "deepseek_calls": deepseek_calls,
         "deepseek_call_delta_from_A": None,  # filled by compare; A is the reference arm

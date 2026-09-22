@@ -13,8 +13,10 @@ from app.jev import callsites
 from app.jev.citation_audit import (
     CONTRADICTED,
     REJECTED,
+    CitationAuditResult,
     CitationRequest,
     audit_citation,
+    is_definitive,
 )
 from app.jev.citation_evidence import DocumentEvidenceResolver
 from app.jev.receipt_store import receipt_connection
@@ -1237,6 +1239,15 @@ class AssessmentService:
         supports the step's ``result`` text; only ``CONTRADICTED``/``REJECTED``
         is a negative verdict (``INSUFFICIENT_CONTEXT``/``NOT_ADDRESSED…`` are not).
 
+        ``verified`` and ``definitive`` are deliberately separate, and the
+        distinction is the honest one: ``verified`` means layer 1 found nothing
+        wrong (the cited chunks exist, are authorized and are current), while
+        ``definitive`` means a *real* semantic verdict was reached
+        (:func:`is_definitive`: ``SUPPORTED`` or ``CONTRADICTED``). With no
+        credential — the state of every deployment so far — layer 3 never runs, so
+        every reference solution is ``verified=True, definitive=False``. Reporting
+        only ``verified`` would let an unchecked reference look like a checked one.
+
         A negative verdict is returned so the caller can flag ``needs_review`` —
         it never changes a mark, weight, total, grade or coverage value. A
         reference with no source_refs at all is recorded honestly as
@@ -1245,6 +1256,7 @@ class AssessmentService:
         unverified = {
             "verdict": "reference_evidence_unverified",
             "verified": False,
+            "definitive": False,
             "negative": False,
             "reason": None,
             "refs": [],
@@ -1318,9 +1330,18 @@ class AssessmentService:
         else:
             verdict = "verified"
         negative = verdict != "verified"
+        # A real semantic verdict is what makes this definitive; without one the
+        # result is only "layer 1 found nothing wrong". is_definitive() is the single
+        # source of that rule (module D), so the gate cannot drift from the auditor.
+        definitive = any(
+            is_definitive(CitationAuditResult(label=str(item["semantic"]), layer="support"))
+            for item in refs
+            if item.get("semantic")
+        )
         return {
             "verdict": verdict,
             "verified": not negative,
+            "definitive": definitive,
             "negative": negative,
             "reason": verdict if negative else None,
             "refs": refs,

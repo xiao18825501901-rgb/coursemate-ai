@@ -20,6 +20,7 @@ a semantic call can never receive an unbounded document.
 from __future__ import annotations
 
 import sqlite3
+from typing import Literal, cast
 
 from app.db import Database
 from app.jev.citation_audit import ResolvedEvidence
@@ -29,7 +30,7 @@ from app.repositories.chunks import ChunkRepository, RetrievalAccess
 _DEFAULT_MAX_CHARS = 4000
 
 
-def _scope_for(version_row: sqlite3.Row) -> str:
+def _scope_for(version_row: sqlite3.Row) -> Literal["official", "mine"]:
     if version_row["source_scope"] == "WORKSPACE_PRIVATE":
         return "mine"
     return "official"
@@ -84,23 +85,26 @@ class DocumentEvidenceResolver:
     def _version(self, document_id: str, version: str | None) -> sqlite3.Row | None:
         with self.database.connect() as connection:
             if version is None:
-                return connection.execute(
+                row = connection.execute(
                     "SELECT * FROM document_versions WHERE document_id = ? "
                     "ORDER BY version DESC LIMIT 1",
                     (document_id,),
                 ).fetchone()
-            return connection.execute(
-                "SELECT * FROM document_versions WHERE document_id = ? "
-                "AND CAST(version AS TEXT) = ?",
-                (document_id, version),
-            ).fetchone()
+            else:
+                row = connection.execute(
+                    "SELECT * FROM document_versions WHERE document_id = ? "
+                    "AND CAST(version AS TEXT) = ?",
+                    (document_id, version),
+                ).fetchone()
+        # sqlite3's own stubs type these rows as Any; the schema guarantees a Row.
+        return cast("sqlite3.Row | None", row)
 
     def _scoped_to_course(self, version_row: sqlite3.Row) -> bool:
         """True when the version belongs to ``self.course_id``'s authorized corpus."""
         if self.course_id is None:
             return True
         if version_row["source_scope"] in ("OFFICIAL", "OWNER_COURSE"):
-            return version_row["course_id"] == self.course_id
+            return str(version_row["course_id"]) == self.course_id
         # WORKSPACE_PRIVATE: only this subject's own workspace corpus for the course.
         with self.database.connect() as connection:
             return (

@@ -89,6 +89,12 @@ EXPECTED_AE_KEYS = {
     "jev_unavailable",
     "metrics",
     "per_case",
+    # Added in round 31, and the reason is stated rather than assumed: the module
+    # metrics are conditional (rate + population), and a conditional rate read without
+    # its denominator is how a metric starts lying. The denominators therefore belong
+    # to the run's metric reporting for every arm, A–E included — this is the one key
+    # the historical set grew by, not a component annotation leaking in.
+    "metric_denominators",
 }
 
 

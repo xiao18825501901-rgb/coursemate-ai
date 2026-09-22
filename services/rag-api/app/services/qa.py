@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import cast
 from uuid import uuid4
 
@@ -10,7 +10,7 @@ from app.db import Database
 from app.errors import ApiError
 from app.jev.reference_verification import verify_query_reference
 from app.jev.service import SemanticDecisionService
-from app.rag.answers import AnswerProvider
+from app.rag.answers import AnswerProvider, evidence_bundle_support
 from app.rag.prompt import build_context_with_hits, build_turn_input, build_tutor_instructions
 from app.rag.retrieval import HybridRetriever
 from app.rag.types import SearchHit
@@ -363,6 +363,45 @@ class QaService:
             for row in reversed(rows)
         ]
 
+    def _evidence_bundle(
+        self,
+        *,
+        owner_user_id: str,
+        course_id: str,
+        query: str,
+        hits: Sequence[SearchHit],
+    ) -> dict[str, str] | None:
+        """Module D's pre-generation evidence bundle for the legacy QA stream.
+
+        Returns ``None`` — so the caller adds **no keys at all** — when there is no
+        semantic layer or no evidence, which is what makes this path byte-identical
+        to before the wiring in every deployment without a credential. The span ids
+        are the same ``S1..Sn`` labels the citations use, so the annotation points at
+        a card the learner can see. Two calls at most (select one span, then judge
+        that span); nothing is dropped, added or reordered.
+        """
+        if self.jev is None or not hits:
+            return None
+        spans = [
+            {
+                "id": f"S{index}",
+                "text": str(hit.content or ""),
+                "version": str(hit.document_id),
+                "scope": course_id,
+            }
+            for index, hit in enumerate(hits, start=1)
+        ]
+        return evidence_bundle_support(
+            self.jev,
+            claim=query,
+            spans=spans,
+            scope=self.jev.scope(
+                owner_user_id=owner_user_id,
+                authorization_scope="citation",
+                course_id=course_id,
+            ),
+        )
+
     def _course_metadata_context(self, course_id: str) -> str:
         with self.database.connect() as connection:
             course = connection.execute(
@@ -539,6 +578,17 @@ class QaService:
             context = ""
             included_hits = []
             retrieval_strategy = "not_applicable"
+        # Module D's pre-generation evidence bundle (source.select_span.v1 +
+        # source.supports_claim.v1) on the legacy QA stream. The UI path has run this
+        # since round 25; this path produced citations without it. The annotation is
+        # advisory only: nothing is dropped, added or reordered, and with no semantic
+        # layer configured the citations are byte-identical to before.
+        citation_support = self._evidence_bundle(
+            owner_user_id=owner_user_id,
+            course_id=course_id,
+            query=retrieval_query if route.uses_course_retrieval else question,
+            hits=included_hits,
+        )
         grounding_mode = {
             QueryIntent.COURSE_GROUNDED: "grounded",
             QueryIntent.COURSE_TUTORING: "mixed",
@@ -608,6 +658,12 @@ class QaService:
                 _citation(item, index)
                 for index, item in enumerate(included_hits, start=1)
             ]
+            if citation_support is not None:
+                for card in citations:
+                    card["jev_citation_support"] = citation_support["support"]
+                    card["jev_selected_span"] = (
+                        citation_support["selected_span"] == card["sourceLabel"]
+                    )
             answer_text = "".join(answer_parts).strip()
             if not answer_text:
                 raise RuntimeError("Answer provider returned no visible text")
