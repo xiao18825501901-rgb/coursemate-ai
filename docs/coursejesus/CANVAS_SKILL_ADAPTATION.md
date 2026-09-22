@@ -1,10 +1,15 @@
 # CANVAS SKILL ADAPTATION (task B1)
 
-**State of this document.** Round-44 design pass over the real upstream checkout, before any
-adapter code exists. Task B1 requires that the production site *actually reuses* the upstream skill
-rather than merely installing it, and equally that the desktop single-user runtime is not turned
-into a multi-tenant service by sharing its global state. Both halves are decided here from the
-measured code, not from the README's description of it.
+**State of this document.** Round-44 design pass over the real upstream checkout; **updated in round
+46 when the adapter was actually written**. §4's shape is now implemented in
+`services/rag-api/app/canvas/` (`registry.py`, `http_safety.py`, `adapter.py`, `UPSTREAM_NOTICE.md`)
+with 31 tests and an 8-mutation proof. What the adapter does **not** yet have is stated in §7:
+no OAuth flow, no job, no UI, no live Canvas call.
+
+Task B1 requires that the production site *actually reuses* the upstream skill rather than merely
+installing it, and equally that the desktop single-user runtime is not turned into a multi-tenant
+service by sharing its global state. Both halves are decided here from the measured code, not from
+the README's description of it.
 
 ## 1. Baseline (measured)
 
@@ -116,12 +121,42 @@ Rules the adapter owns (not inherited from upstream):
 
 ## 6. Honest limits
 
-* This document is a design based on reading the real code; **no adapter code exists yet** and no
-  Canvas API call has been made from the production path. `CANVAS_SKILL_REUSE` therefore stays
-  `RECON_DONE, ADAPTATION_NOT_STARTED`.
+* §1–§3 were read from the real code; §4's adapter now exists (§7), but **no Canvas API call has
+  been made from the production path** and no institution key exists. `CANVAS_SKILL_REUSE` is
+  therefore "implemented and tested against a mock transport", not "verified against a school".
 * The upstream checkout is dirty (the owner's patch). Any import of upstream code must pin the
   baseline commit *and* record the patch, or a future `git pull` would silently drop the
   active/completed behaviour the whole feature depends on.
 * The upstream `SECURITY.md` and README describe a local, single-user tool; their existing
   hardening (for example the cross-host redirect header stripping) is a starting point, not a
   multi-tenant security design, and this document does not treat it as one.
+
+## 7. What was built in round 46
+
+| File | Contents |
+|---|---|
+| `app/canvas/registry.py` | `InstitutionConnectionRegistry` with the two CityU entries; per-institution callback, credential *references* (never secrets), and availability derived from whether the key pair actually exists (`NOT_CONFIGURED` otherwise) |
+| `app/canvas/http_safety.py` | origin normalisation (HTTPS only, no userinfo, no odd port, no control characters), **exact-pattern** endpoint allow-listing, public-address classification and DNS resolution checks, and per-hop download-target validation |
+| `app/canvas/adapter.py` | `CanvasReadAdapter(connection_id, origin, token_provider)` — profile, student courses across `active`+`completed`, course files with `Link` pagination, and streaming downloads through a token-free client |
+| `app/canvas/UPSTREAM_NOTICE.md` | MIT text, baseline commit + the owner's patch, reuse list, do-not-reuse list, and the modification table |
+| `tests/test_canvas_read_adapter.py` | **31 tests**, including the negative cases: non-`GET` verbs, non-allow-listed paths, absolute URLs on another host, cross-origin pagination links, private/metadata download targets, plain-HTTP and odd-port downloads, redirect chains, byte limits, token-only-in-header, and two adapters not sharing state |
+
+**Two real defects were found by these tests, not by review:**
+
+1. **The endpoint allow-list was a prefix**, so `/api/v1/courses/:id/assignments`,
+   `/submissions` and anything else under a course were reachable — exactly the "generic path"
+   the pack forbids. It is now a list of exact patterns per endpoint.
+2. **`httpx` drops a URL's existing query string when `params` is passed**, even an empty list.
+   The adapter therefore re-fetched page 1 forever on a followed next-link: with a real Canvas
+   that is an import that never progresses. It now passes `params` only when non-empty, and the
+   pagination test asserts the actual request URLs.
+
+A third lesson came from the mutation harness itself: removing the pagination bound outright made
+a test loop forever and left the module mutated on disk after the run was killed. The harness now
+runs each mutation under a timeout, and the bounds test uses a *finite* 50-page chain so that a
+missing bound fails an assertion instead of hanging.
+
+Guards are mutation-proved, not asserted: **8 of 8** mutations were caught (GET-only guard,
+pattern allow-list, origin check, private-address check, token-in-query, pagination bound,
+cross-origin next-link, download host allow-list), with the module restored byte-for-byte
+(`work/current-change/mutation-check-canvas.py`).

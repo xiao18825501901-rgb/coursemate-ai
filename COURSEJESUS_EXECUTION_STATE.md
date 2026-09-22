@@ -32,11 +32,11 @@ uncommitted work, and the running cwd was not renamed.
 | `DOMAIN_DNS_TLS` | **RECON_DONE (read-only)** | `coursejesus.com` is delegated to **Aliyun HiChina DNS** (`dns17/dns18.hichina.com`) with **no** `www` or apex records yet; the current `qqttai.com` zone is on **Cloudflare**, apex → Netlify, `www` CNAME → `coursemate-ai-qqtt.netlify.app` (the site to reuse), `rag`/`agent` → `47.114.34.175`. Front end 200 and www→apex 301 live; the API host resets the TLS handshake from this machine and answers `403 Server: Beaver` (Aliyun WAF) on HTTP. Details and the honest limits: `docs/coursejesus/DOMAIN_AND_CLERK_MIGRATION.md` |
 | `CLERK_DOMAIN_AND_USER_CONTINUITY` | **NOT_INSPECTED** | No Clerk instance has been read yet; requirement is the same Production instance and same user subject |
 | `OLD_DOMAIN_COMPATIBILITY` | **NOT_STARTED** | 30-day compatibility window is the plan; nothing configured |
-| `CANVAS_SKILL_REUSE` | **RECON_DONE, ADAPTATION_NOT_STARTED** | Local checkout `D:\Hp\Documents\canvas-study-assistant-skill` at `f05ffae8` (2026-09-20) with **one local modification: `canvas_study/runtime.py`**, which must be preserved; 16 Python files; `LICENSE` present, `NOTICE` absent; `README.md`/`SKILL.md`/`SECURITY.md` present |
-| `CANVAS_OAUTH_PER_INSTITUTION` | **NOT_STARTED** (design fixed) | Institution registry targets `https://canvas.cityu.edu.hk` and `https://cityu-dg.instructure.com`; callback to freeze at `https://rag.coursejesus.com/api/integrations/canvas/oauth/callback`; no public PAT input will be built |
+| `CANVAS_SKILL_REUSE` | **IMPLEMENTED (mock-verified)** | `services/rag-api/app/canvas/` — stateless `CanvasReadAdapter`, institution registry, `http_safety`; `UPSTREAM_NOTICE.md` records the MIT licence, baseline commit `f05ffae8` **and the owner's `runtime.py` patch**. 31 tests + **8/8 mutations caught**. Not yet verified against a school (no key exists) |
+| `CANVAS_OAUTH_PER_INSTITUTION` | **DESIGN FROZEN, NOT IMPLEMENTED** | Registry exists with the two CityU origins and per-institution credential references; availability reports `NOT_CONFIGURED` while no key pair is present. The flow itself (state, callback, token exchange, refresh lock) is specified in `CANVAS_OAUTH_AND_SCOPES.md` and not written yet; no public PAT input will be built |
 | `CANVAS_LOCAL_UPLOAD_FALLBACK` | **NOT_STARTED** | Becomes the real path while no institution Developer Key exists |
 | `CANVAS_PRIVATE_IMPORT` | **NOT_STARTED** | No import job, worker or UI entry point yet |
-| `CANVAS_READ_ONLY_AND_ISOLATION` | **NOT_STARTED** | Design fixed (GET-only, no global state, per-connection context); no code yet |
+| `CANVAS_READ_ONLY_AND_ISOLATION` | **ENFORCED IN CODE (mock-verified)** | GET-only single request path; exact-pattern endpoint allow-list (`/assignments`, `/submissions`, `/messages` and a generic `/read_api` are refused); token only in the `Authorization` header; per-hop download validation with a token-free client; two adapters demonstrably do not share tokens or state. Proven by mutations that remove each guard |
 | `CAMPUS_LIBRARY_SCAN` | **DONE (read-only)** | `scripts/scan_campus_inventory.py` + `docs/coursejesus/LOCAL_CAMPUS_INVENTORY.csv` + `docs/coursejesus/CAMPUS_SOURCE_AND_PUBLICATION_MATRIX.md`: 1919 manifest rows reconciled against disk with 0 missing, 0 size mismatches, 0 unlisted files, 8.26 GiB, SHA-256 for every file |
 | `CAMPUS_FILES_INGESTED` | **NOT_STARTED** | Nothing uploaded or ingested; `publishable_now` is 0 by construction |
 | `CAMPUS_CONTENT_PUBLISHED` | **NOT_STARTED** | Requires the rights decision for 21 restricted + 13 training files and the real `IngestionService` path |
@@ -87,10 +87,9 @@ localhost screenshot or a `health=200`.
 1. **Brand completion (A1)**: convert the operations scripts and `ops/` material, write the
    notification/e-mail templates from the same source, and re-run the browser journeys on the new
    build. The web app itself is done and guarded.
-2. **Canvas read-only adapter (B)**: port the skill's discovery/pagination/file logic into a
-   stateless adapter with injected connection context and token provider, preserving the upstream
-   licence and the owner's local patch; add context-injection tests and negative tests for the
-   forbidden operations.
+2. **Canvas read-only adapter (B)**: **done in round 46** — see the `CANVAS_SKILL_REUSE` and
+   `CANVAS_READ_ONLY_AND_ISOLATION` rows and `docs/coursejesus/CANVAS_SKILL_ADAPTATION.md` §7.
+   What remains is the OAuth flow (§3), the job (§4) and the UI entries.
 3. **OAuth design freeze (B)**: institution registry + state handling + credential storage with a
    key id, then the mock-OAuth journey and the "school not connected" + local-upload fallback.
 4. **Import job (B)**: persistent job table/worker with the frozen state machine and per-file
