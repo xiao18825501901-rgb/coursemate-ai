@@ -1,5 +1,24 @@
 # RELEASE CLOSURE CHECKLIST — 本地收尾与真实发布准备
 
+> ## ⚠ 本文件的模型路径与预算项已被取代（2026-09-22 补注，第 37 轮）
+>
+> 这份清单写于"新 UI 收尾"那一轮（2026-09-15）。其中**两处会误导执行**，请以补注为准，原文保留以保持可追溯：
+>
+> 1. **"千问 canary"（§二.2、§四）已被取代。** 现行架构是 **DeepSeek 负责全部生成**，并且**禁止 Qwen 自动 fallback**；
+>    Qwen 只作为显式配置的历史模式存在。真实模型验证改由
+>    `app/evaluation/deepseek_canary.py` + `scripts/run_deepseek_canary.py` 执行，见
+>    `DEEPSEEK_LIVE_ACCEPTANCE.md`。可以说的是：生产**目前仍在用 Qwen 回答**，切换到 DeepSeek 属于发布窗口内的一步，
+>    且切换后误配会在启动时以具名错误失败（见 `docs/recovery/OWNER_ACTIONS_ONLY.md` Action 2 的变量表）。
+> 2. **"CNY 5.00"预算（§二.2、§三.4、§四）已被取代，且不得继承。** 现行请求见
+>    `MINIMAL_OWNER_ACTION_CARD.md` 与 `docs/recovery/OWNER_ACTIONS_ONLY.md`：**硬上限 ≤1,700 次付费调用 / ≤7.0M tokens**
+>    （Jev ≤1,100，cap 1,500；DeepSeek ≤130，cap 200），**USD 金额由 Owner 指定**（建议值 Jev 15 + DeepSeek 10 + embeddings 2 = 27 USD）。
+>    任务规格明确要求"不要继承旧预算"，因此这里的 CNY 5.00 只是历史记录。
+>
+> **本清单中仍然有效的部分**：§二.1 生产只读核验、§二.3 备份与隔离恢复、§二.4 受控部署顺序、§二.5 双用户+管理员验收、
+> §三.1 审批策略、§三.3 Clerk 控制台、§三.5 真实登录、§四中关于真实登录/视觉正确率/多用户隔离/多 worker 的未证事项。
+> 其中两项在后续轮次已取得本地证据，不再是纯未证事项：**迁移 25→30 演练**（真实迁移文件、`old_rows_unchanged: true`）与
+> **对 release `4ef5064` 的回滚兼容性**（`ROLLBACK_SAFE_WITH_MIGRATED_DB`），见 `docs/recovery/CURRENT_BLOCKER_LEDGER.md` B-27。
+
 **更新日期**：2026-09-15（Asia/Hong_Kong）
 **HEAD**：以 `git rev-parse HEAD` 为准（本文件随提交更新，不写自引用 SHA）
 **模型**：开发执行 `deepseek-v4-pro`（`C:\Users\Hp\.dsh\settings.yaml` 已切，本会话一致）；网站教学 `qwen3.8-max`（未变）。

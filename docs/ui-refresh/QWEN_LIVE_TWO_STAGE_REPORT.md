@@ -1,5 +1,14 @@
 # QWEN LIVE TWO-STAGE REPORT — 千问两阶段教学
 
+> ## ⚠ 本文件的模型与预算已被取代（2026-09-22 补注，第 37 轮）
+>
+> 这是一份历史报告（2026-09-15，结论 `NOT RUN`）。其中**§6 的授权金额与"要跑什么"已不再适用**，原文保留以保持可追溯：
+> 现行架构是 **DeepSeek 负责全部生成**且**禁止 Qwen 自动 fallback**，真实模型验证由
+> `app/evaluation/deepseek_canary.py` + `scripts/run_deepseek_canary.py` 执行；预算不再是 **CNY 5.00**，而是
+> **≤1,700 次付费调用 / ≤7.0M tokens** 的硬上限、USD 金额由 Owner 指定（见 `MINIMAL_OWNER_ACTION_CARD.md` 与
+> `docs/recovery/OWNER_ACTIONS_ONLY.md`）。任务规格要求**不继承旧预算**。仍有效的部分：链路现状、先估算后执行、
+> 超限即停、不自动加钱/换模型/重试这些**纪律**，以及"MockTransport 契约测试不等于真实调用"这一判断。
+
 **结论：NOT RUN。没有任何真实千问调用在本会话发生，零模型费用。**
 
 本文件说明链路现状、为什么没有跑、以及跑之前必须先完成什么。**不把 MockTransport 的

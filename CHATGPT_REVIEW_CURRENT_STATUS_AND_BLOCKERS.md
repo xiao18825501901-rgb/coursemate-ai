@@ -347,6 +347,22 @@ forbids, so the flag stays `false`.
     stale: each already carries a dated correction banner, which is exactly what the audit checks were
     for, so they were left alone.
 
+    Sweeping further, the same pattern turned up somewhere that actually matters for the owner: three
+    documents still prescribe a **Qwen canary with a CNY 5.00 budget**, which is doubly superseded — the
+    architecture is now DeepSeek for all generation with Qwen auto-fallback forbidden, and the task
+    specification says explicitly not to inherit old budgets. Two are actionable rather than historical:
+    `docs/ui-refresh/RELEASE_CLOSURE_CHECKLIST.md` lists "approve CNY 5.00" as a **step for the owner**
+    and its canary section is titled around 千问, and `DSH_EXECUTION_STATE.md` — which calls itself the
+    sole resume reference for a later session — names "approve a Qwen two-stage canary (CNY 5.00
+    suggested)" as the minimum unblocking action. A third, `docs/ui-refresh/QWEN_LIVE_TWO_STAGE_REPORT.md`,
+    still says the amount to put in the authorisation box is CNY 5.00. Each now carries a dated banner
+    naming what was superseded and pointing at the current sources
+    (`MINIMAL_OWNER_ACTION_CARD.md`, `docs/recovery/OWNER_ACTIONS_ONLY.md`: **≤1,700 paid calls / ≤7.0M
+    tokens**, USD set by the owner, proposed 15 + 10 + 2 = 27), with the original text kept for
+    traceability. What those documents still get right — the approval channel, the ordered
+    read-only/backup/deploy sequence, and "no execution without approval" — is stated in the banner so
+    nothing useful is thrown away with the stale parts.
+
 Two of my own first-draft claims were wrong and were corrected in place rather than left standing: I
 first recorded the retrieval re-rank as "40 calls per page, fixable by batching" — it is bounded at
 **16**, and the batching I proposed is not available for that shape (`JevCall` shares one state across

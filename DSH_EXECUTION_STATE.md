@@ -1,5 +1,19 @@
 # DSH 执行状态（会话交接与恢复用）
 
+> ## ⚠ 本文件的"模型路径"与"预算"两处已被取代（2026-09-22 补注，第 37 轮）
+>
+> 本文件写于 2026-09-15。它自称"跨上下文压缩 / 换会话的唯一恢复依据"，因此这两处必须纠正，
+> 以免下一位执行者按已废弃的模型与金额去申请批准；原文保留以保持可追溯：
+>
+> 1. **§5 阻塞项与"最小动作"里的"真实千问两阶段 canary"已被取代。** 现行架构是 **DeepSeek 负责全部生成**，且**禁止 Qwen 自动 fallback**；
+>    真实模型验证走 `app/evaluation/deepseek_canary.py` + `scripts/run_deepseek_canary.py`，见 `DEEPSEEK_LIVE_ACCEPTANCE.md`。
+> 2. **建议预算 `CNY 5.00` 已被取代，且任务规格明确要求"不要继承旧预算"。** 现行请求见 `MINIMAL_OWNER_ACTION_CARD.md` 与
+>    `docs/recovery/OWNER_ACTIONS_ONLY.md`：硬上限 **≤1,700 次付费调用 / ≤7.0M tokens**（Jev ≤1,100 cap 1,500、DeepSeek ≤130 cap 200），
+>    **USD 金额由 Owner 指定**（建议 Jev 15 + DeepSeek 10 + embeddings 2 = 27 USD）。
+>
+> 仍然有效的部分：审批通道、生产只读核验 / 备份与隔离恢复 / 受控部署的**顺序**，以及"未批准就不执行"的原则。
+> 当前状态以 `DSH_JEV_DEEPSEEK_EXECUTION_STATE.md` 与 `docs/recovery/CURRENT_BLOCKER_LEDGER.md` 为准。
+
 **最后更新**：2026-09-15（会话内）
 **本文件是跨上下文压缩 / 换会话的唯一恢复依据。**
 
