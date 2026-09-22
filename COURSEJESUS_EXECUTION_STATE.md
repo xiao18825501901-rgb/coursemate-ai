@@ -91,6 +91,20 @@ localhost screenshot or a `health=200`.
 
 ## 3. Next steps, in order
 
+**Resume point (round 56).** The next increment is the **worker main loop**
+(`services/rag-api/app/canvas/worker.py`). Every part it needs already exists and is reachable
+through the package API: `CanvasJobRepository.claim()` (lease, expired lease reclaimable),
+`CanvasReadAdapter.course_files()`/`download()` (read-only discovery, streaming download through a
+token-free client), `outcome_for_error()`/`outcome_for_download()`/`should_stop_job()` (the
+failure-decision table), `ImportJob.transition()`/`finished_status()` (the state machine and the
+earned completion verdict) and `upsert_file()`/`set_status()` (per-file checkpoint and terminal
+state). The rules it must obey are fixed: no retry on `403`, back off on `429` by `Retry-After`,
+end the batch on `EXPIRED_TOKEN`, stop at a checkpoint on cancel without deleting existing
+material, and let `finished_status()` — not the caller — decide the terminal state. After that:
+the OAuth HTTP routes and the wizard UI (the two underlined "从 Canvas 导入" entry points, the
+"school not connected" state with local-upload fallback), then ingestion into a private course
+through the real `IngestionService`, then the seven new browser journeys.
+
 1. **Brand completion (A1)**: convert the operations scripts and `ops/` material, write the
    notification/e-mail templates from the same source, and re-run the browser journeys on the new
    build. The web app itself is done and guarded.
