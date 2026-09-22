@@ -147,10 +147,22 @@ def main() -> int:
                 jev_predictor=deterministic_fake_jev_predictor,
             )
         else:
-            # A live run would inject a real Jev predictor and a real DeepSeek
-            # predictor; neither exists here, so this branch is unreachable after
-            # _live_preflight. Kept explicit so the module cannot silently fake a live run.
-            summary = run_jev_semantic_ablation(dataset, arm, transport=FakeJevTransport())
+            # Refuse rather than fall through to the fake transport. This branch used
+            # to call the runner with ``FakeJevTransport()`` and rely on
+            # ``_live_preflight`` refusing first - which it only does while the
+            # credentials are absent. With both keys present and --allow-billable the
+            # preflight passes, so a "live" run wrote an artefact whose top-level
+            # transport said "live" while every number in it came from the fake
+            # transport. No live predictor wiring exists yet, so the honest answer is
+            # to stop.
+            print(
+                "Refusing a live run: this CLI has no live predictor wiring, so it "
+                "would run the fake transport and label the output 'live'. No call was "
+                "made and no output was written. The live Jev transport for the A-E "
+                "arms lives in scripts/run_jev_ablation.py; the six component arms "
+                "need live predictors that do not exist yet."
+            )
+            return 3
         arm_summaries.append(summary)
 
     runs = {summary["arm"]: summary for summary in arm_summaries}
@@ -161,8 +173,18 @@ def main() -> int:
         _summarize_arm(summary)
     print(f"comparison verdict={comparison['verdict']}")
 
+    effective_transports = sorted({summary.get("transport") for summary in arm_summaries})
+    expected_transport = "deterministic_fake" if args.transport == "fake" else args.transport
+    if effective_transports != [expected_transport]:
+        print(
+            "Refusing to write: the run used "
+            f"{effective_transports} but the artefact would claim {expected_transport!r}."
+        )
+        return 3
+
     payload = {
         "transport": args.transport,
+        "transport_used": effective_transports[0],
         "dataset_status": dataset.get("dataset_status"),
         "dataset_path": str(args.dataset),
         "allow_billable": args.allow_billable,
