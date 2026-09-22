@@ -24,6 +24,7 @@ import type {
   TeachingProfile,
   TeachingProfilePreview,
 } from "../types/api";
+import { BRAND } from "../brand";
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : "The course operation failed.";
@@ -163,7 +164,7 @@ export function CourseSettingsPage() {
       </section>
       <section className="settings-panel teaching-profile-panel">
         <div className="panel-heading"><h2>AI teaching profile</h2><span>{profiles[0] ? `v${profiles[0].version}` : "Default"}</span></div>
-        <p>Describe how you want CourseMate to teach. Review the structured profile before saving.</p>
+        <p>Describe how you want {BRAND.name} to teach. Review the structured profile before saving.</p>
         <label><span className="field-label">Learning and teaching requirements</span><textarea onChange={(event) => setProfileRequirement(event.target.value)} placeholder="I am a beginner preparing for the exam. Explain why first, then show a worked example." rows={4} value={profileRequirement} /></label>
         <button className="button button-secondary" disabled={profileRequirement.trim().length < 3} onClick={() => void buildProfile()} type="button">Build profile preview</button>
         {profilePreview && <div className="profile-preview" aria-label="Teaching profile preview">

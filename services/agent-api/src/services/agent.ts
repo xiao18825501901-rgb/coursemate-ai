@@ -1,11 +1,12 @@
 import { AgentError } from "../errors.js";
+import { PRODUCT_NAME } from "../config.js";
 import type { AgentModelClient } from "../openai/client.js";
 import { TOOL_DEFINITIONS } from "../tools/schemas.js";
 import type { ToolExecutor } from "../tools/executor.js";
 import type { ToolResult } from "../types.js";
 
 
-const AGENT_INSTRUCTIONS = `You are CourseMate's study planning assistant.
+const AGENT_INSTRUCTIONS = `You are ${PRODUCT_NAME}'s study planning assistant.
 Use the provided task tools whenever the user asks to create, search, update, complete, or delete tasks.
 Never invent a task ID. Search first when a user describes a task without an exact ID.
 If a search returns multiple plausible tasks, ask the user which exact task they mean and do not mutate data.

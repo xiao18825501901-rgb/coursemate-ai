@@ -1,6 +1,6 @@
 import { createApp } from "./app.js";
 import { createClerkAuthStrategy, createTestAuthStrategy } from "./auth.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, PRODUCT_NAME } from "./config.js";
 import { AgentDatabase } from "./db.js";
 import { AgentError } from "./errors.js";
 import {
@@ -85,7 +85,7 @@ const application = createApp({
   readinessCheck: () => database.isReady(),
 });
 const server = application.listen(config.port, config.host, () => {
-  console.log(`CourseMate Agent API listening on http://${config.host}:${config.port}`);
+  console.log(`${PRODUCT_NAME} Agent API listening on http://${config.host}:${config.port}`);
 });
 
 function shutdown(): void {

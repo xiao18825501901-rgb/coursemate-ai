@@ -1,9 +1,10 @@
+import { BRAND } from "../brand";
 export function AboutPage() {
   return (
     <div className="page narrow-page">
       <header className="page-intro">
         <span className="eyebrow">Built to be explained</span>
-        <h1>How CourseMate works</h1>
+        <h1>How {BRAND.name} works</h1>
         <p>
           No orchestration framework hides the important parts. Retrieval, citations, validation,
           and task mutations remain inspectable from request to database row.

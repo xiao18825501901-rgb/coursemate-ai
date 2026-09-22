@@ -5,6 +5,7 @@ import { TestAuthProvider } from "../auth/AuthProvider";
 import { getKnowledgeState } from "../services/learningApi";
 import type { KnowledgeSnapshot, PersonalPlanDraft } from "../types/learning";
 import { KnowledgeTrees } from "./KnowledgeTrees";
+import { BRAND } from "../brand";
 
 vi.mock("../services/learningApi", () => ({
   getKnowledgeState: vi.fn(),
@@ -129,7 +130,7 @@ describe("KnowledgeTrees", () => {
 
     await waitFor(() => expect(onCreatePlan).toHaveBeenCalledWith({
       title: "我的学习路径",
-      change_reason: "Learner selected an ordered atomic-node plan in the CourseMate UI",
+      change_reason: `Learner selected an ordered atomic-node plan in the ${BRAND.name} UI`,
       memberships: [
         { node_id: "canonical-node", parent_node_id: null, ordinal: 0 },
         { node_id: "private-node", parent_node_id: null, ordinal: 1 },

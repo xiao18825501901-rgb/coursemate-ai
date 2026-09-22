@@ -4,9 +4,10 @@ import { describe, expect, it } from "vitest";
 
 import { AppRoutes } from "./App";
 import { TestAuthProvider } from "./auth/AuthProvider";
+import { BRAND } from "./brand";
 
 
-describe("CourseMate application shell", () => {
+describe("CourseJesus application shell", () => {
   it("renders a content-first landing page with both real workflows", () => {
     render(
       <MemoryRouter initialEntries={["/"]}>
@@ -15,7 +16,7 @@ describe("CourseMate application shell", () => {
     );
 
     expect(screen.getByRole("heading", { level: 1, name: /study from evidence/i })).toBeVisible();
-    expect(screen.getByRole("link", { name: /ask coursemate/i })).toHaveAttribute("href", "/qa");
+    expect(screen.getByRole("link", { name: /ask coursejesus/i })).toHaveAttribute("href", "/qa");
     expect(screen.getByRole("link", { name: /plan my study/i })).toHaveAttribute(
       "href",
       "/tasks",
@@ -36,7 +37,7 @@ describe("CourseMate application shell", () => {
       "#main-content",
     );
     expect(screen.getByRole("link", { name: "About" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("heading", { level: 1, name: /how coursemate works/i })).toBeVisible();
+    expect(screen.getByRole("heading", { level: 1, name: /how coursejesus works/i })).toBeVisible();
     expect(screen.getByRole("heading", { level: 2, name: /rag, kept visible/i })).toBeVisible();
     expect(screen.getByRole("heading", { level: 2, name: /agent, kept accountable/i })).toBeVisible();
   });

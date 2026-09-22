@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 
 import { SignedInAccount, SignedOutActions, useCourseMateAuth } from "../auth/AuthProvider";
+import { BRAND } from "../brand";
 
 
 const homeNavigation = { to: "/", label: "Home", end: true };
@@ -34,11 +35,11 @@ export function Layout() {
         Skip to content
       </a>
       <header className="site-header">
-        <NavLink aria-label="CourseMate AI home" className="brand" to="/">
+        <NavLink aria-label={`${BRAND.name} home`} className="brand" to="/">
           <BrandMark />
           <span>
-            <strong>CourseMate</strong>
-            <small>AI study desk</small>
+            <strong>{BRAND.name}</strong>
+            <small>{BRAND.nameZh} · AI study desk</small>
           </span>
         </NavLink>
         <nav aria-label="Primary navigation" className="primary-nav">
@@ -67,8 +68,8 @@ export function Layout() {
         <Outlet />
       </main>
       <footer className="site-footer">
-        <span>CourseMate AI</span>
-        <span>Grounded answers. Accountable actions.</span>
+        <span>{BRAND.name}</span>
+        <span>{BRAND.tagline}</span>
       </footer>
     </div>
   );

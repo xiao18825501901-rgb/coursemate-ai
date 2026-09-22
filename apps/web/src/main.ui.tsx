@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { CourseMateUi } from "./CourseMateUi";
+import { BRAND } from "./brand";
 
 declare global {
   interface Window {
@@ -10,7 +11,7 @@ declare global {
 }
 
 /**
- * Entry point for the new CourseMate single-page application.
+ * Entry point for the new CourseJesus single-page application (see brand.ts).
  *
  * `apps/web/ui.html` loads this module and is served at `/app`, so the new shell
  * and the existing site keep separate documents and cannot fight over global CSS.
@@ -20,7 +21,7 @@ window.COURSEMATE_CONFIG = { apiBase };
 
 const container = document.getElementById("root");
 if (container === null) {
-  throw new Error("CourseMate root element was not found.");
+  throw new Error(`${BRAND.name} root element was not found.`);
 }
 
 createRoot(container).render(

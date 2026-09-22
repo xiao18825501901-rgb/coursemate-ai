@@ -3,12 +3,13 @@ import { createRoot } from "react-dom/client";
 
 import App from "./App";
 import { ClerkAuthProvider, TestAuthProvider } from "./auth/AuthProvider";
+import { BRAND } from "./brand";
 import "./styles.css";
 
 
 const root = document.getElementById("root");
 if (root === null) {
-  throw new Error("CourseMate root element was not found.");
+  throw new Error(`${BRAND.name} root element was not found.`);
 }
 
 const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
@@ -34,7 +35,7 @@ if (testToken) {
   application = (
     <main className="page centered-state" role="alert">
       <h1>Authentication is not configured</h1>
-      <p>Set VITE_CLERK_PUBLISHABLE_KEY before starting CourseMate.</p>
+      <p>Set VITE_CLERK_PUBLISHABLE_KEY before starting {BRAND.name}.</p>
     </main>
   );
 }

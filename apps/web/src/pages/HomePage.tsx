@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { BRAND } from "../brand";
 
 
 export function HomePage() {
@@ -8,12 +9,12 @@ export function HomePage() {
         <div className="eyebrow">Your courses, made navigable</div>
         <h1 id="home-title">Study from evidence. Plan with intent.</h1>
         <p className="hero-copy">
-          CourseMate turns your own lecture material into cited answers, then helps you turn
+          {BRAND.name} turns your own lecture material into cited answers, then helps you turn
           the important parts into a study plan you can actually finish.
         </p>
         <div className="hero-actions">
           <Link className="button button-primary" to="/qa">
-            Ask CourseMate
+            Ask {BRAND.name}
             <span aria-hidden="true">→</span>
           </Link>
           <Link className="button button-secondary" to="/tasks">

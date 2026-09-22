@@ -23,6 +23,7 @@ import type {
   GroundingMode,
   QaStreamMeta,
 } from "../types/api";
+import { BRAND } from "../brand";
 
 
 interface ChatMessage {
@@ -39,7 +40,7 @@ function messageId(): string {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "CourseMate could not complete the request.";
+  return error instanceof Error ? error.message : `${BRAND.name} could not complete the request.`;
 }
 
 function previousUserQuestion(
@@ -369,7 +370,7 @@ export function QaPage() {
             ) : (
               messages.map((message) => (
                 <article className={`message message-${message.role}`} key={message.id}>
-                  <span className="message-role">{message.role === "user" ? "You" : "CourseMate"}</span>
+                  <span className="message-role">{message.role === "user" ? "You" : BRAND.name}</span>
                   {message.role === "assistant" && message.metadata?.groundingMode && (
                     <div
                       className={`grounding-banner grounding-${message.metadata.groundingMode}`}

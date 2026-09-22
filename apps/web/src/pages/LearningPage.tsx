@@ -24,6 +24,7 @@ import type {
   PersonalPlanDraft,
   ProblemSource,
 } from "../types/learning";
+import { BRAND } from "../brand";
 import "./learning.css";
 
 export function LearningPage() {
@@ -193,7 +194,7 @@ export function LearningPage() {
     document.getElementById("assessment-panel")?.scrollIntoView?.({ block: "start" });
   };
   return <div className="page learning-page">
-    <header className="page-intro"><span className="eyebrow">CourseMate V3 · 内测</span><h1>协同学习工作区</h1>
+    <header className="page-intro"><span className="eyebrow">{BRAND.name} · 内测</span><h1>协同学习工作区</h1>
       <p>教学与题目共享学习进度。完成必需教学即可 LEARNED；成绩独立记录。</p>
       <Link to={`/qa/${courseId}`}>旧版问答与历史</Link> · <Link to={`/courses/${courseId}/settings`}>课程教学偏好</Link>
     </header>

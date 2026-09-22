@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { BRAND } from "../brand";
 
 
 interface ErrorBoundaryProps {
@@ -17,7 +18,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
-    console.error("CourseMate UI error", error, info.componentStack);
+    console.error(`${BRAND.name} UI error`, error, info.componentStack);
   }
 
   override render(): ReactNode {
@@ -25,7 +26,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       return (
         <main className="page centered-state">
           <span className="state-code">!</span>
-          <h1>CourseMate hit an unexpected error</h1>
+          <h1>{BRAND.name} hit an unexpected error</h1>
           <p>Reload the page to reconnect to your study desk.</p>
           <button className="button button-primary" onClick={() => window.location.reload()}>
             Reload page

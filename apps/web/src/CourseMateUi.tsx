@@ -3,13 +3,14 @@ import katex from "katex";
 import { useEffect } from "react";
 
 import { App as CourseMateApp } from "./ui/App.jsx";
+import { BRAND } from "./brand";
 
 import "./ui/styles.css";
 import "./ui/styles-extra.css";
 import "./ui/theme.css";
 
 /**
- * The new CourseMate shell renders KaTeX to MathML and refuses to build React
+ * The new CourseJesus shell renders KaTeX to MathML and refuses to build React
  * elements from any other model HTML, so it only needs the render entry point.
  */
 window.CourseMateMath = katex;
@@ -60,7 +61,7 @@ function TestAuthBridge({ token }: { token: string }) {
  *
  * The delivered `api.js` reads a token getter and an auth subscription from
  * `window.CourseMateAuth`; this bridge supplies both from the same Clerk provider
- * the rest of CourseMate uses, so no second authentication system exists and the
+ * the rest of CourseJesus uses, so no second authentication system exists and the
  * bearer token is never handed to React through an environment variable.
  */
 function AuthBridge() {

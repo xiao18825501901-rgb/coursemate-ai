@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { useCourseMateAuth } from "../auth/AuthProvider";
 import { listCourses, listDocuments } from "../services/ragApi";
 import type { Course, CourseDocument } from "../types/api";
+import { BRAND } from "../brand";
 
 
 interface CourseSources { course: Course; documents: CourseDocument[] }
@@ -34,7 +35,7 @@ export function DocumentsPage() {
 
   return (
     <div className="page narrow-page">
-      <header className="page-intro"><span className="eyebrow">Source library</span><h1>Documents and indexing</h1><p>See what CourseMate can retrieve, where it belongs, and whether indexing completed.</p></header>
+      <header className="page-intro"><span className="eyebrow">Source library</span><h1>Documents and indexing</h1><p>See what {BRAND.name} can retrieve, where it belongs, and whether indexing completed.</p></header>
       {error && <div className="alert alert-error" role="alert">{error}</div>}
       {loading ? <div className="workspace-frame" aria-busy="true">Loading source inventory…</div> : sources.length === 0 ? <div className="empty-panel" role="status"><strong>No courses are configured.</strong><span>Run the course importer to create CS3481 and GE2324.</span></div> : (
         <div className="source-groups">

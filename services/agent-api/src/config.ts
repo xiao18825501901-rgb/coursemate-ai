@@ -2,6 +2,15 @@ import path from "node:path";
 
 import type { ToolIntentMode } from "./tools/intent-gate.js";
 
+/**
+ * Product name used by this service's own identity strings: the model instructions and
+ * the operator log line. The web app keeps a richer brand source in
+ * `apps/web/src/brand.ts`; the two are separate packages on purpose, so the name is a
+ * duplicated constant here rather than a cross-package import.
+ * See docs/coursejesus/BRAND_REPLACEMENT_MATRIX.md.
+ */
+export const PRODUCT_NAME = "CourseJesus";
+
 export interface AgentConfig {
   databasePath: string;
   host: string;

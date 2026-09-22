@@ -9,6 +9,7 @@ import type {
   KnowledgeTreeMember,
   PersonalPlanDraft,
 } from "../types/learning";
+import { BRAND } from "../brand";
 
 interface KnowledgeTreesProps {
   workspace: string;
@@ -141,7 +142,7 @@ export function KnowledgeTrees({
     if (memberships.length === 0) return;
     await onCreatePlan({
       title: "我的学习路径",
-      change_reason: "Learner selected an ordered atomic-node plan in the CourseMate UI",
+      change_reason: `Learner selected an ordered atomic-node plan in the ${BRAND.name} UI`,
       memberships,
       prerequisites: [],
     });
