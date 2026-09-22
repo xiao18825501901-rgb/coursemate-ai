@@ -64,13 +64,19 @@ adds a candidate, so the fixed retrieval rules cannot regress here.
   explicit version/correction relation exists; version differences surface as
   `VERSION_OR_TASK_DIFFERENCE`, never as an override.
 
-### The pending definition is not registered
+### The definition is registered, and the module no longer duplicates it
 
-`evidence.consistency.v1` is held as `EVIDENCE_CONSISTENCY_KEY` and built as a
-module-level `DecisionDefinition` (`_EVIDENCE_CONSISTENCY_DEFINITION`) so the
-gateway can evaluate it **today** (modes/bounds/receipts apply exactly). It is
-**not** in `decision_catalog.json`; the exact proposed entry and the registration
-request are in `STRUCTURED_DECISION_CONTRACTS.md`.
+`evidence.consistency.v1` **is** in `decision_catalog.json`, and
+`evidence_consistency_definition()` projects that entry, so the catalog owns the
+candidate vocabulary, the criteria text and the instructions.
+
+This was not always true, and the difference is worth recording: the module used to
+build its own `DecisionDefinition` and pass `{relation: relation}` as the criteria
+labels, which meant the model was shown bare ids instead of the registered
+descriptions — and a calibration run would have measured that duplicate rather than
+the catalog entry. The request now carries the registered id→description map and the
+registered instructions; `test_the_registered_definition_is_the_one_the_model_is_shown`
+pins both.
 
 ---
 

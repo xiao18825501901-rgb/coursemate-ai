@@ -93,10 +93,12 @@ Candidates: `GROUNDED`, `WRONG_FIELD`, `NEGATION_LOST`, `CONSTRAINT_LOST`,
   `FLAGGED` and a bounded repair is planned (if allowed — see §4).
 * `UNCERTAIN` → `NEEDS_REVIEW`.
 
-The definition is implemented against `JevGateway` via a locally built
-`DecisionDefinition` (module constants `EXTRACTION_FIELD_GROUNDED_KEY` /
-`EXTRACTION_FIELD_GROUNDED_VERSION`). It is **not** registered in
-`decision_catalog.json` — see the registration request in §7.
+The definition is registered in `decision_catalog.json` as
+`extraction.field_grounded.v1` (module constant `EXTRACTION_FIELD_GROUNDED_KEY`), and
+`field_grounded_definition()` **projects that entry** rather than carrying a second
+copy: the catalog owns the candidate vocabulary, the criteria text, the instructions
+and the cache scope, and the module asserts its own constants against it so a catalog
+edit cannot silently change what the guard may answer. See §7.
 
 ### 4. A Jev agreement is NOT vision verification
 
@@ -136,10 +138,27 @@ cheating-sensitive:
 (`test_student_answer_rewritten_to_correct_is_refused`,
 `test_student_legibility_repair_not_to_correct_is_allowed`.)
 
-### 7. Catalog-registration request (for the catalog workstream)
+### 7. Catalog registration — **done** (kept for the historical record)
 
-`decision_catalog.json` is owned by another workstream and was **not** edited.
-Please register the following as definition #13, consistently with its own tests:
+This section used to be a request to another workstream, because
+`decision_catalog.json` was not edited by this one. The definition **is now registered**
+(the catalog holds 19 definitions), so the request is closed; the entry below is kept
+only as the record of what was asked for.
+
+What was verified after registration: `field_grounded_definition()` projects the
+catalog entry, and the module's own constants (`FIELD_GROUNDED_CANDIDATES`,
+`FIELD_GROUNDED_REQUIRED_STATE`, `_FIELD_GROUNDED_CACHE_SCOPE`) are asserted against
+it — so registering it did not change the vocabulary, and a later catalog edit cannot
+silently change it either.
+
+* **id / version:** `extraction.field_grounded.v1` (catalog `version` `1.0.0-design`).
+* **primitive:** `Choice`.
+* **fallback (failure policy):** `NEEDS_REVIEW` — deterministic result, never a
+  confident acceptance.
+* **runtime mode:** stays `shadow` (the catalog default) like every other definition
+  until a credential exists; the verifier respects `off`/`shadow`/`on` via the gateway.
+
+Proposed entry, for the record:
 
 ```json
 {
@@ -166,18 +185,6 @@ Please register the following as definition #13, consistently with its own tests
   ]
 }
 ```
-
-* **id / version:** `extraction.field_grounded.v1` / `1.0.0-design` (the current
-  catalog version).
-* **primitive:** `Choice`.
-* **fallback (failure policy):** `NEEDS_REVIEW` — deterministic result, never a
-  confident acceptance.
-* **runtime mode:** stays `shadow` (the catalog default) like the other 12 until a
-  credential exists; the verifier respects `off`/`shadow`/`on` via the gateway.
-
-The module already builds this exact `DecisionDefinition` from module constants
-(`field_grounded_definition()`), so registering it in the catalog will not change
-behaviour — it only makes the definition visible to `Catalog`-aware tooling.
 
 ### 8. Degradation
 
@@ -431,11 +438,14 @@ Host wiring: one shared `SemanticDecisionService` is built in
      `questioned: false` — no lookup, no transport, nothing to bill.
 
    Tests: `tests/test_jev_reference_verification.py` (29 — the module contract with an offline
-   transport, including the negation residue `"it is not question 3, it is 4"`), the prose cases above
-   in `tests/test_reference_parser.py`, and `tests/test_jev_reference_business_path.py` (4) which
-   drives the real `context.retrieve` adapter over a document whose labels came from the real chunker
-   and structure parser. Browser: journey 4 of `tests/e2e/jev-structured.spec.ts` drives the shipped QA
-   page and reads the report out of that page's own `POST /api/qa/chat` stream.
+   transport, including the prose cases above, the negation residue
+   `"it is not question 3, it is 4"`, and the owner-scoped cache), and
+   `tests/test_jev_reference_business_path.py` (4) which drives the real `context.retrieve`
+   adapter over a document whose labels came from the real chunker and structure parser.
+   (`tests/test_reference_parser.py`, the pre-existing parser suite, still passes unchanged —
+   the prose cases were added alongside the new module rather than to it.) Browser: journeys 4-6
+   of `tests/e2e/jev-structured.spec.ts` drive the shipped QA page and read the report out of
+   that page's own `POST /api/qa/chat` stream.
 
    **Still not wired, with the original reasons intact:** the *document-side* surface
    `app/rag/structure.py::extract_structured_blocks`. There, a label is a metadata annotation with no

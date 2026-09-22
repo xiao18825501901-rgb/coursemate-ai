@@ -227,10 +227,25 @@ here for the shared contracts index, not owned by this round.
 
 ---
 
-## Registration request
+## Registration — **done**
 
-Add the two pending entries above to `app/jev/decision_catalog.json` (the catalog
-owner's file — **not edited by this round**) and regenerate the catalog view, then
-remove the two module-local `DecisionDefinition` shims. Both definitions default to
-`shadow` like the existing twelve; promotion to `on` requires labelled-calibration
-evidence, never a global switch.
+Both pending entries above are **in `app/jev/decision_catalog.json`** (19 definitions
+total), so the catalog is the owner of their vocabulary, criteria text, instructions
+and cache scope.
+
+What changed when that landed, and what was left:
+
+* `extraction.field_grounded.v1` — the module-local shim was **removed**;
+  `app/jev/extraction.py::field_grounded_definition()` projects the catalog entry and
+  asserts its own candidate/required-state/cache-scope constants against it.
+* `evidence.consistency.v1` — the shim survived longer than it should have and is now
+  **also removed** (`app/jev/evidence_consistency.py::evidence_consistency_definition()`).
+  This one mattered more than a tidy-up: the module had been sending
+  `{relation: relation}` as the criteria labels, so what the model was shown was **not**
+  the registered criteria, and a calibration run would have measured the duplicate
+  rather than the catalog entry. The request now carries the registered id→description
+  map and the registered instructions, pinned by
+  `test_the_registered_definition_is_the_one_the_model_is_shown`.
+
+Neither definition is promoted out of `shadow`; promotion still requires
+labelled-calibration evidence, never a global switch.

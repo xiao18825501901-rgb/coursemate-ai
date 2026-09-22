@@ -155,6 +155,13 @@ it was withdrawn with Laya), and the release must switch the generative path fro
 rollback release to rehearse against is the real one (`4ef5064`), not an assumed schema-28 build.
 Published CS3481/GE2324 trees (the 2 published courses) must not be regenerated.
 
+> **Superseded (round 30).** This is a round-6 record, written before migrations 029 and 030 existed.
+> As of the current revision production must go **25 → 30** (026 learning-start events, 027 assessment
+> preparation reference, 028 Jev decision receipts, 029 proposal-only `entity_relations`, 030 durable
+> feedback queue), and the release plan in
+> `FINAL_COURSEMATE_JEV_DEEPSEEK_PRODUCTION_REPORT.md` rehearses 026–030 on an isolated restore. The
+> rollback target (`4ef5064`) and the "do not regenerate the published trees" rule still stand.
+
 ### Round-6 work in flight
 
 | Workstream | State |
@@ -360,9 +367,10 @@ bug — the suite would have passed forever if it had only asserted that the dia
 
 ## Round 30 — module A wired to the exact-locator surface, and the round-26 decision reversed (2026-09-22)
 
-Commit `ff1cfa9`. No schema change (still **30**). Module **A** was the last structured
-module marked `MODULE_ONLY`; it is now wired, and the reason the earlier decision was
-wrong is part of the record.
+Commit `ff1cfa9` (module-A wiring) and `6e65396` (the definition de-duplication that
+followed, with the whole gate re-run on the final revision). No schema change (still
+**30**). Module **A** was the last structured module marked `MODULE_ONLY`; it is now
+wired, and the reason the earlier decision was wrong is part of the record.
 
 | Item | What changed |
 |---|---|
@@ -373,17 +381,18 @@ wrong is part of the record.
 | **Consumers** | `V3DomainAdapter._retrieve` attaches `jev_reference` to every returned source; `QaService.stream` adds `referenceVerification` to the SSE `meta` event and the stored message metadata. A message that names no question label costs **zero** calls and reports `questioned: false`. |
 | **Two further real defects found while testing** | (1) **Cross-user cache leak**: the first version took the cache scope from the *optional* decision service, so a run without one fell back to a single server-internal scope and served one learner's judgment to another. `owner_user_id`/`authorization_scope` are now required and the scope is derived from the caller; `test_cache_scope_is_owner_scoped_and_never_crosses_users` reproduces the leak and pins the fix. (2) **The layer could fail a learner request**: `SqlReceiptStore.lookup` raised `sqlite3.OperationalError: no such table: jev_decision_receipts` when its own ledger was absent (a V2-only schema, or new code running before migration 028) — it surfaced as two `test_qa_api.py` failures in the first full regression of this round. An absent ledger is now a cache miss plus a dropped receipt, while every other SQLite error still propagates. |
 | **One more latent hazard closed** | The module's single default repair allowance left the *second* label unplanned, so an exhausted allowance could have kept a label the model called wrong as a filter. Disposal is **verdict-driven** rather than status-driven, and the surface is built with one allowance per label. |
+| **A third definition was still a duplicate of its catalog entry** | `evidence_consistency.py` built its own `DecisionDefinition` and sent `{relation: relation}` as the criteria labels, so the model was shown bare ids while the catalog registered descriptions — and a calibration run would have measured the duplicate rather than the registered entry. The module now projects the catalog definition and sends its criteria/instructions, with the relation vocabulary asserted against the catalog; `test_the_registered_definition_is_the_one_the_model_is_shown` pins both. The three documentation sections still describing a "pending registration request" are corrected. |
 
-**Verified on one frozen SHA (`ff1cfa9`)** — every number below comes from a run on the
-tree that was committed, and `git diff ff1cfa9 -- services/rag-api tests` is empty:
+**Verified on one frozen SHA (`6e65396`)** — every number below comes from a run on the
+tree that was committed, and `git diff HEAD -- services/rag-api tests` is empty:
 
 | Gate | Result |
 |---|---|
-| Full backend regression | **1234 passed / 0 failed** in 1477.65s (exit 0) — `work/current-change/full_run_round30_final.log`. The first run of this round was **1226 passed / 2 failed**, and both failures were the absent-ledger defect above, fixed in the layer rather than in the test |
+| Full backend regression | **1235 passed / 0 failed** in 1467.07s (exit 0) — `work/current-change/full_run_round30_final2.log`. The first run of this round was **1226 passed / 2 failed**, and both failures were the absent-ledger defect above, fixed in the layer rather than in the test |
 | Browser journeys (real Chrome, real three services, injected identity) | **32 journeys / 0 failed**: `ui-refresh` 19, `jev-structured` **6** (three new), `coursemate` 4, `learning` 3 |
-| ruff | **1815 errors at HEAD and 1815 in the tree** — identical, so this round added none (measured against a `git worktree` of `def6c37`) |
-| mypy | **1074 errors in 39 files**, none in a file this round changed or added (a run before and after the receipt-store fix agree exactly; the +6 since round 24's recorded 1068 belongs to rounds 25–29) |
-| New tests | 29 module-contract (`test_jev_reference_verification.py`), 4 business-path over the real chunker and real `context.retrieve` (`test_jev_reference_business_path.py`), 6 absent-ledger (`test_jev_absent_ledger.py`), plus the prose cases pinned in `test_reference_parser.py` — 39 new tests, which is exactly the regression delta 1195 → 1234 |
+| ruff | **1815 errors at the previous revision and 1815 in the tree** — identical, so this round added none (measured against a `git worktree` of `69e6f19`) |
+| mypy | **1074 errors in 39 files**, none in a file this round changed or added (runs before and after each fix agree exactly; the +6 since round 24's recorded 1068 belongs to rounds 25–29) |
+| New tests | 29 module-contract (`test_jev_reference_verification.py`, which carries the prose regression cases for the parser defect), 4 business-path over the real chunker and real `context.retrieve` (`test_jev_reference_business_path.py`), 6 absent-ledger (`test_jev_absent_ledger.py`) and 1 registered-definition (`test_jev_evidence_consistency.py`) — **40 new tests**, which is exactly the regression delta 1195 → 1235 |
 
 The three new browser journeys needed real deployment work rather than a fake: the
 shipped *legacy* pages resolve the RAG API from the value baked into the build

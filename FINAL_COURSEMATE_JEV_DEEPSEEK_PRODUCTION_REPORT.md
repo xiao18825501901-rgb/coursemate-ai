@@ -19,13 +19,13 @@ release plan with its rollback. Anything that has not happened is marked `NOT_RU
 
 | Item | Value |
 |---|---|
-| Revision | `b8104d9` (branch `fix/codex-dsh-audit-20260919`) |
-| Backend regression | **1189 passed / 0 failed** in 1471.55s (`work/current-change/full_run_round27.log`) |
-| Browser journeys | 28 / 28 in real Chrome against the real three services (ui-refresh 19, jev-structured 2, coursemate 4, learning 3) |
+| Revision | `6e65396` (branch `fix/codex-dsh-audit-20260919`) — supersedes `b8104d9`/`5be2d0a`, which this report cited while rounds 28–30 were still landing |
+| Backend regression | **1235 passed / 0 failed** in 1467.07s (`work/current-change/full_run_round30_final2.log`); `git diff HEAD -- services/rag-api tests` is empty, so the run describes the committed revision |
+| Browser journeys | 32 / 32 in real Chrome against the real three services (ui-refresh 19, jev-structured 6, coursemate 4, learning 3) |
 | Web app | `tsc --noEmit` 0, 68 unit tests, production build 0 |
 | agent-api | `tsc --noEmit` 0, 92 unit tests, build 0 |
-| Schema in source | RAG **29** (`LATEST_V3_SCHEMA_VERSION`), UI 13, Agent 1 |
-| Ruff / mypy | clean on every touched file; whole-app mypy reports 1068 **pre-existing** errors in legacy `ui_extension`/`cm_update` code (the Jev layer has 6, all pre-existing) |
+| Schema in source | RAG **30** (`LATEST_V3_SCHEMA_VERSION`), UI 13, Agent 1 |
+| Ruff / mypy | measured against a `git worktree` of the previous revision: ruff **1815 in both**, so no lint debt was added; whole-app mypy reports **1074 pre-existing** errors in 39 legacy `ui_extension`/`cm_update` files, none in a file the current revision changed or added |
 
 ## 3. What the release would change in production
 

@@ -14,8 +14,8 @@ nothing here claims a quality improvement.
 |---|---|
 | Work tree | `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY` |
 | Branch | `fix/codex-dsh-audit-20260919` |
-| Backend regression SHA | `ff1cfa9` (full backend suite run on this revision) |
-| Current HEAD | `ff1cfa9` — backend and all four browser suites re-run on this same revision; `git diff ff1cfa9 -- services/rag-api tests` is empty |
+| Backend regression SHA | `6e65396` (full backend suite run on this revision) |
+| Current HEAD | `6e65396` — backend and all four browser suites re-run on this same revision; `git diff HEAD -- services/rag-api tests` is empty |
 | Schema | RAG **30** (001–030; 029 is the proposal-only `entity_relations` store, 030 the durable feedback queue), UI 13, Agent 1 |
 | Live TypeSafe model/calibration version | **none configured** — live Jev is `NOT_RUN` |
 
@@ -78,8 +78,8 @@ work (`extraction.field_grounded.v1`, `evidence.consistency.v1`), three for P1
 
 | Gate | Result |
 |---|---|
-| Full backend regression on `ff1cfa9` | **1234 passed, 0 failed**, 1477.65s, exit 0 (`work/current-change/full_run_round30_final.log`) |
-| Jev module + call-site suites (A extraction, reference verification, business path, absent ledger, B entity resolution, C evidence consistency + wiring, D citation audit/evidence/binding, high-impact gate, E capability router + dispatch, F tool intent + endpoint, P2 feedback triage, the call sites themselves) | **207 passed** on this revision |
+| Full backend regression on `6e65396` | **1235 passed, 0 failed**, 1467.07s, exit 0 (`work/current-change/full_run_round30_final2.log`) |
+| Jev module + call-site suites (A extraction, reference verification, business path, absent ledger, B entity resolution, C evidence consistency + wiring, D citation audit/evidence/binding, high-impact gate, E capability router + dispatch, F tool intent + endpoint, P2 feedback triage, the call sites themselves) | **208 passed** on this revision |
 | Host-wiring suite (orchestrator receives the shared service; receipts never stall a business call) | **4 passed** |
 | Twelve call-site suite | **16 passed** |
 | Structured-insertion suites (shadow invariance 6, capability dispatch 10, tool-intent endpoint 8) | **24 passed** |
@@ -118,10 +118,10 @@ comment) were corrected without weakening any product assertion.
 | CITATION_AUDIT | **PASS (local, shadow)** | all three layers bound to the teaching path: a deterministic layer-2 verdict that costs zero model calls, a layer-1 re-check through the canonical ACL on a real migrated database (incl. cross-user and cross-course `unauthorized`), the verdict recorded on the card the client receives and marked in the shipped shell, an enforced per-answer budget, and byte-identical cards when no semantic layer is configured. A unit-regex defect that could fabricate a CONTRADICTION was found and fixed |
 | USER_FEEDBACK_TRIAGE | **SOURCE_IMPLEMENTED + LOCAL_INTEGRATED + DURABLE** | module, backend route, durable queue (migration 030), admin reader and the caller's own list, shell entry; 17 triage tests + 6 queue tests + a real-browser journey through the dialog. The privacy rule is a schema CHECK, not a convention |
 | LEARNING_PROGRESS · FIVE_QUESTION_ASSESSMENT | **PASS** (local) | regression suites plus the browser assessment journey (start → 5 questions → submit → graded) |
-| LOCAL_REGRESSION | **PASS** | **1234 passed / 0 failed** on `ff1cfa9` (1477.65s, exit 0); `git diff ff1cfa9 -- services/rag-api tests` is empty, so the run describes the committed tree. The round's first run was 1226/2 and both failures were a real defect in the Jev layer (an absent receipt ledger raising out of a learner request), fixed there rather than in the test |
+| LOCAL_REGRESSION | **PASS** | **1235 passed / 0 failed** on `6e65396` (1467.07s, exit 0); `git diff HEAD -- services/rag-api tests` is empty, so the run describes the committed tree. The round's first run was 1226/2 and both failures were a real defect in the Jev layer (an absent receipt ledger raising out of a learner request), fixed there rather than in the test |
 | JEV_LIVE_VALIDATION · DEEPSEEK_LIVE_VALIDATION | **NOT_RUN** | no credential, no budget |
 | ABLATION | **NOT_RUN** | harness and 310-sample dataset ready; no labelled live run |
-| BROWSER_ACCEPTANCE | **PASS (local)** | **32 journeys / 0 failed** on `ff1cfa9` across four suites in real Chrome against the real services (`ui-refresh` 19, `jev-structured` 6 with three new module-A journeys, `coursemate` 4, `learning` 3), including the Jev-unavailable deployment; production browser acceptance still `NOT_RUN` |
+| BROWSER_ACCEPTANCE | **PASS (local)** | **32 journeys / 0 failed** on `6e65396` across four suites in real Chrome against the real services (`ui-refresh` 19, `jev-structured` 6 with three new module-A journeys, `coursemate` 4, `learning` 3), including the Jev-unavailable deployment; production browser acceptance still `NOT_RUN` |
 | PRODUCTION_DEPLOYMENT · PRODUCTION_ACCEPTANCE | **BLOCKED** | requires the release window and the credentials in `MINIMAL_OWNER_ACTION_CARD.md` |
 
 ## 6. Cost, latency and quality
