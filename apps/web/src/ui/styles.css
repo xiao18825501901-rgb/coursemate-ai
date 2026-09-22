@@ -23,3 +23,11 @@
 .citation-row button.citation-contradicted{border-color:#c57b8f;color:#8f1f45;background:#fceff3}
 .citation-row .citation-warning{display:inline-flex;align-items:center;flex:none}
 .citation-row .citation-warning .ico{width:12px;height:12px}
+
+/* Reference-solution evidence verification (module D's high-impact gate). Two states are
+   shown and they mean different things: `negative` is a real verdict against the
+   reference, `unverified` says the sources were checked but support was never judged —
+   which is the normal state without a credential, and the state that used to be silent. */
+.reference-solution .reference-verification{margin:6px 0 0;font-size:12px;line-height:1.5;color:#8a6236}
+.reference-solution .reference-verification::before{content:"· ";font-weight:700}
+.reference-solution .reference-verification.negative{color:#8f1f45}

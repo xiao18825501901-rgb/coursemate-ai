@@ -479,11 +479,55 @@ test("a node assessment runs the real V3 flow: start, answer, submit, grade", as
   // Answers are written into the one unified composer, labelled per question.
   const answerBox = workspace.getByLabel("统一答案");
   await answerBox.fill("1. correct\n2. correct\n3. correct\n4. correct\n5. correct");
+  const graded = page.waitForResponse(
+    (response) =>
+      /\/knowledge\/assessment\/[^/]+\/submit$/.test(new URL(response.url()).pathname) &&
+      response.request().method() === "POST",
+    { timeout: 90_000 },
+  );
   await workspace.getByRole("button", { name: /提交答案/ }).click();
+  const gradedBody = (await (await graded).json()) as {
+    questions?: Array<{
+      review?: {
+        reference_solution?: unknown;
+        reference_verification?: {
+          verdict?: string;
+          verified?: boolean;
+          definitive?: boolean;
+        };
+      };
+    }>;
+  };
 
   // Grading happened against the V3 assessment engine and its grade snapshot.
   await expect(workspace).toContainText("已评阅", { timeout: 60_000 });
   await expect(workspace.locator(".assessment-review").first()).toContainText("参考解");
+
+  // Module D's high-impact gate reaches the learner: the note shown next to the
+  // reference solution must agree with the verification the server just reported, and
+  // an unchecked reference may not look checked. (Without a credential the server
+  // reports verified-but-not-definitive, so the note is expected to be present; the
+  // definitive branch keeps the assertion meaningful if one is ever configured.)
+  const verification = (gradedBody.questions || [])
+    .map((question) => question.review?.reference_verification)
+    .find((candidate) => candidate != null);
+  expect(verification, "the graded session must report reference verification").toBeTruthy();
+  // This fixture's questions carry no seeded reference source_refs, so the gate honestly
+  // reports "unverified" rather than pretending the evidence was checked.
+  expect(verification?.verdict).toBe("reference_evidence_unverified");
+  expect(verification?.definitive).toBe(false);
+  const verificationNote = workspace
+    .locator(".assessment-review")
+    .first()
+    .locator(".reference-verification");
+  if (verification?.definitive === true) {
+    await expect(verificationNote).toHaveCount(0);
+  } else {
+    await expect(verificationNote).toBeVisible();
+    await expect(verificationNote).toContainText(
+      verification?.verified === true ? "尚未做语义支持判断" : "没有可核验的引用来源",
+    );
+  }
 
   // The node's own state reports the graded result too - still independent from
   // the learning progress, which this fixture never faked. This fixture course
