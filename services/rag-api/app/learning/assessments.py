@@ -17,6 +17,7 @@ from app.jev.citation_audit import (
     audit_citation,
 )
 from app.jev.citation_evidence import DocumentEvidenceResolver
+from app.jev.receipt_store import receipt_connection
 from app.jev.service import SemanticDecisionService
 from app.learning.models import (
     AssessmentAnswer,
@@ -1648,15 +1649,19 @@ class AssessmentService:
             question_needs_review = False
             # Verify the stored reference solution BEFORE it is presented as
             # grading evidence. A negative verdict only flags ``needs_review`` —
-            # it never touches the mark, weight, total, grade or coverage.
-            reference_verification = self._verify_reference_solution(
-                connection,
-                workspace,
-                str(question["question_revision_id"]),
-                node_id=str(session["node_id"]),
-                spec_version=int(session["spec_version"]),
-                include_semantic=True,
-            )
+            # it never touches the mark, weight, total, grade or coverage. The
+            # verification runs inside this grading transaction, so it lends it to
+            # the receipt write: the receipt commits or rolls back with the grade
+            # instead of contending for the write lock with the caller's own txn.
+            with receipt_connection(connection):
+                reference_verification = self._verify_reference_solution(
+                    connection,
+                    workspace,
+                    str(question["question_revision_id"]),
+                    node_id=str(session["node_id"]),
+                    spec_version=int(session["spec_version"]),
+                    include_semantic=True,
+                )
             reference_verifications[str(question["id"])] = reference_verification
             for criterion in question["rubric"]:
                 if self._is_deterministic(question):
@@ -1680,9 +1685,12 @@ class AssessmentService:
                     # criterion_review.v1). It can only FLAG a review (uncertainty
                     # or a contradiction with the grader) — it never changes the
                     # mark, never zeroes a question, and a fallback changes nothing.
-                    needs_review = self._apply_jev_criterion_review(
-                        workspace, question, criterion, fraction, needs_review
-                    )
+                    # Lending the open transaction keeps its receipt atomic with the
+                    # grade instead of racing it for the write lock.
+                    with receipt_connection(connection):
+                        needs_review = self._apply_jev_criterion_review(
+                            workspace, question, criterion, fraction, needs_review
+                        )
                 maximum = (
                     float(question["marks"]) * float(criterion["max_fraction"]) / 100
                 )

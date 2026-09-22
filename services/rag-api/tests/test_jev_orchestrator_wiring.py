@@ -25,13 +25,15 @@ from jev_fixtures import make_jev_database
 
 from app.config import Settings
 from app.jev.gateway import Receipt
-from app.jev.receipt_store import SqlReceiptStore
+from app.jev.receipt_store import SqlReceiptStore, receipt_connection
 from app.main import create_app
 
 
-def _receipt(owner_scope_hash: str | None = "scope-a") -> Receipt:
+def _receipt(
+    identifier: str = "receipt-wiring-1", *, owner_scope_hash: str | None = "scope-a"
+) -> Receipt:
     return Receipt(
-        id="receipt-wiring-1",
+        id=identifier,
         definition_key="pedagogy.next_method.v1",
         primitive="Choice",
         mode="shadow",
@@ -137,3 +139,66 @@ def test_receipt_write_still_raises_a_real_data_error(tmp_path: Path) -> None:
     store = SqlReceiptStore(database)
     with pytest.raises(sqlite3.IntegrityError):
         store.save(_receipt(owner_scope_hash=None))  # NOT NULL column
+
+
+def test_lent_transaction_makes_the_receipt_atomic_with_the_business_change(
+    tmp_path: Path,
+) -> None:
+    """Inside a caller's transaction the receipt is written on that connection.
+
+    This is what the assessment grading path does: it lends its own write
+    transaction to the semantic section, so a decision's receipt commits with the
+    grade and rolls back with it, instead of racing the caller for the write lock.
+    """
+    database = make_jev_database(tmp_path)
+    store = SqlReceiptStore(database)
+
+    # Committed: the receipt is present, and it never touched a second connection.
+    with database.connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        with receipt_connection(connection):
+            store.save(_receipt("lent-committed"))
+        connection.commit()
+    with database.connect() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM jev_decision_receipts WHERE id='lent-committed'"
+            ).fetchone()[0]
+            == 1
+        )
+
+    # Rolled back: the grade and its receipt disappear together — no orphan receipt
+    # describing a decision whose business change never happened.
+    with database.connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        with receipt_connection(connection):
+            store.save(_receipt("lent-rolled-back"))
+        connection.rollback()
+    with database.connect() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM jev_decision_receipts WHERE id='lent-rolled-back'"
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_lending_is_scoped_to_the_context(tmp_path: Path) -> None:
+    """Outside the context the store falls back to its own best-effort connection."""
+    database = make_jev_database(tmp_path)
+    store = SqlReceiptStore(database)
+    with database.connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        with receipt_connection(connection):
+            store.save(_receipt("inside"))
+        # Still inside the caller's transaction, but no longer lent: the store now
+        # uses its own connection, contends, and drops the receipt instead of
+        # writing it into a transaction it does not own.
+        store.save(_receipt("outside"))
+        connection.commit()
+    with database.connect() as connection:
+        ids = {
+            row["id"]
+            for row in connection.execute("SELECT id FROM jev_decision_receipts")
+        }
+    assert ids == {"inside"}

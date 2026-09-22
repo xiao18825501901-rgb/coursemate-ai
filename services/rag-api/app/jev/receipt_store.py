@@ -24,6 +24,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from app.jev.catalog import DecisionDefinition
@@ -35,6 +38,63 @@ from app.jev.models import CacheScope
 # far smaller problem than a stalled or failed grading call.
 RECEIPT_BUSY_TIMEOUT_MS = 250
 
+# A caller that already holds a write transaction can lend it to the receipt write,
+# which makes the receipt part of that same transaction: atomic with the business
+# change, never contended, never dropped. Set by
+# :func:`receipt_connection` around the semantic section of such a caller.
+_ACTIVE_CONNECTION: ContextVar[Any | None] = ContextVar(
+    "jev_receipt_connection", default=None
+)
+
+
+@contextmanager
+def receipt_connection(connection: Any) -> Iterator[Any]:
+    """Route receipt writes made in this context onto an already-open connection.
+
+    Use around the part of a business operation that holds a write transaction and
+    makes semantic calls (assessment grading is the real case). The caller owns the
+    transaction: the receipt commits with it, and rolls back with it — so the ledger
+    stays consistent with the business state instead of racing it.
+    """
+    token = _ACTIVE_CONNECTION.set(connection)
+    try:
+        yield connection
+    finally:
+        _ACTIVE_CONNECTION.reset(token)
+
+
+_INSERT_RECEIPT = """
+INSERT INTO jev_decision_receipts(
+    id, definition_key, primitive, mode, caller_role, owner_scope_hash,
+    course_id, workspace_id, material_revision, node_id, spec_version,
+    question_hash, input_hash, output_json, outcome, latency_ms,
+    model_version, created_at
+) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+"""
+
+
+def _receipt_row(receipt: Receipt) -> tuple[Any, ...]:
+    return (
+        receipt.id,
+        receipt.definition_key,
+        receipt.primitive,
+        receipt.mode,
+        receipt.caller_role,
+        receipt.owner_scope_hash,
+        receipt.course_id,
+        receipt.workspace_id,
+        receipt.material_revision,
+        receipt.node_id,
+        receipt.spec_version,
+        receipt.question_hash,
+        receipt.input_hash,
+        receipt.output_json,
+        receipt.outcome,
+        receipt.latency_ms,
+        receipt.model_version,
+    )
+
 
 class SqlReceiptStore:
     """Persist receipts and look up cached suggestions in the RAG database."""
@@ -44,42 +104,21 @@ class SqlReceiptStore:
         self.busy_timeout_ms = max(0, int(busy_timeout_ms))
 
     def save(self, receipt: Receipt) -> None:
+        # 1. A caller that lent its open transaction: write on that connection, so the
+        #    receipt is atomic with the business change and cannot contend with it.
+        active = _ACTIVE_CONNECTION.get()
+        if active is not None:
+            active.execute(_INSERT_RECEIPT, _receipt_row(receipt))
+            return
+        # 2. Otherwise its own connection, best-effort: a lock conflict drops the
+        #    receipt rather than stalling or failing the decision.
         try:
             with self.database.connect() as connection:
                 connection.execute(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
-                connection.execute(
-                    """
-                    INSERT INTO jev_decision_receipts(
-                        id, definition_key, primitive, mode, caller_role, owner_scope_hash,
-                        course_id, workspace_id, material_revision, node_id, spec_version,
-                        question_hash, input_hash, output_json, outcome, latency_ms,
-                        model_version, created_at
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                        strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-                    """,
-                    (
-                        receipt.id,
-                        receipt.definition_key,
-                        receipt.primitive,
-                        receipt.mode,
-                        receipt.caller_role,
-                        receipt.owner_scope_hash,
-                        receipt.course_id,
-                        receipt.workspace_id,
-                        receipt.material_revision,
-                        receipt.node_id,
-                        receipt.spec_version,
-                        receipt.question_hash,
-                        receipt.input_hash,
-                        receipt.output_json,
-                        receipt.outcome,
-                        receipt.latency_ms,
-                        receipt.model_version,
-                    ),
-                )
+                connection.execute(_INSERT_RECEIPT, _receipt_row(receipt))
         except sqlite3.OperationalError as error:
-            # Another connection holds the write lock (the caller's own transaction
-            # is the normal case). Drop the receipt, keep the decision.
+            # Another connection holds the write lock (the caller's own transaction is
+            # the normal case). Drop the receipt, keep the decision.
             if "locked" not in str(error).lower() and "busy" not in str(error).lower():
                 raise
 
