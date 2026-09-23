@@ -1,4 +1,4 @@
-"""Run the bounded CourseMate V3 structured canary against qwen3.8-max.
+"""Run the bounded CourseJesus V3 structured canary against qwen3.8-max.
 
 The script is fail-closed: it performs no provider call without an explicit billable
 opt-in, verified prices, a whole-run cost ceiling, a provider-call ceiling, an exact

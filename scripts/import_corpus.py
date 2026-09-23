@@ -20,7 +20,7 @@ from app.services.ingestion import IngestionService  # noqa: E402
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Import the read-only CourseMate corpus inventory."
+        description="Import the read-only CourseJesus corpus inventory."
     )
     parser.add_argument(
         "--mode",

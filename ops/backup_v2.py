@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a verified CourseMate backup containing both databases and uploads."""
+"""Create a verified CourseJesus backup containing both databases and uploads."""
 
 from __future__ import annotations
 

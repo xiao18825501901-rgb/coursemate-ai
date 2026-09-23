@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Emit a secret-free CourseMate production readiness snapshot for an external monitor."""
+"""Emit a secret-free CourseJesus production readiness snapshot for an external monitor."""
 
 from __future__ import annotations
 

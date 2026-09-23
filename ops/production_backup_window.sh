@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create a verified CourseMate recovery unit during one short writer pause.
+# Create a verified CourseJesus recovery unit during one short writer pause.
 # Run only as root on the confirmed production host. It deliberately preserves
 # a failed backup directory and restores only the services that were active
 # before the window; it never deletes data or overwrites a backup.
@@ -17,7 +17,7 @@ if [[ "$(id -u)" != "0" ]]; then
   exit 2
 fi
 [[ -r "$RAG_ENV" && -r "$AGENT_ENV" ]] || {
-  echo "Required CourseMate environment file is unreadable." >&2
+  echo "Required CourseJesus environment file is unreadable." >&2
   exit 2
 }
 [[ -x "$PYTHON_BIN" ]] || {

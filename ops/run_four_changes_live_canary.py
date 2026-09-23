@@ -62,7 +62,7 @@ def main() -> int:
         fail("The synthetic live canary cap must be positive and no greater than USD 2.00.")
     source = args.source.resolve()
     if not (source / "services" / "rag-api").is_dir():
-        fail("--source must be the immutable CourseMate release root.")
+        fail("--source must be the immutable CourseJesus release root.")
     output = args.output.resolve()
     if output.exists():
         fail("Refusing to overwrite an existing canary output directory.")

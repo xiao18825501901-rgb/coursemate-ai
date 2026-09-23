@@ -110,7 +110,44 @@ why this document does not claim it.
    the SVG, and generate the sizes/favicon/hashes. Until then the status is `PENDING_ASSET`, and
    a missing image never blocks the rest of the work.
 
-## 6. Honest limits
+## 6. Operations and scripts (round 73)
+
+The backend identity strings were converted in round 72. This is the operations half, and it needed
+a rule rather than a search/replace, because most of the old name in `ops/` is **not** branding: it
+is the name of a running production system.
+
+**Changed — everything a person reads:**
+
+| Where | What changed |
+|---|---|
+| `ops/production_backup_window.sh`, `ops/production_switch_four_changes.sh` | the header comment and the two console messages (`echo`) an operator sees when a required env file is unreadable, or when the services are not healthy |
+| `ops/backup_v2.py`, `ops/monitor_v2.py`, `ops/restore_v2.py`, `ops/release_synthetic_clerk_user.py` | module docstrings (read during a recovery) |
+| `ops/run_four_changes_live_canary.py` | the refusal message on a bad `--source` |
+| `scripts/import_corpus.py` | the CLI `--help` description |
+| `scripts/run_model_benchmark.py`, `scripts/run_v3_model_canary.py` | docstring, and the **model persona** ("You are CourseJesus, a safe private tutor") — the same class of string as the tutor prompt changed in round 72 |
+| `scripts/start_local.ps1` | the three console messages (version check, start banner, early-exit error) |
+
+**Unchanged, with the reason recorded — these are production identifiers, not branding:**
+
+| Where | Why it stays |
+|---|---|
+| `/etc/coursemate/rag.env`, `/etc/coursemate/agent.env`, `/srv/coursemate/**` | the live deployment's paths; renaming them is a production migration and would break the running release |
+| `systemctl … coursemate-rag`, `coursemate-agent`, `runuser -u coursemate` | systemd unit names and the service user of the running deployment |
+| `COURSEMATE_API_PROXY` | an environment variable name callers already set |
+| the `coursemate-v2-*` backup prefix in `backup_v2.py` / `monitor_v2.py` | existing backups carry it and restore/monitor search for it; changing it orphans every existing backup |
+| `User-Agent: CourseMateMonitor/2` | a wire identifier an external monitor may key on |
+| the synthetic Clerk user's `first_name` | an identity in an external system that this script creates and deactivates; the pack forbids rewriting user data for a cosmetic pass |
+| `scripts/m6f_*_driver.mjs` | historical admin-publication walk payloads, kept as the record of a walk that already happened |
+
+A rename of the first group is a coordinated production change (environment paths, unit names, a
+service account, and a backup-prefix migration), not part of a branding edit, and the pack forbids
+doing it as a side effect of one. It is listed in `OWNER_ACTIONS_ONLY_COURSEJESUS.md` instead.
+
+Verified after the pass: the 68 tests covering these scripts and the 33 repo-level recovery tests
+all pass unchanged, and the remaining occurrences in `ops/` and `scripts/` are exactly the entries in
+the table above.
+
+## 7. Honest limits
 
 * The counts above are line/occurrence counts from a text scan of tracked text files; they show
   where work is, not how many edits it will take.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify and restore one CourseMate backup into a new isolated directory.
+"""Verify and restore one CourseJesus backup into a new isolated directory.
 
 After a publication failure, leave RESTORE_SOURCE and RESTORE_TARGET unchanged
 and explicitly set RESTORE_RESUME_PARTIAL to the reported hidden sibling path.

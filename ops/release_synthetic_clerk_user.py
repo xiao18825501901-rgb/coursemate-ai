@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Create or deactivate one tightly scoped CourseMate release-test identity.
+"""Create or deactivate one tightly scoped CourseJesus release-test identity.
 
 The program deliberately reads a short JSON payload only from standard input,
 uses the protected Clerk key already installed on the production host, and never
 prints an email address, password, or credential.  Deactivation bans the Clerk
 user and projects that disabled status to the UI directory without deleting
-the CourseMate audit rows.
+the CourseJesus audit rows.
 """
 
 from __future__ import annotations

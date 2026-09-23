@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Apply the CourseMate four-change runtime release during one bounded maintenance
+# Apply the CourseJesus four-change runtime release during one bounded maintenance
 # window. This script intentionally has no secret values and must be run as root
 # only after a separately verified, immutable full backup has been made.
 set -Eeuo pipefail
@@ -61,7 +61,7 @@ initial_agent=0
 systemctl is-active --quiet coursemate-rag && initial_rag=1 || true
 systemctl is-active --quiet coursemate-agent && initial_agent=1 || true
 [[ "$initial_rag" == "1" && "$initial_agent" == "1" ]] || {
-  echo "Both CourseMate services must be healthy before this bounded release window." >&2
+  echo "Both CourseJesus services must be healthy before this bounded release window." >&2
   exit 2
 }
 
