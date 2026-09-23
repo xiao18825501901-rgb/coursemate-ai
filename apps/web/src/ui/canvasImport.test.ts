@@ -9,10 +9,16 @@ import {
   disconnect,
   importStatus,
   institutions,
+  needsCredentialMessage,
+  openTaskCredential,
   outcomeFromSearch,
   reasonFor,
   setCanvasTokenGetter,
   startImport,
+  taskCourses,
+  taskCredentialOf,
+  taskCredentialState,
+  taskCredentialStateLabel,
 } from "./canvasImport.js";
 
 /**
@@ -79,10 +85,37 @@ describe("Canvas import client", () => {
       connection_id: "conn-1",
       course_ids: ["560", "240"],
       save_connection: true,
+      credential_ref: "",
     });
     // Saving a connection is opt-in: the default must not ask for it.
     await startImport("conn-1", ["560"]);
     expect(JSON.parse(String(callAt(1).options.body)).save_connection).toBe(false);
+  });
+
+  it("sends a task credential as a reference, and only when one was opened", async () => {
+    // The owner-mode path names a credential the server holds in its own process. What travels is
+    // an opaque reference the server minted — never the token, which this client submitted once,
+    // over the one route that accepts it.
+    await startImport("conn-1", ["560"], false, "ref-abc123");
+    const body = JSON.parse(String(callAt(0).options.body));
+    expect(body.credential_ref).toBe("ref-abc123");
+    expect(body.save_connection).toBe(false);
+
+    await openTaskCredential("pasted-value", { institutionKey: "cityu" });
+    const opened = JSON.parse(String(callAt(1).options.body));
+    expect(callAt(1).url).toBe("/api/integrations/canvas/task-credentials");
+    expect(callAt(1).options.method).toBe("POST");
+    expect(opened).toEqual({
+      personal_access_token: "pasted-value",
+      institution_key: "cityu",
+      canvas_base_url: "",
+    });
+    // The credential is in the body, never in the URL, and never on the courses call that uses it.
+    await taskCourses("conn-1", "ref-abc123");
+    expect(callAt(2).url).toBe(
+      "/api/integrations/canvas/courses?connection_id=conn-1&credential_ref=ref-abc123",
+    );
+    expect(callAt(2).url).not.toContain("pasted-value");
   });
 
   it("polls a job, cancels it and disconnects with the documented methods", async () => {
@@ -96,11 +129,11 @@ describe("Canvas import client", () => {
     ]);
   });
 
-  it("never sends a personal access token anywhere", async () => {
+  it("never sends a personal access token anywhere on the public path", async () => {
     const { connectUrl: url } = await import("./canvasImport.js");
     expect(url("cityu")).toBe("/api/integrations/canvas/connect?institution=cityu");
     expect(url("cityu")).not.toMatch(/token|pat|access/i);
-    // The client has no parameter for one: the only authorisation route is the school's page.
+    // `credential_ref` is a reference, not a credential, and the OAuth route still takes no token.
     expect(startImport.length).toBeLessThanOrEqual(3);
   });
 
@@ -168,5 +201,57 @@ describe("Canvas import client", () => {
     expect(outcomeFromSearch("?canvas=something-else")).toBe("");
     expect(outcomeFromSearch("")).toBe("");
     expect(outcomeFromSearch(undefined)).toBe("");
+  });
+});
+
+describe("the one-off task credential, as the client and the screen present it", () => {
+  it("is offered only when the server says this account may use it", () => {
+    // The screen reads the capability rather than assuming it, and a deployment that has not
+    // enabled the path answers as it always did.
+    expect(taskCredentialOf({})).toEqual({
+      available: false,
+      reason: "TASK_CREDENTIAL_DISABLED",
+      ownerOnly: true,
+    });
+    expect(taskCredentialOf({ taskCredential: { available: true, reason: "" } }).available).toBe(true);
+    expect(
+      taskCredentialOf({ taskCredential: { available: false, reason: "NOT_LISTED_FOR_TASK_CREDENTIAL" } })
+        .reason,
+    ).toBe("NOT_LISTED_FOR_TASK_CREDENTIAL");
+  });
+
+  it("never shows a raw lifecycle code to the user", () => {
+    for (const state of [
+      "NEVER_STORED",
+      "PRESENT_TRANSIENTLY",
+      "DESTROYING",
+      "DESTROYED",
+      "EXPIRED",
+      "LOST_ON_RESTART",
+    ]) {
+      const label = taskCredentialStateLabel(state);
+      expect(label).not.toBe(state);
+      expect(label).not.toBe("未知状态");
+    }
+    expect(taskCredentialStateLabel("SOMETHING_ELSE")).toBe("未知状态");
+    expect(taskCredentialStateLabel(undefined)).toBe("未知状态");
+  });
+
+  it("asks for a new credential only when the server says one is needed", () => {
+    expect(needsCredentialMessage({ needsCredential: false, credentialState: "DESTROYED" })).toBe("");
+    expect(needsCredentialMessage(null)).toBe("");
+    const message = needsCredentialMessage({
+      needsCredential: true,
+      credentialState: "LOST_ON_RESTART",
+    });
+    expect(message).toContain("服务重启后已失效");
+    expect(message).toContain("已下载的文件不受影响");
+  });
+
+  it("reads the credential's state back from the server instead of guessing it", async () => {
+    globalThis.fetch = stubFetch({ body: { credentialRef: "ref-1", state: "DESTROYED" } });
+    const body = await taskCredentialState("ref/1");
+    expect(callAt(0).url).toBe("/api/integrations/canvas/task-credentials/ref%2F1");
+    expect(body.state).toBe("DESTROYED");
   });
 });

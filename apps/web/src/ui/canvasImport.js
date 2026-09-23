@@ -65,13 +65,16 @@ export const courses = (connectionId) =>
   call(`/courses?connection_id=${encodeURIComponent(connectionId)}`);
 
 /** Freeze a selection into an import job. The same selection returns the same job. */
-export const startImport = (connectionId, courseIds, saveConnection = false) =>
+export const startImport = (connectionId, courseIds, saveConnection = false, credentialRef = "") =>
   call("/imports", {
     method: "POST",
     body: JSON.stringify({
       connection_id: connectionId,
       course_ids: courseIds,
       save_connection: saveConnection,
+      // A reference to a credential the server holds in its own process for this task — never a
+      // credential. Empty for the school's own OAuth connection, which is the public path.
+      credential_ref: credentialRef,
     }),
   });
 
@@ -210,3 +213,109 @@ export const LOCAL_STATUS_LABELS = {
   CANCELLED: "已取消",
   EXPIRED: "连接码已过期，请重新生成",
 };
+
+/* ------------------------------------------------- the one-off task credential (owner mode)
+ *
+ * The third route to a school, and the narrowest: a personal access token pasted into this page
+ * for **one** import task. It exists because the owner's own testing must not wait for the
+ * school's Developer Key, and it is offered only when the deployment enables it for a listed
+ * account — the server decides that, and `taskCredentialOf()` reads the answer rather than
+ * assuming it.
+ *
+ * What is different from the OAuth path, and what the screen has to say out loud:
+ *   * the token reaches the server, which is the opposite of the local bridge's rule. The page
+ *     therefore says so on the step where it is pasted, and the public connect screen keeps its
+ *     own sentence that this site does not accept personal access tokens;
+ *   * the server holds it in memory for this one task and destroys it once the Canvas reads are
+ *     finished, before any file is parsed or indexed;
+ *   * no institution has approved this path for students. It is the owner's testing route, and
+ *     the screen says that too instead of implying an approval that does not exist.
+ */
+
+/** The capability the server reports for *this* account, or a closed default. */
+export function taskCredentialOf(body) {
+  const capability = body && body.taskCredential;
+  if (!capability || typeof capability !== "object") {
+    return { available: false, reason: "TASK_CREDENTIAL_DISABLED", ownerOnly: true };
+  }
+  return capability;
+}
+
+/** Why the one-off credential path is not offered, in the user's words. */
+export function taskCredentialReasonFor(reason) {
+  if (reason === "TASK_CREDENTIAL_DISABLED") return "";
+  if (reason === "NOT_LISTED_FOR_TASK_CREDENTIAL") return "";
+  if (reason === "SCHEMA_NOT_READY") return "本部署还没有启用私有课程数据库结构。";
+  return "";
+}
+
+/** The five steps of the one-off import, shown above the form. */
+export const TASK_CREDENTIAL_STEPS = [
+  "在 Canvas 里打开 Account（账户）→ Settings（设置）→ + New Access Token。",
+  "Purpose 填 CourseJesus 一次性导入，Expires 选最短的有效期，点 Generate Token。",
+  "把 Token 粘贴到下面，选择学校，然后点「确认学校账号」。",
+  "页面会显示它读到的 Canvas 账号，并列出你可以导入的课程；选好课程再点开始导入。",
+  "读到文件后，服务器会立即销毁这个 Token；导入与索引不再使用它。",
+];
+
+export const TASK_CREDENTIAL_WARNING =
+  "这个 Token 会发送到 CourseJesus 服务器，只在本次导入任务期间保存在内存中，" +
+  "完成文件读取后立即销毁，不写入数据库、不写入日志，也不会用于以后的后台同步。";
+
+export const TASK_CREDENTIAL_POLICY_NOTE =
+  "这是站长为自己的账号开通的一次性导入方式，学校尚未批准面向所有学生的 Token 方式。";
+
+export const TASK_CREDENTIAL_STATE_LABELS = {
+  NEVER_STORED: "没有可用的凭据",
+  PRESENT_TRANSIENTLY: "本次任务正在使用中",
+  DESTROYING: "正在销毁",
+  DESTROYED: "已销毁",
+  EXPIRED: "已过期",
+  LOST_ON_RESTART: "服务重启后已失效，请重新粘贴",
+};
+
+/** The user's words for a lifecycle state, so the screen never shows a raw code. */
+export function taskCredentialStateLabel(state) {
+  return TASK_CREDENTIAL_STATE_LABELS[state] || "未知状态";
+}
+
+/** Whether a job is waiting for a new credential before it can continue. */
+export function needsCredentialMessage(status) {
+  if (!status || !status.needsCredential) return "";
+  const label = taskCredentialStateLabel(status.credentialState);
+  return `本次导入的凭据${label}，需要重新粘贴 Token 才能继续。已下载的文件不受影响。`;
+}
+
+/**
+ * Hold a pasted token for one task. The value is sent once, in the body, and never put in a URL.
+ *
+ * `institutionKey` and `canvasBaseUrl` are alternatives: the server matches a typed address
+ * against its own registry, so an unregistered host is refused rather than contacted.
+ */
+export const openTaskCredential = (personalAccessToken, { institutionKey = "", canvasBaseUrl = "" } = {}) =>
+  call("/task-credentials", {
+    method: "POST",
+    body: JSON.stringify({
+      personal_access_token: personalAccessToken,
+      institution_key: institutionKey,
+      canvas_base_url: canvasBaseUrl,
+    }),
+  });
+
+/** The lifecycle state of one held credential, read back from the server that holds it. */
+export const taskCredentialState = (credentialRef) =>
+  call(`/task-credentials/${encodeURIComponent(credentialRef)}`);
+
+/** Destroy it now, rather than waiting for the task to finish. */
+export const forgetTaskCredential = (credentialRef, reason = "user_disconnected") =>
+  call(`/task-credentials/${encodeURIComponent(credentialRef)}/forget`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+
+/** The student's readable courses, read with the task credential instead of a stored one. */
+export const taskCourses = (connectionId, credentialRef) =>
+  call(
+    `/courses?connection_id=${encodeURIComponent(connectionId)}` +
+      `&credential_ref=${encodeURIComponent(credentialRef)}`
+  );
