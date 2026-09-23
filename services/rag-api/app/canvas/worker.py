@@ -245,6 +245,8 @@ class CanvasImportWorker:
         max_files_per_run: int = DEFAULT_MAX_FILES_PER_RUN,
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
         sleeper: Callable[[float], None] = time.sleep,
+        credential_release: Callable[[ImportJob, str], None] | None = None,
+        credential_available: Callable[[ImportJob], bool] | None = None,
     ) -> None:
         if max_files_per_run < 1 or max_attempts < 1:
             raise ValueError("the worker needs at least one file and one attempt per run")
@@ -258,6 +260,15 @@ class CanvasImportWorker:
         self.max_files_per_run = max_files_per_run
         self.max_attempts = max_attempts
         self._sleep = sleeper
+        # Called once per run, at the point where this run's Canvas reads are finished and before
+        # anything is parsed or indexed. It is how a transient task credential stops existing at
+        # the right moment instead of at the end of the job. Absent for a saved connection, which
+        # is a credential the user chose to keep.
+        self._credential_release = credential_release
+        # Answers "can this job still read Canvas?". Absent means yes, which is the truth for a
+        # saved connection; a job with a transient credential is wired to the store so a destroyed
+        # token stops the reading without stopping the indexing of bytes already fetched.
+        self._credential_available = credential_available
 
     # -------------------------------------------------------------------- entry points
     def drain(self, *, max_jobs: int = 1) -> list[RunResult]:
@@ -290,6 +301,9 @@ class CanvasImportWorker:
                 stopped="reauth",
             )
         except JobStateError as error:
+            # Logged as well as recorded: a job-state failure used to leave a status in the row
+            # and nothing anywhere else, which is the hardest kind of failure to diagnose.
+            LOGGER.warning("canvas import job %s failed a state check: %s", claimed.job_id, error)
             return self._fail(claimed, "JOB_STATE", str(error), stopped="job_state")
         except ApiError as error:
             return self._fail(claimed, error.code, error.message, stopped="api_refused")
@@ -311,6 +325,9 @@ class CanvasImportWorker:
             fingerprint=claimed.fingerprint,
             status=claimed.status,
             files=self.repository.list_files(claimed.job_id),
+            credential_ref=claimed.credential_ref,
+            credential_kind=claimed.credential_kind,
+            credential_state=claimed.credential_state,
         )
 
     def _process(self, claimed: ClaimedJob) -> RunResult:
@@ -326,11 +343,41 @@ class CanvasImportWorker:
             self.repository.release(job.job_id)
             return RunResult(job.job_id, job.status, stopped="already_finished")
 
-        adapter = self.adapter_for(claimed)
         failures: list[tuple[str, str, str]] = []
-        courses = self._enrolled_courses(adapter, job, failures)
-        self._discover(job, adapter, courses, failures)
-        self._advance(job, DOWNLOADING)
+        # Can this run read Canvas at all? For a saved connection the answer is always yes. For a
+        # job that borrowed a transient credential it is a real question — the credential is
+        # destroyed once its reads are done — and the answer decides whether this run re-checks
+        # the school (which is a read) or simply finishes the bytes already on disk (which is not).
+        may_read = self._credential_available is None or self._credential_available(job)
+        pending = job.pending_files()
+        # A job that cannot read needs a credential if it has no file list yet (discovery is a
+        # read) or if any listed file still needs its bytes. An empty file list plus no credential
+        # must never fall through to "the course was empty", which would report a dead token as a
+        # finished import with warnings.
+        if not may_read and (
+            not job.files or any(self._needs_fetch(job, record) for record in pending)
+        ):
+            # Bytes that are not on disk cannot be fetched without a credential. Anything already
+            # fetched is still indexed first — it would be wasteful to drop it — and then the job
+            # says plainly that a new credential is needed.
+            existing_target = self.repository.target_course_of(job.job_id)
+            if existing_target:
+                self._ingest_pass(job, existing_target, failures)
+            return self._finish(
+                job,
+                [],
+                reauth=(
+                    EXPIRED_TOKEN,
+                    "the credential for this task is no longer available; a new one is needed",
+                ),
+                stopped="reauth",
+            )
+        adapter = self.adapter_for(claimed) if may_read else None
+        courses: list[CanvasCourse] = []
+        if adapter is not None:
+            courses = self._enrolled_courses(adapter, job, failures)
+            self._discover(job, adapter, courses, failures)
+            self._advance(job, DOWNLOADING)
 
         if not job.files:
             # An import that found nothing is COMPLETED_WITH_WARNINGS, never a clean success.
@@ -341,13 +388,24 @@ class CanvasImportWorker:
         deferred: set[tuple[str, str, str]] = set()
         stopped = ""
         reauth: tuple[str, str] | None = None
-        while True:
-            candidates = [record for record in job.pending_files() if record.key not in deferred]
+        while adapter is not None:
+            # Only records that still need *bytes* are candidates here. A downloaded file stays
+            # non-terminal until it is ingested, so without this filter the download pass would
+            # keep picking the file it had just fetched and never reach the next one.
+            candidates = [
+                record
+                for record in job.pending_files()
+                if record.key not in deferred and self._needs_fetch(job, record)
+            ]
             if not candidates:
-                # No candidate left. If files are still pending they were all deferred in this
-                # run, and the job is *not* finished: reporting a terminal state here would
-                # turn "the school timed out on three files" into a clean import.
-                stopped = "deferred" if job.pending_files() else ""
+                # No file left to fetch. A record that still needs bytes and was deferred in this
+                # run means the job is *not* finished: reporting a terminal state here would turn
+                # "the school timed out on three files" into a clean import. A record that merely
+                # needs ingesting is not a stop at all — the ingest pass below handles it.
+                remaining_fetch = [
+                    record for record in job.pending_files() if self._needs_fetch(job, record)
+                ]
+                stopped = "deferred" if remaining_fetch else ""
                 break
             if processed >= self.max_files_per_run:
                 stopped = "batch_limit"
@@ -355,17 +413,15 @@ class CanvasImportWorker:
             if not self.repository.touch(job.job_id, worker_id=self.worker_id):
                 raise _LeaseLost(job.job_id)
             if self.repository.status_of(job.job_id) == CANCELLED:
-                for record in job.pending_files():
-                    self._record(
-                        job,
-                        record,
-                        FILE_CANCELLED,
-                        detail="the import was cancelled before this file was reached",
-                    )
-                return self._working_result(job, processed, "cancelled")
+                # Stop reading at the next checkpoint. What was already fetched is still indexed
+                # below: the bytes are on disk, parsing needs no credential, and throwing them
+                # away would delete value the user's token already paid for. The files that were
+                # never fetched are marked CANCELLED after the ingest pass.
+                stopped = "cancelled"
+                break
             record = candidates[0]
             processed += 1
-            reason = self._import_file(job, record, adapter, target_course_id, failures)
+            reason = self._fetch_file(job, record, adapter, failures)
             if reason == _DEFER:
                 deferred.add(record.key)
             elif reason == _REAUTH:
@@ -373,13 +429,50 @@ class CanvasImportWorker:
                 stopped = "reauth"
                 break
 
+        # The reads are over for this run. Everything after this line parses and indexes bytes
+        # that are already on disk, and a credential must not be alive for any of it: that is the
+        # owner's rule, and the reason the download and ingest passes are separate.
+        reads_finished = not any(self._needs_fetch(job, record) for record in job.pending_files())
+        if reads_finished:
+            self._release_credential(job, "canvas_reads_complete")
         if stopped == "reauth":
-            # A dead credential is a terminal verdict, not a pause: the user has to act.
+            # A dead credential is a terminal verdict, not a pause: the user has to act. The
+            # credential is released above whether it died or the run simply finished reading.
+            self._release_credential(job, "credential_failed")
             return self._finish(job, failures, reauth=reauth, stopped="reauth")
+        # A cancellation is captured *before* the ingest pass, because indexing writes working
+        # phases of its own (`INGESTING`, `INDEXING`) and would otherwise wipe the row's
+        # CANCELLED marker — which is how a cancelled import could come back to life and finish.
+        cancelled = stopped == "cancelled" or self.repository.status_of(job.job_id) == CANCELLED
+        # Bytes fetched before this run stopped are still indexed: they were read legitimately,
+        # they are already on disk, and parsing needs no credential. Dropping them would throw
+        # away work the user already paid for with their token.
+        ingested = self._ingest_pass(job, target_course_id, failures)
+        if cancelled:
+            # The user cancelled while this run was working. Report that, restore the row's own
+            # verdict, and never let the finish path write a terminal *success* over it.
+            for record in job.pending_files():
+                self._record(
+                    job,
+                    record,
+                    FILE_CANCELLED,
+                    detail="the import was cancelled before this file was reached",
+                )
+            self.repository.set_status(job.job_id, CANCELLED)
+            self._release_credential(job, "task_cancelled")
+            return self._working_result(job, processed, "cancelled")
         if stopped:
             # Not finished: hand the lease back unchanged so the next run continues here.
             self.repository.release(job.job_id)
             return self._working_result(job, processed, stopped)
+        if ingested >= self.max_files_per_run and any(
+            self._reusable(self._sink(job.job_id, record), record)
+            for record in job.pending_files()
+        ):
+            # The ingest batch limit was reached with bytes still waiting. Not finished, and the
+            # next run needs no credential for them: they are already downloaded.
+            self.repository.release(job.job_id)
+            return self._working_result(job, processed, "batch_limit")
         skipped = sum(1 for record in job.files if record.status == FILE_SKIPPED_IDENTICAL)
         result = self._finish(job, failures, reauth=reauth, stopped="")
         return RunResult(
@@ -390,6 +483,53 @@ class CanvasImportWorker:
             pending=result.pending,
             stopped=result.stopped,
         )
+
+    def _needs_fetch(self, job: ImportJob, record: FileRecord) -> bool:
+        """Whether this record still needs a Canvas read, i.e. whether the credential is needed."""
+        if record.status in (FILE_DOWNLOADED, FILE_DOWNLOAD_ONLY, FILE_INDEXED):
+            return False
+        if record.status == FILE_SKIPPED_IDENTICAL:
+            return False
+        return not self._reusable(self._sink(job.job_id, record), record)
+
+    def _release_credential(self, job: ImportJob, reason: str) -> None:
+        """Tell the caller this job's Canvas reads are over. Never called for a saved connection.
+
+        A job that borrowed a transient credential must be told when to destroy it, and this is
+        the single point where that happens. The callback is given the reason so the receipt can
+        distinguish a completed read pass from a cancelled task or a credential that died.
+        """
+        if not job.uses_transient_credential or self._credential_release is None:
+            return
+        try:
+            self._credential_release(job, reason)
+        except Exception:  # noqa: BLE001 - a release failure must not become an import failure
+            LOGGER.exception("releasing the task credential for job %s failed", job.job_id)
+
+    def _ingest_pass(
+        self,
+        job: ImportJob,
+        target_course_id: str,
+        failures: list[tuple[str, str, str]],
+    ) -> int:
+        """Parse and index every file whose bytes are already on disk. Needs no credential.
+
+        This pass exists as a separate step so that "the credential was destroyed before indexing"
+        is a property of the control flow rather than a claim about timing. It is also what makes
+        a second run able to finish a job whose token is already gone.
+        """
+        ingested = 0
+        for record in list(job.pending_files()):
+            if ingested >= self.max_files_per_run:
+                break
+            sink = self._sink(job.job_id, record)
+            if not self._reusable(sink, record):
+                continue
+            if not self.repository.touch(job.job_id, worker_id=self.worker_id):
+                raise _LeaseLost(job.job_id)
+            self._ingest(job, record, sink, target_course_id, failures)
+            ingested += 1
+        return ingested
 
     def _working_result(self, job: ImportJob, processed: int, stopped: str) -> RunResult:
         """A run that ended before the job did: report the phase the job is really in."""
@@ -505,15 +645,19 @@ class CanvasImportWorker:
         return target
 
     # ------------------------------------------------------------------------- per file
-    def _import_file(
+    def _fetch_file(
         self,
         job: ImportJob,
         record: FileRecord,
         adapter: CanvasReadAdapter,
-        target_course_id: str,
         failures: list[tuple[str, str, str]],
     ) -> str:
-        """Fetch, verify and ingest one file. Returns _CONTINUE, _DEFER or _REAUTH."""
+        """Fetch and verify one file's bytes. Returns _CONTINUE, _DEFER or _REAUTH.
+
+        Downloading and ingesting are separate methods because they are separate *phases* of a
+        run: every fetch happens before any parse or index, so the credential the fetch needed is
+        destroyed in between rather than living on through the indexing work.
+        """
         if record.attempts >= self.max_attempts:
             self._record(
                 job,
@@ -526,22 +670,22 @@ class CanvasImportWorker:
             return _CONTINUE
 
         sink = self._sink(job.job_id, record)
-        if not self._reusable(sink, record):
-            if record.size and record.size > self.max_ingest_bytes:
-                detail = (
-                    f"the file is {record.size} bytes, above the "
-                    f"{self.max_ingest_bytes}-byte ingestion limit"
-                )
-                self._record(job, record, FILE_WARNING, error_class=TOO_LARGE, detail=detail)
-                failures.append((record.file_id, TOO_LARGE, detail))
-                return _CONTINUE
-            decision = self._download(job, record, adapter, sink)
-            if decision in {_DEFER, _REAUTH}:
-                return decision
-            if record.status != FILE_DOWNLOADED:
-                failures.append((record.file_id, record.error_class, record.error_detail))
-                return _CONTINUE
-        return self._ingest(job, record, sink, target_course_id, failures)
+        if self._reusable(sink, record):
+            return _CONTINUE
+        if record.size and record.size > self.max_ingest_bytes:
+            detail = (
+                f"the file is {record.size} bytes, above the "
+                f"{self.max_ingest_bytes}-byte ingestion limit"
+            )
+            self._record(job, record, FILE_WARNING, error_class=TOO_LARGE, detail=detail)
+            failures.append((record.file_id, TOO_LARGE, detail))
+            return _CONTINUE
+        decision = self._download(job, record, adapter, sink)
+        if decision in {_DEFER, _REAUTH}:
+            return decision
+        if record.status != FILE_DOWNLOADED:
+            failures.append((record.file_id, record.error_class, record.error_detail))
+        return _CONTINUE
 
     def _download(
         self,

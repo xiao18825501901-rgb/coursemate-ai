@@ -20,6 +20,7 @@ from app.brand import BRAND
 from app.canvas.credentials import CredentialStoreUnavailable, credential_store_from_settings
 from app.canvas.oauth import CanvasOAuthClient, SqlStateStore
 from app.canvas.registry import InstitutionConnectionRegistry
+from app.canvas.transient_credential import TransientCanvasCredentialStore
 from app.config import Settings
 from app.db import Database
 from app.errors import ApiError
@@ -277,6 +278,11 @@ def create_app(
     # state has to live where every worker reads it (migration 034). The in-memory store stays as
     # the test double.
     application.state.canvas_registry = canvas_registry
+    # The task credential is a different thing from `canvas_credentials` and is deliberately not
+    # gated on a credential key: it is never written to disk, so no key is needed to hold one.
+    # It is per process, because that is the whole design — a restart loses it, and the job says
+    # so rather than pretending the credential is still there.
+    application.state.canvas_task_credentials = TransientCanvasCredentialStore()
     if canvas_credentials is not None:
         application.state.canvas_credentials = canvas_credentials
         application.state.canvas_oauth = CanvasOAuthClient(

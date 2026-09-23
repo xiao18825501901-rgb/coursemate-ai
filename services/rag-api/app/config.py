@@ -121,6 +121,22 @@ class Settings(BaseSettings):
     canvas_local_bridge_enabled: bool = Field(
         default=True, validation_alias=AliasChoices("CANVAS_LOCAL_BRIDGE_ENABLED")
     )
+    # The task-level transient credential: a personal access token pasted for one import task,
+    # held in the service process, destroyed before indexing starts.
+    #
+    # OFF by default, and the default is the point. This path exists because the owner's own
+    # testing must not be blocked by the school's Developer Key, not because the product has
+    # permission to accept students' tokens — no institution has been asked, and the public
+    # multi-user OAuth path (`CANVAS_OAUTH_LIVE = WAITING_INSTITUTION`) stays the only route
+    # offered to everyone else. A deployment turns this on for listed accounts only.
+    canvas_task_credential_enabled: bool = Field(
+        default=False, validation_alias=AliasChoices("CANVAS_TASK_CREDENTIAL_ENABLED")
+    )
+    # Who may use it. Empty means the existing administrators, so enabling the path does not
+    # silently mean "every account": a deployment that lists nobody gets the admins.
+    canvas_task_credential_users: str = Field(
+        default="", validation_alias=AliasChoices("CANVAS_TASK_CREDENTIAL_USERS")
+    )
 
     @model_validator(mode="after")
     def validate_chunk_window(self) -> "Settings":
@@ -137,3 +153,11 @@ class Settings(BaseSettings):
     @property
     def admin_user_id_set(self) -> frozenset[str]:
         return frozenset(item.strip() for item in self.admin_user_ids.split(",") if item.strip())
+
+    @property
+    def canvas_task_credential_user_set(self) -> frozenset[str]:
+        """Accounts allowed to paste a task credential. Falls back to the administrators."""
+        listed = frozenset(
+            item.strip() for item in self.canvas_task_credential_users.split(",") if item.strip()
+        )
+        return listed or self.admin_user_id_set

@@ -28,6 +28,15 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from .transient_credential import NEVER_STORED, PRESENT_TRANSIENTLY
+
+# What kind of credential a job is allowed to use. A saved connection is an encrypted credential
+# the user chose to keep; a transient task credential is the pasted token that must not outlive
+# the reads it was given for. The two are recorded separately because they answer different
+# questions later ("why is there no credential?" means something different in each case).
+CREDENTIAL_KIND_CONNECTION = "connection"
+CREDENTIAL_KIND_TRANSIENT_TASK = "transient_task"
+
 DISCOVERING = "DISCOVERING"
 AWAITING_SELECTION = "AWAITING_SELECTION"
 QUEUED = "QUEUED"
@@ -223,6 +232,20 @@ class ImportJob:
     error_code: str = ""
     error_message: str = ""
     saved_connection: bool = False
+    # The credential this job borrows, as an opaque reference plus its lifecycle state. The
+    # credential itself is never here and never in the database: this is what lets the job say
+    # "the token it was using is gone" instead of silently reading nothing.
+    credential_ref: str = ""
+    credential_kind: str = CREDENTIAL_KIND_CONNECTION
+    credential_state: str = NEVER_STORED
+
+    @property
+    def uses_transient_credential(self) -> bool:
+        return self.credential_kind == CREDENTIAL_KIND_TRANSIENT_TASK
+
+    @property
+    def credential_is_live(self) -> bool:
+        return self.credential_state == PRESENT_TRANSIENTLY
 
     # ------------------------------------------------------------- transitions
     def can_transition(self, target: str) -> bool:
@@ -365,8 +388,16 @@ def new_job(
     institution_origin: str,
     course_ids: list[str],
     material_versions: dict[str, str] | None = None,
+    credential_ref: str = "",
+    credential_kind: str = CREDENTIAL_KIND_CONNECTION,
 ) -> ImportJob:
     """Build a job whose selection is frozen from this point on."""
+    if credential_kind not in (CREDENTIAL_KIND_CONNECTION, CREDENTIAL_KIND_TRANSIENT_TASK):
+        raise JobStateError(f"unknown credential kind {credential_kind}")
+    if credential_kind == CREDENTIAL_KIND_TRANSIENT_TASK and not credential_ref:
+        # A transient job without a reference could never find its credential, and would fail
+        # much later as a confusing "no usable credential". Refusing here names the real problem.
+        raise JobStateError("a transient task credential needs its reference at job creation")
     return ImportJob(
         job_id=job_id,
         connection_id=connection_id,
@@ -380,6 +411,11 @@ def new_job(
             course_ids=course_ids,
             material_versions=material_versions,
         ),
+        credential_ref=credential_ref,
+        credential_kind=credential_kind,
+        credential_state=PRESENT_TRANSIENTLY
+        if credential_kind == CREDENTIAL_KIND_TRANSIENT_TASK
+        else NEVER_STORED,
     )
 
 

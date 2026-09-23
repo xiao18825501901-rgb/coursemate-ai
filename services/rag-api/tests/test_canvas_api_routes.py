@@ -69,8 +69,9 @@ COURSES_COMPLETED = [
 class School:
     """A stand-in Canvas: the courses API, the profile, the token endpoint and a request log."""
 
-    profile_id: int = 4242
+    profile_id: int | None = 4242
     profile_name: str = "Student One"
+    profile_status: int = 200
     courses_status: int = 200
     token_status: int = 200
     requests: list[tuple[str, str]] = field(default_factory=list)
@@ -94,6 +95,13 @@ class School:
                 },
             )
         if path == "/api/v1/users/self/profile":
+            if self.profile_status >= 400:
+                return httpx.Response(
+                    self.profile_status, json={"errors": [{"message": "unauthorized"}]}
+                )
+            if self.profile_id is None:
+                # A school that answers without an identity: the route must refuse to bind one.
+                return httpx.Response(200, json={"name": self.profile_name})
             return httpx.Response(200, json={"id": self.profile_id, "name": self.profile_name})
         if path == "/api/v1/courses":
             if self.courses_status >= 400:
@@ -143,6 +151,8 @@ def build(
     credential_key: str | None = None,
     v3_enabled: bool = True,
     return_path: str | None = None,
+    task_credential: bool = False,
+    task_credential_users: str = "",
 ) -> Harness:
     settings = Settings(
         database_path=tmp_path / "rag.sqlite3",
@@ -151,10 +161,13 @@ def build(
         app_env="test",
         rag_provider_mode="deterministic",
         auth_test_user_id=USER,
+        admin_user_ids=USER,
         v3_enabled=v3_enabled,
         canvas_credential_dir=tmp_path / "canvas-credentials",
         canvas_credential_key=credential_key if credential_key is not None else generate_key(),
         canvas_return_path=return_path if return_path is not None else "/ui-extension/#/courses",
+        canvas_task_credential_enabled=task_credential,
+        canvas_task_credential_users=task_credential_users,
     )
     app = create_app(settings=settings)
     transport = httpx.MockTransport(school.handler)
@@ -798,3 +811,326 @@ def test_a_deployment_without_the_private_course_schema_refuses_instead_of_faili
             response = request(path, json=payload, headers=AUTH)
         assert response.status_code == 503, f"{method} {path} -> {response.status_code}"
         assert response.json()["error"]["details"]["reason"] == "SCHEMA_NOT_READY"
+
+
+# --------------------------------------------------------- the one-off task credential
+PASTED = "1~pastedCanvasPersonalAccessTokenValue000000000000000"
+
+
+def open_task_credential(harness: Harness, *, institution_key: str = "cityu") -> dict[str, Any]:
+    response = harness.client.post(
+        "/api/integrations/canvas/task-credentials",
+        headers=AUTH,
+        json={"institution_key": institution_key, "personal_access_token": PASTED},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_the_task_credential_path_is_off_until_a_deployment_offers_it_to_an_account(
+    tmp_path, keys
+) -> None:
+    """The owner's testing path must not be a public multi-user feature by accident.
+
+    Three separate gates are asserted: the deployment flag, the listed account, and the reason
+    the UI is told. A deployment that never enables it answers exactly as it does today.
+    """
+    closed = build(tmp_path, School(), task_credential=False)
+    body = closed.client.get("/api/integrations/canvas/institutions", headers=AUTH).json()
+    assert body["taskCredential"] == {
+        "available": False,
+        "reason": "TASK_CREDENTIAL_DISABLED",
+        "ownerOnly": True,
+    }
+    refusal = closed.client.post(
+        "/api/integrations/canvas/task-credentials",
+        headers=AUTH,
+        json={"institution_key": "cityu", "personal_access_token": PASTED},
+    )
+    assert refusal.status_code == 403
+    assert refusal.json()["error"]["code"] == "CANVAS_TASK_CREDENTIAL_FORBIDDEN"
+    assert refusal.json()["error"]["details"]["reason"] == "TASK_CREDENTIAL_DISABLED"
+
+    listed_elsewhere = build(
+        tmp_path, School(), task_credential=True, task_credential_users="someone-else"
+    )
+    body = listed_elsewhere.client.get(
+        "/api/integrations/canvas/institutions", headers=AUTH
+    ).json()
+    assert body["taskCredential"]["available"] is False
+    assert body["taskCredential"]["reason"] == "NOT_LISTED_FOR_TASK_CREDENTIAL"
+
+    open_here = build(tmp_path, School(), task_credential=True, task_credential_users=USER)
+    body = open_here.client.get("/api/integrations/canvas/institutions", headers=AUTH).json()
+    assert body["taskCredential"]["available"] is True
+    assert body["taskCredential"]["ownerOnly"] is True
+    assert body["taskCredential"]["idleMinutes"] == 30
+    assert body["taskCredential"]["maxHours"] == 24
+
+
+def test_a_pasted_credential_is_held_transiently_and_written_down_nowhere(tmp_path, keys) -> None:
+    """The owner's central requirement, checked against the database rather than asserted.
+
+    Every column of every Canvas table is searched for the pasted value. Nothing may contain it,
+    and the connection row must show that no encrypted credential was written for this task.
+    """
+    harness = build(tmp_path, School(), task_credential=True)
+
+    body = open_task_credential(harness)
+
+    assert body["state"] == "PRESENT_TRANSIENTLY"
+    assert body["canvasUserId"] == "4242"
+    assert body["canvasName"] == "Student One"
+    assert PASTED not in json.dumps(body)
+    assert json.dumps(body).lower().count("token") == 0
+
+    with harness.app.state.database.connect() as connection:
+        tables = [
+            str(row["name"])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'canvas%'"
+            )
+        ]
+        assert tables
+        for table in tables:
+            rows = connection.execute(f"SELECT * FROM {table}").fetchall()  # noqa: S608 - own tables
+            for row in rows:
+                assert PASTED not in json.dumps([dict(entry) for entry in [row]], default=str)
+        connection_row = connection.execute(
+            "SELECT credential_key_id, credential_expires_at, saved_for_reuse "
+            "FROM canvas_connections WHERE id=?",
+            (body["connectionId"],),
+        ).fetchone()
+        # No key id and no expiry: nothing was encrypted on this task's behalf.
+        assert not connection_row["credential_key_id"]
+        assert connection_row["credential_expires_at"] is None
+        assert int(connection_row["saved_for_reuse"]) == 0
+        events = connection.execute(
+            "SELECT state, reason, subject FROM canvas_credential_lifecycle_events "
+            "WHERE credential_ref=?",
+            (body["credentialRef"],),
+        ).fetchall()
+    assert [str(event["state"]) for event in events] == ["PRESENT_TRANSIENTLY"]
+    assert str(events[0]["subject"]) == USER
+    # The credential is in this process, and asking about it says so without returning it.
+    state = harness.client.get(
+        f"/api/integrations/canvas/task-credentials/{body['credentialRef']}", headers=AUTH
+    )
+    assert state.status_code == 200
+    assert state.json()["state"] == "PRESENT_TRANSIENTLY"
+    assert PASTED not in state.text
+
+
+def test_the_task_credential_reads_courses_and_stops_being_usable_once_forgotten(
+    tmp_path, keys
+) -> None:
+    """The lifecycle the owner asked for: usable for the reads it was given, then unusable."""
+    harness = build(tmp_path, School(), task_credential=True)
+    opened = open_task_credential(harness)
+    ref = opened["credentialRef"]
+    connection_id = opened["connectionId"]
+
+    listed = harness.client.get(
+        f"/api/integrations/canvas/courses?connection_id={connection_id}&credential_ref={ref}",
+        headers=AUTH,
+    )
+    assert listed.status_code == 200, listed.text
+    assert [course["id"] for course in listed.json()["courses"]] == ["560", "240"]
+
+    forgotten = harness.client.post(
+        f"/api/integrations/canvas/task-credentials/{ref}/forget",
+        headers=AUTH,
+        json={"reason": "canvas_reads_complete"},
+    )
+    assert forgotten.status_code == 200, forgotten.text
+    assert forgotten.json() == {
+        "credentialRef": ref,
+        "state": "DESTROYED",
+        "cleared": True,
+        # Two reads: the active enrolments and the completed-history page, which is exactly what
+        # listing the student's readable courses costs.
+        "readCalls": 2,
+    }
+
+    after = harness.client.get(
+        f"/api/integrations/canvas/courses?connection_id={connection_id}&credential_ref={ref}",
+        headers=AUTH,
+    )
+    # A reference to a credential that no longer exists is answered as such, with the state in
+    # the details, rather than as a school authorisation error: "this credential is gone" and
+    # "the school refused the token" are different problems and the screen says different things.
+    assert after.status_code == 404, after.text
+    assert after.json()["error"]["code"] == "TASK_CREDENTIAL_NOT_FOUND"
+    assert after.json()["error"]["details"]["state"] == "DESTROYED"
+
+    state = harness.client.get(
+        f"/api/integrations/canvas/task-credentials/{ref}", headers=AUTH
+    ).json()
+    assert state["state"] == "DESTROYED"
+    assert state["reason"] == "canvas_reads_complete"
+
+    with harness.app.state.database.connect() as connection:
+        states = [
+            str(row["state"])
+            for row in connection.execute(
+                "SELECT state FROM canvas_credential_lifecycle_events WHERE credential_ref=? "
+                "ORDER BY created_at, id",
+                (ref,),
+            )
+        ]
+    assert states == ["PRESENT_TRANSIENTLY", "DESTROYED"]
+
+
+def test_an_import_that_borrows_a_task_credential_says_so_and_reports_its_state(
+    tmp_path, keys
+) -> None:
+    """The job records the kind and the reference; the credential stays out of the row."""
+    harness = build(tmp_path, School(), task_credential=True)
+    opened = open_task_credential(harness)
+    ref = opened["credentialRef"]
+
+    created = harness.client.post(
+        "/api/integrations/canvas/imports",
+        headers=AUTH,
+        json={
+            "connection_id": opened["connectionId"],
+            "course_ids": ["560"],
+            "credential_ref": ref,
+        },
+    )
+    assert created.status_code == 202, created.text
+    body = created.json()
+    assert body["credentialKind"] == "transient_task"
+    assert body["credentialState"] == "PRESENT_TRANSIENTLY"
+
+    with harness.app.state.database.connect() as connection:
+        row = connection.execute(
+            "SELECT credential_ref, credential_kind, credential_state, owner_user_id "
+            "FROM canvas_import_jobs WHERE id=?",
+            (body["jobId"],),
+        ).fetchone()
+    assert str(row["credential_ref"]) == ref
+    assert str(row["credential_kind"]) == "transient_task"
+    assert str(row["credential_state"]) == "PRESENT_TRANSIENTLY"
+
+    status = harness.client.get(
+        f"/api/integrations/canvas/imports/{body['jobId']}", headers=AUTH
+    ).json()
+    assert status["credentialState"] == "PRESENT_TRANSIENTLY"
+    assert status["needsCredential"] is False
+
+    harness.client.post(
+        f"/api/integrations/canvas/task-credentials/{ref}/forget",
+        headers=AUTH,
+        json={"reason": "canvas_reads_complete"},
+    )
+
+    after = harness.client.get(
+        f"/api/integrations/canvas/imports/{body['jobId']}", headers=AUTH
+    ).json()
+    assert after["credentialState"] == "DESTROYED"
+    # The job has not finished, so it cannot proceed without a new credential — and it says so.
+    assert after["needsCredential"] is True
+
+
+def test_a_job_created_with_a_reference_that_is_not_held_is_refused(tmp_path, keys) -> None:
+    """A stale reference must not become a job that can never read anything."""
+    harness = build(tmp_path, School(), task_credential=True)
+    opened = open_task_credential(harness)
+
+    response = harness.client.post(
+        "/api/integrations/canvas/imports",
+        headers=AUTH,
+        json={
+            "connection_id": opened["connectionId"],
+            "course_ids": ["560"],
+            "credential_ref": "not-a-held-ref",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "TASK_CREDENTIAL_NOT_FOUND"
+    assert response.json()["error"]["details"]["state"] == "NEVER_STORED"
+
+
+def test_a_pasted_credential_that_the_school_refuses_is_never_held(tmp_path, keys) -> None:
+    """A token the school will not accept must fail at the door, not become a task.
+
+    Two refusals are exercised: the school rejecting the token outright, and the school answering
+    without an identity to bind. Neither may leave a held credential or a lifecycle row behind.
+    """
+    refused = build(tmp_path, School(profile_status=401), task_credential=True)
+    response = refused.client.post(
+        "/api/integrations/canvas/task-credentials",
+        headers=AUTH,
+        json={"institution_key": "cityu", "personal_access_token": PASTED},
+    )
+    assert response.status_code == 401, response.text
+    assert response.json()["error"]["code"] == "CANVAS_NEEDS_REAUTH"
+    assert refused.app.state.canvas_task_credentials.live_count() == 0
+
+    anonymous = build(tmp_path, School(profile_id=None), task_credential=True)
+    response = anonymous.client.post(
+        "/api/integrations/canvas/task-credentials",
+        headers=AUTH,
+        json={"institution_key": "cityu", "personal_access_token": PASTED},
+    )
+    assert response.status_code == 502, response.text
+    assert response.json()["error"]["code"] == "CANVAS_IDENTITY_UNAVAILABLE"
+
+    for harness in (refused, anonymous):
+        assert harness.app.state.canvas_task_credentials.live_count() == 0
+        with harness.app.state.database.connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) AS total FROM canvas_credential_lifecycle_events"
+            ).fetchone()
+            connections = connection.execute(
+                "SELECT COUNT(*) AS total FROM canvas_connections"
+            ).fetchone()
+        assert int(row["total"]) == 0, "a refused token must not be recorded as a held credential"
+        assert int(connections["total"]) == 0, "nothing may be stored for a token that failed"
+
+
+def test_a_token_pasted_for_an_unknown_school_is_refused_before_any_read(tmp_path, keys) -> None:
+    """The school comes from the registry, so an arbitrary address cannot be reached."""
+    harness = build(tmp_path, School(), task_credential=True)
+    for payload in (
+        {"institution_key": "not-a-school", "personal_access_token": PASTED},
+        {"canvas_base_url": "https://evil.example.com", "personal_access_token": PASTED},
+        {"personal_access_token": PASTED},
+    ):
+        response = harness.client.post(
+            "/api/integrations/canvas/task-credentials", headers=AUTH, json=payload
+        )
+        assert response.status_code in (409, 422), response.text
+    assert harness.school.requests == []
+    assert harness.app.state.canvas_task_credentials.live_count() == 0
+
+
+def test_the_token_field_is_rejected_on_every_other_route(tmp_path, keys) -> None:
+    """`extra="forbid"` is what keeps the exception to exactly one route.
+
+    The service accepts a credential in one body, for one owner, on one path. Everywhere else a
+    body carrying one is a 422 rather than a silently ignored field.
+    """
+    harness = build(tmp_path, School(), task_credential=True)
+    for path, payload in (
+        ("/api/integrations/canvas/imports", {"connection_id": "x", "course_ids": ["560"]}),
+        (
+            "/api/integrations/canvas/imports",
+            {"connection_id": "x", "course_ids": ["560"], "personal_access_token": PASTED},
+        ),
+        ("/api/integrations/canvas/local-sessions", {"institution_key": "cityu"}),
+        (
+            "/api/integrations/canvas/local-sessions",
+            {"institution_key": "cityu", "personal_access_token": PASTED},
+        ),
+    ):
+        response = harness.client.post(path, headers=AUTH, json=payload)
+        carries_credential = "personal_access_token" in payload
+        if carries_credential:
+            assert response.status_code == 422, f"{path} accepted a credential"
+        else:
+            # Without the field the request reaches the route's own logic, which is what proves
+            # the credential is not merely an optional field these models quietly ignore.
+            assert response.status_code != 422, f"{path} -> {response.status_code}"

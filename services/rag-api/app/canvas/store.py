@@ -21,8 +21,16 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from .job import ACTIVE_STATES, TERMINAL_STATES, FileRecord, ImportJob, JobStateError
+from .job import (
+    ACTIVE_STATES,
+    CREDENTIAL_KIND_CONNECTION,
+    TERMINAL_STATES,
+    FileRecord,
+    ImportJob,
+    JobStateError,
+)
 from .oauth import Connection
+from .transient_credential import NEVER_STORED
 
 LEASE_SECONDS = 120
 
@@ -47,6 +55,9 @@ class ClaimedJob:
     fingerprint: str
     status: str
     leased_until: str
+    credential_ref: str = ""
+    credential_kind: str = CREDENTIAL_KIND_CONNECTION
+    credential_state: str = NEVER_STORED
 
 
 class CanvasConnectionRepository:
@@ -211,8 +222,9 @@ class CanvasJobRepository:
         try:
             self._connection.execute(
                 "INSERT INTO canvas_import_jobs(id, connection_id, owner_user_id, "
-                "institution_origin, course_ids_json, selection_fingerprint, status) "
-                "VALUES(?,?,?,?,?,?,?)",
+                "institution_origin, course_ids_json, selection_fingerprint, status, "
+                "credential_ref, credential_kind, credential_state) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?)",
                 (
                     job.job_id,
                     job.connection_id,
@@ -221,6 +233,12 @@ class CanvasJobRepository:
                     json.dumps(list(job.course_ids)),
                     job.fingerprint,
                     job.status,
+                    # The reference and the kind, never the credential. A job that used a
+                    # transient task token records that fact here so a reader can tell it apart
+                    # from one backed by a saved connection.
+                    job.credential_ref,
+                    job.credential_kind,
+                    job.credential_state,
                 ),
             )
         except sqlite3.IntegrityError as error:
@@ -268,7 +286,35 @@ class CanvasJobRepository:
             fingerprint=str(row["selection_fingerprint"]),
             status=str(row["status"]),
             leased_until=lease_until,
+            credential_ref=str(row["credential_ref"] or ""),
+            credential_kind=str(row["credential_kind"] or CREDENTIAL_KIND_CONNECTION),
+            credential_state=str(row["credential_state"] or NEVER_STORED),
         )
+
+    # ------------------------------------------------------------------ credentials
+    def credential_of(self, job_id: str) -> tuple[str, str, str]:
+        """`(ref, kind, state)` for a job. Never a token: there is none to return."""
+        row = self._connection.execute(
+            "SELECT credential_ref, credential_kind, credential_state FROM canvas_import_jobs "
+            "WHERE id=?",
+            (job_id,),
+        ).fetchone()
+        if row is None:
+            raise JobStateError(f"no job {job_id}")
+        return (
+            str(row["credential_ref"] or ""),
+            str(row["credential_kind"] or CREDENTIAL_KIND_CONNECTION),
+            str(row["credential_state"] or NEVER_STORED),
+        )
+
+    def set_credential_state(self, job_id: str, state: str) -> bool:
+        """Record a lifecycle transition on the job. Returns whether a row changed."""
+        cursor = self._connection.execute(
+            "UPDATE canvas_import_jobs SET credential_state=?, "
+            "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
+            (state, job_id),
+        )
+        return cursor.rowcount == 1
 
     # ------------------------------------------------------------------ progress
     def touch(
@@ -510,3 +556,75 @@ class CanvasJobRepository:
             raise JobStateError(
                 f"no file row for {origin} {course_id} {file_id}: discovery must record it first"
             )
+
+
+class CanvasCredentialLifecycleRepository:
+    """The receipt of a credential's life: which state, when, and how much it was used.
+
+    This table exists to answer questions after the fact — was the credential destroyed before
+    indexing started, was it lost with a restart, was it cleared on cancel — and it can only
+    answer them because the credential itself was never written down. Every method here stores
+    states and numbers; none of them can store a token, and `record` takes no token argument.
+    """
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self._connection = connection
+        self._connection.row_factory = sqlite3.Row
+
+    def record(
+        self,
+        *,
+        credential_ref: str,
+        subject: str,
+        institution_origin: str,
+        state: str,
+        reason: str = "",
+        read_calls: int = 0,
+        zeroed_bytes: int = 0,
+        store_instance_id: str = "",
+        job_id: str = "",
+    ) -> str:
+        """Append one transition. Returns the id of the event row."""
+        event_id = uuid.uuid4().hex
+        self._connection.execute(
+            "INSERT INTO canvas_credential_lifecycle_events(id, job_id, credential_ref, subject, "
+            "institution_origin, state, reason, read_calls, zeroed_bytes, store_instance_id) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (
+                event_id,
+                job_id or None,
+                credential_ref,
+                subject,
+                institution_origin,
+                state,
+                reason,
+                int(read_calls),
+                int(zeroed_bytes),
+                store_instance_id,
+            ),
+        )
+        return event_id
+
+    def for_ref(self, credential_ref: str) -> list[dict[str, object]]:
+        rows = self._connection.execute(
+            "SELECT state, reason, read_calls, zeroed_bytes, store_instance_id, created_at "
+            "FROM canvas_credential_lifecycle_events WHERE credential_ref=? "
+            "ORDER BY created_at, id",
+            (credential_ref,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def counts_by_state(self, *, subject: str = "") -> dict[str, int]:
+        """How many credentials reached each state, for the lifecycle evidence report."""
+        if subject:
+            rows = self._connection.execute(
+                "SELECT state, COUNT(*) AS total FROM canvas_credential_lifecycle_events "
+                "WHERE subject=? GROUP BY state",
+                (subject,),
+            ).fetchall()
+        else:
+            rows = self._connection.execute(
+                "SELECT state, COUNT(*) AS total FROM canvas_credential_lifecycle_events "
+                "GROUP BY state"
+            ).fetchall()
+        return {str(row["state"]): int(row["total"]) for row in rows}

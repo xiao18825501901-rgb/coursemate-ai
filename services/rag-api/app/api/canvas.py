@@ -7,17 +7,17 @@ instead:
 * the institution is named by **key** and resolved through the registry, so a caller cannot
   submit a `base_url` and reuse another school's client secret;
 * the callback's `redirect_uri` is the institution's registered value, and the redirect after
-  the callback is a **fixed relative path** — there is no `return_url` parameter by which a
+  the callback is a **fixed relative path** 鈥?there is no `return_url` parameter by which a
   caller could steer a user somewhere else;
 * the state is one-time, short-lived and bound to `(subject, institution)` before any outbound
   request, so a forged or replayed callback cannot attach an account;
 * a token never appears in a response body. What a caller may see about a connection is its id,
-  the school, the Canvas display name, the granted scopes and an expiry — all read from the
+  the school, the Canvas display name, the granted scopes and an expiry 鈥?all read from the
   database row, never from the credential store;
 * importing is a job: the selection is frozen into an idempotency fingerprint, and the same
   selection returns the same job instead of starting a second import.
 
-When a school has no Developer Key — or the deployment has no credential-encryption key — these
+When a school has no Developer Key 鈥?or the deployment has no credential-encryption key 鈥?these
 routes report `NOT_CONFIGURED` so the UI can show the local-upload fallback. They never accept a
 personal access token in place of the school's OAuth flow and never store a token in the clear.
 
@@ -37,7 +37,7 @@ from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth import AuthenticatedUser, require_user
 from app.canvas.adapter import (
@@ -49,7 +49,14 @@ from app.canvas.adapter import (
     CanvasReadError,
 )
 from app.canvas.credentials import CredentialStoreUnavailable, credential_store_from_settings
-from app.canvas.job import AWAITING_SELECTION, QUEUED, TERMINAL_STATES, new_job
+from app.canvas.job import (
+    AWAITING_SELECTION,
+    CREDENTIAL_KIND_CONNECTION,
+    CREDENTIAL_KIND_TRANSIENT_TASK,
+    QUEUED,
+    TERMINAL_STATES,
+    new_job,
+)
 from app.canvas.oauth import (
     CanvasOAuthClient,
     Connection,
@@ -61,7 +68,22 @@ from app.canvas.oauth import (
     token_provider_for,
 )
 from app.canvas.registry import InstitutionConnectionRegistry, UnknownInstitutionError
-from app.canvas.store import CanvasConnectionRepository, CanvasJobRepository
+from app.canvas.store import (
+    CanvasConnectionRepository,
+    CanvasCredentialLifecycleRepository,
+    CanvasJobRepository,
+)
+from app.canvas.transient_credential import (
+    DESTROYED,
+    EXPIRED,
+    HARD_TTL_SECONDS,
+    LOST_ON_RESTART,
+    PRESENT_TRANSIENTLY,
+    SELECTION_IDLE_TTL_SECONDS,
+    CredentialRefused,
+    TaskCredential,
+    TransientCanvasCredentialStore,
+)
 from app.config import Settings
 from app.db import Database
 from app.errors import ApiError
@@ -87,11 +109,58 @@ CANVAS_UNAVAILABLE_CODES = {
 
 
 class ImportSelection(BaseModel):
-    """The frozen selection: which connection, which Canvas courses, and nothing else."""
+    """The frozen selection: which connection, which Canvas courses, and nothing else.
+
+    `extra="forbid"` is deliberate and load-bearing: without it a body could carry a
+    `personal_access_token` and have it silently ignored, which is exactly the kind of near-miss
+    that makes "this service never accepts a credential here" untrue in practice. A credential is
+    accepted on one route, and everywhere else a body containing one is refused.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     connection_id: str = Field(min_length=1, max_length=64)
     course_ids: list[str] = Field(min_length=1, max_length=50)
     save_connection: bool = False
+    # Only ever a reference to a credential held in this process, never a credential. A caller
+    # that names one is saying "use the token this task was given", and an unknown reference is
+    # refused rather than treated as "no credential".
+    credential_ref: str = Field(default="", max_length=64)
+
+
+class TaskCredentialRequest(BaseModel):
+    """The one request in this service that carries a credential, and only for its owner.
+
+    The module docstring's rule is that no route accepts a personal access token in place of the
+    school's OAuth flow. This is the deliberate, single exception, and the four things that keep
+    it from becoming a second import system:
+
+    * the deployment must enable it (`CANVAS_TASK_CREDENTIAL_ENABLED`, off by default);
+    * the account must be listed as an owner (`CANVAS_TASK_CREDENTIAL_USERS`, defaulting to the
+      administrators), so it is not a public multi-user path;
+    * the credential is never stored 鈥?it is held in this process for one task and destroyed
+      when that task's Canvas reads are done;
+    * the school must still be one the registry knows, addressed by key or by its exact origin.
+
+    `extra="forbid"` stays: this model has exactly the fields it needs, and a caller cannot smuggle
+    in a scope, a user id or a return path.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    institution_key: str = Field(default="", max_length=64)
+    canvas_base_url: str = Field(default="", max_length=200)
+    personal_access_token: str = Field(min_length=1, max_length=512)
+    canvas_user_id: str = Field(default="", max_length=64)
+
+
+class TaskCredentialForget(BaseModel):
+    """Why a credential stopped existing, when the caller is the one ending it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(default="user_disconnected", max_length=64)
+
 
 
 # ---------------------------------------------------------------------------------- plumbing
@@ -254,6 +323,157 @@ def _canvas_http_error(error: CanvasReadError) -> ApiError:
     )
 
 
+def _task_credential_store(request: Request) -> TransientCanvasCredentialStore:
+    """The process's transient store. One per app, because that is what "in memory" means here."""
+    existing = getattr(request.app.state, "canvas_task_credentials", None)
+    if isinstance(existing, TransientCanvasCredentialStore):
+        return existing
+    created = TransientCanvasCredentialStore()
+    request.app.state.canvas_task_credentials = created
+    return created
+
+
+def _task_credential_capability(request: Request, user: AuthenticatedUser) -> dict[str, Any]:
+    """Whether *this* caller may use the task-credential path, and why not when they may not.
+
+    Kept separate from the OAuth capability on purpose: the owner's own testing is not evidence
+    that the school has approved a public token path, and the two answers must be reportable
+    independently (`PAT_CODE_AND_OWNER_TEST` versus `PAT_PUBLIC_ROLLOUT_ELIGIBILITY`).
+    """
+    settings = _settings(request)
+    if not settings.canvas_task_credential_enabled:
+        return {"available": False, "reason": "TASK_CREDENTIAL_DISABLED", "ownerOnly": True}
+    if user.user_id not in settings.canvas_task_credential_user_set:
+        return {"available": False, "reason": "NOT_LISTED_FOR_TASK_CREDENTIAL", "ownerOnly": True}
+    if not _tables_ready(request):
+        return {"available": False, "reason": "SCHEMA_NOT_READY", "ownerOnly": True}
+    return {
+        "available": True,
+        "reason": "",
+        "ownerOnly": True,
+        "idleMinutes": int(SELECTION_IDLE_TTL_SECONDS // 60),
+        "maxHours": int(HARD_TTL_SECONDS // 3600),
+    }
+
+
+def _require_task_credential_owner(request: Request, user: AuthenticatedUser) -> None:
+    capability = _task_credential_capability(request, user)
+    if not capability["available"]:
+        raise ApiError(
+            status.HTTP_403_FORBIDDEN,
+            "CANVAS_TASK_CREDENTIAL_FORBIDDEN",
+            "This deployment does not offer the one-off credential import for this account.",
+            details={"reason": capability["reason"]},
+        )
+
+
+def _public_task_credential(credential: TaskCredential) -> dict[str, Any]:
+    """What a caller may see about a task credential: its state, never its value."""
+    return {
+        "credentialRef": credential.credential_ref,
+        "state": credential.state,
+        "connectionId": credential.connection_id,
+        "institutionKey": credential.institution_key,
+        "origin": credential.institution_origin,
+        "canvasUserId": credential.canvas_user_id,
+        "canvasName": credential.canvas_display_name,
+        "readCalls": credential.read_calls,
+        "expiresAt": credential.created_wall + (credential.idle_expires_at - credential.created_at),
+        "hardExpiresAt": credential.created_wall + (
+            credential.hard_expires_at - credential.created_at
+        ),
+    }
+
+
+def _owned_task_credential(
+    request: Request, user: AuthenticatedUser, credential_ref: str
+) -> TaskCredential:
+    """This user's live task credential, or a typed refusal that says which state it is in."""
+    credential = _task_credential_store(request).record(credential_ref)
+    if credential is None or credential.subject != user.user_id:
+        state = _task_credential_store(request).state(credential_ref)
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND,
+            "TASK_CREDENTIAL_NOT_FOUND",
+            "That import credential is no longer held.",
+            details={"state": state},
+        )
+    return credential
+
+
+def _task_institution(
+    request: Request, registry: InstitutionConnectionRegistry, payload: TaskCredentialRequest
+) -> Any:
+    """The school a task credential is for: by key, or by an exact registered origin.
+
+    A caller cannot submit an arbitrary base URL and have the service talk to it: the address is
+    matched against the registry, which is the same rule the OAuth flow follows.
+    """
+    if payload.institution_key:
+        try:
+            return registry.by_key(payload.institution_key)
+        except UnknownInstitutionError as error:
+            raise ApiError(
+                status.HTTP_409_CONFLICT,
+                "CANVAS_INSTITUTION_UNKNOWN",
+                "That school is not one this deployment knows.",
+            ) from error
+    if payload.canvas_base_url:
+        try:
+            return registry.by_origin(payload.canvas_base_url)
+        except UnknownInstitutionError as error:
+            raise ApiError(
+                status.HTTP_409_CONFLICT,
+                "CANVAS_INSTITUTION_UNKNOWN",
+                "That address is not a school this deployment knows.",
+            ) from error
+    raise ApiError(
+        status.HTTP_422_UNPROCESSABLE_ENTITY,
+        "CANVAS_INSTITUTION_REQUIRED",
+        "Name the school this credential belongs to.",
+    )
+
+
+def _record_credential_event(
+    request: Request,
+    *,
+    credential: TaskCredential,
+    state: str,
+    reason: str = "",
+    job_id: str = "",
+) -> None:
+    """Append the lifecycle receipt. Best effort by design: an audit row must never be the reason
+    a credential fails to be destroyed."""
+    try:
+        with _database(request).connect() as connection:
+            CanvasCredentialLifecycleRepository(connection).record(
+                credential_ref=credential.credential_ref,
+                subject=credential.subject,
+                institution_origin=credential.institution_origin,
+                state=state,
+                reason=reason,
+                read_calls=credential.read_calls,
+                zeroed_bytes=credential.zeroed_bytes,
+                store_instance_id=_task_credential_store(request).instance_id,
+                job_id=job_id,
+            )
+    except Exception:  # noqa: BLE001 - see the docstring
+        LOGGER.warning("could not record a Canvas credential lifecycle event")
+
+
+def _institution_for_origin(
+    request: Request, registry: InstitutionConnectionRegistry, origin: str
+) -> Any:
+    try:
+        return registry.by_origin(origin)
+    except UnknownInstitutionError as error:
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "CONNECTION_INSTITUTION_UNKNOWN",
+            "This connection names a school that is no longer configured.",
+        ) from error
+
+
 def _public_connection(connection: Connection) -> dict[str, Any]:
     """What a caller may see about a connection: never a token, never a key."""
     return {
@@ -286,14 +506,7 @@ def _connection_adapter(
     if client is None:
         raise _canvas_unavailable("NO_CREDENTIAL_KEY")
     stored = _owned_connection(request, user, connection_id)
-    try:
-        institution = client.registry.by_origin(stored.origin)
-    except UnknownInstitutionError as error:
-        raise ApiError(
-            status.HTTP_409_CONFLICT,
-            "CONNECTION_INSTITUTION_UNKNOWN",
-            "This connection names a school that is no longer configured.",
-        ) from error
+    institution = _institution_for_origin(request, client.registry, stored.origin)
     if institution.key != stored.institution_key:
         # A stored row can only be used against the institution that issued it.
         raise ApiError(
@@ -311,13 +524,32 @@ def _connection_adapter(
     return adapter, stored
 
 
+def _task_credential_adapter(
+    request: Request, user: AuthenticatedUser, credential_ref: str
+) -> CanvasReadAdapter:
+    """A read-only adapter that reads with a task credential instead of a stored one.
+
+    The token comes from the transient store at call time and nowhere else, so a credential that
+    has been destroyed makes the read fail as `EXPIRED_TOKEN` rather than being read from a copy.
+    """
+    _require_task_credential_owner(request, user)
+    store = _task_credential_store(request)
+    credential = _owned_task_credential(request, user, credential_ref)
+    return _adapter(
+        request,
+        connection_id=credential.connection_id,
+        origin=credential.institution_origin,
+        registry=_registry(request),
+        token_provider=store.provider(credential_ref),
+    )
+
+
 # ------------------------------------------------------------------------------ availability
 @router.get("/institutions")
 def list_institutions(
     request: Request, user: Annotated[AuthenticatedUser, Depends(require_user)]
 ) -> dict[str, Any]:
     """Which schools can be connected right now, and why not when they cannot."""
-    del user
     registry = _registry(request)
     credentials_ready = _credential_store(request) is not None
     tables_ready = _tables_ready(request)
@@ -343,6 +575,166 @@ def list_institutions(
         "institutions": institutions,
         "credentialsReady": credentials_ready,
         "tablesReady": tables_ready,
+        # A separate answer from `credentialsReady`, which is about the deployment's ability to
+        # store an OAuth credential. This one is about the one-off task credential and is scoped
+        # to the caller, so the UI can offer it to the owner without offering it to everyone.
+        "taskCredential": _task_credential_capability(request, user),
+    }
+
+
+# ------------------------------------------------------------------- task credentials
+@router.post("/task-credentials", status_code=status.HTTP_201_CREATED)
+def open_task_credential(
+    payload: TaskCredentialRequest,
+    request: Request,
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+) -> dict[str, Any]:
+    """Hold a pasted credential for one import task, after proving whose Canvas account it is.
+
+    The identity is read once, with the pasted token, before anything is held: a token that
+    belongs to somebody else, or to nobody, must fail here rather than produce a task that stores
+    another person's material under this user's name.
+    """
+    _require_tables(request)
+    _require_task_credential_owner(request, user)
+    registry = _registry(request)
+    institution = _task_institution(request, registry, payload)
+    if institution.state != "AVAILABLE":
+        # An unconfigured school has no origin to validate URLs against; the read would be
+        # refused a moment later by the adapter, and saying so here is clearer.
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "CANVAS_INSTITUTION_UNAVAILABLE",
+            "That school is not open for connections on this deployment.",
+        )
+    try:
+        canvas_user_id, canvas_name = _identity(
+            request, institution.origin, registry, payload.personal_access_token
+        )
+    except CanvasReadError as error:
+        # The school refused the token. Reported as the school's answer, and nothing is stored.
+        raise _canvas_http_error(error) from error
+    if payload.canvas_user_id and payload.canvas_user_id != canvas_user_id:
+        # The caller may pin the account it expects; a token that belongs to another account is
+        # refused instead of quietly binding the wrong identity.
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "CANVAS_ACCOUNT_MISMATCH",
+            "That credential does not belong to the Canvas account this task named.",
+        )
+    store = _task_credential_store(request)
+    connection = Connection(
+        connection_id=uuid.uuid4().hex,
+        subject=user.user_id,
+        institution_key=institution.key,
+        origin=institution.origin,
+        canvas_user_id=canvas_user_id,
+        canvas_name=canvas_name,
+        scopes=(),
+        saved_for_reuse=False,
+        # No encrypted credential is written for a task credential, and these two columns are how
+        # a reader can tell: a stored connection always names a key id.
+        credential_key_id="",
+        credential_expires_at=None,
+    )
+    with _database(request).connect() as connection_handle:
+        # Identity and bookkeeping only. `upsert` is keyed by (owner, origin, canvas user), so a
+        # second task for the same account reuses the row instead of accumulating connections.
+        connection_id = CanvasConnectionRepository(connection_handle).upsert(
+            connection, connection_id=connection.connection_id
+        )
+    try:
+        credential = store.open_task(
+            subject=user.user_id,
+            connection_id=connection_id,
+            institution_key=institution.key,
+            institution_origin=institution.origin,
+            token=payload.personal_access_token,
+            canvas_user_id=canvas_user_id,
+            canvas_display_name=canvas_name,
+        )
+    except CredentialRefused as error:
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "CANVAS_CREDENTIAL_REFUSED",
+            str(error),
+        ) from error
+    _record_credential_event(request, credential=credential, state=PRESENT_TRANSIENTLY)
+    return {
+        **_public_task_credential(credential),
+        "connectionId": connection_id,
+        "sameAccountReused": connection_id != connection.connection_id,
+    }
+
+
+@router.get("/task-credentials/{credential_ref}")
+def task_credential_state(
+    credential_ref: str,
+    request: Request,
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+) -> dict[str, Any]:
+    """The lifecycle state of one task credential, for the screen that has to explain it."""
+    _require_tables(request)
+    _require_task_credential_owner(request, user)
+    store = _task_credential_store(request)
+    credential = store.record(credential_ref)
+    if credential is not None and credential.subject == user.user_id:
+        return _public_task_credential(credential)
+    receipt = store.receipt_for(credential_ref)
+    if receipt is not None and receipt["subject"] == user.user_id:
+        return {
+            "credentialRef": credential_ref,
+            "state": receipt["state"],
+            "reason": receipt["destroy_reason"],
+            "readCalls": receipt["read_calls"],
+            "expiresAt": 0.0,
+            "hardExpiresAt": 0.0,
+        }
+    # Never held by this process, or held by a previous one. `reconcile` turns the database's
+    # record into the honest current answer: a credential that was live and is not in this
+    # process was lost with a restart, and the user has to supply a token again.
+    recorded = ""
+    with _database(request).connect() as connection:
+        row = connection.execute(
+            "SELECT credential_state, owner_user_id FROM canvas_import_jobs WHERE credential_ref=?",
+            (credential_ref,),
+        ).fetchone()
+    if row is not None and str(row["owner_user_id"]) == user.user_id:
+        recorded = str(row["credential_state"] or "")
+    state = store.reconcile(credential_ref, recorded_state=recorded)
+    return {"credentialRef": credential_ref, "state": state, "reason": "", "readCalls": 0}
+
+
+@router.post("/task-credentials/{credential_ref}/forget")
+def forget_task_credential(
+    credential_ref: str,
+    payload: TaskCredentialForget,
+    request: Request,
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+) -> dict[str, Any]:
+    """Destroy the credential now. The user does not have to wait for the task to finish."""
+    _require_tables(request)
+    _require_task_credential_owner(request, user)
+    store = _task_credential_store(request)
+    credential = store.record(credential_ref)
+    if credential is not None and credential.subject != user.user_id:
+        credential = None
+    if credential is None:
+        return {
+            "credentialRef": credential_ref,
+            "state": store.state(credential_ref),
+            "cleared": False,
+        }
+    destroyed = store.destroy(credential_ref, reason=payload.reason)
+    if destroyed is not None:
+        _record_credential_event(
+            request, credential=destroyed, state=DESTROYED, reason=payload.reason
+        )
+    return {
+        "credentialRef": credential_ref,
+        "state": store.state(credential_ref),
+        "cleared": True,
+        "readCalls": destroyed.read_calls if destroyed is not None else 0,
     }
 
 
@@ -432,7 +824,7 @@ def oauth_callback(
     with _database(request).connect() as connection:
         repository = CanvasConnectionRepository(connection)
         # The question is "is this school already linked to a *different* Canvas account?", so
-        # the lookup is by user and institution — not by the account id that has no row yet.
+        # the lookup is by user and institution 鈥?not by the account id that has no row yet.
         existing = repository.for_subject_and_institution(
             subject=completed.state.subject, origin=completed.institution.origin
         )
@@ -487,9 +879,17 @@ def list_canvas_courses(
     request: Request,
     user: Annotated[AuthenticatedUser, Depends(require_user)],
     connection_id: Annotated[str, Query(min_length=1, max_length=64)],
+    credential_ref: Annotated[str, Query(max_length=64)] = "",
 ) -> dict[str, Any]:
-    """The student's own readable courses, for the import selection screen."""
-    adapter, _stored = _connection_adapter(request, user, connection_id)
+    """The student's own readable courses, for the import selection screen.
+
+    Reading this list *is* one of the Canvas reads the owner authorised, so it goes through the
+    transient credential when the caller names one, and through the stored connection otherwise.
+    """
+    if credential_ref:
+        adapter = _task_credential_adapter(request, user, credential_ref)
+    else:
+        adapter, _stored = _connection_adapter(request, user, connection_id)
     try:
         courses = adapter.student_courses()
     except CanvasReadError as error:
@@ -525,12 +925,23 @@ def create_import(
             "INVALID_COURSE_ID",
             "Canvas course ids are numeric.",
         )
+    credential_ref = payload.credential_ref
+    if credential_ref:
+        # The job borrows this task's credential, so the credential has to be alive and belong to
+        # this user at the moment the job is created. A stale reference is refused here rather
+        # than becoming a job that can never read anything.
+        _require_task_credential_owner(request, user)
+        _owned_task_credential(request, user, credential_ref)
     job = new_job(
         job_id=uuid.uuid4().hex,
         connection_id=stored.connection_id,
         subject=user.user_id,
         institution_origin=stored.origin,
         course_ids=course_ids,
+        credential_ref=credential_ref,
+        credential_kind=(
+            CREDENTIAL_KIND_TRANSIENT_TASK if credential_ref else CREDENTIAL_KIND_CONNECTION
+        ),
     )
     # Confirming the selection is the only legal way into QUEUED, and it is what the worker
     # looks for: a job waiting for the student is never picked up.
@@ -549,6 +960,8 @@ def create_import(
         "created": created,
         "status": str(row["status"]) if row else QUEUED,
         "courseIds": sorted(course_ids),
+        "credentialKind": str(row["credential_kind"]) if row else "connection",
+        "credentialState": str(row["credential_state"]) if row else "NEVER_STORED",
     }
 
 
@@ -570,15 +983,35 @@ def import_status(
     counts: dict[str, int] = {}
     for record in files:
         counts[record.status] = counts.get(record.status, 0) + 1
+    # What the screen needs in order to tell the user the truth about the credential: it is gone
+    # (`DESTROYED`/`EXPIRED`), it was lost with a restart, or it is still held for this task's
+    # remaining Canvas reads. `needsCredential` says whether an import that is not finished
+    # cannot proceed without a new token.
+    credential_ref = str(row["credential_ref"] or "")
+    recorded_state = str(row["credential_state"] or "")
+    if credential_ref:
+        credential_state = _task_credential_store(request).reconcile(
+            credential_ref, recorded_state=recorded_state
+        )
+    else:
+        credential_state = recorded_state or "NEVER_STORED"
+    job_status = str(row["status"])
     return {
         "jobId": job_id,
-        "status": str(row["status"]),
+        "status": job_status,
         "errorCode": str(row["error_code"] or ""),
         "errorMessage": str(row["error_message"] or ""),
         "targetCourseId": str(row["target_course_id"] or ""),
         "courses": len(json.loads(str(row["course_ids_json"]))),
         "files": len(files),
         "byStatus": counts,
+        "credentialKind": str(row["credential_kind"] or "connection"),
+        "credentialState": credential_state,
+        "needsCredential": bool(
+            str(row["credential_kind"]) == CREDENTIAL_KIND_TRANSIENT_TASK
+            and job_status not in TERMINAL_STATES
+            and credential_state in (DESTROYED, EXPIRED, LOST_ON_RESTART)
+        ),
     }
 
 
@@ -627,3 +1060,4 @@ def disconnect(
     with _database(request).connect() as connection:
         CanvasConnectionRepository(connection).mark_revoked(connection_id, subject=user.user_id)
     return {"connectionId": connection_id, "revoked": True, "revokedAtSchool": revoked_remote}
+

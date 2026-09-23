@@ -38,7 +38,14 @@ from app.canvas import (
     safe_upload_name,
     target_course_slug,
 )
-from app.canvas.job import ACTIVE_STATES, AWAITING_SELECTION, QUEUED, FileRecord
+from app.canvas.job import (
+    ACTIVE_STATES,
+    AWAITING_SELECTION,
+    CREDENTIAL_KIND_TRANSIENT_TASK,
+    QUEUED,
+    FileRecord,
+    ImportJob,
+)
 from app.canvas.store import CanvasJobRepository
 from app.config import Settings
 from app.db import Database
@@ -283,6 +290,9 @@ def build(
     max_attempts: int = 3,
     max_files_per_run: int = 200,
     worker_id: str = "worker-1",
+    events: list[str] | None = None,
+    credential_available: bool = True,
+    on_release=None,
 ) -> Harness:
     settings = Settings(
         database_path=tmp_path / "rag.sqlite3",
@@ -310,6 +320,16 @@ def build(
         (CONNECTION, SUBJECT, "cityu", CITYU, "4242"),
     )
     ingestion = IngestionService(database, settings, DeterministicEmbeddingProvider())
+    if events is not None:
+        # The event log records the two moments that must not be reordered: the task credential
+        # being released, and the first real indexing work. It wraps the ingestion entry point
+        # rather than the worker's own methods so the evidence is about the work, not the code.
+        class RecordingIngestion(IngestionService):
+            def queue_document(self, *args, **kwargs):
+                events.append("indexing")
+                return super().queue_document(*args, **kwargs)
+
+        ingestion = RecordingIngestion(database, settings, DeterministicEmbeddingProvider())
     repository = CanvasJobRepository(connection)
     transport = httpx.MockTransport(canvas.handler)
     adapter = CanvasReadAdapter(
@@ -323,6 +343,13 @@ def build(
     )
     sleeps: list[float] = []
     work_dir = tmp_path / "canvas-work"
+
+    def release(job: ImportJob, reason: str) -> None:
+        if events is not None:
+            events.append(f"release:{reason}")
+        if on_release is not None:
+            on_release(job, reason)
+
     worker = CanvasImportWorker(
         repository=repository,
         ingestion=ingestion,
@@ -334,6 +361,10 @@ def build(
         max_files_per_run=max_files_per_run,
         max_attempts=max_attempts,
         sleeper=sleeps.append,
+        credential_release=release if (events is not None or on_release is not None) else None,
+        credential_available=(
+            (lambda job: credential_available) if not credential_available else None
+        ),
     )
     return Harness(
         canvas=canvas,
@@ -348,7 +379,14 @@ def build(
     )
 
 
-def queued_job(harness: Harness, *, job_id: str = "job-1", course_ids=("560", "240")):
+def queued_job(
+    harness: Harness,
+    *,
+    job_id: str = "job-1",
+    course_ids=("560", "240"),
+    transient_credential: bool = False,
+    credential_ref: str = "cred-ref-1",
+):
     """A job the way the confirmation route would leave it: selected, queued, frozen."""
     job = new_job(
         job_id=job_id,
@@ -356,6 +394,10 @@ def queued_job(harness: Harness, *, job_id: str = "job-1", course_ids=("560", "2
         subject=SUBJECT,
         institution_origin=CITYU,
         course_ids=list(course_ids),
+        credential_ref=credential_ref if transient_credential else "",
+        credential_kind=(
+            CREDENTIAL_KIND_TRANSIENT_TASK if transient_credential else "connection"
+        ),
     )
     job.transition(AWAITING_SELECTION)
     job.transition(QUEUED)
@@ -843,7 +885,7 @@ def test_a_cancelled_import_stops_at_the_checkpoint_and_keeps_what_it_imported(t
     def cancel_after_the_first_file(*args, **kwargs):
         original(*args, **kwargs)
         calls["n"] += 1
-        if calls["n"] == 2:  # the first file has been verified and indexed
+        if calls["n"] == 1:  # the first file has been fetched, and no further read has started
             harness.connection.execute(
                 "UPDATE canvas_import_jobs SET status='CANCELLED' WHERE id='job-1'"
             )
@@ -856,10 +898,47 @@ def test_a_cancelled_import_stops_at_the_checkpoint_and_keeps_what_it_imported(t
     assert result.status == "CANCELLED"
     assert harness.job_row()["status"] == "CANCELLED"
     rows = harness.files_by_id()
+    # The file whose bytes were already fetched is still indexed: the fetch was authorised, the
+    # bytes are on disk, and parsing needs no credential. The file that was never fetched is
+    # CANCELLED, which is the visible record of where the import stopped.
     assert rows["7"]["status"] == "INDEXED"
     assert rows["1"]["status"] == "CANCELLED"
     # Cancelling stops the import; it does not delete material that is already stored.
     assert [doc["filename"] for doc in harness.documents()] == ["shading.md"]
+
+
+def test_a_cancellation_never_resurrects_a_finished_looking_job(tmp_path) -> None:
+    """Indexing writes working phases of its own; a cancellation must survive them.
+
+    The worker writes `INGESTING`/`INDEXING` while it parses, so a cancel that arrives during a
+    run can be overwritten by the very same run. The row's own verdict is what has to win, and
+    this test drives the cancel in at the last possible moment: after both files were fetched.
+    """
+    harness = build(tmp_path, two_course_canvas())
+    queued_job(harness)
+    original = harness.repository.record_file_result
+    calls = {"n": 0}
+
+    def cancel_after_the_second_file(*args, **kwargs):
+        original(*args, **kwargs)
+        calls["n"] += 1
+        if calls["n"] == 2:  # both files fetched, nothing parsed yet
+            harness.connection.execute(
+                "UPDATE canvas_import_jobs SET status='CANCELLED' WHERE id='job-1'"
+            )
+
+    harness.repository.record_file_result = cancel_after_the_second_file  # type: ignore[method-assign]
+
+    result = harness.worker.run_once()
+
+    assert result is not None and result.stopped == "cancelled"
+    assert harness.job_row()["status"] == "CANCELLED", "the row's verdict must not be overwritten"
+    assert result.status == "CANCELLED"
+    rows = harness.files_by_id()
+    # Both files were fetched before the cancel was seen, so both are kept. Nothing was fetched
+    # after it, which is what "cancel at the next checkpoint" means.
+    assert {rows["7"]["status"], rows["1"]["status"]} == {"INDEXED"}
+    assert sorted(doc["filename"] for doc in harness.documents()) == ["lighting.md", "shading.md"]
 
 
 def test_a_worker_that_lost_its_lease_writes_nothing(tmp_path) -> None:
@@ -966,3 +1045,87 @@ def test_the_private_course_id_is_a_stable_valid_slug() -> None:
     )
     assert re.fullmatch(r"[a-z0-9][a-z0-9-]{1,49}", first)
     assert not first.startswith("ws-")
+
+
+# ------------------------------------------------- the transient task credential's moment
+def test_the_task_credential_is_released_before_anything_is_indexed(tmp_path) -> None:
+    """The owner's ordering rule, as a property of the run rather than a claim about timing.
+
+    A pasted token is held for the Canvas reads of one task and must be gone before CourseMate
+    starts parsing or indexing anything. The event log makes the order checkable: the release
+    has to appear before the first indexing call, not merely be intended to.
+    """
+    events: list[str] = []
+
+    def record_destruction(job, reason):
+        harness.connection.execute(
+            "UPDATE canvas_import_jobs SET credential_state='DESTROYED' WHERE id=?",
+            (job.job_id,),
+        )
+
+    harness = build(tmp_path, two_course_canvas(), events=events, on_release=record_destruction)
+    queued_job(harness, transient_credential=True)
+
+    result = harness.worker.run_once()
+
+    assert result is not None and result.status == "COMPLETED"
+    assert events.count("release:canvas_reads_complete") == 1
+    assert "indexing" in events, "the test is only meaningful if indexing actually happened"
+    assert events.index("release:canvas_reads_complete") < events.index("indexing")
+    assert harness.job_row()["credential_state"] == "DESTROYED"
+    assert harness.job_row()["credential_kind"] == "transient_task"
+    assert len(harness.documents()) == 2
+
+
+def test_a_job_whose_credential_is_gone_asks_for_one_instead_of_reading(tmp_path) -> None:
+    """A destroyed credential must not silently produce an empty import.
+
+    With a transient job whose token is gone, the run may not touch Canvas at all. It reports
+    that a credential is needed, and it reads nothing.
+    """
+    canvas = two_course_canvas()
+    harness = build(tmp_path, canvas, credential_available=False)
+    queued_job(harness, transient_credential=True)
+
+    result = harness.worker.run_once()
+
+    assert result is not None
+    assert result.status == "NEEDS_REAUTH"
+    assert result.stopped == "reauth"
+    # Nothing was read: the school saw no request at all from this run, so no file row exists.
+    assert canvas.requests == []
+    assert harness.files_by_id() == {}
+    assert harness.job_row()["status"] == "NEEDS_REAUTH"
+    assert harness.documents() == []
+
+
+def test_a_credential_is_not_released_while_reads_are_still_outstanding(tmp_path) -> None:
+    """The other half of the rule: released when the reads are done, not before.
+
+    A batch-limited run still has files to fetch, so destroying the credential there would turn
+    an ordinary long import into a re-authorisation prompt.
+    """
+    events: list[str] = []
+    harness = build(tmp_path, two_course_canvas(), events=events, max_files_per_run=1)
+    queued_job(harness, transient_credential=True)
+
+    result = harness.worker.run_once()
+
+    assert result is not None and result.stopped == "batch_limit"
+    assert [event for event in events if event.startswith("release:")] == []
+    assert harness.files_by_id(), "the first file's bytes are on disk"
+    assert harness.job_row()["status"] in ACTIVE_STATES
+    # The bytes that were fetched are still indexed, so the run was not wasted.
+    assert len(harness.documents()) == 1
+
+
+def test_a_saved_connection_never_triggers_a_credential_release(tmp_path) -> None:
+    """A connection the user chose to keep is not a task credential, and must not be destroyed."""
+    events: list[str] = []
+    harness = build(tmp_path, two_course_canvas(), events=events)
+    queued_job(harness)  # credential_kind defaults to the saved connection
+
+    result = harness.worker.run_once()
+
+    assert result is not None and result.status == "COMPLETED"
+    assert [event for event in events if event.startswith("release:")] == []
