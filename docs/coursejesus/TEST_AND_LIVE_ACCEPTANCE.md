@@ -11,14 +11,15 @@ so the relevant numbers are re-stated here rather than left to the older table b
 
 | Gate | Result | Revision / evidence |
 |---|---|---|
-| Backend regression (rag-api) | **1570 passed / 3 skipped / 0 failed** (2520 s, exit 0) | `work/current-change/full_run_round78.log`; the +9 there were the campus ingest CLI tests |
+| Backend regression (rag-api) | **1599 passed / 3 skipped / 0 failed** (1778 s, exit 0) | `work/current-change/full_run_round80.log` on `47bc2e1`; the +29 are the Canvas local-bridge tests. The three skips are the symlink case, the POSIX-permission case and the optional-SDK case |
 | Canvas local-bridge suite (new) | **29 passed / 0 failed** — replay, cross-user, expiry, unknown school, unselected course, forged digest, path-shaped name, idempotent retry, real quota, no credential column | `services/rag-api/tests/test_canvas_local_bridge.py`, real `create_app` wiring + real DB + real `IngestionService` |
 | Neighbouring Canvas/schema suites | **88 passed / 0 failed** | `test_canvas_api_routes.py`, `test_canvas_import_schema.py`, `test_database.py`, `test_ui_extension_schema_compat.py`, `test_schema_rollback_compat.py`, `test_v3_migration_rehearsal.py`, `test_ingestion_api.py` |
 | Web unit tests | **96 passed / 22 files** | round 79; the 6 new ones cover the bridge client, the address matching and the required texts |
 | Web typecheck | `tsc -b --pretty false` **exit 0** | round 79 |
 | Web production build | **exit 0**, and the build now runs `scripts/scan_web_bundle_for_pat.mjs`, whose negative control (a planted `<input name="canvas_token" />`) fails the build | round 79, wired into `apps/web/package.json` |
 | Agent service tests | **92 passed / 12 files** | round 79 |
-| Browser journeys, Canvas screen | **2/2 pass** on the revised screen (zero `input` elements in the dialog, tutorial text, no credential field), including 390px and the dark theme | `work/current-change/browser_ui_canvas_round79.log` |
+| Browser journeys, both suites | **21/21 `ui-refresh` and 6/6 `jev-structured`, all passing on `47bc2e1`** in real Chrome against the three real services | `work/current-change/browser_ui_round79c.log` (2.4 m) and `browser_jev_round79c.log` (59.7 s) |
+| Browser journeys, Canvas screen | **2/2 pass** on the revised screen (every input is the school radio, the tutorial text, no credential field), including 390px and the dark theme | `work/current-change/browser_ui_canvas_round79b.log` |
 
 ## 1. Local gates, with the revision each one describes
 
