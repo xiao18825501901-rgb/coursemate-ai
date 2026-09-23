@@ -30,9 +30,10 @@ V3_MIGRATIONS = (
     "032_campus_material.sql",
     "033_canvas_local_bridge.sql",
     "034_canvas_oauth_states.sql",
+    "035_canvas_task_credential.sql",
 )
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 34
+LATEST_V3_SCHEMA_VERSION = 35
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (
@@ -517,6 +518,37 @@ class Database:
                     connection.execute(
                         "UPDATE courses SET display_type='private' "
                         "WHERE course_type != 'official'"
+                    )
+                # Migration 035 columns are conditional ALTERs for the same reason (ledger entry
+                # lives in the SQL file). They describe a credential the database must never
+                # hold: an opaque reference, whether it was a transient task credential or a
+                # saved connection, and the lifecycle state of that credential.
+                job_columns = {
+                    row["name"]
+                    for row in connection.execute("PRAGMA table_info(canvas_import_jobs)")
+                }
+                if job_columns:
+                    if "credential_ref" not in job_columns:
+                        connection.execute(
+                            "ALTER TABLE canvas_import_jobs ADD COLUMN "
+                            "credential_ref TEXT NOT NULL DEFAULT ''"
+                        )
+                    if "credential_kind" not in job_columns:
+                        connection.execute(
+                            "ALTER TABLE canvas_import_jobs ADD COLUMN "
+                            "credential_kind TEXT NOT NULL DEFAULT 'connection' "
+                            "CHECK(credential_kind IN ('connection','transient_task'))"
+                        )
+                    if "credential_state" not in job_columns:
+                        connection.execute(
+                            "ALTER TABLE canvas_import_jobs ADD COLUMN "
+                            "credential_state TEXT NOT NULL DEFAULT 'NEVER_STORED' "
+                            "CHECK(credential_state IN ('NEVER_STORED','PRESENT_TRANSIENTLY',"
+                            "'DESTROYING','DESTROYED','EXPIRED','LOST_ON_RESTART'))"
+                        )
+                    connection.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_canvas_jobs_credential "
+                        "ON canvas_import_jobs(credential_ref)"
                     )
 
     def is_ready(self) -> bool:

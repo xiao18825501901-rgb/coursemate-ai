@@ -52,6 +52,17 @@ from .registry import (
     default_institutions,
 )
 from .store import CanvasJobRepository, ClaimedJob
+from .transient_credential import (
+    DESTROYED,
+    EXPIRED,
+    LOST_ON_RESTART,
+    NEVER_STORED,
+    PRESENT_TRANSIENTLY,
+    CredentialRefused,
+    CredentialUnavailable,
+    TaskCredential,
+    TransientCanvasCredentialStore,
+)
 from .worker import (
     CanvasImportWorker,
     RunResult,
@@ -123,4 +134,15 @@ __all__ = [
     "material_media_type",
     "safe_upload_name",
     "target_course_slug",
+    # the credential that lives for one task and is then destroyed
+    # (transient_credential.py)
+    "DESTROYED",
+    "EXPIRED",
+    "LOST_ON_RESTART",
+    "NEVER_STORED",
+    "PRESENT_TRANSIENTLY",
+    "CredentialRefused",
+    "CredentialUnavailable",
+    "TaskCredential",
+    "TransientCanvasCredentialStore",
 ]
