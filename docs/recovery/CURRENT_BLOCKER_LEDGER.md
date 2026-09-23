@@ -116,6 +116,34 @@ round-trip through this shell's console had left inside `CAMPUS_SOURCE_AND_PUBLI
 0 failed** in 2520.02 s (`work/current-change/full_run_round78.log`, exit 0; +9 are the new CLI tests),
 `mypy app` again at exactly 1004 errors / 32 files, and `ruff check` clean on both changed files.
 
+**`47bc2e1`** then revised the Canvas identity design and implemented the fallback it leaves room for.
+The governing rule changed: OAuth is the production route for every user, and a Personal Access Token
+may no longer be how an ordinary user connects a school. The Account → Settings → Approved Integrations
+→ + New Access Token tutorial is kept, but behind a secondary entry on the import screen and followed
+by the sentence that tells the user not to paste a token into the site; the honest state for a school
+with no Developer Key is now 等待学校开通 Canvas 连接.
+
+The local half — the user's own machine reading the token through a hidden prompt and keeping it in
+the OS credential store — is the owner-verified `canvas-study-assistant` skill, reused rather than
+rewritten. The server half is new: migration 033 (`canvas_local_sessions` with a *hash* of a
+single-use 30-minute code, one user and one institution; `canvas_local_files` per-file receipts),
+`app/canvas/local_bridge.py` and ten routes in `app/api/canvas_local.py`. The token cannot reach this
+service: the schema has no column for one (a test reads `PRAGMA table_info`), every request model is
+`extra="forbid"` so a posted token is a 422, the page has no field for one, and
+`scripts/scan_web_bundle_for_pat.mjs` — wired into the web build — fails it if the output or the
+sources could collect one (its negative control is a planted `<input name="canvas_token" />`).
+
+Writing the 29 tests found two defects that would have shipped: `get_job` answers `JOB_NOT_FOUND` for a
+private *user* course unless the caller names the owner, so a successful upload reported its own job as
+missing; and `REJECTED` was missing from the file-status CHECK constraint, so the first format outside
+the upload allow-list returned a 500 instead of a typed receipt. The gate on this revision is **1599
+passed / 3 skipped / 0 failed** in 1778.11 s (`work/current-change/full_run_round80.log`, exit 0; +29
+are the new tests), with the web unit suite at 96, the agent suite at 92, `tsc -b` exit 0, the
+production build green with the PAT scan, and the two Canvas browser journeys passing on the revised
+screen. `CANVAS_OAUTH_LIVE` stays **`WAITING_INSTITUTION`**: no school key exists, so nothing here is
+reported as a production OAuth verification, and the local bridge's results are never made to stand in
+for one.
+
 **Audited revision.** branch `fix/codex-dsh-audit-20260919`, audited at HEAD
 `7e2e4db7cf99d85f92a82c9f97d72729fdaa5162` ("Record round 30's final revision and correct three
 stale deliverable claims", 2026-09-22 13:31 +08:00), working tree clean, **76 commits ahead of
