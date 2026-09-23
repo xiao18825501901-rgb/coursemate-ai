@@ -4,6 +4,22 @@
 and what remains for the live gate. It is written so a later round can tell a re-run from an
 inherited number, and so no module is reported as passing because another module passed.
 
+## 0. Update (round 79, Canvas identity revision)
+
+The Canvas identity design changed — OAuth is the production route, the local bridge is the fallback —
+so the relevant numbers are re-stated here rather than left to the older table below:
+
+| Gate | Result | Revision / evidence |
+|---|---|---|
+| Backend regression (rag-api) | **1570 passed / 3 skipped / 0 failed** (2520 s, exit 0) | `work/current-change/full_run_round78.log`; the +9 there were the campus ingest CLI tests |
+| Canvas local-bridge suite (new) | **29 passed / 0 failed** — replay, cross-user, expiry, unknown school, unselected course, forged digest, path-shaped name, idempotent retry, real quota, no credential column | `services/rag-api/tests/test_canvas_local_bridge.py`, real `create_app` wiring + real DB + real `IngestionService` |
+| Neighbouring Canvas/schema suites | **88 passed / 0 failed** | `test_canvas_api_routes.py`, `test_canvas_import_schema.py`, `test_database.py`, `test_ui_extension_schema_compat.py`, `test_schema_rollback_compat.py`, `test_v3_migration_rehearsal.py`, `test_ingestion_api.py` |
+| Web unit tests | **96 passed / 22 files** | round 79; the 6 new ones cover the bridge client, the address matching and the required texts |
+| Web typecheck | `tsc -b --pretty false` **exit 0** | round 79 |
+| Web production build | **exit 0**, and the build now runs `scripts/scan_web_bundle_for_pat.mjs`, whose negative control (a planted `<input name="canvas_token" />`) fails the build | round 79, wired into `apps/web/package.json` |
+| Agent service tests | **92 passed / 12 files** | round 79 |
+| Browser journeys, Canvas screen | **2/2 pass** on the revised screen (zero `input` elements in the dialog, tutorial text, no credential field), including 390px and the dark theme | `work/current-change/browser_ui_canvas_round79.log` |
+
 ## 1. Local gates, with the revision each one describes
 
 | Gate | Result | Revision / evidence |
@@ -63,9 +79,15 @@ achieved anywhere in this repository: a provider returning valid JSON is not a q
 
 The pack asks for journeys that do not exist yet, and they are listed here so their absence is
 visible: extraction verification, alias retrieval, conflicting conditions, an unsupported citation,
-capability selection, a wrong tool intent, and Jev-disconnected fallback. The import wizard's own
-journeys (two entry points, school-not-configured state, selection, progress, cancel) also do not
-exist yet because the UI does not exist yet.
+capability selection, a wrong tool intent, and Jev-disconnected fallback. Three of those now exist in
+`tests/e2e/jev-structured.spec.ts` (capability dispatch, extraction of a named question reference, and
+the Jev-unavailable deployment), and the import wizard's own journeys now exist too — two entry
+points, the honest "等待学校开通 Canvas 连接" state, the local-token route, the 390px layout and both
+themes. The remaining four are recorded as not existing rather than quietly dropped: condition
+conflict needs a live decision to produce a real `SAME_CONTEXT_CONTRADICTION`, the semantic half of
+citation support needs a live decision, alias retrieval is asserted on the real corpus instead (a
+browser cannot discriminate it with stub embeddings), and tool intent is asserted at the agent's real
+execution boundary because the E2E agent never proposes a tool call.
 
 ## 5. Honest limits
 

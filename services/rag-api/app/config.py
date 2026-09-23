@@ -113,6 +113,14 @@ class Settings(BaseSettings):
         default="/ui-extension/#/courses",
         validation_alias=AliasChoices("CANVAS_RETURN_PATH"),
     )
+    # The Local Canvas Bridge is the fallback for a school that has not issued a Developer Key: the
+    # user runs a bridge on their own machine and only metadata, file bytes and receipts ever reach
+    # this service. It is on by default because it grants nothing a user does not already have
+    # (their own private course, their own storage quota); an operator can turn it off, and the
+    # capability route then says so instead of the page offering something the deployment refuses.
+    canvas_local_bridge_enabled: bool = Field(
+        default=True, validation_alias=AliasChoices("CANVAS_LOCAL_BRIDGE_ENABLED")
+    )
 
     @model_validator(mode="after")
     def validate_chunk_window(self) -> "Settings":

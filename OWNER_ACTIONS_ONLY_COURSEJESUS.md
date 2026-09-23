@@ -81,8 +81,27 @@ protected environment or the existing secret mechanism only.
   is not possible, and DSH will not pretend it is; nor does the owner's consent replace each
   student's own consent on the school login page.
 * **Success looks like:** the school enables a Developer Key with the read-only scope set in the
-  draft letter; until then the public UI says "学校连接尚未开通" and offers local file upload, and
-  the status stays `NOT_CONFIGURED` rather than being reported as done.
+  draft letter; until then the public UI says "等待学校开通 Canvas 连接" and offers the local routes
+  (local file upload, and the Local Canvas Bridge), and the status stays `NOT_CONFIGURED` rather
+  than being reported as done.
+
+### 5b. What the owner no longer has to do (the revised identity rule)
+
+* **Removed:** the previous design asked an ordinary CourseJesus user to generate a Personal Access
+  Token in Canvas (`Account → Settings → Approved Integrations → + New Access Token`) and submit it
+  to the website. That is **not** the product path any more and the site has no field for a token.
+* **What replaces it:** OAuth for every user, and the Local Canvas Bridge for the case where the
+  school has no Developer Key yet. In the bridge, the token is read on the user's own machine through
+  a hidden prompt and kept in the operating system's credential store; CourseJesus receives course
+  metadata, file bytes and receipts only.
+* **Still needed from the owner, for their own migration:** nothing beyond running the local tool on
+  their own machine when they want to import their own courses. **Do not send a PAT in chat, in a
+  report, in a commit or into the website** — the tutorial on the import page says the same thing to
+  users, in the same words.
+* **Two institutions, two keys:** `https://canvas.cityu.edu.hk` and
+  `https://cityu-dg.instructure.com` are separate Canvas instances, so one approval does not cover the
+  other. The request should be submitted per instance, and each approval produces its own client id
+  and secret.
 
 ## 6. Publication rights for the campus review list
 

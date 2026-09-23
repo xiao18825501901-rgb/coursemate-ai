@@ -58,11 +58,26 @@ Implemented and verified against a **simulated** school — no school has been c
   checkpoint on cancel without deleting material, and never report a job with unfinished files as
   complete).
 * Nine HTTP routes and the wizard: both "从 Canvas 导入" entry points are real underlined buttons,
-  and the screen a real user sees today reads **"学校连接尚未开通"** with the reason per school and the
-  local-upload fallback. **There is no personal-access-token input anywhere.**
-* **Blocked:** the school Developer Key. Until it exists the status stays `NOT_CONFIGURED`, and the
-  connect/select/progress steps are covered by the route tests and unit tests rather than by a
-  browser.
+  and the screen a real user sees today reads **"等待学校开通 Canvas 连接"**, lists each school with
+  the server's reason, and puts the local routes in front of the student. **There is no
+  personal-access-token input anywhere.**
+* **Revision (round 79): OAuth is the production route; the Personal Access Token is a local bridge.**
+  The import screen now carries the school picker (both schools plus "其他 Canvas 学校" with an
+  address field) and the primary `连接 Canvas` button; the Account → Settings → Approved Integrations
+  → + New Access Token tutorial is kept, but behind the secondary entry `无法连接？查看本地 Token
+  导入方式`, followed by the sentence that tells the user not to paste a token into the site. Its
+  server half is a short-lived, single-use import session (migration 033, ten routes,
+  `app/canvas/local_bridge.py`): the user's own machine reads the token through a hidden prompt and
+  keeps it in the OS credential store, while CourseJesus only ever receives course metadata, file
+  bytes (checked against the declared size and digest) and receipts. **29 tests** drive the real
+  application, and two defects they found are fixed: a private-course job read needs the owner named,
+  and `REJECTED` was missing from the file-status CHECK constraint. `scripts/scan_web_bundle_for_pat.mjs`
+  now fails a web build whose output or sources could collect a token (its negative control is a
+  planted `<input name="canvas_token" />`).
+* **Blocked:** the school Developer Key — `CANVAS_OAUTH_LIVE = WAITING_INSTITUTION`. Until it exists
+  the status stays `NOT_CONFIGURED`, the connect/select/progress steps are covered by the route tests
+  and unit tests rather than by a browser, and **the local bridge's results are never reported as the
+  production OAuth PASS**.
 
 ## 3. Campus course expansion (T3)
 

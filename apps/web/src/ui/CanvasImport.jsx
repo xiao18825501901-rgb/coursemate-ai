@@ -2,36 +2,57 @@ import React from 'react';
 
 import { Icon } from './icons.jsx';
 import {
+    BRIDGE_STEPS,
     cancelImport,
+    cancelLocalSession,
     connectUrl,
     connectableInstitutions,
     connections as listConnections,
     courses as listCourses,
     disconnect,
     importStatus,
+    institutionForAddress,
     institutions as listInstitutions,
+    localBridgeCapability,
+    localSession,
+    LOCAL_STATUS_LABELS,
+    openLocalSession,
     outcomeFromSearch,
     OUTCOME_MESSAGES,
     reasonFor,
+    selectLocalCourses,
     setCanvasTokenGetter,
     startImport,
+    TOKEN_STEPS,
+    TOKEN_WARNING,
+    bridgeCommand,
 } from './canvasImport.js';
 
 /**
- * The Canvas import wizard (task B2's UI half).
+ * The Canvas import wizard.
  *
- * Three things it must never do, because the server refuses them anyway but a UI that pretended
- * otherwise would be lying to the student:
+ * The product goal is "connect your own school Canvas → choose your courses → CourseJesus builds you
+ * a private course". Two ways reach a school, and the difference is not cosmetic:
  *
- *   * it never asks for a personal access token — the only route to a school is that school's own
- *     authorisation page, opened as a full-page navigation;
- *   * it never offers a school that the server says is not `connectable`; it shows why, and puts
- *     the local upload path in front of the student instead;
- *   * it never claims an import is done. Progress comes from the job the server owns, and a job
- *     that finished with warnings or needs re-authorisation says so.
+ *   * **OAuth** is the path for every user: the school's own authorisation page, opened as a
+ *     full-page navigation. It is the primary button.
+ *   * **The local bridge** is the fallback for a school that has not issued a Developer Key yet.
+ *     The user runs a tool on their own machine; a Personal Access Token is read there through a
+ *     hidden prompt and kept by the operating system. It sits behind a secondary entry, and the page
+ *     says plainly what not to do.
+ *
+ * Three things this screen must never do, because the server refuses them anyway but a UI that
+ * pretended otherwise would be lying to the student:
+ *
+ *   * it never asks for a personal access token in a form field — there is no input for one anywhere,
+ *     and a token pasted into this page has nowhere to go;
+ *   * it never offers a school the server says is not `connectable`; it shows why and puts the local
+ *     paths in front of the student instead;
+ *   * it never claims an import is done. Progress comes from the job the server owns.
  */
 
 const POLL_MS = 1500;
+const FINISHED = ['COMPLETED', 'COMPLETED_WITH_WARNINGS', 'NEEDS_REAUTH', 'FAILED', 'CANCELLED'];
 
 export function CanvasImportLink({ onClick, className = '' }) {
     return <button type="button" className={('canvas-import-link ' + className).trim()} onClick={onClick}>
@@ -39,13 +60,25 @@ export function CanvasImportLink({ onClick, className = '' }) {
     </button>;
 }
 
+/** The steps a user follows in Canvas, shown only under the local-token entry. */
+export function LocalTokenSteps() {
+    return <div className="canvas-import-token">
+        <ol className="canvas-import-token-steps">
+            {TOKEN_STEPS.map(step => <li key={step}>{step}</li>)}
+        </ol>
+        <p className="canvas-import-warning">{TOKEN_WARNING}</p>
+    </div>;
+}
+
 export class CanvasImport extends React.Component {
     state = {
         step: 'loading', institutions: [], credentialsReady: null, connections: [],
         connection: null, courses: [], selected: [], saveConnection: false,
-        job: null, error: '', busy: false,
+        job: null, error: '', busy: false, localOpen: false, otherSchool: '',
+        bridge: null, bridgeCode: '', bridgeCourses: [], bridgeSelected: [],
     };
     poll = null;
+    bridgePoll = null;
 
     async componentDidMount() {
         setCanvasTokenGetter(() => window.CourseMateAuth?.getToken?.() || null);
@@ -54,7 +87,10 @@ export class CanvasImport extends React.Component {
         await this.load();
     }
 
-    componentWillUnmount() { if (this.poll) clearTimeout(this.poll); }
+    componentWillUnmount() {
+        if (this.poll) clearTimeout(this.poll);
+        if (this.bridgePoll) clearTimeout(this.bridgePoll);
+    }
 
     async load() {
         this.setState({ error: '' });
@@ -92,11 +128,103 @@ export class CanvasImport extends React.Component {
         window.location.assign(connectUrl(key));
     }
 
+    /** The school the user picked, whether from the list or by typing an address. */
+    pickSchool(key) {
+        this.setState({ picked: key, error: '' });
+    }
+
+    async openBridge() {
+        const { picked, otherSchool, institutions } = this.state;
+        let key = picked;
+        if (key === 'other') {
+            const match = institutionForAddress({ institutions }, otherSchool);
+            if (!match) {
+                this.setState({
+                    error: '这所学校还没有在 CourseJesus 开通，请先按下面的方式在本地导入，' +
+                        '或把学校地址告诉我们以便申请开通。',
+                });
+                return;
+            }
+            key = match.key;
+        }
+        if (!key) {
+            this.setState({ error: '请先选择一所学校。' });
+            return;
+        }
+        this.setState({ busy: true, error: '' });
+        try {
+            const capability = await localBridgeCapability();
+            if (!capability.localBridgeEnabled) {
+                this.setState({ busy: false, error: '本地导入工具在当前部署里没有开启。' });
+                return;
+            }
+            const opened = await openLocalSession(key);
+            this.setState({
+                busy: false, step: 'bridge', bridge: opened, bridgeCode: opened.code,
+                bridgeCourses: [], bridgeSelected: [],
+            });
+            this.watchBridge(opened.sessionId);
+        }
+        catch (error) {
+            this.setState({ busy: false, error: error.message });
+        }
+    }
+
+    async watchBridge(sessionId) {
+        try {
+            const status = await localSession(sessionId);
+            this.setState({ bridge: status, bridgeCourses: status.courses || [] });
+            if (!FINISHED.includes(status.status) && status.status !== 'EXPIRED') {
+                this.bridgePoll = setTimeout(() => this.watchBridge(sessionId), POLL_MS);
+            }
+            else {
+                this.props.onFinished?.();
+            }
+        }
+        catch (error) {
+            this.setState({ error: error.message });
+        }
+    }
+
+    async confirmBridgeSelection() {
+        const { bridge, bridgeSelected } = this.state;
+        if (!bridge || !bridgeSelected.length) return;
+        this.setState({ busy: true, error: '' });
+        try {
+            await selectLocalCourses(bridge.sessionId, bridgeSelected);
+            const status = await localSession(bridge.sessionId);
+            this.setState({ busy: false, bridge: status });
+            this.watchBridge(bridge.sessionId);
+        }
+        catch (error) {
+            this.setState({ busy: false, error: error.message });
+        }
+    }
+
+    async cancelBridge() {
+        const { bridge } = this.state;
+        if (!bridge) return;
+        try {
+            await cancelLocalSession(bridge.sessionId);
+            this.setState({ step: 'connect', bridge: null, bridgeCode: '' });
+        }
+        catch (error) {
+            this.setState({ error: error.message });
+        }
+    }
+
     toggleCourse(id) {
         const selected = this.state.selected.includes(id)
             ? this.state.selected.filter(x => x !== id)
             : [...this.state.selected, id];
         this.setState({ selected });
+    }
+
+    toggleBridgeCourse(id) {
+        const selected = this.state.bridgeSelected.includes(id)
+            ? this.state.bridgeSelected.filter(x => x !== id)
+            : [...this.state.bridgeSelected, id];
+        this.setState({ bridgeSelected: selected });
     }
 
     async start() {
@@ -117,7 +245,7 @@ export class CanvasImport extends React.Component {
         try {
             const status = await importStatus(jobId);
             this.setState({ job: status });
-            if (!['COMPLETED', 'COMPLETED_WITH_WARNINGS', 'NEEDS_REAUTH', 'FAILED', 'CANCELLED'].includes(status.status)) {
+            if (!FINISHED.includes(status.status)) {
                 this.poll = setTimeout(() => this.watch(jobId), POLL_MS);
             }
             else {
@@ -152,38 +280,138 @@ export class CanvasImport extends React.Component {
     }
 
     /* ------------------------------------------------------------------ rendering */
+    /**
+     * The school choice, shared by both screens.
+     *
+     * It is a radio list plus an address field rather than a set of per-school buttons, because the
+     * revised flow needs the user to name their school once and then choose how to reach it: the
+     * school's own authorisation page, or the local bridge when the school has no Developer Key yet.
+     * A typed address is matched against the registry and never used to contact anything: an
+     * unregistered host is reported as not open rather than being tried.
+     */
+    renderSchoolPicker() {
+        const { institutions, picked, otherSchool } = this.state;
+        return <fieldset className="canvas-import-picker">
+            <legend>选择你的学校</legend>
+            {institutions.map(item => <label key={item.key} className="canvas-import-school">
+                <input type="radio" name="canvas-school" checked={picked === item.key} onChange={() => this.pickSchool(item.key)}/>
+                <span><strong>{item.label}</strong><small>{item.origin}</small></span>
+            </label>)}
+            <label className="canvas-import-school">
+                <input type="radio" name="canvas-school" checked={picked === 'other'} onChange={() => this.pickSchool('other')}/>
+                <span><strong>其他 Canvas 学校</strong><small>输入学校 Canvas 地址</small></span>
+            </label>
+            {picked === 'other' && <input
+                type="url"
+                className="canvas-import-address"
+                placeholder="https://canvas.example.edu"
+                aria-label="学校 Canvas 地址"
+                value={otherSchool}
+                onChange={event => this.setState({ otherSchool: event.target.value })}
+            />}
+        </fieldset>;
+    }
+
     renderUnavailable() {
         const { institutions, error } = this.state;
         return <div className="canvas-import-step">
-            <p className="canvas-import-lead">学校连接尚未开通</p>
+            <p className="canvas-import-lead">等待学校开通 Canvas 连接</p>
             <ul className="canvas-import-schools">
                 {institutions.map(item => <li key={item.key}>
                     <strong>{item.label}</strong>
                     <small>{reasonFor(item.reason) || '暂时无法连接'}</small>
                 </li>)}
             </ul>
+            {this.renderSchoolPicker()}
             {error && <p className="error-text">{error}</p>}
-            <p className="helper-note">在开通之前，可以先在本地创建课程并上传资料；导入功能开通后，这里会出现连接按钮。</p>
+            <p className="helper-note">在开通之前，可以用下面的本地方式导入，或者直接在本地创建课程并上传资料。</p>
             <div className="row" style={{ gap: 10, marginTop: 14 }}>
                 <button type="button" className="btn primary" onClick={() => { this.props.close?.(); this.props.localUpload?.(); }}>
                     <Icon name="plus"/>上传本地资料
                 </button>
+                <button type="button" className="btn" onClick={() => this.openBridge()}>用本地 Token 导入</button>
                 <button type="button" className="btn" onClick={() => this.load()}>重新检查</button>
             </div>
+            <button type="button" className="canvas-import-secondary" onClick={() => this.setState({ localOpen: !this.state.localOpen })}>
+                无法连接？查看本地 Token 导入方式
+            </button>
+            {this.state.localOpen && <LocalTokenSteps/>}
         </div>;
     }
 
     renderConnect() {
+        const { busy, picked } = this.state;
         const connectable = connectableInstitutions({ institutions: this.state.institutions });
         return <div className="canvas-import-step">
-            <p className="canvas-import-lead">连接你的学校账号</p>
-            <p className="helper-note">只读取你本人的课程与资料，不会上传、提交作业或改动学校数据；授权随时可以断开。</p>
-            <div className="canvas-import-actions">
-                {connectable.map(item => <button type="button" key={item.key} className="btn primary" onClick={() => this.connect(item.key)}>
-                    连接 {item.label}
-                </button>)}
+            <p className="canvas-import-lead">从 Canvas 导入课程</p>
+            <p className="helper-note">连接你的学校 Canvas 后，CourseJesus 只会读取你选择导入的课程资料，并把它们创建为你自己的私人课程。</p>
+            {this.renderSchoolPicker()}
+            {connectable.length > 0
+                ? <button type="button" className="btn primary" disabled={busy || !picked} onClick={() => this.connect(picked)}>
+                    连接 Canvas
+                </button>
+                : <p className="helper-note">这所学校还没有开通官方授权连接；可以先用下面的本地方式导入。</p>}
+            <p className="helper-note">本站不接收个人访问令牌，也不会保存它；只能用学校的官方授权页面。</p>
+            <button type="button" className="canvas-import-secondary" onClick={() => this.setState({ localOpen: !this.state.localOpen })}>
+                无法连接？查看本地 Token 导入方式
+            </button>
+            {this.state.localOpen && <>
+                <LocalTokenSteps/>
+                <button type="button" className="btn" disabled={busy || !picked} onClick={() => this.openBridge()}>
+                    用本地 Token 导入
+                </button>
+            </>}
+        </div>;
+    }
+
+    renderBridge() {
+        const { bridge, bridgeCode, bridgeCourses, bridgeSelected, busy, error } = this.state;
+        const status = bridge?.status || 'OPEN';
+        const selectable = status === 'CLAIMED';
+        return <div className="canvas-import-step">
+            <p className="canvas-import-lead">用本地 Token 导入</p>
+            <p className="helper-note">{LOCAL_STATUS_LABELS[status] || status}</p>
+            {error && <p className="error-text">{error}</p>}
+            {status === 'OPEN' && <>
+                <p className="helper-note">在你的电脑上运行下面的命令，然后按提示隐藏输入 Canvas Token：</p>
+                <code className="canvas-import-code">{bridgeCommand(bridgeCode)}</code>
+                <p className="helper-note">这个连接码 {bridge?.expiresAt ? `在 ${bridge.expiresAt} 前有效，` : ''}只能使用一次，而且只属于你；它不含任何 Token。</p>
+            </>}
+            {selectable && <>
+                <p className="helper-note">工具已经读到你的课程。选择要导入的课程：</p>
+                <div className="canvas-import-courses">
+                    {bridgeCourses.map(course => <label key={course.canvasCourseId} className="canvas-import-course">
+                        <input
+                            type="checkbox"
+                            checked={bridgeSelected.includes(course.canvasCourseId)}
+                            onChange={() => this.toggleBridgeCourse(course.canvasCourseId)}
+                        />
+                        <span>
+                            <strong>{course.name || course.canvasCourseId}</strong>
+                            <small>
+                                {course.courseCode}{course.term ? ' · ' + course.term : ''}
+                                {course.enrollmentState ? ' · ' + course.enrollmentState : ''}
+                                {course.fileCount ? ` · ${course.fileCount} 个文件` : ''}
+                            </small>
+                        </span>
+                    </label>)}
+                </div>
+                <p className="helper-note">默认不勾选任何课程；只有你勾选的课程会被下载和导入。课程会建成你自己的私人课程。</p>
+                <button type="button" className="btn primary" disabled={busy || !bridgeSelected.length} onClick={() => this.confirmBridgeSelection()}>
+                    开始导入{bridgeSelected.length ? `（${bridgeSelected.length} 门课程）` : ''}
+                </button>
+            </>}
+            {['SELECTED', 'IMPORTING'].includes(status) && <>
+                <p className="helper-note">本地工具正在下载并上传你选择的课程资料，这一页会持续显示进度。</p>
+                <ul className="canvas-import-progress">
+                    {Object.entries(bridge?.counts || {}).map(([state, count]) => <li key={state}><span>{state}</span><strong>{count}</strong></li>)}
+                </ul>
+            </>}
+            {status === 'EXPIRED' && <p className="helper-note">连接码已经过期，请回到上一步重新生成一个。</p>}
+            <div className="row" style={{ gap: 10, marginTop: 14 }}>
+                {!FINISHED.includes(status) && <button type="button" className="btn" onClick={() => this.cancelBridge()}>取消导入</button>}
+                <button type="button" className="btn" onClick={() => this.setState({ step: 'connect', bridge: null })}>返回</button>
             </div>
-            <p className="helper-note">本站不接收个人访问令牌；只能用学校的官方授权页面。</p>
         </div>;
     }
 
@@ -229,7 +457,7 @@ export class CanvasImport extends React.Component {
     renderJob() {
         const { job, error } = this.state;
         if (!job) return null;
-        const finished = ['COMPLETED', 'COMPLETED_WITH_WARNINGS', 'NEEDS_REAUTH', 'FAILED', 'CANCELLED'].includes(job.status);
+        const finished = FINISHED.includes(job.status);
         return <div className="canvas-import-step">
             <p className="canvas-import-lead">{this.statusLine()}</p>
             <p className="helper-note">共 {job.files || 0} 个文件{job.courses ? ` · ${job.courses} 门课程` : ''}{job.errorCode ? ` · ${job.errorCode}` : ''}</p>
@@ -253,6 +481,7 @@ export class CanvasImport extends React.Component {
             {step === 'loading' && <p className="helper-note">正在检查学校连接状态…</p>}
             {step === 'unavailable' && this.renderUnavailable()}
             {step === 'connect' && this.renderConnect()}
+            {step === 'bridge' && this.renderBridge()}
             {step === 'select' && this.renderSelect()}
             {step === 'job' && this.renderJob()}
         </div>;

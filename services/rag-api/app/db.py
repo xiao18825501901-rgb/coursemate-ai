@@ -28,9 +28,10 @@ V3_MIGRATIONS = (
     "030_feedback_reports.sql",
     "031_canvas_import.sql",
     "032_campus_material.sql",
+    "033_canvas_local_bridge.sql",
 )
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 32
+LATEST_V3_SCHEMA_VERSION = 33
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (

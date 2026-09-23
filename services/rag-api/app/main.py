@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.canvas import router as canvas_router
+from app.api.canvas_local import router as canvas_local_router
 from app.api.feedback import router as feedback_router
 from app.api.ingestion import router as ingestion_router
 from app.api.learning import router as learning_router
@@ -15,6 +16,7 @@ from app.api.qa import router as qa_router
 from app.api.teaching_profiles import router as teaching_profiles_router
 from app.api.tool_intent import router as tool_intent_router
 from app.auth import AuthVerifier, ClerkAuthVerifier, TestAuthVerifier
+from app.brand import BRAND
 from app.canvas.credentials import CredentialStoreUnavailable, credential_store_from_settings
 from app.canvas.oauth import CanvasOAuthClient, InMemoryStateStore
 from app.canvas.registry import InstitutionConnectionRegistry
@@ -45,7 +47,6 @@ from app.services.overlay_publication import OverlayPublicationService
 from app.services.publication import PublicationService
 from app.services.qa import QaService
 from app.services.teaching_profiles import TeachingProfileService
-from app.brand import BRAND
 
 LOGGER = logging.getLogger(__name__)
 
@@ -265,6 +266,7 @@ def create_app(
     application.include_router(feedback_router)
     application.include_router(tool_intent_router)
     application.include_router(canvas_router)
+    application.include_router(canvas_local_router)
     # The Canvas integration is wired with one shared registry and one shared OAuth client, so a
     # state issued by one request is the state another request validates. The credential store is
     # absent when no key is configured, and the routes report NOT_CONFIGURED rather than storing

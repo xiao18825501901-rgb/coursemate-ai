@@ -121,3 +121,92 @@ export const OUTCOME_MESSAGES = {
   denied: "你取消了学校授权，没有连接任何账号。",
   failed: "学校授权没有完成，可以重新连接或先上传本地资料。",
 };
+
+/* ------------------------------------------------------------------ the local bridge
+ *
+ * The second route to a school, for the case OAuth cannot cover yet: a school that has not issued a
+ * Developer Key. The user runs the local bridge on their own machine; a Personal Access Token is read
+ * there through a hidden prompt and kept by the operating system, and CourseJesus only ever receives
+ * course metadata, file bytes and receipts.
+ *
+ * The one rule this module enforces for the UI: there is no field, parameter or call here that could
+ * carry a token to the server. A code goes out (it is the bridge's claim ticket), the user's own
+ * session token authorises the call, and nothing else.
+ */
+
+const LOCAL_ROOT = `${API_ROOT}/local-sessions`;
+
+/** Whether this deployment offers the bridge at all, and why not when it does not. */
+export const localBridgeCapability = () => call("/local-sessions/capability");
+
+/** Open a session for one registered school and get the one-time code to paste into a terminal. */
+export const openLocalSession = (institutionKey) =>
+  call("/local-sessions", {
+    method: "POST",
+    body: JSON.stringify({ institution_key: institutionKey }),
+  });
+
+export const localSession = (sessionId) =>
+  call(`/local-sessions/${encodeURIComponent(sessionId)}`);
+
+export const selectLocalCourses = (sessionId, courseIds) =>
+  call(`/local-sessions/${encodeURIComponent(sessionId)}/selection`, {
+    method: "POST",
+    body: JSON.stringify({ canvas_course_ids: courseIds }),
+  });
+
+export const cancelLocalSession = (sessionId) =>
+  call(`/local-sessions/${encodeURIComponent(sessionId)}/cancel`, { method: "POST" });
+
+/**
+ * Match a typed school address against the registered schools.
+ *
+ * The server refuses an unregistered school on purpose: an authorisation flow pointed at an arbitrary
+ * host would hand the school's code to whoever owns that host. So the page looks the address up in
+ * the list the server gave it, and when there is no match it says the school is not open yet instead
+ * of starting anything.
+ */
+export function institutionForAddress(body, address) {
+  const wanted = String(address || "").trim().replace(/\/+$/, "").toLowerCase();
+  if (!wanted) return null;
+  const list = (body && body.institutions) || [];
+  return list.find((item) => String(item.origin || "").toLowerCase() === wanted) || null;
+}
+
+/** The exact address the user has to open in Canvas, from the tutorial the task requires. */
+export const TOKEN_STEPS = [
+  "登录你的学校 Canvas，点右上角 Account（账户）。",
+  "打开 Settings（设置）。",
+  "在 Approved Integrations（已批准的集成）里点 + New Access Token（新建访问令牌）。",
+  "Purpose 填 local import；Expires 选一个短期限；点 Generate Token。",
+  "复制 Token，只在本地终端里粘贴，不要粘贴到任何网页。",
+];
+
+export const TOKEN_WARNING =
+  "为了保护你的 Canvas 凭据，请不要把这个 Token 粘贴到 CourseJesus 网页。" +
+  "本地导入工具会通过隐藏输入读取 Token，并保存在你电脑的系统凭据库里。";
+
+/** The command the user runs locally once a session is open. The code is a ticket, not a secret. */
+export function bridgeCommand(code) {
+  return `canvas-study-assistant bridge --code ${code}`;
+}
+
+export const BRIDGE_STEPS = [
+  "在同一台电脑上打开终端，运行下面的命令。",
+  "工具会隐藏输入你的 Canvas Token（Personal Access Token），并保存到系统凭据库。",
+  "工具用 Token 在你本机读取你本人的课程列表，把课程名发回这一页。",
+  "在这一页选择要导入的课程，工具才开始下载并上传文件。",
+  "Token 不会离开你的电脑；CourseJesus 只收到课程信息、文件和导入回执。",
+];
+
+export const LOCAL_STATUS_LABELS = {
+  OPEN: "等待本地工具连接",
+  CLAIMED: "本地工具已连接，正在读取课程",
+  SELECTED: "已选择课程，等待本地工具上传",
+  IMPORTING: "正在导入文件",
+  COMPLETED: "导入完成",
+  COMPLETED_WITH_WARNINGS: "导入完成，但有需要留意的文件",
+  FAILED: "导入失败",
+  CANCELLED: "已取消",
+  EXPIRED: "连接码已过期，请重新生成",
+};

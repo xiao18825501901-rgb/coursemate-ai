@@ -868,14 +868,41 @@ test("the Canvas import has two entry points and says so honestly when no school
 
   const dialog = page.getByRole("dialog", { name: "从 Canvas 导入课程" });
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText("学校连接尚未开通");
+  await expect(dialog).toContainText("等待学校开通 Canvas 连接");
   await expect(dialog).toContainText("Developer Key");
   await expect(dialog).toContainText("CityU");
   // The client asked the server, rather than guessing.
   expect(canvasRequests).toContain("/api/integrations/canvas/institutions");
   expect(canvasRequests).toContain("/api/integrations/canvas/connections");
-  // There is no credential field of any kind: the school's own page is the only way in.
-  expect(await dialog.locator("input").count()).toBe(0);
+
+  // The only inputs on this screen are the school choice itself — one radio per registered school and
+  // one for "其他 Canvas 学校". The earlier version of this journey asserted *zero* inputs, which was
+  // true before the revision added the picker; asserting what the inputs actually are is the stronger
+  // claim, and the credential check below is the one that matters.
+  const inputs = dialog.locator("input");
+  const inputCount = await inputs.count();
+  expect(inputCount).toBeGreaterThan(0);
+  for (let index = 0; index < inputCount; index += 1) {
+    const input = inputs.nth(index);
+    expect(await input.getAttribute("type")).toBe("radio");
+    expect(await input.getAttribute("name")).toBe("canvas-school");
+  }
+  // Nothing anywhere in the dialog is named or labelled like a credential.
+  expect(
+    await dialog
+      .locator('input[name*="token" i], input[id*="token" i], input[name*="pat" i], input[name*="secret" i]')
+      .count(),
+  ).toBe(0);
+
+  // The revision's local route: a secondary entry opens the tutorial, the page states plainly that a
+  // token must not be pasted here, and the local bridge is offered as a real button. None of it adds
+  // a field, which is the point — the token is read on the user's own machine.
+  await dialog.getByRole("button", { name: "无法连接？查看本地 Token 导入方式" }).click();
+  await expect(dialog).toContainText("Approved Integrations");
+  await expect(dialog).toContainText("New Access Token");
+  await expect(dialog).toContainText("不要把这个 Token 粘贴到 CourseJesus 网页");
+  await expect(dialog.getByRole("button", { name: "用本地 Token 导入" })).toBeVisible();
+  expect(await dialog.locator("input").count()).toBe(inputCount);
 
   // The fallback is the real local-upload path: it opens the existing create-course form.
   await dialog.getByRole("button", { name: /上传本地资料/ }).click();
@@ -895,7 +922,7 @@ test("the Canvas import has two entry points and says so honestly when no school
   await bannerLink.click();
   const bannerDialog = page.getByRole("dialog", { name: "从 Canvas 导入课程" });
   await expect(bannerDialog).toBeVisible();
-  await expect(bannerDialog).toContainText("学校连接尚未开通");
+  await expect(bannerDialog).toContainText("等待学校开通 Canvas 连接");
 });
 
 test("the Canvas import screen fits a 390px viewport and both themes", async ({ page }, testInfo) => {
@@ -907,7 +934,7 @@ test("the Canvas import screen fits a 390px viewport and both themes", async ({ 
   await link.click();
   const dialog = page.getByRole("dialog", { name: "从 Canvas 导入课程" });
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText("学校连接尚未开通");
+  await expect(dialog).toContainText("等待学校开通 Canvas 连接");
 
   // The dialog stays inside the viewport instead of overflowing it.
   const box = await dialog.boundingBox();

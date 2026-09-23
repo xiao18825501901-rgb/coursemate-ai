@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node ../../scripts/scan_web_bundle_for_pat.mjs dist",
     "preview": "vite preview",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run"

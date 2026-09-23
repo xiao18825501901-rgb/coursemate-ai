@@ -1,5 +1,17 @@
 # CANVAS OAUTH AND SCOPES (task B2/B3)
 
+**Revision (round 79).** The Canvas identity design was revised: **OAuth is the production route for
+every user, and the Personal Access Token survives only as a local/development bridge.** The
+Account → Settings → Approved Integrations → + New Access Token tutorial is still shown, but under a
+secondary entry on the import screen and with the explicit instruction not to paste the token into the
+site; the local tool reads it through a hidden prompt and keeps it in the operating system's credential
+store. The server half of that bridge — a short-lived, single-use import session with ten routes, two
+new tables (migration 033) and 29 tests — is in `docs/coursejesus/CANVAS_LOCAL_BRIDGE.md`, and
+`scripts/scan_web_bundle_for_pat.mjs` now fails a web build that could collect a token. What did *not*
+change: the primary button is still the school's own authorisation page, there is still no PAT input
+anywhere in the product, and `CANVAS_OAUTH_LIVE` stays `WAITING_INSTITUTION` until a school issues a
+Developer Key.
+
 **State of this document.** Round-44 design pass; the flow was implemented in round 47
 (`services/rag-api/app/canvas/oauth.py`, 22 tests: state replay/expiry/forgery, denial, exact
 callback, error classification, identity binding and account replacement, concurrent refresh,
