@@ -56,9 +56,28 @@ No human has looked at it yet.
 ### 1.4 Campus courses and student qualification — `CAMPUS_TYPE_AND_VERIFICATION_ENFORCED`
 
 Campus courses stay `campus` with `requires_student_verification = 1`. The registration
-**auto-grant is removed** in this round, real verification is made distinguishable from the old
-registration-auto source, every historical row is kept, and the data gap is stated with one decision
-for the owner. Implementation and measurements: `docs/coursejesus/CAMPUS_VERIFIED_ONLY_MIGRATION.md`.
+**auto-grant is removed from both call sites** — including the one that was *inside* the access
+check, where asking for a course is what opened it. `ensure_user` no longer accepts an
+`auto_qualify` parameter, so no caller can reintroduce the grant, and `current_user` no longer reads
+`campus_qualification_policy` when deciding who is granted anything.
+
+Real verification is now distinguishable from the old registration-auto source:
+`qualification_origin()` classifies a row as `real` (`code`/`admin`/`grandfathered`) or
+`registration_auto` (`registered`), and `qualification_origin_counts()` counts the three classes
+plus accounts with none — without naming anybody. No row was rewritten, downgraded or deleted: a
+historical `registered` row keeps access under the unchanged default policy ("stop granting, do not
+revoke"), and `verified_only` is available when the owner decides otherwise.
+
+**The one decision, with its number unmeasured rather than estimated:** the count of accounts a
+switch to `verified_only` would newly refuse must come from the deployment's own database, which
+this round did not open. The read-only command is in
+`docs/coursejesus/CAMPUS_VERIFIED_ONLY_MIGRATION.md` §6, and because a code redeemed after an
+auto-grant leaves `method='registered'` for good, that number is an upper bound on "never really
+verified" and should be cross-checked against `cmui_verification_codes`.
+
+Verified: **162 campus-related tests pass** (51 + 111 across the suites this touches), the change
+adds **zero** ruff findings against HEAD, and the diagnostic's read-only claim was checked by
+hashing a seeded database before and after it ran. `docs/coursejesus/CAMPUS_VERIFIED_ONLY_MIGRATION.md`.
 
 ### 1.5 Model credentials — `MODEL_SPENDING_POLICY_APPLIED`, `DEEPSEEK_LIVE`
 
@@ -108,6 +127,8 @@ same-site publish → acceptance → final report, and it starts only when the o
 | `0e50252` | The owner's live small-sample runner |
 | `2d9efde` | Execution state: the new statuses, and a corrected "no credential input" claim |
 | `a2ed067` | The live model results, including the Jev Score finding |
+| `7e736fc` | The latest authorisation state, item by item |
+| `57cd19c` | Campus: stop granting at registration, make the origin visible, keep every row |
 
 Targeted results on this round's revisions (the full gate is owed once the tree is frozen with the
 campus change):
@@ -120,6 +141,7 @@ campus change):
 | `tests/test_canvas_owner_smoke.py` | 8 passed |
 | canvas + schema + database selection | **319 passed, 1 skipped** |
 | Jev / gateway / structured | **391 passed** |
+| campus + qualification suites after the change | **162 passed** (51 + 111) |
 | web (vitest) | **107 passed** (23 files) |
 | `tsc -b` (web, incl. node-side tests) | exit 0 |
 | production build + PAT scan | exit 0 — `no token field, notice present` |
