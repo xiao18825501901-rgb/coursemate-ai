@@ -15,11 +15,14 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from .job import ACTIVE_STATES, TERMINAL_STATES, FileRecord, ImportJob, JobStateError
+from .oauth import Connection
 
 LEASE_SECONDS = 120
 
@@ -44,6 +47,143 @@ class ClaimedJob:
     fingerprint: str
     status: str
     leased_until: str
+
+
+class CanvasConnectionRepository:
+    """Persistence for a user's link to one Canvas account.
+
+    The row holds identity and bookkeeping only: there is no token column, because the
+    credential lives in the encrypted store keyed by `connection_id` (see `credentials.py`).
+    `upsert` is keyed by `(owner_user_id, institution_origin, canvas_user_id)`, which is the
+    migration's unique constraint, so reconnecting the same school updates one row instead of
+    accumulating connections.
+    """
+
+    def __init__(self, connection: sqlite3.Connection, *, clock: Callable[[], float] = time.time):
+        self._connection = connection
+        self._connection.row_factory = sqlite3.Row
+        self._clock = clock
+
+    def upsert(self, connection: Connection, *, connection_id: str) -> str:
+        """Insert or refresh the row for this `(owner, institution, Canvas user)` triple."""
+        self._connection.execute(
+            "INSERT INTO canvas_connections(id, owner_user_id, institution_key, "
+            "institution_origin, canvas_user_id, canvas_display_name, granted_scopes, "
+            "saved_for_reuse, credential_key_id, credential_expires_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(owner_user_id, institution_origin, canvas_user_id) DO UPDATE SET "
+            "institution_key=excluded.institution_key, "
+            "canvas_display_name=excluded.canvas_display_name, "
+            "granted_scopes=excluded.granted_scopes, "
+            "saved_for_reuse=excluded.saved_for_reuse, "
+            "credential_key_id=excluded.credential_key_id, "
+            "credential_expires_at=excluded.credential_expires_at, "
+            "revoked_at=NULL, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')",
+            (
+                connection_id,
+                connection.subject,
+                connection.institution_key,
+                connection.origin,
+                connection.canvas_user_id,
+                connection.canvas_name,
+                " ".join(connection.scopes),
+                int(connection.saved_for_reuse),
+                connection.credential_key_id,
+                connection.credential_expires_at,
+            ),
+        )
+        row = self._connection.execute(
+            "SELECT id FROM canvas_connections WHERE owner_user_id=? AND institution_origin=? "
+            "AND canvas_user_id=?",
+            (connection.subject, connection.origin, connection.canvas_user_id),
+        ).fetchone()
+        if row is None:  # pragma: no cover - the upsert above guarantees a row
+            raise JobStateError("the connection row could not be read back after upsert")
+        # A reconnect that matched an existing row keeps that row's id: callers must address the
+        # connection the database actually holds, not the id they proposed.
+        return str(row["id"])
+
+    def get(self, connection_id: str, *, subject: str) -> Connection | None:
+        """One connection, but only for the user it belongs to."""
+        row = self._connection.execute(
+            "SELECT * FROM canvas_connections WHERE id=? AND owner_user_id=? "
+            "AND revoked_at IS NULL",
+            (connection_id, subject),
+        ).fetchone()
+        return self._to_connection(row) if row is not None else None
+
+    def for_subject(self, subject: str) -> list[Connection]:
+        rows = self._connection.execute(
+            "SELECT * FROM canvas_connections WHERE owner_user_id=? AND revoked_at IS NULL "
+            "ORDER BY created_at",
+            (subject,),
+        ).fetchall()
+        return [self._to_connection(row) for row in rows]
+
+    def existing_for_account(
+        self, *, subject: str, origin: str, canvas_user_id: str
+    ) -> Connection | None:
+        row = self._connection.execute(
+            "SELECT * FROM canvas_connections WHERE owner_user_id=? AND institution_origin=? "
+            "AND canvas_user_id=?",
+            (subject, origin, canvas_user_id),
+        ).fetchone()
+        return self._to_connection(row) if row is not None else None
+
+    def for_subject_and_institution(self, *, subject: str, origin: str) -> Connection | None:
+        """This user's existing link to one school, whichever Canvas account it names.
+
+        The callback needs this one: the question "is this school already linked to a different
+        Canvas account?" cannot be answered by looking up the *new* account id, because a row for
+        it does not exist yet — which is exactly how one person's courses would end up filed
+        under another person's account.
+        """
+        row = self._connection.execute(
+            "SELECT * FROM canvas_connections WHERE owner_user_id=? AND institution_origin=? "
+            "AND revoked_at IS NULL ORDER BY created_at LIMIT 1",
+            (subject, origin),
+        ).fetchone()
+        return self._to_connection(row) if row is not None else None
+
+    def mark_revoked(self, connection_id: str, *, subject: str) -> bool:
+        cursor = self._connection.execute(
+            "UPDATE canvas_connections SET revoked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'), "
+            "credential_key_id=NULL, credential_expires_at=NULL, saved_for_reuse=0, "
+            "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+            "WHERE id=? AND owner_user_id=?",
+            (connection_id, subject),
+        )
+        return cursor.rowcount == 1
+
+    def mark_saved_for_reuse(self, connection_id: str, *, subject: str, saved: bool) -> bool:
+        """Record the user's explicit choice to keep the connection for later updates.
+
+        Default is not to keep it: an ordinary import stores nothing once the job and its retry
+        window are over, and only a deliberate opt-in leaves a credential behind.
+        """
+        cursor = self._connection.execute(
+            "UPDATE canvas_connections SET saved_for_reuse=?, "
+            "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND owner_user_id=?",
+            (1 if saved else 0, connection_id, subject),
+        )
+        return cursor.rowcount == 1
+
+    @staticmethod
+    def _to_connection(row: sqlite3.Row) -> Connection:
+        scopes = str(row["granted_scopes"] or "")
+        expires = row["credential_expires_at"]
+        return Connection(
+            connection_id=str(row["id"]),
+            subject=str(row["owner_user_id"]),
+            institution_key=str(row["institution_key"]),
+            origin=str(row["institution_origin"]),
+            canvas_user_id=str(row["canvas_user_id"]),
+            canvas_name=str(row["canvas_display_name"] or ""),
+            scopes=tuple(scopes.split()) if scopes else (),
+            saved_for_reuse=bool(row["saved_for_reuse"]),
+            credential_key_id=str(row["credential_key_id"] or ""),
+            credential_expires_at=float(expires) if expires is not None else None,
+        )
 
 
 class CanvasJobRepository:
@@ -214,6 +354,17 @@ class CanvasJobRepository:
             "SELECT status FROM canvas_import_jobs WHERE id=?", (job_id,)
         ).fetchone()
         return str(row["status"]) if row else None
+
+    def snapshot(self, job_id: str) -> sqlite3.Row | None:
+        """The whole job row, for the status route.
+
+        Deliberately the raw row: the route reports the same fields the worker writes, so a
+        status page cannot drift from the state machine by re-deriving them.
+        """
+        row = self._connection.execute(
+            "SELECT * FROM canvas_import_jobs WHERE id=?", (job_id,)
+        ).fetchone()
+        return row if row is not None else None
 
     def upsert_file(
         self,

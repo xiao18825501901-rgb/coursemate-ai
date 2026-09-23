@@ -96,6 +96,16 @@ class Settings(BaseSettings):
     ui_task_agent_url: str = ""
     ui_task_agent_timeout_seconds: float = Field(default=60.0, ge=1.0, le=300.0)
     ui_web_dir: Path = Field(default=Path("../../apps/web/dist"))
+    # Canvas credentials are stored under an authenticated-encryption key that lives here and
+    # nowhere else: not in the database, not in the repository, not in a log. Without it the
+    # integration reports itself unconfigured instead of storing a token in the clear.
+    canvas_credential_key: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("CANVAS_CREDENTIAL_KEY")
+    )
+    canvas_credential_dir: Path = Field(
+        default=Path("../../data/canvas-credentials"),
+        validation_alias=AliasChoices("CANVAS_CREDENTIAL_DIR"),
+    )
 
     @model_validator(mode="after")
     def validate_chunk_window(self) -> "Settings":

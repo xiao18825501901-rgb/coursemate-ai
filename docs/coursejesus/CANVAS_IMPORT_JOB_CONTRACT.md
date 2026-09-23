@@ -1,9 +1,12 @@
 # CANVAS IMPORT JOB CONTRACT (task B4)
 
-**State of this document.** Round-44 design pass. This is the contract the importer will be built
-against; **no job table row exists yet and no import has ever run**. It is written against the
-repository's existing persistence conventions rather than invented ones, so the implementation is a
-port, not a parallel universe.
+**State of this document.** Round-44 design pass, updated in round 69. The contract is now
+implemented: migration 031 created the tables, `app/canvas/store.py` owns the rows,
+`app/canvas/worker.py` runs a job (round 68), and `app/api/canvas.py` is the route layer that turns
+a confirmed selection into a queued job (round 69). **No import has ever run against a real school**
+and no school key exists, so every statement here about Canvas behaviour is contractual, not
+observed. It was written against the repository's existing persistence conventions rather than
+invented ones, so the implementation is a port, not a parallel universe.
 
 ## 1. What it reuses
 
@@ -202,3 +205,30 @@ empty for both schools because guessing a Canvas CDN host would break real downl
 download rule today is "public HTTPS, validated at every hop" plus the origin's own host. Once a
 live response names the file domain, it goes in the institution's `download_hosts` and the rule
 tightens to that host alone — the mechanism is already tested.
+
+## 11. Who writes a job (round 69)
+
+A job is created by `POST /api/integrations/canvas/imports`, and only there. The route:
+
+1. resolves the connection **for the signed-in user** (another user's connection is reported as
+   absent, not forbidden);
+2. rejects empty or non-numeric course ids — the selection is a list of Canvas ids, never a
+   `base_url` or a search term;
+3. builds the job with `new_job`, whose fingerprint covers the connection, the owner, the
+   institution origin, the sorted course ids and the observed material versions, then moves it
+   `AWAITING_SELECTION → QUEUED` (the only legal way in);
+4. calls `create_or_get`, so the same frozen selection returns the **same** job with
+   `created: false` rather than starting a second import;
+5. stores the private course's id on the job once the worker creates it, so a resumed run reuses
+   that course.
+
+`GET /imports/{id}` reports the job row itself — status, error code, target course, per-file counts
+— so the status page cannot drift from the state machine by re-deriving anything.
+`POST /imports/{id}/cancel` moves the job to `CANCELLED` only from a working state and reports
+`cancelled: false` for a job that already finished; it never deletes documents, chunks or stored
+bytes. `DELETE /connections/{id}` revokes at the school (best effort) and **always** forgets the
+local credential, because a disconnect that leaves a usable credential behind is worse than one
+that leaves a stale token at the school.
+
+The route layer holds no Canvas logic of its own: every school call goes through
+`CanvasReadAdapter` or `CanvasOAuthClient`, and every row goes through the two repositories.

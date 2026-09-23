@@ -6,6 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.canvas import router as canvas_router
 from app.api.feedback import router as feedback_router
 from app.api.ingestion import router as ingestion_router
 from app.api.learning import router as learning_router
@@ -14,6 +15,9 @@ from app.api.qa import router as qa_router
 from app.api.teaching_profiles import router as teaching_profiles_router
 from app.api.tool_intent import router as tool_intent_router
 from app.auth import AuthVerifier, ClerkAuthVerifier, TestAuthVerifier
+from app.canvas.credentials import CredentialStoreUnavailable, credential_store_from_settings
+from app.canvas.oauth import CanvasOAuthClient, InMemoryStateStore
+from app.canvas.registry import InstitutionConnectionRegistry
 from app.config import Settings
 from app.db import Database
 from app.errors import ApiError
@@ -68,6 +72,16 @@ def create_app(
         raise RuntimeError("CLERK_SECRET_KEY or CLERK_JWT_KEY is required.")
     database = Database(resolved_settings)
     database.initialize()
+    # Canvas private import: the registry is always present (it reports NOT_CONFIGURED per
+    # school, which is what the UI shows), while the credential store only exists when the
+    # deployment holds an encryption key. A missing key is a missing capability, never a
+    # plaintext fallback.
+    canvas_registry = InstitutionConnectionRegistry()
+    try:
+        canvas_credentials = credential_store_from_settings(resolved_settings)
+    except CredentialStoreUnavailable:
+        LOGGER.warning("CANVAS_CREDENTIAL_KEY is set but unusable; Canvas import stays off")
+        canvas_credentials = None
     embedding_secret = resolved_settings.rag_embedding_api_key
     embedding_api_key = embedding_secret.get_secret_value() if embedding_secret else ""
     deepseek_chat_secret = resolved_settings.deepseek_chat_api_key
@@ -249,6 +263,19 @@ def create_app(
     application.include_router(publication_router)
     application.include_router(feedback_router)
     application.include_router(tool_intent_router)
+    application.include_router(canvas_router)
+    # The Canvas integration is wired with one shared registry and one shared OAuth client, so a
+    # state issued by one request is the state another request validates. The credential store is
+    # absent when no key is configured, and the routes report NOT_CONFIGURED rather than storing
+    # a token in the clear.
+    application.state.canvas_registry = canvas_registry
+    if canvas_credentials is not None:
+        application.state.canvas_credentials = canvas_credentials
+        application.state.canvas_oauth = CanvasOAuthClient(
+            registry=canvas_registry,
+            state_store=InMemoryStateStore(),
+            credential_store=canvas_credentials,
+        )
     if resolved_settings.v3_enabled:
         application.include_router(learning_router)
     if resolved_settings.ui_extension_enabled:

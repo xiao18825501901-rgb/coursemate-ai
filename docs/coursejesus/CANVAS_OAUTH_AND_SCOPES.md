@@ -1,13 +1,16 @@
 # CANVAS OAUTH AND SCOPES (task B2/B3)
 
-**State of this document.** Round-44 design pass; **the flow itself was implemented in round 47**
-in `services/rag-api/app/canvas/oauth.py` and is covered by 22 tests (state replay/expiry/forgery,
-denial, exact callback, error classification, identity binding and account replacement, concurrent
-refresh, revocation, redaction). The protocol facts below were verified against Instructure's own
-documentation (markdown endpoints under `https://developerdocs.instructure.com/`), and the design
-decisions follow from them. **No school Developer Key exists yet, no authorisation has been
-performed, and the HTTP routes do not exist yet** — so the Canvas status stays `NOT_CONFIGURED`
-and will not be reported as connected.
+**State of this document.** Round-44 design pass; the flow was implemented in round 47
+(`services/rag-api/app/canvas/oauth.py`, 22 tests: state replay/expiry/forgery, denial, exact
+callback, error classification, identity binding and account replacement, concurrent refresh,
+revocation, redaction) and the **HTTP routes plus the encrypted credential store were implemented
+in round 69** (`app/api/canvas.py`, `app/canvas/credentials.py`; 39 route tests and 13 credential
+tests, with 6 of 6 route/credential guards proven by mutation). The protocol facts below were
+verified against Instructure's own documentation (markdown endpoints under
+`https://developerdocs.instructure.com/`), and the design decisions follow from them.
+**No school Developer Key exists yet and no authorisation has ever been performed against a real
+school** — so the Canvas status stays `NOT_CONFIGURED` and nothing here should be read as saying a
+school is connected. See §9 for what the routes now do and what they still cannot do.
 
 ## 1. Why OAuth and not a token box
 
@@ -161,14 +164,53 @@ Rules that the implementation must hold:
   denied authorisation, wrong institution), so the flow is complete and testable before any real
   key exists. Those tests are explicitly **not** evidence that OAuth works with a school.
 
-## 9. Honest limits
+## 9. The routes, and how a token is stored (round 69)
+
+`services/rag-api/app/api/canvas.py` mounts nine routes under `/api/integrations/canvas`:
+
+| Route | What it does | What it refuses |
+|---|---|---|
+| `GET /institutions` | Per school: label, origin, `connectable`, and a reason when it is not (`NO_DEVELOPER_KEY`, `NO_CREDENTIAL_KEY`, `SCHEMA_NOT_READY`) | Nothing: it is the route the "school not open yet" state is built from |
+| `GET /connections` | The caller's own connections, as public fields only | Any token or key field, by construction |
+| `GET /connect?institution=<key>` | 303 to the school's `login/oauth2/auth` URL with the registered `redirect_uri` | An unregistered key; a caller-supplied `base_url` (there is no such parameter) |
+| `GET /oauth/callback` | Validates the one-time state, exchanges the code, reads the school's identity, stores the credential, 303 back to a **fixed** path | A forged/expired/replayed state (before any outbound call); an account that would replace an existing connection without confirmation |
+| `GET /courses` | The student's own active/completed courses for the selection screen | Another user's connection (reported as absent) |
+| `POST /imports` | Freezes the selection into a queued job; the same selection returns the same job | Empty or non-numeric course ids; another user's connection |
+| `GET /imports/{id}` | Job status, per-file counts, target course | Another user's job (reported as absent, not forbidden) |
+| `POST /imports/{id}/cancel` | Cancels at the next checkpoint; imported material is untouched | A job that is already terminal (reports `cancelled: false`) |
+| `DELETE /connections/{id}` | Revokes at the school (best effort) and **always** forgets the local credential | A connection that is not the caller's |
+
+How the token is kept, which is the part the pack is strictest about:
+
+* AES-256-GCM with a random nonce per write and associated data binding the ciphertext to its
+  version, key id and connection id; the key comes from `CANVAS_CREDENTIAL_KEY` (32 bytes, base64)
+  and lives in no database, no repository and no log. Each record carries a `key_id` (a digest of
+  the key) so a rotation is visible rather than silent.
+* Files are written under `CANVAS_CREDENTIAL_DIR` (default `data/canvas-credentials`), one per
+  connection, named after a digest of the connection id, with a temporary file and an atomic
+  replace, `0600`/`0700` where the platform honours permission bits.
+* **With no key configured the store does not exist**, and the routes report `NO_CREDENTIAL_KEY`:
+  there is no plaintext path and no "store it unencrypted for now" branch.
+* The import job stores a `connection_id` only — the migration has no token column at all — so a
+  database dump cannot contain a credential, and a restored database alone cannot reach a school.
+
+## 10. Honest limits
 
 * Everything in §2 is documentation-verified, not exercised against a live Canvas instance; no
-  authorisation code has ever been exchanged here.
+  authorisation code has ever been exchanged here, and the route tests drive a simulated school.
 * The scope identifiers in §3 are the expected `url:GET|<path>` forms and are marked as needing
   confirmation, because the authoritative list is account-specific
   (`GET /api/v1/accounts/:account_id/scopes`) and only a school administrator can read it.
 * Canvas's scope listing endpoint is documented as BETA, so the school's own console remains the
   final authority on what it will grant.
+* **The state and credential stores are per process.** `create_app` wires one shared pair for the
+  application, but a multi-worker deployment needs a shared state store before the flow is enabled
+  for real users, or a callback can land on a worker that did not issue the state. This is stated
+  in the router's own docstring rather than left to be discovered.
+* The canvas tables come from migration 031, which is applied with the V3 schema. A deployment
+  without the private-course model therefore has no canvas tables, and the routes report
+  `SCHEMA_NOT_READY` instead of failing with a missing-table error — the capability is genuinely
+  absent there, since the import writes a private course.
 * Nothing here changes the Canvas status: it remains `NOT_CONFIGURED` until a school key exists and
-  a real student completes a real authorisation.
+  a real student completes a real authorisation. The UI entries and the local-upload fallback are
+  the next increment and do not exist yet.

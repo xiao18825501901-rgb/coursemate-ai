@@ -227,6 +227,11 @@ class Connection:
     scopes: tuple[str, ...] = ()
     saved_for_reuse: bool = False
     created_at: float = field(default_factory=time.time)
+    # Which encrypted credential belongs to this connection and when it expires. The token
+    # itself is never here: these two facts let the application tell "expired" from "never
+    # connected" without being able to read a credential even if it wanted to.
+    credential_key_id: str = ""
+    credential_expires_at: float | None = None
 
     def matches_account(self, origin: str, canvas_user_id: str) -> bool:
         return self.origin == origin and self.canvas_user_id == str(canvas_user_id)
