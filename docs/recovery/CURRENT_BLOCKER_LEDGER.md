@@ -39,6 +39,12 @@ granting access — at **1515 passed / 3 skipped / 0 failed** in 1508.13 s
 **90 web unit tests** passing, and **21 of 21 real-Chrome `ui-refresh` journeys** passing
 (`work/current-change/ui_refresh_round70.log`, the 19 existing plus two new Canvas ones).
 
+**`b46e7f0`** then started task C3's reading half — the campus material policy and planner, migration
+032's per-file rights metadata, and the first offering ingested into a private, unpublished campus
+course — at **1537 passed / 3 skipped / 0 failed** in 1527.38 s
+(`work/current-change/full_run_round71.log`, exit 0; the +22 are that module's tests), `mypy app`
+still 1004 errors / 32 files.
+
 **Audited revision.** branch `fix/codex-dsh-audit-20260919`, audited at HEAD
 `7e2e4db7cf99d85f92a82c9f97d72729fdaa5162` ("Record round 30's final revision and correct three
 stale deliverable claims", 2026-09-22 13:31 +08:00), working tree clean, **76 commits ahead of
