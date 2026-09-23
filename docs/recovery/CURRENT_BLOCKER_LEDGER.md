@@ -69,6 +69,25 @@ gated and failed 54 tests** (`full_run_round74.log`: `table courses has no colum
 because those columns arrive with the V3 schema), which is how the non-V3 regression was found; the
 gate was re-run after the fix rather than the failing run being re-interpreted.
 
+**`3b0ebea`** then made a file-scoped refusal a stored material row instead of a failed import. Running
+the six-offering campus batch had recorded two CS4182 lecture PDFs (302,882,145 and 174,573,307 bytes
+against the 20 MB `max_upload_bytes` limit — 42 ingestable files in the plan are over it) as `FAILED`,
+which reads as a broken import; a limit refusal is the situation the Canvas worker already records as
+`TOO_LARGE`, so it becomes `DOWNLOAD_ONLY`. The mapping is an **allow-list** now, because the first
+version was a deny-list and downgraded an unrecognised `COURSE_NOT_FOUND` to `DOWNLOAD_ONLY` until the
+negative control caught it. The re-run of the same six offerings reports **0 `FAILED`** (was 2) with 41
+documents, 1355 chunks, 35 `INDEXED`, 10 `DOWNLOAD_ONLY`, 3 `BLOCKED` and 48 material rows, every
+course still `private/private`
+(`work/current-change/full_run_round77_batch.log`, read back from the database). The same run corrected
+a figure of mine: the first batch summary summed a *cumulative* per-course count and reported 129
+review rows where the table holds 48; the script now reads the table and the superseded summary is kept
+beside the corrected one. The gate on this revision is **1561 passed / 3 skipped / 0 failed** in 2711.57 s
+(`work/current-change/full_run_round77.log`, exit 0), `mypy app` again at exactly 1004 errors / 32
+files, `ruff check` clean on both changed files, and 4 of 4 new guards proven by mutation
+(`work/current-change/mutation-check-campus-refusal-mapping.py`) — whose first version rewrote the
+source in text mode, relined the whole file to CRLF and was caught by its own byte-for-byte restore
+check, so it now uses binary I/O.
+
 **Audited revision.** branch `fix/codex-dsh-audit-20260919`, audited at HEAD
 `7e2e4db7cf99d85f92a82c9f97d72729fdaa5162` ("Record round 30's final revision and correct three
 stale deliverable claims", 2026-09-22 13:31 +08:00), working tree clean, **76 commits ahead of
