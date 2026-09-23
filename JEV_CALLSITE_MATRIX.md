@@ -119,6 +119,21 @@ receipts (plus, for entity resolution, the proposal-only `entity_relations` stor
 
 ## Browser journeys: what exists, what cannot exist yet, and why
 
+**Measured on revision `e4656aa`** (the suites start the real three-service shape — RAG API with the
+UI extension mounted, the Node task agent, and the production web build behind the Netlify-shaped
+static server — and drive real Chrome):
+
+| suite | journeys | result |
+|---|---|---|
+| `tests/e2e/jev-structured.spec.ts` | **6** | 6 passed in 2.2 m (`work/current-change/browser_jev_round79.log`) |
+| `tests/e2e/ui-refresh.spec.ts` | **21** | 21 passed in 4.3 m (`work/current-change/browser_ui_round79.log`) |
+
+The six `jev-structured` journeys, by name: *the shipped shell reports the capability it dispatched*,
+*the shipped shell can file a problem report without leaving the lesson*, *with no TypeSafe credential
+every decision degrades and teaching still works*, *the shipped page verifies a named question
+reference before filtering on it*, *prose that merely follows the number is not a sub-part*, and *a
+question that names no question spends nothing*.
+
 The task lists seven journeys to add. Six of them exist or are covered at a lower
 layer with a real assertion; one cannot be written truthfully today because the
 behaviour it would assert does not happen in any reachable runtime mode. Every row
@@ -184,4 +199,4 @@ says which, so a missing journey is never mistaken for a passing one.
 | F ToolIntentCheck | agent-api `test/executor-intent-gate.test.ts` (+ the endpoint tests) | write tools gated, `searchTask` never gated, `off` byte-identical, `advisory` records, `enforce` blocks |
 | C EvidenceConsistency | `services/rag-api/tests/test_jev_evidence_consistency_wiring.py` | `sources` are byte-identical across off/shadow/unavailable/no-Jev; a real contradiction keeps both sources with unchanged ids/order, attaches `jev_conflict_with`, and appends exactly one bounded note to the teaching prompt; version/assumption differences never produce a conflict note |
 | D ClaimCitationAudit | `services/rag-api/tests/test_citation_audit_binding.py` + `test_jev_citation_evidence.py` + `apps/web/src/ui/citationSupport.test.ts` | a figure the claim asserts but the source never states is flagged in code with **zero** Jev calls; a shadow decision annotates the cards without altering or dropping any; an unauthorized citation is `REJECTED` with its reason; a real signal records `SUPPORTED`; an audit failure never loses the answer; the per-answer budget (6 cards) is enforced; the resolver proves cross-user/cross-course material is `unauthorized` on a real migrated DB; the shell marks only a real negative verdict |
-| Shell entry for the feedback module | `tests/e2e/ui-refresh.spec.ts` | the "报告问题" entry is reachable in the shipped shell |
+| Shell entry for the feedback module | **CORRECTED (round 79) — it is a real submission, and it is in the other suite** | `tests/e2e/jev-structured.spec.ts` → "the shipped shell can file a problem report without leaving the lesson": the shipped shell opens the 报告问题 dialog, sends its own `POST /api/feedback`, and the response carries a `feedback_…` report id. An earlier version of this row said `ui-refresh.spec.ts`; that suite only proves the entry is reachable through the help surface, which is a weaker claim than the one the module needs |
