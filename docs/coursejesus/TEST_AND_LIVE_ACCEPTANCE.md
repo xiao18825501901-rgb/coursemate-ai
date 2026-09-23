@@ -20,7 +20,7 @@ so the relevant numbers are re-stated here rather than left to the older table b
 | Web production build | **exit 0**, and the build now runs `scripts/scan_web_bundle_for_pat.mjs`, whose negative control (a planted `<input name="canvas_token" />`) fails the build | round 79, wired into `apps/web/package.json` |
 | Agent service tests | **92 passed / 12 files** | round 79 |
 | Browser journeys, both suites | **21/21 `ui-refresh` and 6/6 `jev-structured`, all passing on `47bc2e1`** in real Chrome against the three real services | `work/current-change/browser_ui_round79c.log` (2.4 m) and `browser_jev_round79c.log` (59.7 s) |
-| Browser journeys, Canvas screen | **2/2 pass** on the revised screen (every input is the school radio, the tutorial text, no credential field), including 390px and the dark theme | `work/current-change/browser_ui_canvas_round79b.log` |
+| Browser journeys, Canvas screen | **3/3 pass** on the revised screen: two entry points and the honest state, the 390px/dark-theme layout, and **the local bridge end to end** — the shipped page opens a session and shows the one-time code, the local tool (played by `request`) claims it and reports the courses it found, the page offers them with nothing pre-selected, and the user's choice is what the server records | `work/current-change/browser_ui_round80c.log` — 22/22 `ui-refresh` journeys pass on this revision |
 
 ## 1. Local gates, with the revision each one describes
 

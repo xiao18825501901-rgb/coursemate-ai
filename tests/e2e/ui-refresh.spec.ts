@@ -925,6 +925,94 @@ test("the Canvas import has two entry points and says so honestly when no school
   await expect(bannerDialog).toContainText("等待学校开通 Canvas 连接");
 });
 
+test("the local Canvas bridge runs from the shipped page to a selected course", async ({
+  page,
+  request,
+}) => {
+  // The only route that works while a school has no Developer Key: a short-lived session, a one-time
+  // code for the user's terminal, and the user choosing courses **here**. The local tool is played by
+  // `request`, which talks to the same backend with the same test identity — everything else is the
+  // shipped page and the real routes.
+  const api = "http://127.0.0.1:8100";
+  const auth = { Authorization: "Bearer test-session-token" };
+  const opened: string[] = [];
+  page.on("request", (r) => {
+    const url = new URL(r.url());
+    if (url.pathname.startsWith("/api/integrations/canvas/local-sessions")) opened.push(url.pathname);
+  });
+
+  await page.goto("/app");
+  await assertShellDocument(page);
+  await page.locator(".add-course-canvas-row").getByRole("button", { name: "从 Canvas 导入" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "从 Canvas 导入课程" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("等待学校开通 Canvas 连接");
+
+  // Choose the school and ask for a session. The page shows the code the user pastes into a terminal.
+  // The radio's accessible name is the label plus the origin, so the origin is what identifies it
+  // (the first version of this journey looked for the full display name and never found it).
+  await dialog.getByRole("radio", { name: /canvas\.cityu\.edu\.hk/ }).check();
+  await dialog.getByRole("button", { name: "用本地 Token 导入" }).click();
+  const code = dialog.locator(".canvas-import-code");
+  await expect(code).toBeVisible();
+  const command = (await code.innerText()).trim();
+  expect(command).toMatch(/--code\s+[A-Za-z0-9_-]{20,}/);
+  const oneTimeCode = command.split("--code")[1].trim();
+  expect(opened).toContain("/api/integrations/canvas/local-sessions");
+
+  // The page never asked for a token: the only field in this step is none at all.
+  expect(await dialog.locator("input").count()).toBe(0);
+
+  // The local tool claims the session and reports what it found on the user's own account.
+  const claim = await request.post(`${api}/api/integrations/canvas/local-sessions/claim`, {
+    headers: auth,
+    data: { code: oneTimeCode, canvas_user_id: "4242", canvas_display_name: "Student One" },
+  });
+  expect(claim.ok(), await claim.text()).toBeTruthy();
+  const sessionId = (await claim.json()).sessionId as string;
+
+  const discovery = await request.post(
+    `${api}/api/integrations/canvas/local-sessions/${sessionId}/discovery`,
+    {
+      headers: auth,
+      data: {
+        courses: [
+          {
+            canvas_course_id: "560",
+            name: "Problem Solve & Programming",
+            course_code: "CS2312",
+            term: "Semester B 2025_26",
+            enrollment_state: "active",
+            workflow_state: "available",
+            file_count: 3,
+          },
+        ],
+      },
+    },
+  );
+  expect(discovery.ok(), await discovery.text()).toBeTruthy();
+
+  // The page polls the session and offers what the tool found; nothing is selected by default.
+  await expect(dialog).toContainText("Problem Solve & Programming");
+  await expect(dialog).toContainText("CS2312");
+  const courseCheckbox = dialog.getByRole("checkbox").first();
+  await expect(courseCheckbox).not.toBeChecked();
+  await courseCheckbox.check();
+  await dialog.getByRole("button", { name: /开始导入/ }).click();
+
+  // The user's choice is what the server records — the local tool only ever reads it back.
+  await expect
+    .poll(async () => {
+      const status = await request.get(
+        `${api}/api/integrations/canvas/local-sessions/${sessionId}/selection`,
+        { headers: auth },
+      );
+      return (await status.json()).selectedCourseIds as string[];
+    }, { timeout: 20_000 })
+    .toEqual(["560"]);
+});
+
 test("the Canvas import screen fits a 390px viewport and both themes", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/app");
@@ -950,7 +1038,7 @@ test("the Canvas import screen fits a 390px viewport and both themes", async ({ 
   await link.click();
   const darkDialog = page.getByRole("dialog", { name: "从 Canvas 导入课程" });
   await expect(darkDialog).toBeVisible();
-  await expect(darkDialog).toContainText("学校连接尚未开通");
+  await expect(darkDialog).toContainText("等待学校开通 Canvas 连接");
   // The entry point keeps its own contrast in the dark theme (it is not left as dark text).
   await page.keyboard.press("Escape");
   const colour = await link.evaluate((node) => getComputedStyle(node).color);
