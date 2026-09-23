@@ -3,19 +3,19 @@
 How the Jev decision layer is measured: the judgment dataset, the calibration procedure, the
 A/B/C/D/E arms and the honesty rules that stop a plumbing run from being read as a quality result.
 
-**Ablation result: live A–E run done on the calibration split; the *comparison* is
-`NOT_INTERPRETABLE` and that is the harness's own verdict.** The Jev half of the ablation now runs
-against the real service (`typesafe-sdk==0.7.0`, live transport, 53 calls over the 47-sample
-calibration split), and each arm's absolute metrics against the labels are real numbers (§8). What
-is still missing is a **production/DeepSeek baseline predictor**, so arm A abstains on every sample
-and the harness refuses to read the difference as a quality claim
-(`reason: "placeholder baseline (no production predictor injected)"`). Nothing in this report is a
-claim that Jev beats DeepSeek; the per-arm numbers in §8 are what the live model actually scored,
-and the calibration thresholds remain untuned (`thresholds = UNSET_UNTIL_CALIBRATED_ON_LABELLED_DATA`).
+**Ablation result: the live comparison ran and is `INTERPRETABLE` — and it does not pass the
+quality gate, so nothing is promoted.** The Jev half of the ablation runs against the real service
+and the non-Jev half against live DeepSeek (§9): 53 Jev calls + 162 DeepSeek calls on the 47-sample
+calibration split, all answered. Against that real baseline, Jev improves citation support
+(0.667 → 0.833) and exercise choice (0.000 → 0.500), **regresses** span selection (1.000 → 0.750),
+`key_fact_retention` (1.000 → 0.000), `criterion_error` (0.000 → 0.333) and `corpus_quality_mae`
+(0.125 → 0.250), and ties on the rest. **Every definition therefore stays `shadow`**, and §9 records
+what has to be fixed and re-measured before the retrieval-rerank promotion the task lists first can
+be considered. Thresholds remain untuned
+(`thresholds = UNSET_UNTIL_CALIBRATED_ON_LABELLED_DATA`).
 
-The DeepSeek side of the earlier statement still holds for the *comparison*: no live DeepSeek
-baseline has been run in this harness. (The separate DeepSeek canary did run live — 10/10 roles —
-and that is reported in `docs/coursejesus/MODEL_SECRET_IMPORT_AND_LIVE_RESULTS.md`, not here.)
+The test split (67 samples) has **not** been run: thresholds are tuned on calibration, and the test
+set is looked at once, after they are frozen.
 
 ---
 
@@ -313,28 +313,67 @@ raw answer is recorded inside it next to the label it was compared with.
 Each arm improves exactly the metric its added definition owns, which is the nesting behaving as
 designed rather than a coincidence of one definition lifting everything.
 
-**What this is not.** The comparison verdict is `NOT_INTERPRETABLE`, with the harness's own reason:
-`placeholder baseline (no production predictor injected)`. Arm A abstains on every sample, so the
-gaps above are **not** "Jev beats DeepSeek" — they are "the definition answers correctly where
-nothing answered before". Reading them as lift over DeepSeek would be exactly the substitution the
-task forbids.
+**What this is not.** With no production baseline injected, the comparison verdict is
+`NOT_INTERPRETABLE` (the harness's own reason: `placeholder baseline (no production predictor
+injected)`), and arm A abstains on every sample. Those gaps are therefore **not** "Jev beats
+DeepSeek" — they are "the definition answers correctly where nothing answered before". §9 replaces
+that run with one that has a real baseline, and the conclusion changes materially.
 
-**Three honest limits of these numbers.**
+## 9. The comparison that matters: Jev against live DeepSeek (same split, 2026-09-24)
 
-1. **No live DeepSeek baseline predictor exists**, so arms A and B cannot yet produce a comparable
-   number. Wiring one is the next step; until then the A/B rows are abstention baselines.
-2. **`locator_accuracy = 0.000`, `corpus_quality_mae = 3.0`, `key_fact_retention = 0.000` are
-   abstention baselines too**, not failures: the calibration split carries no locator samples
-   (those are `source.select_span`/locator families in other splits), and `corpus.quality.v1` is an
-   ingestion-time definition that no A–E arm turns on. Arm B is empty for the same reason: the
-   calibration split has no `retrieval.support.v1` samples (all 58 are in train/test).
-3. **The continuous Score value is discretised by rounding to the nearest declared level** in the
-   predictor, and `noul` is binarised at 0.5. Both are the *comparison's* mapping, stated in the
-   predictor's docstring and recorded in each call, not calibrated boundaries. The measured
-   separation lives in the "Live evidence" section of `JEV_CALLSITE_MATRIX.md` (3.99 vs 0.0 on
-   `retrieval.support.v1`; 1.77–1.82 vs 0.95–1.05 on `corpus.quality.v1`; 2.0 vs 0.03 on
-   `feedback.severity.v1`).
+**What was added.** `app/evaluation/jev_deepseek_baseline.py` answers the non-Jev side of every arm
+with live DeepSeek — same question, same state, same allowed options, JSON-schema constrained,
+thinking disabled (the measured requirement on this model). An unusable answer is recorded as an
+**abstention**, never as a wrong answer, so the baseline is not handicapped. Wired into the CLI as
+`--deepseek-baseline`; the artefact records the baseline's provider, model and full call log.
 
-**What it takes to finish this measurement.** A production/DeepSeek baseline predictor, then the
-same run on the calibration split to fit thresholds, and one evaluation on the test split — after
-which the per-definition promotion decision in §14 of the task can be taken on evidence.
+**Run.** Calibration split (47 samples), `--transport live --allow-billable --deepseek-baseline`,
+arms A–E. **53 live Jev calls + 162 live DeepSeek calls, all 162 answered** (42,601 input + 1,196
+output tokens, p50 504 ms, p95 727 ms, max 1,063 ms). Evidence:
+`work/current-change/jev-ablation-live-baseline.json` (+`.log`).
+
+**Verdict: `INTERPRETABLE`.** And the result is not favourable to Jev:
+
+| metric | A — DeepSeek baseline | E — all Jev on | verdict |
+|---|---|---|---|
+| `citation_support_accuracy` | 0.667 | **0.833** | Jev better |
+| `unsupported_claim_rate` | 0.667 | **0.500** | Jev better |
+| `exercise_accuracy` | 0.000 | **0.500** | Jev better |
+| `span_selection_accuracy` | **1.000** | 0.750 | **Jev worse** |
+| `key_fact_retention` | **1.000** | 0.000 | **Jev worse** |
+| `criterion_error` | **0.000** | 0.333 | **Jev worse** |
+| `corpus_quality_mae` | **0.125** | 0.250 | **Jev worse** |
+| `context_compaction`, `intent_accuracy`, `pedagogy_accuracy`, `prerequisite_accuracy`, `coverage_confusion`, `mainline_recovery_rate` | ties | ties | no change |
+| `locator_accuracy`, `classification_accuracy`, `image_answer_accuracy`, `feedback_category_accuracy`, the six module metrics | 0.000 on both sides | 0.000 | not measurable on this split |
+
+**Cost effect, measured:** turning Jev on *reduces* DeepSeek calls — `deepseek_call_delta_vs_A` is
+−9 (C), −17 (D), −27 (E). The Jev-answered questions no longer need a DeepSeek answer.
+
+**What this decides.** §14 of the task allows promotion only on a real quality gate, and this gate
+does not pass: **no definition is non-inferior across the board**, and the two definitions whose arms
+own the regressions (`assessment.criterion_review.v1` on `criterion_error`,
+`coverage.item_support.v1` alongside it) are exactly the two the task says may only ever be
+advisory. So:
+
+* **every definition stays `shadow`**; nothing is promoted by this round;
+* `citation_support`/`span selection` (arm E) is the one place with a measurable gain, and even there
+  `span_selection_accuracy` regressed, so it is a candidate for a *targeted* fix rather than a
+  promotion;
+* the two regressions and the `key_fact_retention` swing (1.000 → 0.000) need investigating before
+  any promotion decision. The per-metric sample counts are **not** in this artefact, so how much of
+  each swing is real and how much is small-n is not yet known — stated rather than assumed.
+
+**Three honest limits of this comparison.**
+
+1. **47 samples.** It is the calibration split, which is the right set for tuning, and it is small:
+   one sample moves a metric by ~2–7 points. No threshold is fitted here, deliberately — fitting on
+   this run and then reporting the same run as evidence would be the leakage the task forbids.
+2. **`locator_accuracy`, `corpus_quality_mae` and the module metrics are 0.000 for both sides**
+   because the calibration split carries no samples for them (or no arm turns them on), not because
+   both sides failed.
+3. **The baseline is one model at one setting** (`deepseek-flash`, thinking disabled). A different
+   DeepSeek setting is a different baseline and would have to be re-measured.
+
+**Next step, and it is a small one:** investigate the two regressions and the `key_fact_retention`
+swing with per-metric sample counts in the artefact, fix what is a defect, then re-run — and only
+then consider the retrieval-rerank promotion the task lists as the first priority.

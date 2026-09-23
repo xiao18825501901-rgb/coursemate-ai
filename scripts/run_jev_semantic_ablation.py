@@ -29,6 +29,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 RAG_SERVICE = ROOT / "services" / "rag-api"
@@ -73,6 +74,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--transport", choices=["fake", "live"], default="fake")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--allow-billable", action="store_true")
+    parser.add_argument(
+        "--deepseek-baseline",
+        action="store_true",
+        help=(
+            "Answer the non-Jev side of every arm with live DeepSeek, so the comparison measures "
+            "Jev against a real baseline instead of against abstention. Requires a live run."
+        ),
+    )
+    parser.add_argument("--deepseek-model", default="deepseek-flash")
+    parser.add_argument("--deepseek-base-url", default="https://api.deepseek.com")
+    parser.add_argument("--deepseek-timeout", type=float, default=60.0)
     return parser.parse_args()
 
 
@@ -92,6 +104,39 @@ def _live_preflight(args: argparse.Namespace) -> None:
             f"environment (missing {', '.join(missing)}). No billable call was made."
         )
         raise SystemExit(2)
+
+
+def _deepseek_baseline(args: argparse.Namespace) -> tuple[Any, list[dict]]:
+    """Build the live DeepSeek baseline predictor, or (None, []) when it was not requested."""
+    if not args.deepseek_baseline:
+        return None, []
+    import httpx
+
+    from app.evaluation.jev_deepseek_baseline import deepseek_baseline_predictor
+    from app.evaluation.provider_safety import validate_deepseek_base_url
+
+    api_key = os.environ.get("DEEPSEEK_API_KEY") or ""
+    base_url = validate_deepseek_base_url(args.deepseek_base_url)
+    client = httpx.Client(
+        timeout=httpx.Timeout(args.deepseek_timeout, connect=12), follow_redirects=False
+    )
+
+    def transport(endpoint: str, payload: dict) -> dict:
+        response = client.post(
+            endpoint, headers={"Authorization": "Bearer " + api_key}, json=payload
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f"PROVIDER_HTTP_{response.status_code}")
+        return response.json()
+
+    calls: list[dict] = []
+    predictor = deepseek_baseline_predictor(
+        transport,
+        base_url=base_url,
+        model=args.deepseek_model,
+        calls=calls,
+    )
+    return predictor, calls
 
 
 def _summarize_arm(summary: dict) -> None:
@@ -136,11 +181,17 @@ def main() -> int:
     if args.transport == "live":
         _live_preflight(args)
 
+    dataset = None
     try:
         dataset = load_jev_dataset(args.dataset)
     except ValueError as error:
         print(f"Ablation preflight failed: {error}")
         return 2
+
+    baseline_predictor = None
+    baseline_calls: list[dict] = []
+    if args.transport == "live":
+        baseline_predictor, baseline_calls = _deepseek_baseline(args)
 
     if args.arm == "all":
         arms = list(ARM_NAMES)
@@ -170,6 +221,7 @@ def main() -> int:
                 arm,
                 transport=transport,
                 jev_predictor=live_jev_predictor(transport, calls=live_calls),
+                deepseek_predictor=baseline_predictor,
             )
             summary["live_calls"] = live_calls
             summary["live_call_count"] = len(live_calls)
@@ -192,12 +244,28 @@ def main() -> int:
         )
         return 3
 
+    if args.transport == "fake" and args.deepseek_baseline:
+        print("Refusing: --deepseek-baseline only applies to a live run.")
+        return 2
     payload = {
         "transport": args.transport,
         "transport_used": effective_transports[0],
         "dataset_status": dataset.get("dataset_status"),
         "dataset_path": str(args.dataset),
         "allow_billable": args.allow_billable,
+        "baseline": {
+            "injected": baseline_predictor is not None,
+            "provider": "deepseek" if baseline_predictor is not None else None,
+            "model": args.deepseek_model if baseline_predictor is not None else None,
+            "calls": len(baseline_calls),
+            "call_log": baseline_calls,
+            "note": (
+                ""
+                if baseline_predictor is not None
+                else "no production predictor injected: arm A abstains, so the comparison verdict "
+                "is NOT_INTERPRETABLE by the harness's own rule"
+            ),
+        },
         "comparison": comparison,
         "arms": arm_summaries,
     }
