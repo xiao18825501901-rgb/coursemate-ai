@@ -60,6 +60,15 @@ Clerk user's name) kept and each keep recorded with its reason — at **1548 pas
 0 failed** in 2391.45 s (`work/current-change/full_run_round73.log`, exit 0; no new tests, which is
 why the count is unchanged). It also added the missing `docs/coursejesus/DATA_MIGRATION_AND_ROLLBACK.md`.
 
+**`8938034`** then made a new official course record the campus label and the verification gate that
+migration 025's header states — after measuring that the old values were inconsistent with that policy
+without being an access-control hole, since every gate ORs the flag with the label. It reached
+**1556 passed / 3 skipped / 0 failed** in 1578.52 s (`work/current-change/full_run_round75.log`,
+exit 0; the +8 are the new suite), `mypy app` still 1004 errors / 32 files. **Its first attempt was
+gated and failed 54 tests** (`full_run_round74.log`: `table courses has no column named display_type`,
+because those columns arrive with the V3 schema), which is how the non-V3 regression was found; the
+gate was re-run after the fix rather than the failing run being re-interpreted.
+
 **Audited revision.** branch `fix/codex-dsh-audit-20260919`, audited at HEAD
 `7e2e4db7cf99d85f92a82c9f97d72729fdaa5162` ("Record round 30's final revision and correct three
 stale deliverable claims", 2026-09-22 13:31 +08:00), working tree clean, **76 commits ahead of
