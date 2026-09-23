@@ -1,5 +1,10 @@
 # CAMPUS SOURCE AND PUBLICATION MATRIX (task C1)
 
+**State of this document.** Round 44 reconnaissance, extended in round 71 with the ingestion plan.
+Sections 1–8 are the scan's findings; §9–§11 record what the planner decided per file, what was
+ingested, and what is still waiting on the owner. Nothing here has been published: the scan reads
+files, the planner decides, and the one ingested course is **private**.
+
 **State of this document.** This is the round-44 result of the *read-only* scan required by task
 C1 — "读取本机 `D:\Canvas`、`D:\Canvas-DG`，核验后通过正式入库和课程发布流程扩充校园课程".
 Everything below is measured on this machine by `scripts/scan_campus_inventory.py`. Nothing was
@@ -210,3 +215,55 @@ each row. Nothing else is redacted.
    for the DG root; the affected rows say so in `notes`.
 6. **Nothing here is published, uploaded, migrated or cost anything.** The next step (C3) needs
    the rights decision in §5 and the real `IngestionService` path, not a fixture.
+
+## 9. What the planner decided per file (round 71, measured)
+
+`scripts/plan_campus_ingestion.py` applies the publication policy to the **full** inventory and
+writes a plan plus one consolidated review list. Run on the scan output of round 44:
+
+| Decision | Files | Meaning |
+|---|---|---|
+| `INGESTABLE` | **1479** | academic teaching material a loader can read; goes into a **private** campus course |
+| `DOWNLOAD_ONLY` | **186** | academic material whose format no loader reads (video, archives, data files); recorded, never counted as learnable material |
+| `BLOCKED` | **254** | never ingested: 21 personal/restricted, 170 information/announcement, 13 training, plus exam/quiz/marking documents and shadow-library copies |
+| Total | **1919** | 34 offerings; **28** have at least one ingestable file |
+
+Two rules are worth stating because the inventory shows what a naive version does:
+
+* **The assessment rule is word-boundary, not substring.** A substring rule blocks
+  `lec04-26-CSS-simple-example.html` (`example` contains `exam`) and every
+  `Tutorial_N_solutions.pdf`. The rule that ships blocks a final paper, a midterm, a marking
+  scheme, an explicit exam or quiz and the Chinese exam terms, and deliberately leaves tutorial
+  solutions as teaching material. It flags rather than misses: `Topic03_P12_final_field.pptx`
+  (a Java-keyword slide) is flagged, which costs the owner one line and is the accepted bias.
+* **A copy whose name names a shadow library is not "rights unclear".** Course 628's second file is
+  a book ending `(z-library.sk, 1lib.sk, z-lib.sk)`. The first version of the policy ingested it
+  into a draft course; that was wrong, and the file is now `BLOCKED` with
+  `UNLICENSED_SOURCE`.
+
+## 10. The first verification course (round 71, measured)
+
+Course **628** (`���ʵ��`, CityU (DG), Summer Term 2026) was ingested through the real
+`IngestionService` into a **private** campus course �� the pack's "verify with one small course
+first":
+
+| Fact | Value |
+|---|---|
+| Target course | `campus-https-cityu-dg-instructure-com-628-3728d6d2` |
+| Course state after ingesting | `visibility=private`, `publication_status=private`, `published_at=NULL` |
+| Files | 2 �� the report-format `.docx` **INDEXED**, the shadow-library book **BLOCKED** |
+| Documents / chunks | 1 / 2 |
+| Review rows | 2 (`NEEDS_REVIEW` / `BLOCKED_NEEDS_OWNER_DECISION`) |
+| Published | **No.** Nothing was published, and this path cannot publish |
+
+A second run of the same course recognised identical content and reported `SKIPPED_IDENTICAL`
+rather than creating a duplicate document. A course that is already `pending` or `published` is
+refused instead of written into, because migration 019 freezes a release under review.
+
+## 11. What is still waiting on the owner
+
+`docs/coursejesus/CAMPUS_RIGHTS_REVIEW_LIST.csv` is the single list: **1715 rows**, one per file
+whose rights nobody has verified, each with its course, classification, decision, reason, review
+status and `publication_basis`. It is written from the **committed** inventory, so no personal
+filename enters Git. The three groups in ��5 are on it; publishing any of them needs one decision
+from the owner, and until then every campus course stays private.

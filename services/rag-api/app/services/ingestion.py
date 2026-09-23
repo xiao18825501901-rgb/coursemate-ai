@@ -19,6 +19,7 @@ from app.models import (
     Document,
     DocumentPage,
     IngestionJob,
+    PublicationStatus,
     UploadAccepted,
 )
 from app.rag.chunking import chunk_sections
@@ -95,12 +96,33 @@ class IngestionService:
         *,
         owner_user_id: str | None = None,
         is_admin: bool = True,
+        publication_status: PublicationStatus | None = None,
     ) -> Course:
+        """Create a course, optionally with an explicit publication state.
+
+        An administrator course is published as it is created — that is the existing behaviour and
+        stays the default. Campus material needs the opposite: it is created **not published**, so
+        that nothing reaches a student before a reviewer has decided its rights, and so that the
+        decision is one transaction rather than a create-then-demote pair that a crash could split.
+        A non-administrator cannot use this to publish anything.
+        """
         course_type = "official" if is_admin else "user"
         if self.settings.v3_enabled and payload.id.startswith("ws-"):
             raise ApiError(422, "RESERVED_COURSE_ID", "This course ID namespace is reserved.")
-        visibility = "public" if is_admin else "private"
-        publication_status = "published" if is_admin else "private"
+        if (
+            publication_status is not None
+            and not is_admin
+            and publication_status != PublicationStatus.PRIVATE
+        ):
+            raise ApiError(
+                403, "PUBLICATION_NOT_ALLOWED", "Only an administrator can publish a course."
+            )
+        if publication_status is None:
+            publication_status = (
+                PublicationStatus.PUBLISHED if is_admin else PublicationStatus.PRIVATE
+            )
+        # A course that is not published is not visible to anyone but its owner and admins.
+        visibility = "public" if publication_status == PublicationStatus.PUBLISHED else "private"
         owner = None if is_admin else owner_user_id
         try:
             with self.database.connect() as connection:
@@ -142,8 +164,8 @@ class IngestionService:
                         owner,
                         course_type,
                         visibility,
-                        publication_status,
-                        publication_status,
+                        publication_status.value,
+                        publication_status.value,
                     ),
                 )
                 row = connection.execute(

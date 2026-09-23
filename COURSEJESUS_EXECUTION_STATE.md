@@ -39,8 +39,8 @@ uncommitted work, and the running cwd was not renamed.
 | `CANVAS_PRIVATE_IMPORT` | **LOOP IMPLEMENTED AND TESTED (mock-verified), no HTTP route yet** | `app/canvas/job.py` (states, legal transitions, frozen-selection fingerprint, per-file records, earned verdict), `migrations/031_canvas_import.sql` + `app/canvas/store.py` (idempotent creation, lease-based claiming, per-file checkpoints) and now `app/canvas/worker.py`: claim → re-check the selection against the student's own live enrolments → list files → download → verify → ingest through the real `IngestionService` → checkpoint → earned terminal state. The private course is created by the real course service (`course_type='user'`, private, owner-scoped, quota-respecting) and its id is stored in `target_course_id`. **148 Canvas tests pass** in 60.29 s (26 of them new worker tests, which run the real adapter, the real migrated schema and the real ingestion path — only the school's HTTP surface is simulated). Two worker defects were found by those tests and fixed: the `NEEDS_REAUTH` branch released the lease instead of writing the verdict, and a cancel result reported the state constant instead of the outcome. Still missing: the HTTP routes, the wizard entries, and any real school call |
 | `CANVAS_READ_ONLY_AND_ISOLATION` | **ENFORCED IN CODE (mock-verified)** | GET-only single request path; exact-pattern endpoint allow-list (`/assignments`, `/submissions`, `/messages` and a generic `/read_api` are refused); token only in the `Authorization` header; per-hop download validation with a token-free client; two adapters demonstrably do not share tokens or state. Proven by mutations that remove each guard |
 | `CAMPUS_LIBRARY_SCAN` | **DONE (read-only)** | `scripts/scan_campus_inventory.py` + `docs/coursejesus/LOCAL_CAMPUS_INVENTORY.csv` + `docs/coursejesus/CAMPUS_SOURCE_AND_PUBLICATION_MATRIX.md`: 1919 manifest rows reconciled against disk with 0 missing, 0 size mismatches, 0 unlisted files, 8.26 GiB, SHA-256 for every file |
-| `CAMPUS_FILES_INGESTED` | **NOT_STARTED** | Nothing uploaded or ingested; `publishable_now` is 0 by construction |
-| `CAMPUS_CONTENT_PUBLISHED` | **NOT_STARTED** | Requires the rights decision for 21 restricted + 13 training files and the real `IngestionService` path |
+| `CAMPUS_FILES_INGESTED` | **ONE COURSE DONE (measured), nothing published** | `scripts/plan_campus_ingestion.py` decided all 1919 files (1479 `INGESTABLE`, 186 `DOWNLOAD_ONLY`, 254 `BLOCKED`; 28 of 34 offerings have ingestable material) and `scripts/ingest_campus_course.py` ingested the first verification course — 社会实践 (`628`, CityU (DG)) — through the real `IngestionService` into a **private** campus course: one document with 2 chunks, the shadow-library book in that course now `BLOCKED`, and `visibility=private`, `publication_status=private`, `published_at=NULL` afterwards. Migration 032 records one row per file with its decision, reason and rights metadata. 22 tests; a re-run reports `SKIPPED_IDENTICAL` instead of duplicating a document; a `pending`/`published` course is refused rather than written into |
+| `CAMPUS_CONTENT_PUBLISHED` | **NOT_STARTED (and cannot start here)** | 1715 rows are listed in `docs/coursejesus/CAMPUS_RIGHTS_REVIEW_LIST.csv` waiting for one owner decision; every campus course stays private until then. Publication needs the rights declaration, not code |
 | `EXISTING_COURSE_PRESERVATION` | **OK (untouched)** | CS3481 (`630`) and GE2324 (`629`) found locally as Summer Term 2026 offerings; production `course_id`, trees, history, grades and bindings untouched; no re-download |
 | `DEEPSEEK_JEV_EXISTING_SCOPE` | **UNCHANGED** | The three appended tasks did not modify the DeepSeek/Jev work; its gate is still the 1314-pass run above |
 | `BACKUP_RESTORE` | **NOT_STARTED for this work** | Production backup/restore belongs to the release sequence, after the local work |
@@ -126,26 +126,36 @@ localhost screenshot or a `health=200`.
    no request parameter can steer it. One honest gap found and recorded rather than half-fixed: the
    shell's forms had no associated labels, and only the create-course form (the one the fallback
    opens) has been corrected.
+14. **Campus ingestion, decided and verified (round 71)**: `app/campus_ingestion.py` +
+   `scripts/plan_campus_ingestion.py` decide all 1919 inventory files (1479 ingestable, 186
+   download-only, 254 blocked) and write one review list; `scripts/ingest_campus_course.py` +
+   migration 032 ingest the first offering — 社会实践 (`628`) — through the real `IngestionService`
+   into a **private** campus course (1 document, 2 chunks, nothing published). Running the planner on
+   the real inventory is what found the three defects a unit test could not: the policy expected the
+   disk status `OK` where the scanner writes `PRESENT`, so it blocked all 1919 files; the assessment
+   rule's `\b` boundaries missed `Final2023.pdf` and `cs3334_final_problem_set.pdf`; and the plan
+   file was too lossy to re-derive its own decisions. Two more came from running the ingestion: the
+   campus course must be created `private` — `pending` is a *frozen* release under migration 019, so
+   the import's own insert aborts — and a copy whose filename names a shadow library
+   (`(z-library.sk, 1lib.sk, z-lib.sk)`) is not merely "rights unclear" and is now blocked.
 
 ## 3. Next steps, in order
 
-**Resume point (round 70).** Task B's Canvas path is now complete end to end except for a real
-school: three of its four status codes carry evidence (`CANVAS_SKILL_REUSE`,
-`CANVAS_OAUTH_PER_INSTITUTION`, `CANVAS_PRIVATE_IMPORT`, `CANVAS_LOCAL_UPLOAD_FALLBACK`), and what
-remains before a release is (a) the brand remainder in §3 item 1, (b) campus ingestion (task C3),
-which is the only large local stream still untouched, and (c) the owner-supplied conditions in §4.
+**Resume point (round 71).** Task C's reading half is now executable end to end: the scan exists,
+the planner decides every file, and one offering has been ingested into a private campus course.
+What remains on this stream is **scale and the owner's decision**: running the same two commands
+for the remaining 27 offerings with material (28 in total, ~1479 files) once the owner has decided
+rights for the 1715 listed rows, and wiring the campus display/verification path so a published
+campus course appears as `display_type='campus'`.
 
-The next locally executable increment is **campus ingestion preparation**: the inventory exists
-(`LOCAL_CAMPUS_INVENTORY.csv`, 1919 rows reconciled, `publishable_now = 0`), so the work is to
-classify one small academic course end to end through the real `IngestionService` and the normal
-admin draft/review/publish flow, and to produce the review list for the 40 files waiting on a
-rights decision. That needs no school key and no owner decision for the *reading* half.
+The other two open items are unchanged: the brand remainder in §3 item 1 (ops/scripts, templates,
+and the backend identity strings), and the wizard's remaining steps for a real school, which wait on
+the school Developer Key. Everything else in §3 is executable locally without an owner decision.
 
-Two constraints the remaining UI work has to respect, both already enforced server-side: no
-personal-access-token input exists anywhere (the only authorisation is the school's OAuth flow), and
-a school that is not `connectable` must show the fallback rather than a button that fails on click.
-One finding from round 70 is still open: the shell's forms other than the create-course form have no
-programmatically associated labels.
+Two constraints the remaining work has to respect, both enforced in code: no school connection
+exists without the school's own OAuth flow (there is no token input anywhere), and no campus
+material is published without a recorded rights decision — the material records cannot advance
+their own review status.
 
 The rules the worker obeys are the ones the pack fixed, and they are now tested rather than
 described: no retry on `403`, back off on `429` by `Retry-After` and retry that file, leave other
