@@ -29,7 +29,6 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
-import sqlite3
 import sys
 from typing import Any
 
@@ -113,6 +112,19 @@ def main(argv: list[str] | None = None) -> int:
     if not courses:
         print(f"offering {args.course!r} is not in the plan", file=sys.stderr)
         return 2
+    if len(courses) > 1:
+        # Two scan roots exist (`D:\Canvas` and `D:\Canvas-DG`) and the plan records each offering's
+        # own `sourceRoot`, because the same relative path exists under both — so acting on the
+        # wrong one would ingest another institution's file. Today's plan has no course id under two
+        # institutions, so this cannot happen yet; taking the first match would make it happen
+        # *silently* the day one appears, which is the failure this refuses instead.
+        origins = ", ".join(sorted({str(item.get("institutionOrigin")) for item in courses}))
+        print(
+            f"offering {args.course!r} appears under more than one institution ({origins}); "
+            "pass --institution to say which one, because the files come from a different root",
+            file=sys.stderr,
+        )
+        return 2
     course = courses[0]
 
     # The plan records each course's scan root, because the same relative path exists under both
@@ -122,6 +134,29 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "the plan does not record its source root; write the plan with "
             "scripts/plan_campus_ingestion.py against the scan output first",
+            file=sys.stderr,
+        )
+        return 2
+
+    # Everything that can refuse the plan is checked **before** anything is written, so a refused
+    # run leaves no half-created course behind: the staleness check used to sit after the course was
+    # created, which is how the CLI's own test found an empty private course left by a plan it had
+    # just refused.
+    rebuilt_rows = [row_from_plan(entry, course, source_root) for entry in course["files"]]
+    rows = [row for row, _decision in rebuilt_rows]
+    rebuilt = plan(rows)
+    course_plan = rebuilt[(str(course["institutionOrigin"]), str(course["courseId"]))]
+    # The policy is re-derived from the recorded facts; if it now disagrees with the plan's verdict,
+    # the plan is stale and acting on it would ingest something the policy refuses.
+    stale = [
+        row.relative_path
+        for row, decision in rebuilt_rows
+        if course_plan.decisions[row.key].status != decision.status
+    ]
+    if stale:
+        print(
+            f"the plan is stale for {len(stale)} file(s); re-run plan_campus_ingestion.py "
+            f"(first: {stale[0]})",
             file=sys.stderr,
         )
         return 2
@@ -154,8 +189,8 @@ def main(argv: list[str] | None = None) -> int:
                     id=target,
                     name=str(course["courseCode"] or course["courseName"] or target)[:120],
                     description=(
-                        f"由 {course['institutionOrigin']} 的 Canvas 课程 {course['courseId']} 导入；"
-                        "资料权限尚未核定，课程保持私有。"
+                        f"由 {course['institutionOrigin']} 的 Canvas 课程 "
+                        f"{course['courseId']} 导入；资料权限尚未核定，课程保持私有。"
                     ),
                 ),
                 is_admin=True,
@@ -167,24 +202,6 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"the campus course {target} is {existing['publication_status']}; "
                 "new material needs a new revision, not an import into a frozen release",
-                file=sys.stderr,
-            )
-            return 2
-        rebuilt_rows = [row_from_plan(entry, course, source_root) for entry in course["files"]]
-        rows = [row for row, _decision in rebuilt_rows]
-        rebuilt = plan(rows)
-        course_plan = rebuilt[(str(course["institutionOrigin"]), str(course["courseId"]))]
-        # The policy is re-derived from the recorded facts; if it now disagrees with the plan's
-        # verdict, the plan is stale and acting on it would ingest something the policy refuses.
-        stale = [
-            row.relative_path
-            for row, decision in rebuilt_rows
-            if course_plan.decisions[row.key].status != decision.status
-        ]
-        if stale:
-            print(
-                f"the plan is stale for {len(stale)} file(s); re-run plan_campus_ingestion.py "
-                f"(first: {stale[0]})",
                 file=sys.stderr,
             )
             return 2
