@@ -80,6 +80,7 @@ from .public_events import public_event
 from .retrieval import context_for, file_rows, get_course
 from .steps import answer_steps_parse, solution_steps
 from .stream_lifecycle import monitored_stream
+from app.brand import BRAND
 
 User=Annotated[dict,Depends(current_user)]
 TERMINAL={'completed','failed','cancelled'}
@@ -439,7 +440,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         for task in list(jobs.values()): task.cancel()
         if jobs: await asyncio.gather(*jobs.values(),return_exceptions=True)
 
-    app=FastAPI(title='CourseMate UI Update API',version='1.1.0',lifespan=lifespan)
+    app=FastAPI(title=f'{BRAND.name} UI Update API',version='1.1.0',lifespan=lifespan)
     app.state.cfg,app.state.db,app.state.provider,app.state.domain=cfg,db,model,domain
     app.state.jobs=jobs
     app.state.subject_resolver=subject_resolver

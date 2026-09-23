@@ -45,6 +45,7 @@ from app.services.overlay_publication import OverlayPublicationService
 from app.services.publication import PublicationService
 from app.services.qa import QaService
 from app.services.teaching_profiles import TeachingProfileService
+from app.brand import BRAND
 
 LOGGER = logging.getLogger(__name__)
 
@@ -117,7 +118,7 @@ def create_app(
                 else MissingAnswerProvider()
             )
 
-    application = FastAPI(title="CourseMate RAG API", version="0.1.0")
+    application = FastAPI(title=f"{BRAND.name} RAG API", version="0.1.0")
     application.state.ingestion_service = IngestionService(
         database,
         resolved_settings,

@@ -27,7 +27,7 @@ uncommitted work, and the running cwd was not renamed.
 
 | Code | Status | Evidence / reason |
 |---|---|---|
-| `BRAND_UI` | **IN_PROGRESS (web + agent done, guarded)** | One brand source `apps/web/src/brand.ts`; both HTML entries and the PWA manifest are generated from it (the manifest did not exist before); 17 front-end files and the agent service's prompt/log now render the new name; `apps/web/tests/brand.test.ts` (8 tests) fails if any source file outside an explicit remainder list prints the old name. Verified on the **built bundle**: `dist/index.html` → `<title>CourseJesus</title>`, `dist/ui.html` → `<title>CourseJesus 学习空间</title>`, `manifest.webmanifest` → `CourseJesus`, no placeholder leftovers, and the only `CourseMate` strings left in the bundle are the compatibility identifiers. **Real Chrome: 19/19 ui-refresh journeys pass** on that build. Still old, and listed: `ops/` + scripts (37), `docs/` (history by decision), and the **backend identity strings** — the two FastAPI titles, the Chinese teacher prompts in `app/cm_update/provider.py`, the default display name `CourseMate 同学`, two DB-guard messages, and the tutor prompt pinned by `tests/test_tutor_prompt.py` (prompt and test must change together). Notification/e-mail templates do not exist yet |
+| `BRAND_UI` | **DONE (web, agent and backend), guarded** | One brand source per runtime: `apps/web/src/brand.ts` for the web app and `app/brand.py` for the backend. Both HTML entries and the PWA manifest are generated from the front-end source (the manifest did not exist before); 17 front-end files and the agent service's prompt/log render the new name; the backend's user-visible identity now reads it too — the tutor persona a student's answer comes from (`app/rag/prompt.py`), the Chinese teacher instruction, the default display name (`CourseJesus 同学` in four use sites), both FastAPI titles, the developer-facing guard messages and the canary's persona line. `apps/web/tests/brand.test.ts` (8 tests) and `services/rag-api/tests/test_brand_identity.py` (**11 tests**, round 72) fail when an old visible name reappears, and the backend guard is **structural** (it reads string literals from the AST, so a docstring or comment cannot mask a regression) and mutation-proven 3/3. The compatibility identifiers are recorded in one place and the guard refuses an unrecorded one — it found `coursemate_internal_token` on its first run. Verified on the **built bundle**: `dist/index.html` → `<title>CourseJesus</title>`, `dist/ui.html` → `<title>CourseJesus 学习空间</title>`, `manifest.webmanifest` → `CourseJesus`; real Chrome: 21/21 ui-refresh journeys. Still old, and listed: `ops/` + scripts and `docs/` (history by decision) |
 | `LOGO_ASSETS` | **PENDING_ASSET** | No artwork supplied. The interim mark is the repository's existing `favicon.svg`; `BRAND.logoStatus` says `PENDING_ASSET` in code rather than implying a final logo. The manifest had to be created, not edited |
 | `REPOSITORY_RENAME` | **NOT_STARTED** (target identified) | `git remote -v` → `https://github.com/xiao18825501901-rgb/coursemate-ai.git`. Renaming to `coursejesus` is a platform action; see `OWNER_ACTIONS_ONLY_COURSEJESUS.md` |
 | `DOMAIN_DNS_TLS` | **RECON_DONE (read-only)** | `coursejesus.com` is delegated to **Aliyun HiChina DNS** (`dns17/dns18.hichina.com`) with **no** `www` or apex records yet; the current `qqttai.com` zone is on **Cloudflare**, apex → Netlify, `www` CNAME → `coursemate-ai-qqtt.netlify.app` (the site to reuse), `rag`/`agent` → `47.114.34.175`. Front end 200 and www→apex 301 live; the API host resets the TLS handshake from this machine and answers `403 Server: Beaver` (Aliyun WAF) on HTTP. Details and the honest limits: `docs/coursejesus/DOMAIN_AND_CLERK_MIGRATION.md` |
@@ -138,6 +138,19 @@ localhost screenshot or a `health=200`.
    campus course must be created `private` — `pending` is a *frozen* release under migration 019, so
    the import's own insert aborts — and a copy whose filename names a shadow library
    (`(z-library.sk, 1lib.sk, z-lib.sk)`) is not merely "rights unclear" and is now blocked.
+15. **Backend brand identity (round 72)**: `app/brand.py` is the backend's brand and URL source,
+   replacing the literals the state file had listed as remaining — both FastAPI titles, the Chinese
+   teacher instruction, the default display name in four use sites, three developer-facing guard
+   messages, the canary's persona line, and the tutor persona a student's answer comes from (prompt
+   and its pinned test moved together, as the pack requires). `tests/test_brand_identity.py` guards
+   it **structurally** — it reads string literals from the AST, so a docstring or a comment cannot
+   mask a regression — and refuses an old-name identifier nobody recorded; it found
+   `coursemate_internal_token` on its first run. Mutation-proven 3/3, and running the same mutation
+   against the UI-extension suites showed the *runtime* half of the compatibility rule is already
+   protected there: renaming `cmui_users` at a use site fails them with 6 failures / 16 errors. One
+   judgment call is recorded rather than hidden: `coursemate-dev-verification-secret` and
+   `coursemate-ui-update` keep their spelling because they are a credential default and a status
+   contract, not visible names.
 
 ## 3. Next steps, in order
 

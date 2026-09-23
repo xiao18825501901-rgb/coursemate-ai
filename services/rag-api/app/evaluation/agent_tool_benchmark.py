@@ -5,9 +5,10 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+from app.brand import BRAND
 
 MAX_AGENT_RESPONSE_ROUNDS = 3
-AGENT_INSTRUCTIONS = """You are CourseMate's study planning assistant.
+AGENT_INSTRUCTIONS = f"""You are {BRAND.name}'s study planning assistant.
 Use the provided task tools whenever the user asks to create, search, update, complete,
 or delete tasks.
 Never invent a task ID. Search first when a user describes a task without an exact ID.

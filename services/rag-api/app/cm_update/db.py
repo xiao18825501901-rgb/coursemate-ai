@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime, timezone
 from uuid import uuid4
+from app.brand import BRAND
 
 
 def now() -> str:
@@ -295,7 +296,7 @@ class Database:
         with self.connect() as c:
             tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if tables.intersection({'courses','chunks','tasks','schema_migrations'}):
-                raise ValueError('Refusing to initialize UI database over an existing CourseMate domain database')
+                raise ValueError(f'Refusing to initialize UI database over an existing {BRAND.name} domain database')
             if 'cmui_meta' in tables:
                 current=c.execute("SELECT value FROM cmui_meta WHERE key='schema_version'").fetchone()
                 if current and int(current[0])>SCHEMA_VERSION: raise ValueError('Newer UI database schema detected; do not downgrade')

@@ -1,5 +1,11 @@
 # BRAND REPLACEMENT MATRIX (task A1)
 
+**State of this document.** Round-44 scan, updated in round 72. Class A is now **done on both
+runtimes**: the web app reads `apps/web/src/brand.ts` and the backend reads `app/brand.py`, and each
+has a guard that fails when a visible old name comes back. What remains of Class A is the
+operations material (`ops/`, scripts) and the historical documents, which stay old by decision
+(§3). The measured scan result below is round 44's and is kept as the record of what was found.
+
 **State of this document.** Round-44 scan, **updated in round 45 when the visible rename actually
 happened for the web app and the agent service**. The scan method and the class split below are
 unchanged; §2 and §5 now record what was converted, and §6 records what is honestly still old.
@@ -66,6 +72,20 @@ saved user data, which the pack forbids in the same sentence that requires the v
 | Git commit messages, tags, release records | repository history | GitHub rename keeps them |
 | Local source root `D:\CourseMate_COMPLETE_ARCHIVE_20260918\...` | the working tree must not move mid-flight | pack §5: no mid-round rename of the live cwd |
 
+| `coursemate-dev-verification-secret` (the dev fallback verification secret) | a credential *default*, not a brand string: renaming it invalidates locally issued verification tokens, and production requires `CMUI_VERIFICATION_SECRET` | recorded in `app/brand.py`, class B |
+| `coursemate-ui-update` (a value in the UI service's status payload) | a machine value a client may key on | recorded in `app/brand.py`, class B |
+
+### Class B is enforced, not only documented (round 72)
+
+`app/brand.py` records these identifiers in `COMPATIBILITY_IDENTIFIERS`, and
+`services/rag-api/tests/test_brand_identity.py` fails when an old-name identifier appears that
+nobody recorded — that is how a careless rename slips in. Its first run found
+`coursemate_internal_token`, the parameter name FastAPI derives the internal-token header from.
+
+The **runtime** half is protected by the UI-extension suites: renaming `cmui_users` at a single use
+site makes them fail with 6 failures and 16 errors
+(`work/current-change/check-cmui-rename-detection.py`). A static check cannot prove that, which is
+why this document does not claim it.
 ## 4. Class C — decide per case (ambiguous)
 
 | Surface | Current | Options |

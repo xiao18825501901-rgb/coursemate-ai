@@ -9,6 +9,7 @@ import json
 import math
 
 from .db import uid
+from app.brand import BRAND
 
 
 class ClerkDirectoryClient:
@@ -67,7 +68,7 @@ def sync_directory(db, records, *, complete=False, snapshot_at_ms=None):
             if old and old['updated_ms']>=updated:
                 continue
             created = datetime.fromtimestamp(row.get('created_at',updated)/1000,timezone.utc).isoformat(timespec='milliseconds')
-            name = (' '.join(str(row.get(k) or '') for k in ('first_name','last_name')).strip() or row.get('username') or 'CourseMate 同学')[:120]
+            name = (' '.join(str(row.get(k) or '') for k in ('first_name','last_name')).strip() or row.get('username') or BRAND.default_display_name())[:120]
             handle = str(row.get('username') or 'student-'+hashlib.sha256(subject.encode()).hexdigest()[:12])[:80]
             collision = c.execute('SELECT id FROM cmui_users WHERE handle=? AND id<>?',(handle,subject)).fetchone()
             if collision: handle='student-'+hashlib.sha256(subject.encode()).hexdigest()[:20]
@@ -192,7 +193,7 @@ def apply_grandfather_snapshot(db, records, *, cutoff_ms, complete):
             for subject in result['candidates']:
                 handle = 'student-' + hashlib.sha256(subject.encode()).hexdigest()[:20]
                 c.execute('INSERT OR IGNORE INTO cmui_users(id,name,handle,created_at) VALUES(?,?,?,?)',
-                          (subject, 'CourseMate 同学', handle, at))
+                          (subject, BRAND.default_display_name(), handle, at))
                 c.execute("INSERT INTO cmui_verification(owner,verified,method,verified_at,boundary_notes,updated_at) VALUES(?,1,'grandfathered',?,?,?) ON CONFLICT(owner) DO UPDATE SET verified=1,method='grandfathered',verified_at=excluded.verified_at,boundary_notes=excluded.boundary_notes,updated_at=excluded.updated_at WHERE cmui_verification.verified=0",
                           (subject, at, 'protected registered snapshot ' + result['evidence']['snapshot_sha256'], at))
             c.execute('UPDATE cmui_meta SET value=? WHERE key=?', (json.dumps(receipt), _GRANDFATHER_RECEIPT))

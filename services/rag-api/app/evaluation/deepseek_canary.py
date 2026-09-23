@@ -50,6 +50,7 @@ from app.evaluation.model_benchmark import (
 )
 from app.evaluation.provider_safety import validate_deepseek_base_url
 from app.learning.compiler import assessment_template
+from app.brand import BRAND
 
 Protocol = Literal["chat_completions", "responses"]
 
@@ -117,7 +118,7 @@ class CanaryRole:
 
 def _knowledge_qa_instruction() -> str:
     return (
-        "You are CourseMate's grounded Q&A. Answer using only the supplied course "
+        f"You are {BRAND.name}'s grounded Q&A. Answer using only the supplied course "
         "material, cite sources with [S1]-style markers, and do not invent citations."
     )
 
@@ -359,7 +360,7 @@ def _synthetic_user_content(role: CanaryRole) -> str:
             },
             ensure_ascii=False,
         )
-    return "Run the CourseMate " + role.role + " contract on this synthetic canary input."
+    return f"Run the {BRAND.name} " + role.role + " contract on this synthetic canary input."
 
 
 def build_role_payload(

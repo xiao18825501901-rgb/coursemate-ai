@@ -20,6 +20,7 @@ from typing import Any, cast
 
 from .db import Database
 from .directory import ClerkDirectoryClient, apply_grandfather_snapshot, grandfather_candidates
+from app.brand import BRAND
 
 SNAPSHOT_VERSION = 1
 _RECORD_KEYS = {"id", "created_at", "updated_at", "banned", "deleted", "locked"}
@@ -163,7 +164,7 @@ def _database_status(path: Path) -> dict[str, object]:
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
         if "cmui_meta" not in tables:
-            raise ValueError("Target is not a CourseMate UI database")
+            raise ValueError(f"Target is not a {BRAND.name} UI database")
         values = {
             row["key"]: row["value"]
             for row in connection.execute(
@@ -267,7 +268,7 @@ def apply_snapshot(
         raise ValueError("Frozen candidate-set hash does not match the approved candidate-set hash")
     database_status = preview["database"]
     if not isinstance(database_status, dict):
-        raise ValueError("Existing CourseMate UI database status is required")
+        raise ValueError(f"Existing {BRAND.name} UI database status is required")
     if database_status["receipt_status"] == "COMPLETED" and (
         database_status["receipt_cutoff_ms"] != cutoff_ms
         or database_status["receipt_evidence_sha256"]

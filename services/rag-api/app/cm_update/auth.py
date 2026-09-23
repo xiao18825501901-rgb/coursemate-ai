@@ -3,6 +3,7 @@ import time
 import jwt
 from fastapi import Request, HTTPException
 from .db import now
+from app.brand import BRAND
 
 
 def ensure_user(db, user_id: str, auto_verify: bool = False, auto_qualify: bool = True):
@@ -11,7 +12,7 @@ def ensure_user(db, user_id: str, auto_verify: bool = False, auto_qualify: bool 
     if not row:
         handle = 'student-' + hashlib.sha256(user_id.encode()).hexdigest()[:12]
         with db.connect(True) as c:
-            c.execute('INSERT OR IGNORE INTO cmui_users(id,name,handle,created_at) VALUES (?,?,?,?)', (user_id,'CourseMate 同学',handle,now()))
+            c.execute('INSERT OR IGNORE INTO cmui_users(id,name,handle,created_at) VALUES (?,?,?,?)', (user_id,BRAND.default_display_name(),handle,now()))
         row = db.one('SELECT * FROM cmui_users WHERE id=?',(user_id,))
         created = True
     if auto_verify:

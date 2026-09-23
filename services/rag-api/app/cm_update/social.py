@@ -20,6 +20,7 @@ from typing import Any, Callable
 
 from .db import Database, now, uid
 from . import templates
+from app.brand import BRAND
 
 
 # ------------------------------------------------------------------- verification
@@ -190,7 +191,7 @@ def grandfather_existing_users(db: Database, candidates: list[str]) -> None:
                 raise ValueError('Invalid protected snapshot subject')
             handle = 'student-' + hashlib.sha256(owner.encode()).hexdigest()[:12]
             c.execute('INSERT OR IGNORE INTO cmui_users(id,name,handle,created_at) VALUES(?,?,?,?)',
-                      (owner, 'CourseMate 同学', handle, boundary_at))
+                      (owner, BRAND.default_display_name(), handle, boundary_at))
             c.execute("INSERT INTO cmui_verification(owner,verified,method,verified_at,boundary_notes,updated_at) VALUES(?,1,'grandfathered',?,?,?) ON CONFLICT(owner) DO UPDATE SET verified=1,method='grandfathered',verified_at=excluded.verified_at,boundary_notes=excluded.boundary_notes,updated_at=excluded.updated_at WHERE cmui_verification.verified=0",
                       (owner, boundary_at, 'protected pre-enablement snapshot', boundary_at))
         c.execute("INSERT INTO cmui_meta(key,value) VALUES('verification_grandfather_boundary',?)",
