@@ -840,3 +840,93 @@ test("each learning pane persists its own accessible reasoning strength and subm
   await page.keyboard.press("Escape");
   await page.screenshot({ path: testInfo.outputPath("independent-reasoning-strengths.png"), fullPage: true });
 });
+
+test("the Canvas import has two entry points and says so honestly when no school is open", async ({
+  page,
+}) => {
+  // The deployment has no school Developer Key, so this is the state a real user sees today.
+  // The import screen must show that state and the local-upload fallback rather than a button
+  // that fails on click — and it must never ask for a personal access token.
+  const canvasRequests: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/api/integrations/canvas")) canvasRequests.push(url.pathname);
+  });
+
+  await page.goto("/app");
+  await assertShellDocument(page);
+
+  // Entry point 1: the last row of the dashboard's dashed create card.
+  const dashboardRow = page.locator(".add-course-canvas-row");
+  await expect(dashboardRow).toBeVisible();
+  const dashboardLink = dashboardRow.getByRole("button", { name: "从 Canvas 导入" });
+  await expect(dashboardLink).toBeVisible();
+  // A real control, not a decorated div: focusable, and activated from the keyboard.
+  await dashboardLink.focus();
+  await expect(dashboardLink).toBeFocused();
+  await page.keyboard.press("Enter");
+
+  const dialog = page.getByRole("dialog", { name: "从 Canvas 导入课程" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("学校连接尚未开通");
+  await expect(dialog).toContainText("Developer Key");
+  await expect(dialog).toContainText("CityU");
+  // The client asked the server, rather than guessing.
+  expect(canvasRequests).toContain("/api/integrations/canvas/institutions");
+  expect(canvasRequests).toContain("/api/integrations/canvas/connections");
+  // There is no credential field of any kind: the school's own page is the only way in.
+  expect(await dialog.locator("input").count()).toBe(0);
+
+  // The fallback is the real local-upload path: it opens the existing create-course form.
+  await dialog.getByRole("button", { name: /上传本地资料/ }).click();
+  const createDialog = page.getByRole("dialog", { name: "创建你的课程" });
+  await expect(createDialog).toBeVisible();
+  await expect(createDialog.getByLabel("课程名称")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(createDialog).toHaveCount(0);
+
+  // Entry point 2: the create area at the top of All Courses.
+  await page.evaluate(() => {
+    window.location.hash = "#/courses";
+  });
+  await expect(page.getByRole("heading", { level: 1, name: "所有课程" })).toBeVisible();
+  const bannerLink = page.locator(".canvas-import-link-banner");
+  await expect(bannerLink).toBeVisible();
+  await bannerLink.click();
+  const bannerDialog = page.getByRole("dialog", { name: "从 Canvas 导入课程" });
+  await expect(bannerDialog).toBeVisible();
+  await expect(bannerDialog).toContainText("学校连接尚未开通");
+});
+
+test("the Canvas import screen fits a 390px viewport and both themes", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/app");
+
+  const link = page.locator(".add-course-canvas-row").getByRole("button", { name: "从 Canvas 导入" });
+  await expect(link).toBeVisible();
+  await link.click();
+  const dialog = page.getByRole("dialog", { name: "从 Canvas 导入课程" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("学校连接尚未开通");
+
+  // The dialog stays inside the viewport instead of overflowing it.
+  const box = await dialog.boundingBox();
+  expect(box).not.toBeNull();
+  expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(391);
+  const fallback = dialog.getByRole("button", { name: /上传本地资料/ });
+  await expect(fallback).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("canvas-import-390.png"), fullPage: true });
+
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "切换至深色模式" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await link.click();
+  const darkDialog = page.getByRole("dialog", { name: "从 Canvas 导入课程" });
+  await expect(darkDialog).toBeVisible();
+  await expect(darkDialog).toContainText("学校连接尚未开通");
+  // The entry point keeps its own contrast in the dark theme (it is not left as dark text).
+  await page.keyboard.press("Escape");
+  const colour = await link.evaluate((node) => getComputedStyle(node).color);
+  expect(colour).not.toBe("rgb(0, 0, 0)");
+  await page.screenshot({ path: testInfo.outputPath("canvas-import-dark-390.png"), fullPage: true });
+});

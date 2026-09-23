@@ -68,11 +68,13 @@ LOGGER = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/integrations/canvas", tags=["canvas"])
 
-# Where the browser lands after the callback, whatever happened. A fixed relative path is the
-# point: nothing in the query string can redirect a user off the product.
-IMPORT_PAGE_PATH = "/courses?canvas=connected"
-IMPORT_DENIED_PATH = "/courses?canvas=denied"
-IMPORT_FAILED_PATH = "/courses?canvas=failed"
+# Where the browser lands after the callback, whatever happened. The path is configuration
+# (`CANVAS_RETURN_PATH`) and never a request parameter: nothing in the query string can steer a
+# user off the product. The outcome is appended as a query the UI reads on load.
+IMPORT_STATUS_PARAM = "canvas"
+CONNECTED = "connected"
+DENIED = "denied"
+FAILED = "failed"
 
 CANVAS_UNAVAILABLE_CODES = {
     EXPIRED_TOKEN: (status.HTTP_401_UNAUTHORIZED, "CANVAS_NEEDS_REAUTH"),
@@ -160,6 +162,18 @@ def _tables_ready(request: Request) -> bool:
 def _require_tables(request: Request) -> None:
     if not _tables_ready(request):
         raise _canvas_unavailable("SCHEMA_NOT_READY")
+
+
+def return_target(request: Request, outcome: str) -> str:
+    """The configured return path with the outcome appended, fragment preserved.
+
+    The UI is hash-routed, so the configured path may be `/ui-extension/#/courses`: the query
+    goes before the fragment (`#` is not part of a query string) and the fragment is kept.
+    """
+    configured = _settings(request).canvas_return_path or "/"
+    path, separator, fragment = configured.partition("#")
+    joiner = "&" if "?" in path else "?"
+    return f"{path}{joiner}{IMPORT_STATUS_PARAM}={outcome}" + (f"#{fragment}" if separator else "")
 
 
 def _adapter(
@@ -329,7 +343,9 @@ def start_authorisation(
     if client is None:
         raise _canvas_unavailable("NO_CREDENTIAL_KEY")
     try:
-        url = client.start(user.user_id, institution, return_path=IMPORT_PAGE_PATH)
+        url = client.start(
+            user.user_id, institution, return_path=_settings(request).canvas_return_path
+        )
     except UnknownInstitutionError as error:
         raise ApiError(
             status.HTTP_404_NOT_FOUND, "UNKNOWN_INSTITUTION", "That school is not supported."
@@ -357,7 +373,9 @@ def oauth_callback(
     """
     client = _oauth(request)
     if client is None:
-        return RedirectResponse(IMPORT_FAILED_PATH, status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(
+            return_target(request, FAILED), status_code=status.HTTP_303_SEE_OTHER
+        )
     params = {
         key: value
         for key, value in (
@@ -372,12 +390,15 @@ def oauth_callback(
         completed = client.complete(params)
     except CanvasReadError as read_error:
         LOGGER.warning("canvas callback could not exchange the code: %s", read_error.category)
-        return RedirectResponse(IMPORT_FAILED_PATH, status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(
+            return_target(request, FAILED), status_code=status.HTTP_303_SEE_OTHER
+        )
     except OAuthError as oauth_error:
         # A denial is a normal outcome the user chose; everything else failed. The school's own
         # message is logged, never echoed into a redirect target.
         LOGGER.info("canvas callback refused: %s", oauth_error.reason)
-        target = IMPORT_DENIED_PATH if oauth_error.reason == "ACCESS_DENIED" else IMPORT_FAILED_PATH
+        outcome = DENIED if oauth_error.reason == "ACCESS_DENIED" else FAILED
+        target = return_target(request, outcome)
         return RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
 
     canvas_user_id, canvas_name = _identity(
@@ -402,9 +423,13 @@ def oauth_callback(
             # A different Canvas account cannot take over an existing connection. The user has
             # to disconnect first, which is a decision rather than a silent rebind.
             LOGGER.warning("canvas callback refused a rebind: %s", replacement_error.reason)
-            return RedirectResponse(IMPORT_FAILED_PATH, status_code=status.HTTP_303_SEE_OTHER)
+            return RedirectResponse(
+                return_target(request, FAILED), status_code=status.HTTP_303_SEE_OTHER
+            )
         repository.upsert(bound, connection_id=bound.connection_id)
-    return RedirectResponse(IMPORT_PAGE_PATH, status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(
+        return_target(request, CONNECTED), status_code=status.HTTP_303_SEE_OTHER
+    )
 
 
 def _identity(

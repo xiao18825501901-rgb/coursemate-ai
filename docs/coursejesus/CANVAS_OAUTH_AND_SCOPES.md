@@ -194,7 +194,46 @@ How the token is kept, which is the part the pack is strictest about:
 * The import job stores a `connection_id` only — the migration has no token column at all — so a
   database dump cannot contain a credential, and a restored database alone cannot reach a school.
 
-## 10. Honest limits
+## 10. The wizard, and the state a real user sees today (round 70)
+
+The two entry points the pack names now exist in the shell
+(`apps/web/src/ui/App.jsx`), and both are real `<button>` elements with an underline, reachable by
+Tab and activated with Enter:
+
+| Entry point | Where | Element |
+|---|---|---|
+| Dashboard | the last row of the dashed create card (`控制面板`) | `.add-course-canvas-row` → "从 Canvas 导入" |
+| All Courses | the create area at the top of `所有课程` (`course-banner`) | `.canvas-import-link-banner` → "从 Canvas 导入" |
+
+Both open the same wizard (`apps/web/src/ui/CanvasImport.jsx`), which is driven entirely by the
+server's own answers through `apps/web/src/ui/canvasImport.js`:
+
+* `GET /institutions` decides the headline. With no Developer Key — the state this deployment is
+  actually in — the screen reads **"学校连接尚未开通"**, lists each school with the server's reason,
+  and offers **上传本地资料**, which opens the existing create-course form. It never shows a connect
+  button that would fail on click, and it has **no credential field of any kind**: the only way to a
+  school is that school's own authorisation page, opened as a full-page navigation to
+  `/api/integrations/canvas/connect?institution=<key>`.
+* When a school *is* connectable, the wizard connects, lists the student's own readable courses for
+  selection, posts the frozen selection, and then reports the job the server owns — including
+  `COMPLETED_WITH_WARNINGS` (with the reason: pictures and scans are stored but do not count as
+  learnable material) and `NEEDS_REAUTH` (reconnect and the unfinished files continue). It never
+  claims an import is done on its own authority, and saving the connection is an explicit checkbox.
+* The callback lands on the path in `CANVAS_RETURN_PATH` (default `/ui-extension/#/courses`, the
+  deployed shell's real URL) with `?canvas=connected|denied|failed` appended **before** the
+  fragment, because the shell is hash-routed.
+
+Verified in real Chrome: two new journeys in `tests/e2e/ui-refresh.spec.ts` (21/21 pass) — one
+walks both entry points by keyboard and checks the not-open state, the fallback and the absence of
+any credential input; the other checks the screen at 390px and in the dark theme. Nine unit tests
+pin the client (URLs, methods, the token only in a header, the server's error code surfacing).
+
+Finding while building it: the shell's forms had **no programmatically associated labels**
+(`htmlFor` appeared nowhere in `src/ui`). The create-course form — the one the fallback opens — now
+associates its four fields; the rest of the shell still needs the same treatment, which is recorded
+here rather than quietly half-fixed.
+
+## 11. Honest limits
 
 * Everything in §2 is documentation-verified, not exercised against a live Canvas instance; no
   authorisation code has ever been exchanged here, and the route tests drive a simulated school.
@@ -211,6 +250,9 @@ How the token is kept, which is the part the pack is strictest about:
   without the private-course model therefore has no canvas tables, and the routes report
   `SCHEMA_NOT_READY` instead of failing with a missing-table error — the capability is genuinely
   absent there, since the import writes a private course.
+* The connect/select/progress steps of the wizard are **not** exercised in a browser, because no
+  school is connectable on this deployment; they are covered by the route tests and by the client's
+  unit tests, and by the simulated-school suite. A journey that pretended otherwise would be
+  claiming an authorisation that never happened.
 * Nothing here changes the Canvas status: it remains `NOT_CONFIGURED` until a school key exists and
-  a real student completes a real authorisation. The UI entries and the local-upload fallback are
-  the next increment and do not exist yet.
+  a real student completes a real authorisation.

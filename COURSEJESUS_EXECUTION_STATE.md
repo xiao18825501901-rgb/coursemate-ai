@@ -35,7 +35,7 @@ uncommitted work, and the running cwd was not renamed.
 | `OLD_DOMAIN_COMPATIBILITY` | **NOT_STARTED** | 30-day compatibility window is the plan; nothing configured |
 | `CANVAS_SKILL_REUSE` | **IMPLEMENTED (mock-verified)** | `services/rag-api/app/canvas/` — stateless `CanvasReadAdapter`, institution registry, `http_safety`; `UPSTREAM_NOTICE.md` records the MIT licence, baseline commit `f05ffae8` **and the owner's `runtime.py` patch**. 31 tests + **8/8 mutations caught**. Not yet verified against a school (no key exists) |
 | `CANVAS_OAUTH_PER_INSTITUTION` | **ROUTES AND ENCRYPTED STORAGE IMPLEMENTED (mock-verified)** | `app/canvas/oauth.py` (documented authorisation URL with the frozen `redirect_uri`; one-time, short-lived `state` bound to (subject, institution, nonce), consumed on success **and** failure; forged/expired/replayed states refused before any outbound request; denial reported as `ACCESS_DENIED`; `POST login/oauth2/token` exchange and refresh with `expires_in`; serialised per-connection refresh; `DELETE` revocation that clears the local credential even when the school endpoint fails — 22 tests) and now `app/api/canvas.py` + `app/canvas/credentials.py`: nine routes under `/api/integrations/canvas` (institutions, connections, connect, callback, courses, imports create/status/cancel, disconnect), with **39 route tests** running the real `create_app` wiring against a simulated school and **13 credential tests**. The token is stored with AES-256-GCM under `CANVAS_CREDENTIAL_KEY`, bound to version + key id + connection id, in files outside the database; **with no key the routes report `NO_CREDENTIAL_KEY` instead of storing anything in the clear**. 6 of 6 route/credential guards proven by mutation (`mutation-check-canvas-routes.py`). Still missing: the two UI entries, the local-upload fallback screen, a shared state store for multi-worker, and any real school key |
-| `CANVAS_LOCAL_UPLOAD_FALLBACK` | **NOT_STARTED (the state it falls back from now exists)** | Becomes the real path while no institution Developer Key exists. `GET /institutions` now reports per school why it cannot be connected (`NO_DEVELOPER_KEY`, `NO_CREDENTIAL_KEY`, `SCHEMA_NOT_READY`), which is what the fallback screen renders; the screen itself and the two "从 Canvas 导入" entries are the next increment |
+| `CANVAS_LOCAL_UPLOAD_FALLBACK` | **SCREEN AND FALLBACK DONE (browser-verified)** | Both entry points exist as real underlined buttons (dashboard dashed card's last row, all-courses create area) and open one wizard. With no Developer Key — this deployment's actual state — the screen reads "学校连接尚未开通", lists each school with the server's reason, and offers 上传本地资料, which opens the existing create-course form; there is **no credential input of any kind**. Verified in real Chrome by two new journeys (21/21 pass), including 390px and the dark theme, and by 9 client unit tests. The connect/select/progress steps remain covered by the route tests and the simulated school, not by a browser, because no school is connectable here |
 | `CANVAS_PRIVATE_IMPORT` | **LOOP IMPLEMENTED AND TESTED (mock-verified), no HTTP route yet** | `app/canvas/job.py` (states, legal transitions, frozen-selection fingerprint, per-file records, earned verdict), `migrations/031_canvas_import.sql` + `app/canvas/store.py` (idempotent creation, lease-based claiming, per-file checkpoints) and now `app/canvas/worker.py`: claim → re-check the selection against the student's own live enrolments → list files → download → verify → ingest through the real `IngestionService` → checkpoint → earned terminal state. The private course is created by the real course service (`course_type='user'`, private, owner-scoped, quota-respecting) and its id is stored in `target_course_id`. **148 Canvas tests pass** in 60.29 s (26 of them new worker tests, which run the real adapter, the real migrated schema and the real ingestion path — only the school's HTTP surface is simulated). Two worker defects were found by those tests and fixed: the `NEEDS_REAUTH` branch released the lease instead of writing the verdict, and a cancel result reported the state constant instead of the outcome. Still missing: the HTTP routes, the wizard entries, and any real school call |
 | `CANVAS_READ_ONLY_AND_ISOLATION` | **ENFORCED IN CODE (mock-verified)** | GET-only single request path; exact-pattern endpoint allow-list (`/assignments`, `/submissions`, `/messages` and a generic `/read_api` are refused); token only in the `Authorization` header; per-hop download validation with a token-free client; two adapters demonstrably do not share tokens or state. Proven by mutations that remove each guard |
 | `CAMPUS_LIBRARY_SCAN` | **DONE (read-only)** | `scripts/scan_campus_inventory.py` + `docs/coursejesus/LOCAL_CAMPUS_INVENTORY.csv` + `docs/coursejesus/CAMPUS_SOURCE_AND_PUBLICATION_MATRIX.md`: 1919 manifest rows reconciled against disk with 0 missing, 0 size mismatches, 0 unlisted files, 8.26 GiB, SHA-256 for every file |
@@ -114,20 +114,38 @@ localhost screenshot or a `health=200`.
    caught), and reviewing the credential store for that run exposed a claim in its own docstring
    that was false — a copied record *did* open for another connection — which is now a check with a
    test behind it.
+13. **The Canvas wizard and its fallback (round 70)**: both entry points the pack names (dashboard
+   dashed card's last row, all-courses create area) now open one wizard driven entirely by the
+   server's answers, and the screen a real user sees today — no Developer Key — says
+   "学校连接尚未开通", gives each school's reason, and offers the local-upload path. **No credential
+   input exists anywhere.** Verified in real Chrome (21/21 ui-refresh journeys, the two new ones
+   covering both entry points by keyboard, the fallback, 390px and the dark theme) and by 9 client
+   unit tests. Building it also forced a server fix: the post-callback redirect pointed at a path
+   the hash-routed shell does not serve, so the target is now the configured `CANVAS_RETURN_PATH`
+   with the outcome appended *before* the fragment — two tests pin that it is configuration and that
+   no request parameter can steer it. One honest gap found and recorded rather than half-fixed: the
+   shell's forms had no associated labels, and only the create-course form (the one the fallback
+   opens) has been corrected.
 
 ## 3. Next steps, in order
 
-**Resume point (round 69).** What is left of task B is the **wizard UI**: the two underlined
-"从 Canvas 导入" entry points (the dashboard dashed create card's last row and the all-courses top
-create area), the "school connection is not open yet" state rendered from
-`GET /api/integrations/canvas/institutions`, the course-selection screen from
-`GET /api/integrations/canvas/courses`, the job progress view, and the local-upload fallback. The
-server side is complete enough for all of it: nine routes exist, a selection becomes a queued job,
-and the worker (round 68) imports it into a real private course.
+**Resume point (round 70).** Task B's Canvas path is now complete end to end except for a real
+school: three of its four status codes carry evidence (`CANVAS_SKILL_REUSE`,
+`CANVAS_OAUTH_PER_INSTITUTION`, `CANVAS_PRIVATE_IMPORT`, `CANVAS_LOCAL_UPLOAD_FALLBACK`), and what
+remains before a release is (a) the brand remainder in §3 item 1, (b) campus ingestion (task C3),
+which is the only large local stream still untouched, and (c) the owner-supplied conditions in §4.
 
-Two constraints the UI work has to respect, both already enforced server-side: no personal-access-token
-input exists anywhere (the only authorisation is the school's OAuth flow), and a school that is not
-`connectable` must show the fallback rather than a button that fails on click.
+The next locally executable increment is **campus ingestion preparation**: the inventory exists
+(`LOCAL_CAMPUS_INVENTORY.csv`, 1919 rows reconciled, `publishable_now = 0`), so the work is to
+classify one small academic course end to end through the real `IngestionService` and the normal
+admin draft/review/publish flow, and to produce the review list for the 40 files waiting on a
+rights decision. That needs no school key and no owner decision for the *reading* half.
+
+Two constraints the remaining UI work has to respect, both already enforced server-side: no
+personal-access-token input exists anywhere (the only authorisation is the school's OAuth flow), and
+a school that is not `connectable` must show the fallback rather than a button that fails on click.
+One finding from round 70 is still open: the shell's forms other than the create-course form have no
+programmatically associated labels.
 
 The rules the worker obeys are the ones the pack fixed, and they are now tested rather than
 described: no retry on `403`, back off on `429` by `Retry-After` and retry that file, leave other

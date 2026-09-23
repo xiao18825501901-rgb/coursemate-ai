@@ -142,6 +142,7 @@ def build(
     *,
     credential_key: str | None = None,
     v3_enabled: bool = True,
+    return_path: str | None = None,
 ) -> Harness:
     settings = Settings(
         database_path=tmp_path / "rag.sqlite3",
@@ -153,6 +154,7 @@ def build(
         v3_enabled=v3_enabled,
         canvas_credential_dir=tmp_path / "canvas-credentials",
         canvas_credential_key=credential_key if credential_key is not None else generate_key(),
+        canvas_return_path=return_path if return_path is not None else "/ui-extension/#/courses",
     )
     app = create_app(settings=settings)
     transport = httpx.MockTransport(school.handler)
@@ -207,7 +209,7 @@ def authorise(harness: Harness, *, institution: str = "cityu", code: str = "abc1
         follow_redirects=False,
     )
     assert response.status_code == 303, response.text
-    assert response.headers["location"] == "/courses?canvas=connected"
+    assert response.headers["location"] == "/ui-extension/?canvas=connected#/courses"
     return harness.connection_id()
 
 
@@ -285,6 +287,63 @@ def test_an_unknown_school_is_refused(tmp_path, keys) -> None:
     assert response.json()["error"]["code"] == "UNKNOWN_INSTITUTION"
 
 
+def test_the_return_target_is_configuration_and_not_a_request_parameter(tmp_path, keys) -> None:
+    """The product decides where a user lands; a query string must not be able to steer it.
+
+    The UI is hash-routed, so the configured path carries a fragment and the outcome query has to
+    go before it — which is exactly the sort of detail that would otherwise be discovered as a
+    404 in production.
+    """
+    harness = build(tmp_path, School(), return_path="/app#/courses")
+    state = harness.start_state()
+    response = harness.client.get(
+        f"/api/integrations/canvas/oauth/callback?code=abc&state={state}"
+        "&return_url=https://evil.example.com/steal",
+        follow_redirects=False,
+    )
+    assert response.headers["location"] == "/app?canvas=connected#/courses"
+
+    # A configured path with no fragment is used as-is, and one that already carries a query
+    # keeps it.
+    plain = build(tmp_path / "plain", School(), return_path="/courses")
+    state = plain.start_state()
+    assert (
+        plain.client.get(
+            f"/api/integrations/canvas/oauth/callback?code=abc&state={state}",
+            follow_redirects=False,
+        ).headers["location"]
+        == "/courses?canvas=connected"
+    )
+    queried = build(tmp_path / "queried", School(), return_path="/app?from=canvas#/courses")
+    state = queried.start_state()
+    assert (
+        queried.client.get(
+            f"/api/integrations/canvas/oauth/callback?code=abc&state={state}",
+            follow_redirects=False,
+        ).headers["location"]
+        == "/app?from=canvas&canvas=connected#/courses"
+    )
+
+
+def test_every_callback_outcome_uses_the_configured_return_path(tmp_path, keys) -> None:
+    harness = build(tmp_path, School(token_status=400), return_path="/app#/courses")
+    state = harness.start_state()
+    failed = harness.client.get(
+        f"/api/integrations/canvas/oauth/callback?code=abc&state={state}", follow_redirects=False
+    )
+    denied_state = harness.start_state()
+    denied = harness.client.get(
+        f"/api/integrations/canvas/oauth/callback?error=access_denied&state={denied_state}",
+        follow_redirects=False,
+    )
+    forged = harness.client.get(
+        "/api/integrations/canvas/oauth/callback?code=abc&state=forged", follow_redirects=False
+    )
+    assert failed.headers["location"] == "/app?canvas=failed#/courses"
+    assert denied.headers["location"] == "/app?canvas=denied#/courses"
+    assert forged.headers["location"] == "/app?canvas=failed#/courses"
+
+
 def test_a_wired_client_without_a_credential_store_is_treated_as_unconfigured(
     tmp_path, keys
 ) -> None:
@@ -311,7 +370,7 @@ def test_a_wired_client_without_a_credential_store_is_treated_as_unconfigured(
         "/api/integrations/canvas/oauth/callback?code=abc&state=whatever",
         follow_redirects=False,
     )
-    assert callback.headers["location"] == "/courses?canvas=failed"
+    assert callback.headers["location"] == "/ui-extension/?canvas=failed#/courses"
     assert harness.school.token_payloads == []
 
 
@@ -362,7 +421,7 @@ def test_a_callback_with_a_state_we_never_issued_is_refused(tmp_path, keys) -> N
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/courses?canvas=failed"
+    assert response.headers["location"] == "/ui-extension/?canvas=failed#/courses"
     assert harness.school.token_payloads == [], "no code may be exchanged for a forged state"
     assert (
         harness.client.get("/api/integrations/canvas/connections", headers=AUTH).json()[
@@ -383,8 +442,8 @@ def test_a_state_cannot_be_replayed(tmp_path, keys) -> None:
         f"/api/integrations/canvas/oauth/callback?code=abc&state={state}", follow_redirects=False
     )
 
-    assert first.headers["location"] == "/courses?canvas=connected"
-    assert second.headers["location"] == "/courses?canvas=failed"
+    assert first.headers["location"] == "/ui-extension/?canvas=connected#/courses"
+    assert second.headers["location"] == "/ui-extension/?canvas=failed#/courses"
     assert len(harness.school.token_payloads) == 1
     assert (
         len(
@@ -406,7 +465,7 @@ def test_a_denied_authorisation_is_reported_as_denied_not_as_a_failure(tmp_path,
         follow_redirects=False,
     )
 
-    assert response.headers["location"] == "/courses?canvas=denied"
+    assert response.headers["location"] == "/ui-extension/?canvas=denied#/courses"
     assert harness.school.token_payloads == []
 
 
@@ -421,7 +480,7 @@ def test_a_successful_callback_stores_an_encrypted_credential_and_no_token_in_th
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/courses?canvas=connected"
+    assert response.headers["location"] == "/ui-extension/?canvas=connected#/courses"
     assert TOKEN not in response.text and TOKEN not in json.dumps(dict(response.headers))
     # The code was exchanged for the registered callback and the school's own client id.
     assert harness.school.token_payloads == [
@@ -482,7 +541,7 @@ def test_a_callback_for_a_different_canvas_account_does_not_replace_the_connecti
         f"/api/integrations/canvas/oauth/callback?code=second&state={state}", follow_redirects=False
     )
 
-    assert response.headers["location"] == "/courses?canvas=failed"
+    assert response.headers["location"] == "/ui-extension/?canvas=failed#/courses"
     connections = harness.client.get("/api/integrations/canvas/connections", headers=AUTH).json()[
         "connections"
     ]
@@ -501,7 +560,7 @@ def test_a_token_endpoint_failure_is_reported_without_echoing_the_school_message
         f"/api/integrations/canvas/oauth/callback?code=abc&state={state}", follow_redirects=False
     )
 
-    assert response.headers["location"] == "/courses?canvas=failed"
+    assert response.headers["location"] == "/ui-extension/?canvas=failed#/courses"
     assert "invalid_grant" not in response.headers["location"]
     assert (
         harness.client.get("/api/integrations/canvas/connections", headers=AUTH).json()[

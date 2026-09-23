@@ -51,9 +51,7 @@ class Settings(BaseSettings):
     v3_daily_operations: int = Field(default=30, ge=1, le=500)
     v3_daily_model_calls_per_user: int = Field(default=60, ge=1, le=1_000)
     v3_daily_model_calls_per_user_course: int = Field(default=60, ge=1, le=1_000)
-    v3_problem_image_max_bytes: int = Field(
-        default=10 * 1024 * 1024, ge=1_024, le=20 * 1024 * 1024
-    )
+    v3_problem_image_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1_024, le=20 * 1024 * 1024)
     v3_preview_max_bytes: int = Field(default=2 * 1024 * 1024, ge=1_024, le=20 * 1024 * 1024)
     v3_preview_max_text_chars: int = Field(default=100_000, ge=1_000, le=1_000_000)
     v3_preview_max_csv_rows: int = Field(default=200, ge=1, le=5_000)
@@ -105,6 +103,15 @@ class Settings(BaseSettings):
     canvas_credential_dir: Path = Field(
         default=Path("../../data/canvas-credentials"),
         validation_alias=AliasChoices("CANVAS_CREDENTIAL_DIR"),
+    )
+    # Where the browser lands after the school's callback. It is configuration rather than a
+    # request parameter on purpose: the product decides the return target once, and no query
+    # string can steer a user elsewhere. The path before the fragment may contain a query
+    # (`?canvas=connected` is appended to it); the fragment is kept, because the UI is
+    # hash-routed.
+    canvas_return_path: str = Field(
+        default="/ui-extension/#/courses",
+        validation_alias=AliasChoices("CANVAS_RETURN_PATH"),
     )
 
     @model_validator(mode="after")

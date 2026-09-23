@@ -131,3 +131,34 @@
 .node-popover .start-assessment{color:var(--accent,#aa2059);font-weight:600}
 .assessment-question header small{display:block}
 @media(max-width:800px){.assessment-topbar{height:48px;padding:0 12px}.assessment-body{padding:14px 14px 20px}.assessment-composer{padding:10px 12px 14px}}
+
+/* Canvas private import: the two entry points and the wizard they open.
+   Both entries are real buttons with an underline, so they read as links, are reachable with
+   Tab and activated with Enter or Space, and stay visible in both themes. */
+.canvas-import-link{display:inline-flex;align-items:center;gap:7px;padding:2px 0;background:none;border:0;color:var(--accent,#aa2059);font-size:13px;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+.canvas-import-link .ico{width:16px;height:16px}
+.canvas-import-link:hover{text-decoration-thickness:2px}
+.canvas-import-link:focus-visible{outline:2px solid var(--accent,#aa2059);outline-offset:3px;border-radius:3px}
+.add-course-canvas-row{display:flex;flex-direction:column;gap:6px;align-items:flex-start;margin-top:14px;padding-top:14px;border-top:1px dashed var(--line,#d9e0e5)}
+.add-course-canvas-row small{color:var(--muted,#7b8b96);font-size:11px}
+.canvas-import-link-banner{margin-top:12px}
+.canvas-import{min-height:120px}
+.canvas-import-step{display:flex;flex-direction:column;gap:10px}
+.canvas-import-lead{margin:0;font-size:15px;font-weight:600}
+.canvas-import-schools{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px}
+.canvas-import-schools li{display:flex;flex-direction:column;gap:3px;padding:10px 12px;border:1px solid var(--line,#e4e9ed);border-radius:8px;background:var(--surface,#f6f8fa)}
+.canvas-import-schools small{color:var(--muted,#7b8b96);font-size:12px;line-height:1.6}
+.canvas-import-actions{display:flex;flex-wrap:wrap;gap:10px}
+.canvas-import-courses{display:flex;flex-direction:column;gap:6px;max-height:46vh;overflow:auto;margin:4px 0}
+.canvas-import-course{display:flex;gap:10px;align-items:flex-start;padding:9px 11px;border:1px solid var(--line,#e4e9ed);border-radius:7px;cursor:pointer}
+.canvas-import-course span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.canvas-import-course small{color:var(--muted,#7b8b96);font-size:11px}
+.canvas-import-progress{margin:0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:8px}
+.canvas-import-progress li{display:flex;gap:7px;align-items:center;padding:6px 10px;border:1px solid var(--line,#e4e9ed);border-radius:20px;background:var(--surface,#f6f8fa);font-size:12px}
+.modal:has(.canvas-import){width:640px;max-width:94vw}
+@media(max-width:420px){
+  .canvas-import-link{font-size:12px}
+  .canvas-import-courses{max-height:none}
+  .canvas-import-actions .btn{width:100%}
+  .modal:has(.canvas-import){width:96vw}
+}
