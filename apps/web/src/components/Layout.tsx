@@ -14,13 +14,24 @@ const privateNavigation = [
   { to: "/documents", label: "Documents", end: false },
 ];
 
+/**
+ * The brand mark: the owner's own artwork, not a drawing of it.
+ *
+ * The mark is served from `public/brand/` in the sizes derived from the supplied original (see
+ * `brand.ts` and `docs/coursejesus/LOGO_ASSET_MANIFEST.md`). It is declared with its real dimensions
+ * so the header does not shift while it loads, and its alternative text names the product, because a
+ * logo that is only a background image leaves a screen reader with nothing.
+ */
 function BrandMark() {
   return (
-    <svg aria-hidden="true" className="brand-mark" viewBox="0 0 40 40">
-      <path d="M7 9.5 20 4l13 5.5v19L20 36 7 28.5Z" />
-      <path d="m12 17 8-3.5 8 3.5-8 3.5Z" />
-      <path d="M14.5 20v5.5c3.5 2.2 7.5 2.2 11 0V20" />
-    </svg>
+    <img
+      alt={BRAND.logoAlt}
+      className="brand-mark"
+      decoding="async"
+      height={40}
+      src={BRAND.logoPath}
+      width={40}
+    />
   );
 }
 

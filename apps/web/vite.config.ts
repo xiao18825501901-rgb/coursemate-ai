@@ -80,13 +80,23 @@ function brandManifest(): Record<string, unknown> {
     display: "standalone",
     theme_color: BRAND.themeColor,
     background_color: "#fffdf7",
-    icons: [
-      // The repository's existing mark. The owner's artwork will replace it and the
-      // generated sizes/hashes will be added then; until that happens
-      // `BRAND.logoStatus` says PENDING_ASSET rather than pretending otherwise.
-      { src: BRAND.logoPath, sizes: "any", type: "image/svg+xml", purpose: "any" },
-    ],
+    // The owner's own artwork, in the two install sizes, from the brand source. Raster, because the
+    // supplied original is a PNG: calling it `image/svg+xml` (as the interim mark was) would be false.
+    icons: BRAND.icons
+      .filter((icon) => icon.purposes.includes("manifest"))
+      .map((icon) => ({ src: icon.src, sizes: icon.sizes, type: icon.type, purpose: "any" })),
   };
+}
+
+/** The `<link rel="icon">` set for a document entry, from the same brand source. */
+export function brandIconLinks(): string {
+  return BRAND.icons
+    .filter((icon) => icon.purposes.includes("document"))
+    .map((icon) => {
+      const rel = icon.sizes === "180x180" ? "apple-touch-icon" : "icon";
+      return `<link rel="${rel}" href="${icon.src}" sizes="${icon.sizes}" type="${icon.type}" />`;
+    })
+    .join("\n    ");
 }
 
 /**
@@ -104,6 +114,7 @@ function brandDocuments(): Plugin {
     "%BRAND_CANONICAL%": BRAND.canonicalOrigin,
     "%BRAND_THEME_COLOR%": BRAND.themeColor,
     "%BRAND_LOGO%": BRAND.logoPath,
+    "%BRAND_ICONS%": brandIconLinks(),
     "%BRAND_MANIFEST%": "/manifest.webmanifest",
   };
   return {

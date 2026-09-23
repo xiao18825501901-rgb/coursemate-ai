@@ -177,3 +177,9 @@
   .canvas-import-actions .btn{width:100%}
   .modal:has(.canvas-import){width:96vw}
 }
+
+/* The owner's mark, in the refreshed shell: square, never stretched, never shrunk by flex. */
+.brand-mark{display:block;width:32px;height:32px;border-radius:7px;object-fit:contain;flex:0 0 auto}
+.global-nav .brand .brand-mark{width:28px;height:28px}
+.login-brand .brand-mark,.login-page .brand-mark{width:56px;height:56px;border-radius:12px}
+.help-art .brand-mark{width:72px;height:72px;border-radius:16px}

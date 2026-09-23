@@ -94,9 +94,33 @@ describe("brand configuration", () => {
     expect(isPreviousOrigin(BRAND.canonicalOrigin)).toBe(false);
   });
 
-  it("declares the logo asset as pending rather than pretending it is final", () => {
-    expect(BRAND.logoStatus).toBe("PENDING_ASSET");
-    expect(BRAND.logoPath.startsWith("/")).toBe(true);
+  it("serves the owner's final artwork rather than an interim mark", () => {
+    // This guard used to assert PENDING_ASSET, which was right while no artwork existed. The owner
+    // supplied it, so the claim that has to hold now is the opposite one: the brand source says FINAL
+    // and points at the derived PNG set. The files themselves (existence, dimensions, opacity and
+    // hashes against the original) are checked where a filesystem is available, in
+    // services/rag-api/tests/test_brand_assets.py — a jsdom test cannot see them.
+    expect(BRAND.logoStatus).toBe("FINAL");
+    expect(BRAND.logoPath.startsWith("/brand/")).toBe(true);
+    expect(BRAND.logoPath.endsWith(".png")).toBe(true);
+    expect(BRAND.logoAlt).toContain(BRAND.name);
+  });
+
+  it("declares the document and install icon sets from the same source", () => {
+    const documentIcons = BRAND.icons.filter((icon) => icon.purposes.includes("document"));
+    const manifestIcons = BRAND.icons.filter((icon) => icon.purposes.includes("manifest"));
+    expect(documentIcons.map((icon) => icon.sizes)).toEqual([
+      "16x16",
+      "32x32",
+      "48x48",
+      "180x180",
+    ]);
+    expect(manifestIcons.map((icon) => icon.sizes)).toEqual(["192x192", "512x512"]);
+    for (const icon of BRAND.icons) {
+      expect(icon.src.startsWith("/brand/")).toBe(true);
+      // The artwork is raster: declaring it as a vector, as the interim mark did, would be false.
+      expect(icon.type).toBe("image/png");
+    }
   });
 
   it("derives titles and the Canvas callback from the same source", () => {

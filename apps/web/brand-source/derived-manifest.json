@@ -1,0 +1,90 @@
+{
+  "source": {
+    "path": "D:\\UserData\\Downloads\\Codex 图像 2026年9月23日 01_20_02.png",
+    "sha256": "ae536df4cc1e9e989c3b9c7ff15a33137d1f526bcbc779aebd4b3e6e93be14e5",
+    "bytes": 610482,
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA"
+  },
+  "derivation": {
+    "trim": "alpha bounding box (49, 19, 1216, 1214)",
+    "margin": "uniform 4% of the trimmed square side",
+    "resample": "LANCZOS",
+    "opaque_background": "rgb(255, 253, 247) (the manifest's own background_color)"
+  },
+  "assets": [
+    {
+      "file": "logo-mark-512.png",
+      "size": [
+        512,
+        512
+      ],
+      "opaque": false,
+      "bytes": 135714,
+      "sha256": "89627f908028b6a66292ba2be1f339b384e037d98376425139d27c70df2a4302"
+    },
+    {
+      "file": "favicon-48.png",
+      "size": [
+        48,
+        48
+      ],
+      "opaque": false,
+      "bytes": 3500,
+      "sha256": "e90edf16fe55b9473cef93fadf022a0e660907efca58f304e81d143e9a9cb800"
+    },
+    {
+      "file": "favicon-32.png",
+      "size": [
+        32,
+        32
+      ],
+      "opaque": false,
+      "bytes": 1884,
+      "sha256": "3bed13446e21ab2ad25ef866d801d34fb030895721895646899245792abbb752"
+    },
+    {
+      "file": "favicon-16.png",
+      "size": [
+        16,
+        16
+      ],
+      "opaque": false,
+      "bytes": 662,
+      "sha256": "b30acb445cd48cd230fdca3f8fbc0a51c02b10dbf3847dc5bd1e9386f876c99b"
+    },
+    {
+      "file": "apple-touch-icon-180.png",
+      "size": [
+        180,
+        180
+      ],
+      "opaque": true,
+      "bytes": 30690,
+      "sha256": "1093445a1908c0b02d4c3f83917400c00d794445a1baf116127f3eb62a6bfda1"
+    },
+    {
+      "file": "icon-192.png",
+      "size": [
+        192,
+        192
+      ],
+      "opaque": true,
+      "bytes": 33861,
+      "sha256": "376ab44674999e24d60766ac228bb554de78bd07279161c1ccc3c49a0c4e658e"
+    },
+    {
+      "file": "icon-512.png",
+      "size": [
+        512,
+        512
+      ],
+      "opaque": true,
+      "bytes": 143113,
+      "sha256": "5310568637b83b92acee929cf4e4a780c115d1bbd0c4370cb6882ed5788f3390"
+    }
+  ]
+}

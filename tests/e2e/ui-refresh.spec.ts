@@ -841,6 +841,81 @@ test("each learning pane persists its own accessible reasoning strength and subm
   await page.screenshot({ path: testInfo.outputPath("independent-reasoning-strengths.png"), fullPage: true });
 });
 
+test("the shipped shell carries the owner's artwork wherever the brand appears", async ({
+  page,
+}, testInfo) => {
+  // The mark used to be a drawn icon (an inline SVG in the legacy shell, a generic book glyph in this
+  // one). The owner supplied the real artwork, so what has to hold is that the *shipped* shell serves
+  // the derived file in every brand slot: the loading screen, the sign-in card and the global
+  // navigation. Screenshots are written for a human to look at, because this check can prove the
+  // markup and the bytes but not the appearance.
+  await page.goto("/app");
+  await assertShellDocument(page);
+
+  const anyMark = page.locator("img.brand-mark");
+  await expect(anyMark.first()).toBeVisible();
+  await expect(anyMark.first()).toHaveAttribute("src", "/brand/logo-mark-512.png");
+  await expect(anyMark.first()).toHaveAttribute("alt", "CourseJesus 耶课稣");
+
+  // Every instance on screen is square (nothing stretched) and actually loaded.
+  const squares = await anyMark.evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const image = node as HTMLImageElement;
+      const box = image.getBoundingClientRect();
+      return {
+        natural: [image.naturalWidth, image.naturalHeight],
+        box: [Math.round(box.width), Math.round(box.height)],
+        complete: image.complete,
+      };
+    }),
+  );
+  expect(squares.length).toBeGreaterThan(0);
+  for (const instance of squares) {
+    expect(instance.complete).toBe(true);
+    expect(instance.natural).toEqual([512, 512]);
+    expect(instance.box[0]).toBe(instance.box[1]);
+    expect(instance.box[0]).toBeGreaterThan(0);
+  }
+
+  // The navigation's own mark, once the shell is past the connecting screen.
+  const navMark = page.locator(".global-nav .brand .brand-mark");
+  await expect(navMark).toBeVisible();
+  const navBox = await navMark.evaluate((node) => {
+    const box = (node as HTMLImageElement).getBoundingClientRect();
+    return [Math.round(box.width), Math.round(box.height)];
+  });
+  expect(navBox).toEqual([28, 28]);
+
+  await page.locator("nav.global-nav").screenshot({
+    path: testInfo.outputPath("brand-nav-light.png"),
+  });
+
+  const toggle = page.getByRole("button", { name: "切换至深色模式" });
+  await toggle.click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(navMark).toBeVisible();
+  const darkBox = await navMark.evaluate((node) => {
+    const box = (node as HTMLImageElement).getBoundingClientRect();
+    return [Math.round(box.width), Math.round(box.height)];
+  });
+  expect(darkBox).toEqual([28, 28]);
+  await page.locator("nav.global-nav").screenshot({
+    path: testInfo.outputPath("brand-nav-dark.png"),
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(navMark).toBeVisible();
+  await page.locator("nav.global-nav").screenshot({
+    path: testInfo.outputPath("brand-nav-dark-390.png"),
+  });
+
+  // The theme is server-persisted, so leaving it dark here changed the state every later journey in
+  // this serial suite starts from — the Canvas journey could no longer find a "switch to dark" control
+  // and timed out. Put it back.
+  await page.getByRole("button", { name: "切换至浅色模式" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+});
+
 test("the Canvas import has two entry points and says so honestly when no school is open", async ({
   page,
 }) => {
