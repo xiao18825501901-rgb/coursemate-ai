@@ -23,6 +23,15 @@ figures name the revisions they were measured on; each is a working-tree run who
 identical to the named commit, which was made from that same clean tree. Everything below still
 describes the Jev/DeepSeek work on the revision named in each row.
 
+The Canvas stream then added its server-side authorisation surface in **`4c84338`** — the nine
+OAuth/import routes, the AES-256-GCM credential store and their 39 tests — at **1513 passed /
+3 skipped / 0 failed** in 1493.69 s (`work/current-change/full_run_round69b.log`, exit 0; the gate
+was re-run on the amended revision rather than passed off from the pre-amend run, whose only
+difference was `ruff format` churn in two files), `mypy app` again at 1004 errors / 32 files, and
+6 of 6 route/credential guards proven by mutation
+(`work/current-change/mutation-check-canvas-routes.py`). The third skip is the POSIX-permission
+case, which cannot run on this Windows host.
+
 **Audited revision.** branch `fix/codex-dsh-audit-20260919`, audited at HEAD
 `7e2e4db7cf99d85f92a82c9f97d72729fdaa5162` ("Record round 30's final revision and correct three
 stale deliverable claims", 2026-09-22 13:31 +08:00), working tree clean, **76 commits ahead of
