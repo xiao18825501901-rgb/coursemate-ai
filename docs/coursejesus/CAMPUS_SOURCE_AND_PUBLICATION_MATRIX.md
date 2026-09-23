@@ -243,15 +243,15 @@ Two rules are worth stating because the inventory shows what a naive version doe
 
 ## 10. The first verification course (round 71, measured)
 
-Course **628** (`Éç»áÊµ¼ù`, CityU (DG), Summer Term 2026) was ingested through the real
-`IngestionService` into a **private** campus course ¡ª the pack's "verify with one small course
+Course **628** (`ç¤¾ä¼šå®žè·µ`, CityU (DG), Summer Term 2026) was ingested through the real
+`IngestionService` into a **private** campus course â€”â€” the pack's "verify with one small course
 first":
 
 | Fact | Value |
 |---|---|
 | Target course | `campus-https-cityu-dg-instructure-com-628-3728d6d2` |
 | Course state after ingesting | `visibility=private`, `publication_status=private`, `published_at=NULL` |
-| Files | 2 ¡ª the report-format `.docx` **INDEXED**, the shadow-library book **BLOCKED** |
+| Files | 2 â€”â€” the report-format `.docx` **INDEXED**, the shadow-library book **BLOCKED** |
 | Documents / chunks | 1 / 2 |
 | Review rows | 2 (`NEEDS_REVIEW` / `BLOCKED_NEEDS_OWNER_DECISION`) |
 | Published | **No.** Nothing was published, and this path cannot publish |
@@ -265,5 +265,5 @@ refused instead of written into, because migration 019 freezes a release under r
 `docs/coursejesus/CAMPUS_RIGHTS_REVIEW_LIST.csv` is the single list: **1715 rows**, one per file
 whose rights nobody has verified, each with its course, classification, decision, reason, review
 status and `publication_basis`. It is written from the **committed** inventory, so no personal
-filename enters Git. The three groups in ¡ì5 are on it; publishing any of them needs one decision
+filename enters Git. The three groups in Â§5 are on it; publishing any of them needs one decision
 from the owner, and until then every campus course stays private.
