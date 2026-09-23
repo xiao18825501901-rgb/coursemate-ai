@@ -193,6 +193,30 @@ skipped / 0 failed** in 1728.14 s (`work/current-change/full_run_round82.log`, e
 tests), and nothing else moved: no schema change, no route change, no behaviour change — this round adds
 evidence about behaviour that already existed.
 
+**`f7e9816`** then pointed the "no number without its revision" rule at the Jev deliverables themselves.
+`work/current-change/verify-jev-doc-claims.py` checks the nine documents' countable claims in one pass
+— every named test file exists, every quoted `test_x.py (N)` matches `--collect-only`, the dataset and
+split figures match the JSON and the manifest's own counts, the measurement suite's size matches
+collection, and every browser-journey total names when it was measured. Two claims had drifted:
+
+* `DSH_JEV_DEEPSEEK_EXECUTION_STATE.md` quoted `test_jev_entity_resolution.py` as 18 in one row while
+  the same file's other row said 20; the suite collects **20**, so the first was stale;
+* `JEV_CALIBRATION_AND_ABLATION_REPORT.md` said the calibration maths is "real, 43 tests", and no suite
+  in the tree collects 43 for it: `test_jev_calibration.py`, the only file importing the module,
+  collects **19**. The row now names that file and its measured count, and the report states the
+  measurement suite's real size — **122 tests across eight files** — which the checker now enforces.
+
+Three of the checker's own bugs surfaced before they became doc "fixes" (the companion dataset's 49
+samples compared against the main dataset's 310, a dataset coverage read as a catalog claim, and a
+journey rule that flagged historical round records which do name their revision); each check is now
+scoped to the quantity it is about. The two snapshot documents were left unedited apart from a dated
+note at the top — `FINAL_COURSEMATE_JEV_STRUCTURED_ENHANCEMENT_REPORT.md` gained a short table of what
+has moved since `169bd57` (schema 30 → 34, gate 1614 on `8d43dc6`, web 73/19 → 96/22, browser 19 → 22
+per suite, 46 → 49 journeys in the tree) with the evidence paths, and
+`CHATGPT_REVIEW_CURRENT_STATUS_AND_BLOCKERS.md` says its 46-journey total is from 2026-09-22 — because
+rewriting a historical measurement is how a report stops being evidence. No code, test or schema
+changed this round; `CANVAS_OAUTH_LIVE` and both live model gates remain `NOT_RUN`/`WAITING_INSTITUTION`.
+
 **Audited revision.** branch `fix/codex-dsh-audit-20260919`, audited at HEAD
 `7e2e4db7cf99d85f92a82c9f97d72729fdaa5162` ("Record round 30's final revision and correct three
 stale deliverable claims", 2026-09-22 13:31 +08:00), working tree clean, **76 commits ahead of
