@@ -420,6 +420,29 @@ wired, and the reason the earlier decision was wrong is part of the record.
 > Both are recorded in `docs/recovery/CURRENT_BLOCKER_LEDGER.md` B-27, and the publish path's local
 > half in B-35.
 
+> **Added 2026-09-24 (rounds 83–84).** The most consequential thing since the table above: **the
+> Jev layer has now been called live, and the quality gate does not pass.** Nothing is promoted;
+> every definition is still `shadow`.
+>
+> | What ran | Result |
+> |---|---|
+> | All **19 catalog definitions** called live through the real gateway, caching disabled, positive + negative case each | **31 cases, 31 valid answers, 30 met the expectation, 19/19 definitions covered** (`work/current-change/jev-live-cases.json`) |
+> | The Score primitive | Found to be **unusable live**: the service answers with a decimal on the definition's own scale (`3.99` on 0..4, `2.0` on 0..2), not a level key, so the typed validator refused it as `invalid_response`. Fixed by carrying the number as `JevAnswer.score_value` **without inventing a level**; out-of-scale values are still refused (`f6d6311`) |
+> | A–E ablation, live Jev, calibration split (47 samples) | Verdict `NOT_INTERPRETABLE` — arm A abstained on everything because no production baseline was injected |
+> | A–E ablation, live Jev **and live DeepSeek baseline** (162 DeepSeek calls, all answered) | Verdict **`INTERPRETABLE`**, and unfavourable: Jev improves citation support 0.667→0.833, unsupported-claim rate 0.667→0.500, exercise 0.000→0.500; **regresses** span selection 1.000→0.750, `key_fact_retention` 1.000→0.000, `criterion_error` 0.000→0.333, `corpus_quality_mae` 0.125→0.250; ties elsewhere. DeepSeek calls fall by 9/17/27 across arms C/D/E (`ed7133d`, §9 of `JEV_CALIBRATION_AND_ABLATION_REPORT.md`) |
+> | Test split (67 samples) | **Not run, deliberately**: thresholds are tuned on calibration and the test set is looked at once, after they are frozen |
+>
+> Consequences, stated rather than softened: **no promotion**, including the retrieval-rerank
+> promotion the task lists as first priority (the calibration split has no `retrieval.support.v1`
+> samples, so that definition has no live quality number at all yet); the two regressions sit on
+> `assessment.criterion_review.v1` and `coverage.item_support.v1`, the two definitions the task
+> allows only ever to be advisory; and the per-metric sample counts are not yet in the artefact, so
+> how much of each swing is real versus small-n is **unknown**, not assumed.
+>
+> Also added in these rounds: `live_jev_predictor` (the semantic ablation harness could not run live
+> at all before) and `app/evaluation/jev_deepseek_baseline.py` (the missing baseline — without it
+> the comparison was measured against abstention).
+
 **Verified on one frozen SHA (`6e65396`)** — every number below comes from a run on the
 tree that was committed, and `git diff HEAD -- services/rag-api tests` is empty:
 
