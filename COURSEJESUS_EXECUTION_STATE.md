@@ -35,8 +35,8 @@ uncommitted work, and the running cwd was not renamed.
 | `OLD_DOMAIN_COMPATIBILITY` | **NOT_STARTED** | 30-day compatibility window is the plan; nothing configured |
 | `CANVAS_SKILL_REUSE` | **IMPLEMENTED (mock-verified)** | `services/rag-api/app/canvas/` — stateless `CanvasReadAdapter`, institution registry, `http_safety`; `UPSTREAM_NOTICE.md` records the MIT licence, baseline commit `f05ffae8` **and the owner's `runtime.py` patch**. 31 tests + **8/8 mutations caught**. Not yet verified against a school (no key exists) |
 | `CANVAS_OAUTH_PER_INSTITUTION` | **IMPLEMENTED (mock-verified)** | `app/canvas/oauth.py`: documented authorisation URL with the frozen `redirect_uri`; one-time, short-lived `state` bound to (subject, institution, nonce) and consumed on success **and** failure; forged/expired/replayed states refused before any outbound request; denial reported as `ACCESS_DENIED`; `POST login/oauth2/token` exchange and refresh with `expires_in`; **serialised per-connection refresh** that reuses a just-renewed credential instead of issuing a second token; `DELETE` revocation that clears the local credential even if the school endpoint fails. 22 tests. Still missing: the HTTP routes, the shared state/credential stores a multi-worker deployment needs, and any real school key |
-| `CANVAS_LOCAL_UPLOAD_FALLBACK` | **NOT_STARTED** | Becomes the real path while no institution Developer Key exists |
-| `CANVAS_PRIVATE_IMPORT` | **CORE IMPLEMENTED (mock-verified), no job runner yet** | `app/canvas/job.py`: the twelve states with a legal-transition table, the frozen-selection idempotency fingerprint, per-file records keyed by `origin + course_id + file_id`, checkpointing, cancel semantics, and an earned completion verdict (empty/`403`/unparseable/cancelled → `COMPLETED_WITH_WARNINGS`, `EXPIRED_TOKEN` → `NEEDS_REAUTH`). 21 tests. **Missing:** the migration that stores these rows, the worker that leases them, the HTTP routes, the UI entries, and the real `IngestionService` hand-off — nothing has been imported |
+| `CANVAS_LOCAL_UPLOAD_FALLBACK` | **NOT_STARTED** | Becomes the real path while no institution Developer Key exists. `CanvasReadAdapter` and the worker both refuse cleanly with `NOT_CONFIGURED`/`EXPIRED_TOKEN` semantics rather than pretending, which is the precondition for the fallback |
+| `CANVAS_PRIVATE_IMPORT` | **LOOP IMPLEMENTED AND TESTED (mock-verified), no HTTP route yet** | `app/canvas/job.py` (states, legal transitions, frozen-selection fingerprint, per-file records, earned verdict), `migrations/031_canvas_import.sql` + `app/canvas/store.py` (idempotent creation, lease-based claiming, per-file checkpoints) and now `app/canvas/worker.py`: claim → re-check the selection against the student's own live enrolments → list files → download → verify → ingest through the real `IngestionService` → checkpoint → earned terminal state. The private course is created by the real course service (`course_type='user'`, private, owner-scoped, quota-respecting) and its id is stored in `target_course_id`. **148 Canvas tests pass** in 60.29 s (26 of them new worker tests, which run the real adapter, the real migrated schema and the real ingestion path — only the school's HTTP surface is simulated). Two worker defects were found by those tests and fixed: the `NEEDS_REAUTH` branch released the lease instead of writing the verdict, and a cancel result reported the state constant instead of the outcome. Still missing: the HTTP routes, the wizard entries, and any real school call |
 | `CANVAS_READ_ONLY_AND_ISOLATION` | **ENFORCED IN CODE (mock-verified)** | GET-only single request path; exact-pattern endpoint allow-list (`/assignments`, `/submissions`, `/messages` and a generic `/read_api` are refused); token only in the `Authorization` header; per-hop download validation with a token-free client; two adapters demonstrably do not share tokens or state. Proven by mutations that remove each guard |
 | `CAMPUS_LIBRARY_SCAN` | **DONE (read-only)** | `scripts/scan_campus_inventory.py` + `docs/coursejesus/LOCAL_CAMPUS_INVENTORY.csv` + `docs/coursejesus/CAMPUS_SOURCE_AND_PUBLICATION_MATRIX.md`: 1919 manifest rows reconciled against disk with 0 missing, 0 size mismatches, 0 unlisted files, 8.26 GiB, SHA-256 for every file |
 | `CAMPUS_FILES_INGESTED` | **NOT_STARTED** | Nothing uploaded or ingested; `publishable_now` is 0 by construction |
@@ -88,33 +88,49 @@ localhost screenshot or a `health=200`.
    (`mutation-check-campus-scan.py`), with both tools restored byte-for-byte and the working tree
    clean afterwards. This confirms the security and evidence guards still bite after migration 031
    and the job repository were added; no new code was written this round.
+11. **The worker loop (round 68)**: `app/canvas/worker.py`, plus the checkpoint writes it needed
+   (`store.list_files`, `record_file_result`, `touch`, `set_target_course`/`target_course_of`) and
+   one adapter method (`course_file_download_url`, read from the file's own metadata record so a URL
+   can never belong to a different file). 26 new tests drive the real adapter, the real migrated
+   schema and the real `IngestionService`; the school's HTTP surface is the only thing simulated.
+   The tests found two real worker defects — the `NEEDS_REAUTH` branch released the lease instead of
+   writing the verdict, and the cancel path reported the state constant as the stop reason — and
+   reviewing my own first draft found three more before it ever ran: a wrong import for
+   `CanvasCourse`, a `raise None` path in the enrolment check, and a hole where files deferred in
+   one run could let a half-finished job report `COMPLETED`. `mypy app` stayed at exactly the
+   baseline (1004 errors / 32 files) with **zero** errors in `app/canvas`.
 
 ## 3. Next steps, in order
 
-**Resume point (round 56).** The next increment is the **worker main loop**
-(`services/rag-api/app/canvas/worker.py`). Every part it needs already exists and is reachable
-through the package API: `CanvasJobRepository.claim()` (lease, expired lease reclaimable),
-`CanvasReadAdapter.course_files()`/`download()` (read-only discovery, streaming download through a
-token-free client), `outcome_for_error()`/`outcome_for_download()`/`should_stop_job()` (the
-failure-decision table), `ImportJob.transition()`/`finished_status()` (the state machine and the
-earned completion verdict) and `upsert_file()`/`set_status()` (per-file checkpoint and terminal
-state). The rules it must obey are fixed: no retry on `403`, back off on `429` by `Retry-After`,
-end the batch on `EXPIRED_TOKEN`, stop at a checkpoint on cancel without deleting existing
-material, and let `finished_status()` — not the caller — decide the terminal state. After that:
-the OAuth HTTP routes and the wizard UI (the two underlined "从 Canvas 导入" entry points, the
-"school not connected" state with local-upload fallback), then ingestion into a private course
-through the real `IngestionService`, then the seven new browser journeys.
+**Resume point (round 68).** The worker loop now exists
+(`services/rag-api/app/canvas/worker.py`) and imports a selection end to end through the real
+`IngestionService`; what is left of task B before the UI is the **OAuth HTTP routes** and then the
+wizard. The routes are the only thing that can create a connection from a real authorisation: the
+registry reports `NOT_CONFIGURED` without a school Developer Key, so the "school not connected"
+state and the local-upload fallback come first in the UI work.
+
+The rules the worker obeys are the ones the pack fixed, and they are now tested rather than
+described: no retry on `403`, back off on `429` by `Retry-After` and retry that file, leave other
+transport failures pending for the next run, end the batch on `EXPIRED_TOKEN`, stop at a checkpoint
+on cancel without deleting material, and let the file results — never the caller — decide the
+terminal state. Two debts it carries on purpose: the downloaded copy of a file that could not be
+parsed stays on disk (it is the only copy CourseMate has), and a `FILE_PENDING` file is re-fetched
+rather than reused, because a row that went back to pending still holds the *previous* version's
+hash.
 
 1. **Brand completion (A1)**: convert the operations scripts and `ops/` material, write the
    notification/e-mail templates from the same source, and re-run the browser journeys on the new
    build. The web app itself is done and guarded.
 2. **Canvas read-only adapter (B)**: **done in round 46** — see the `CANVAS_SKILL_REUSE` and
    `CANVAS_READ_ONLY_AND_ISOLATION` rows and `docs/coursejesus/CANVAS_SKILL_ADAPTATION.md` §7.
-   What remains is the OAuth flow (§3), the job (§4) and the UI entries.
-3. **OAuth design freeze (B)**: institution registry + state handling + credential storage with a
-   key id, then the mock-OAuth journey and the "school not connected" + local-upload fallback.
-4. **Import job (B)**: persistent job table/worker with the frozen state machine and per-file
-   checkpoint; private course creation through the existing course service and `IngestionService`.
+3. **OAuth design freeze (B)**: **done in round 47** (registry, state handling, credential storage
+   with a key id). What remains is the HTTP routes and the shared stores a multi-worker deployment
+   needs: `InMemoryStateStore`/`InMemoryCredentialStore` are single-process by construction, so the
+   routes must not be wired to them in production.
+4. **Import job (B)**: **loop done in round 68** — `claim` → discovery → download → verify →
+   ingest → checkpoint → earned terminal state, with 26 new tests. The private course is created
+   through the real course service (`kind=user`, private, owner-scoped) and its id is persisted in
+   `target_course_id` so a resumed run reuses it.
 5. **Campus ingestion (C3)**: one small qualifying course end to end (the pack's requirement),
    then batches; rights/publication decision for the 40 review-list files first.
 6. **Domain/Clerk/GitHub (A2/A3)**: read-only inventory of DNS, Clerk, Netlify and the GitHub repo

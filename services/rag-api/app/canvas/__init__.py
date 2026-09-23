@@ -52,6 +52,14 @@ from .registry import (
     default_institutions,
 )
 from .store import CanvasJobRepository, ClaimedJob
+from .worker import (
+    CanvasImportWorker,
+    RunResult,
+    default_target_course_resolver,
+    material_media_type,
+    safe_upload_name,
+    target_course_slug,
+)
 from .worker_decisions import (
     FileOutcome,
     outcome_for_download,
@@ -108,4 +116,11 @@ __all__ = [
     "outcome_for_download",
     "outcome_for_error",
     "should_stop_job",
+    # the worker that drives the state machine (worker.py)
+    "CanvasImportWorker",
+    "RunResult",
+    "default_target_course_resolver",
+    "material_media_type",
+    "safe_upload_name",
+    "target_course_slug",
 ]

@@ -164,3 +164,136 @@ def test_the_database_never_stores_a_token_even_after_a_full_job(tmp_path) -> No
         dump = "\n".join(str(row) for row in connection.execute(f"SELECT * FROM {table}"))
         for forbidden in ("Bearer ", "access_token", "refresh_token", "client_secret"):
             assert forbidden not in dump, f"{table} contains {forbidden}"
+
+
+# ------------------------------------------------------------------ lease ownership
+def test_renewing_a_lease_reports_whether_this_worker_still_owns_the_job(tmp_path) -> None:
+    """The single-writer rule: a progress write is conditional on the lease."""
+    repo, _ = repository(tmp_path)
+    repo.create_or_get(make_job())
+    repo.claim(worker_id="w1")
+
+    assert repo.touch("job-1", worker_id="w1") is True
+    assert repo.touch("job-1", worker_id="w2") is False, "a foreign worker must not write"
+    assert repo.status_of("job-1") == "DISCOVERING"
+
+    assert repo.touch("job-1", worker_id="w1", status="DOWNLOADING") is True
+    assert repo.status_of("job-1") == "DOWNLOADING"
+    assert repo.status_of("job-1") != "COMPLETED"
+
+
+def test_a_progress_write_refuses_a_finished_state(tmp_path) -> None:
+    repo, _ = repository(tmp_path)
+    repo.create_or_get(make_job())
+    repo.claim(worker_id="w1")
+    try:
+        repo.touch("job-1", worker_id="w1", status="COMPLETED")
+    except JobStateError:
+        return
+    raise AssertionError("a terminal state was written as if it were progress")
+
+
+def test_the_target_private_course_is_remembered_for_a_resumed_run(tmp_path) -> None:
+    repo, _ = repository(tmp_path)
+    repo.create_or_get(make_job())
+    assert repo.target_course_of("job-1") is None
+    repo.set_target_course("job-1", "canvas-cityu-abc123")
+    assert repo.target_course_of("job-1") == "canvas-cityu-abc123"
+    try:
+        repo.set_target_course("job-1", "")
+    except JobStateError:
+        pass
+    else:
+        raise AssertionError("an empty course id was accepted as a target")
+
+
+# ------------------------------------------------------------------ file checkpoints
+def test_file_rows_come_back_as_the_workers_own_record_type(tmp_path) -> None:
+    repo, _ = repository(tmp_path)
+    repo.create_or_get(make_job())
+    repo.upsert_file(
+        "job-1",
+        origin=CITYU,
+        course_id="560",
+        file_id="1",
+        display_name="a.pdf",
+        size=10,
+        updated_at="2026-01-01",
+        folder_or_module="files/42",
+    )
+    repo.record_file_result(
+        "job-1",
+        origin=CITYU,
+        course_id="560",
+        file_id="1",
+        status="INDEXED",
+        sha256="abc",
+        document_id="doc_1",
+        parse_state="parsed",
+        index_state="indexed",
+        attempts=2,
+    )
+
+    (record,) = repo.list_files("job-1")
+
+    assert record.key == (CITYU, "560", "1")
+    assert record.display_name == "a.pdf"
+    assert record.folder_or_module == "files/42"
+    assert record.status == "INDEXED"
+    assert record.bytes_sha256 == "abc"
+    assert record.local_document_id == "doc_1"
+    assert (record.parse_state, record.index_state) == ("parsed", "indexed")
+    assert record.attempts == 2
+
+
+def test_a_result_for_a_file_the_job_never_listed_is_refused(tmp_path) -> None:
+    """Inventing a row for an unlisted file would hide a defect behind a plausible record."""
+    repo, connection = repository(tmp_path)
+    repo.create_or_get(make_job())
+    try:
+        repo.record_file_result(
+            "job-1", origin=CITYU, course_id="560", file_id="404", status="INDEXED"
+        )
+    except JobStateError:
+        pass
+    else:
+        raise AssertionError("a result was recorded for a file that does not exist")
+    assert connection.execute("SELECT COUNT(*) FROM canvas_import_files").fetchone()[0] == 0
+
+
+def test_refreshing_a_file_back_to_pending_clears_the_recorded_hash(tmp_path) -> None:
+    """A pending row has no verified bytes, and a stale hash on it is a correctness trap."""
+    repo, connection = repository(tmp_path)
+    repo.create_or_get(make_job())
+    repo.upsert_file(
+        "job-1", origin=CITYU, course_id="560", file_id="1", display_name="a.pdf", size=10
+    )
+    repo.record_file_result(
+        "job-1", origin=CITYU, course_id="560", file_id="1", status="INDEXED", sha256="old-hash"
+    )
+    repo.upsert_file(
+        "job-1", origin=CITYU, course_id="560", file_id="1", display_name="a.pdf", size=99
+    )
+    row = connection.execute(
+        "SELECT status, size_bytes, bytes_sha256 FROM canvas_import_files WHERE source_file_id='1'"
+    ).fetchone()
+    assert (row["status"], row["size_bytes"], row["bytes_sha256"]) == ("PENDING", 99, "")
+    # And a refresh that keeps a verified status does not throw the hash away.
+    repo.record_file_result(
+        "job-1", origin=CITYU, course_id="560", file_id="1", status="INDEXED", sha256="new-hash"
+    )
+    repo.upsert_file(
+        "job-1",
+        origin=CITYU,
+        course_id="560",
+        file_id="1",
+        display_name="a.pdf",
+        size=99,
+        status="INDEXED",
+    )
+    assert (
+        connection.execute(
+            "SELECT status, bytes_sha256 FROM canvas_import_files WHERE source_file_id='1'"
+        ).fetchone()["bytes_sha256"]
+        == "new-hash"
+    )

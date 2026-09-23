@@ -252,7 +252,9 @@ class ImportJob:
 
         A file already present keeps its local links (an ingested document is not thrown
         away because the same file id was seen again), and a changed version moves it back
-        to pending instead of leaving it marked as done.
+        to pending instead of leaving it marked as done. The stored hash is cleared with it:
+        it described the *previous* version, and leaving it in place would let a worker that
+        trusts a recorded hash ingest stale bytes for a new version.
         """
         for existing in self.files:
             if existing.key == record.key:
@@ -263,6 +265,9 @@ class ImportJob:
                     existing.size = record.size
                     existing.source_updated_at = record.source_updated_at
                     existing.etag = record.etag
+                    existing.bytes_sha256 = ""
+                    existing.parse_state = ""
+                    existing.index_state = ""
                 return existing
         self.files.append(record)
         return record

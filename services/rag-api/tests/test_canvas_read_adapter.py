@@ -14,6 +14,7 @@ the whole point: the security properties are properties of this code.
 from __future__ import annotations
 
 import ipaddress
+import json
 import pathlib
 
 import httpx
@@ -30,6 +31,7 @@ from app.canvas import (
     parse_next_link,
     validate_download_target,
 )
+from app.canvas.adapter import FORBIDDEN, INVALID_RESPONSE
 
 CITYU = "https://canvas.cityu.edu.hk"
 CITYU_DG = "https://cityu-dg.instructure.com"
@@ -475,7 +477,121 @@ def test_two_adapters_do_not_share_tokens_or_state() -> None:
 def test_the_adapter_exposes_no_write_or_discovery_helper() -> None:
     """A model-facing surface must not be able to reach Canvas through this class."""
     public = {name for name in dir(CanvasReadAdapter) if not name.startswith("_")}
-    assert public == {"course_files", "download", "profile", "student_courses"}
+    assert public == {
+        "course_file_download_url",
+        "course_files",
+        "download",
+        "profile",
+        "student_courses",
+    }
+
+
+def test_a_download_url_comes_from_the_files_own_metadata_record() -> None:
+    """The URL is read per file, so a listing cannot supply one for the wrong file."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        if request.url.path == "/api/v1/courses/560/files/9":
+            return httpx.Response(
+                200,
+                json={
+                    "id": 9,
+                    "display_name": "notes.pdf",
+                    "size": 3,
+                    "url": f"{CITYU}/download/notes.pdf",
+                },
+            )
+        return httpx.Response(404, json={})
+
+    url = adapter(handler).course_file_download_url("560", "9")
+
+    assert url == f"{CITYU}/download/notes.pdf"
+    assert seen == ["/api/v1/courses/560/files/9"]
+
+
+def test_a_file_without_a_download_url_is_forbidden_and_never_retried() -> None:
+    """A locked file is reported as this way by Canvas; classifying it retryable would
+    mean probing a file the school has already refused."""
+    client = adapter(lambda request: httpx.Response(200, json={"id": 9, "display_name": "x"}))
+    with pytest.raises(CanvasReadError) as raised:
+        client.course_file_download_url("560", "9")
+    assert raised.value.category == FORBIDDEN
+    assert raised.value.retryable is False
+
+
+def test_a_download_url_that_is_not_a_public_https_target_is_refused() -> None:
+    """A metadata record is still untrusted input: it must not point the worker at a
+    loopback address, the cloud metadata service, a plain-HTTP host or a strange port."""
+    for target in (
+        "http://canvas.cityu.edu.hk/notes.pdf",
+        "https://169.254.169.254/latest/meta-data/",
+        "https://127.0.0.1/notes.pdf",
+        "https://canvas.cityu.edu.hk:8443/notes.pdf",
+        "https://user:pass@canvas.cityu.edu.hk/notes.pdf",
+    ):
+        client = adapter(
+            lambda request, target=target: httpx.Response(200, json={"url": target})
+        )
+        with pytest.raises(CanvasReadError) as raised:
+            client.course_file_download_url("560", "9")
+        assert raised.value.category == FORBIDDEN, target
+
+
+def test_an_institution_that_declares_download_hosts_narrows_the_url_rule() -> None:
+    """Once a school's file domain is known it is pinned, and nothing else is fetched.
+
+    The default institutions declare no list yet, because guessing a school's CDN host
+    would break the real download; until a live response names it, the rule stays "public
+    HTTPS" and this test records the mechanism that will restrict it.
+    """
+    from app.canvas.registry import Institution, InstitutionConnectionRegistry
+
+    institution = Institution(
+        key="cityu",
+        label="CityU",
+        origin=CITYU,
+        callback_url="https://rag.coursejesus.com/api/integrations/canvas/oauth/callback",
+        client_id_ref="CANVAS_CITYU_CLIENT_ID",
+        client_secret_ref="CANVAS_CITYU_CLIENT_SECRET",
+        download_hosts=("canvas.cityu.edu.hk",),
+    )
+    registry = InstitutionConnectionRegistry([institution])
+    client = adapter(
+        lambda request: httpx.Response(200, json={"url": "https://evil.example.com/notes.pdf"}),
+        registry_override=registry,
+    )
+    with pytest.raises(CanvasReadError) as raised:
+        client.course_file_download_url("560", "9")
+    assert raised.value.category == FORBIDDEN
+    # And a URL on the declared host is accepted.
+    allowed = adapter(
+        lambda request: httpx.Response(
+            200, json={"url": f"{CITYU}/download/notes.pdf"}
+        ),
+        registry_override=registry,
+    )
+    assert allowed.course_file_download_url("560", "9") == f"{CITYU}/download/notes.pdf"
+
+
+def test_a_non_numeric_file_id_cannot_be_smuggled_into_the_path() -> None:
+    for course_id, file_id in (("560", "9/../../users/self/profile"), ("560x", "9"), ("", "9")):
+        client = adapter(lambda request: httpx.Response(200, json={"url": f"{CITYU}/x"}))
+        with pytest.raises(CanvasReadError) as raised:
+            client.course_file_download_url(course_id, file_id)
+        assert raised.value.category == INVALID_RESPONSE
+
+
+def test_file_metadata_that_is_not_an_object_is_an_invalid_response() -> None:
+    for payload in ([{"url": f"{CITYU}/x"}], "not json at all"):
+        client = adapter(
+            lambda request, payload=payload: httpx.Response(
+                200, content=payload if isinstance(payload, str) else json.dumps(payload).encode()
+            )
+        )
+        with pytest.raises(CanvasReadError) as raised:
+            client.course_file_download_url("560", "9")
+        assert raised.value.category == INVALID_RESPONSE
 
 
 # ------------------------------------------------------------------ url rules

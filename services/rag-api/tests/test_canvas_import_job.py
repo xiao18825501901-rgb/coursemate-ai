@@ -193,6 +193,27 @@ def test_a_new_version_of_the_same_file_id_is_not_skipped_forever() -> None:
     assert existing in state.pending_files()
 
 
+def test_a_new_version_drops_the_previous_hash_and_parse_state() -> None:
+    """The recorded hash describes the *previous* version, so a worker that trusts it would
+    ingest stale bytes for a file the school has since changed."""
+    state = job()
+    existing = state.add_file(record("1", size=10))
+    existing.finish(FILE_INDEXED)
+    existing.bytes_sha256 = "hash-of-the-old-version"
+    existing.parse_state = "parsed"
+    existing.index_state = "indexed"
+
+    state.add_file(record("1", size=99))
+
+    assert existing.bytes_sha256 == ""
+    assert (existing.parse_state, existing.index_state) == ("", "")
+    assert existing.status == FILE_PENDING
+    # The document the previous version produced stays linked: it is a true historical fact.
+    existing.local_document_id = "doc-old"
+    state.add_file(record("1", size=100))
+    assert existing.local_document_id == "doc-old"
+
+
 def test_an_unchanged_file_keeps_its_local_links() -> None:
     state = job()
     existing = state.add_file(record("1"))

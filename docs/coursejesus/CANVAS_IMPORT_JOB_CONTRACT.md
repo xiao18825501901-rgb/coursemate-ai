@@ -147,8 +147,58 @@ between the two is detected on restart and reconciled from the file's hash, not 
 
 ## 9. Honest limits
 
-* This is a contract, not an implementation: no table, worker, UI or Canvas call exists yet.
+* The rows, the repository and the worker now exist (see §10). There is still **no HTTP route and
+  no UI entry**, and **no Canvas call has ever been made to a school**: the adapter and the worker
+  are exercised against a simulated HTTP surface only.
 * The state names and error classes are fixed here so that the UI, the worker and the tests cannot
   drift; changing them later is a migration, not an edit.
 * Nothing in this contract claims a school key: until one exists the job path is exercised only
-  against a mock OAuth adapter and local files, and the status stays `NOT_CONFIGURED`.
+  against a mock OAuth adapter and simulated Canvas responses, and the connection status stays
+  `NOT_CONFIGURED`.
+
+## 10. What is implemented, and what the worker actually does (round 68)
+
+`app/canvas/worker.py` runs one claimed job. Its order is: claim a lease → re-check the frozen
+selection against the student's **own live enrolments** (a course id the student is not enrolled in
+is refused before it is read, whoever wrote it) → list each selected course's files and record one
+row per `origin + course_id + file_id` → create or reuse the private course → then per file:
+download URL from that file's own metadata record, stream the bytes, verify size and hash, store the
+copy, and hand the bytes to `IngestionService.queue_document` + `process_document` → checkpoint the
+result → write the state the file results have earned.
+
+Decisions that are easy to get wrong, and are now pinned by tests:
+
+* **A phase is only moved forward.** `VERIFYING`, `INGESTING` and `INDEXING` are set once each, on
+  the way through; a resumed run never rewrites a working state backwards.
+* **A retryable failure is not a result.** A `429` sleeps the school's interval (bounded) and
+  retries that file; other transport failures leave the row `PENDING` and defer it to the next run,
+  so one unresponsive file cannot hold the batch.
+* **A `403` is terminal for that file.** One attempt, recorded `FORBIDDEN`, and the import ends
+  `COMPLETED_WITH_WARNINGS` rather than clean.
+* **A dead credential ends the batch** with `NEEDS_REAUTH`; the untouched files stay `PENDING`, so
+  re-authorising resumes the same job instead of starting over.
+* **A job is never finished while a file is unfinished.** If every remaining file was deferred in a
+  run, the job stays in its working state and its lease is released.
+* **Zero chunks is not material.** The ingestion layer accepts an extension it has no loader for by
+  marking the document `ready` with `chunk_count = 0`. The worker records that as `DOWNLOAD_ONLY`,
+  not `INDEXED`, because a stored picture is not text a model can read — and it must never count
+  towards coverage.
+* **Cancel stops at the checkpoint.** Remaining files become `CANCELLED`; imported documents and
+  their bytes are left alone.
+
+Two deliberate debts, stated rather than hidden:
+
+1. The downloaded copy of a file that could not be parsed stays on disk. It is the only copy
+   CourseMate has, and deleting it would be the "cancel deletes your material" mistake in a
+   different costume. `cleanup_empty_directories()` removes only directories that hold nothing.
+2. A row that is `PENDING` is downloaded again rather than reused from disk. Only a `DOWNLOADED`
+   row has a hash that is known to describe the version now being asked for; a row that went back to
+   pending after the school changed the file still holds the previous hash, and reusing those bytes
+   would silently ingest stale content. The same reasoning is why `ImportJob.add_file` clears the
+   hash when it detects a new version.
+
+The school's file domain is also not yet pinned per institution: `Institution.download_hosts` is
+empty for both schools because guessing a Canvas CDN host would break real downloads, so the
+download rule today is "public HTTPS, validated at every hop" plus the origin's own host. Once a
+live response names the file domain, it goes in the institution's `download_hosts` and the rule
+tightens to that host alone — the mechanism is already tested.

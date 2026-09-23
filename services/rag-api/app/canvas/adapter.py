@@ -24,6 +24,7 @@ This module performs no retries: retry/backoff belongs to the job layer (see
 `docs/coursejesus/CANVAS_IMPORT_JOB_CONTRACT.md`), which needs `Retry-After` and the
 error category rather than a hidden retry loop.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -96,8 +97,14 @@ STATUS_CATEGORIES = {
 class CanvasReadError(RuntimeError):
     """A classified read failure. `category` is stable; `detail` is for humans."""
 
-    def __init__(self, category: str, detail: str, *, status: int | None = None,
-                 retry_after: float | None = None) -> None:
+    def __init__(
+        self,
+        category: str,
+        detail: str,
+        *,
+        status: int | None = None,
+        retry_after: float | None = None,
+    ) -> None:
         super().__init__(f"{category}: {detail}")
         self.category = category
         self.detail = detail
@@ -294,9 +301,7 @@ class CanvasReadAdapter:
                     allowed_patterns=ALLOWED_ENDPOINT_PATTERNS,
                 )
             except UnsafeUrlError as error:
-                raise CanvasReadError(
-                    FORBIDDEN, f"refused pagination link: {error}"
-                ) from error
+                raise CanvasReadError(FORBIDDEN, f"refused pagination link: {error}") from error
         return _Page(items=list(payload), next_url=next_url)
 
     def _iter_pages(
@@ -410,6 +415,40 @@ class CanvasReadAdapter:
             content_type=str(item.get("content-type", "")),
             url_present=bool(item.get("url")),
         )
+
+    def course_file_download_url(self, course_id: str, file_id: str) -> str:
+        """The signed download URL for one file, taken from that file's own metadata record.
+
+        Read per file through `GET /api/v1/courses/:course_id/files/:file_id` rather than
+        carried over from the listing, so the URL always belongs to a file id this course
+        actually returned for this student, and so a listing that paginated past a file
+        cannot produce a URL for the wrong one.
+
+        The URL is itself a credential while it lives: it is validated here (HTTPS, this
+        institution's download hosts, public target) and then handed straight to `download`,
+        never logged, never stored and never returned to any caller of this module.
+        """
+        if not str(course_id).isdigit() or not str(file_id).isdigit():
+            raise CanvasReadError(INVALID_RESPONSE, "course and file ids must be numeric")
+        response = self._request(GET, f"/api/v1/courses/{course_id}/files/{file_id}")
+        try:
+            payload = response.json()
+        except ValueError as error:
+            raise CanvasReadError(INVALID_RESPONSE, "file metadata was not JSON") from error
+        if not isinstance(payload, dict):
+            raise CanvasReadError(INVALID_RESPONSE, "file metadata was not an object")
+        url = payload.get("url")
+        if not isinstance(url, str) or not url:
+            # The ordinary cause is a locked or hidden file, which Canvas signals this way
+            # rather than with a 403. Classified as FORBIDDEN so it is never retried.
+            raise CanvasReadError(FORBIDDEN, "the file carries no download url")
+        try:
+            validate_download_target(
+                url, allowed_hosts=self.institution.download_hosts, resolver=self._resolver
+            )
+        except UnsafeUrlError as error:
+            raise CanvasReadError(FORBIDDEN, f"refused download target: {error}") from error
+        return url
 
     # ------------------------------------------------------------------- download
     def download(self, url: str, sink: pathlib.Path) -> DownloadResult:

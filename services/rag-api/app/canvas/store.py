@@ -19,7 +19,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from .job import ACTIVE_STATES, ImportJob, JobStateError
+from .job import ACTIVE_STATES, TERMINAL_STATES, FileRecord, ImportJob, JobStateError
 
 LEASE_SECONDS = 120
 
@@ -131,6 +131,61 @@ class CanvasJobRepository:
         )
 
     # ------------------------------------------------------------------ progress
+    def touch(
+        self,
+        job_id: str,
+        *,
+        worker_id: str,
+        status: str | None = None,
+        now: datetime | None = None,
+    ) -> bool:
+        """Renew this worker's lease, optionally moving the working status, and report ownership.
+
+        Returns False when the row is no longer owned by `worker_id` — an expired lease that a
+        second worker has already taken. That return value is the whole point of the method:
+        two workers must never write one job, and the only reliable way to know is to make the
+        write conditional on the worker id and look at what it affected.
+        """
+        if status == "DONE":
+            raise JobStateError("DONE is not a job state")
+        if status is not None and status in TERMINAL_STATES:
+            raise JobStateError(f"{status} is terminal: use set_status for a finished job")
+        moment = now or _now()
+        assignments = ["leased_until=?", "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')"]
+        values: list[object] = [_stamp(moment + timedelta(seconds=self._lease_seconds))]
+        if status is not None:
+            assignments.insert(0, "status=?")
+            values.insert(0, status)
+        values.extend([job_id, worker_id])
+        cursor = self._connection.execute(
+            f"UPDATE canvas_import_jobs SET {', '.join(assignments)} WHERE id=? AND worker_id=?",
+            values,
+        )
+        return cursor.rowcount == 1
+
+    def set_target_course(self, job_id: str, target_course_id: str) -> None:
+        """Remember the private course this import writes into.
+
+        Written before the first file is ingested, so a worker that dies and resumes reuses
+        the course it already created instead of creating a second private course for the
+        same request.
+        """
+        if not target_course_id:
+            raise JobStateError("a target course id is required")
+        self._connection.execute(
+            "UPDATE canvas_import_jobs SET target_course_id=?, "
+            "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
+            (target_course_id, job_id),
+        )
+
+    def target_course_of(self, job_id: str) -> str | None:
+        row = self._connection.execute(
+            "SELECT target_course_id FROM canvas_import_jobs WHERE id=?", (job_id,)
+        ).fetchone()
+        if row is None or row["target_course_id"] is None:
+            return None
+        return str(row["target_course_id"])
+
     def set_status(
         self, job_id: str, status: str, *, error_code: str = "", error_message: str = ""
     ) -> None:
@@ -172,25 +227,44 @@ class CanvasJobRepository:
         updated_at: str = "",
         etag: str = "",
         status: str = "PENDING",
+        folder_or_module: str = "",
     ) -> str:
-        """Insert or refresh one file row, keyed by external identity."""
+        """Insert or refresh one file row, keyed by external identity.
+
+        Returns the row id. A refresh that sets `PENDING` also clears the recorded content
+        hash, because a pending row has no verified bytes.
+        """
         existing = self._connection.execute(
             "SELECT id FROM canvas_import_files WHERE job_id=? AND origin=? AND "
             "source_course_id=? AND source_file_id=?",
             (job_id, origin, str(course_id), str(file_id)),
         ).fetchone()
         if existing is not None:
+            # A row that goes back to PENDING has no verified bytes, so it must not keep the
+            # previous version's hash: a later run would compare that hash with a stale file
+            # on disk, find them equal, and ingest the old version as if it were the new one.
             self._connection.execute(
                 "UPDATE canvas_import_files SET display_name=?, size_bytes=?, source_updated_at=?, "
-                "etag=?, status=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
-                (display_name, size, updated_at, etag, status, existing["id"]),
+                "etag=?, status=?, source_folder_or_module=?, "
+                "bytes_sha256=CASE WHEN ?='PENDING' THEN '' ELSE bytes_sha256 END, "
+                "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
+                (
+                    display_name,
+                    size,
+                    updated_at,
+                    etag,
+                    status,
+                    folder_or_module,
+                    status,
+                    existing["id"],
+                ),
             )
             return str(existing["id"])
         row_id = uuid.uuid4().hex
         self._connection.execute(
             "INSERT INTO canvas_import_files(id, job_id, origin, source_course_id, source_file_id, "
             "display_name, size_bytes, source_updated_at,"
-            " etag, status) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            " etag, status, source_folder_or_module) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             (
                 row_id,
                 job_id,
@@ -202,6 +276,86 @@ class CanvasJobRepository:
                 updated_at,
                 etag,
                 status,
+                folder_or_module,
             ),
         )
         return row_id
+
+    def list_files(self, job_id: str) -> list[FileRecord]:
+        """Every file row for a job, oldest first, as the worker's own record type.
+
+        This is what makes a restart resume instead of repeat: the worker rebuilds its view
+        of the job from these rows rather than from anything held in memory.
+        """
+        rows = self._connection.execute(
+            "SELECT * FROM canvas_import_files WHERE job_id=? ORDER BY created_at, rowid",
+            (job_id,),
+        ).fetchall()
+        return [
+            FileRecord(
+                origin=str(row["origin"]),
+                course_id=str(row["source_course_id"]),
+                file_id=str(row["source_file_id"]),
+                display_name=str(row["display_name"]),
+                size=int(row["size_bytes"]),
+                source_updated_at=str(row["source_updated_at"]),
+                etag=str(row["etag"]),
+                folder_or_module=str(row["source_folder_or_module"]),
+                bytes_sha256=str(row["bytes_sha256"]),
+                local_document_id=str(row["local_document_id"] or ""),
+                local_document_version_id=str(row["local_document_version_id"] or ""),
+                parse_state=str(row["parse_state"]),
+                index_state=str(row["index_state"]),
+                status=str(row["status"]),
+                error_class=str(row["error_class"] or ""),
+                error_detail=str(row["error_detail"] or ""),
+                attempts=int(row["attempts"]),
+            )
+            for row in rows
+        ]
+
+    def record_file_result(
+        self,
+        job_id: str,
+        *,
+        origin: str,
+        course_id: str,
+        file_id: str,
+        status: str,
+        sha256: str = "",
+        document_id: str = "",
+        error_class: str = "",
+        error_detail: str = "",
+        parse_state: str = "",
+        index_state: str = "",
+        attempts: int = 0,
+    ) -> None:
+        """Checkpoint one file's result. The row must already exist: discovery creates it.
+
+        Refusing to insert here is deliberate — a result for a file the job never listed is a
+        defect, and inventing a row for it would hide the defect behind a plausible record.
+        """
+        cursor = self._connection.execute(
+            "UPDATE canvas_import_files SET status=?, bytes_sha256=?, local_document_id=?, "
+            "error_class=?, error_detail=?, parse_state=?, index_state=?, attempts=?, "
+            "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+            "WHERE job_id=? AND origin=? AND source_course_id=? AND source_file_id=?",
+            (
+                status,
+                sha256,
+                document_id or None,
+                error_class or None,
+                error_detail or None,
+                parse_state,
+                index_state,
+                attempts,
+                job_id,
+                origin,
+                str(course_id),
+                str(file_id),
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise JobStateError(
+                f"no file row for {origin} {course_id} {file_id}: discovery must record it first"
+            )
