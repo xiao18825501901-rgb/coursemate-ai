@@ -40,7 +40,7 @@ import sqlite3
 import uuid
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Final
 
 from app.errors import ApiError
 from app.learning.uploads import MEDIA_TYPES
@@ -488,6 +488,73 @@ def _media_type(extension: str) -> str | None:
     return preferred[0] if preferred else sorted(allowed)[0]
 
 
+# Errors the *file* is responsible for. Only these may become "stored but unreadable"; anything
+# else is our own or the course's problem and must stay visible as a failure. An allow-list rather
+# than a deny-list on purpose: a wrong guess here decides whether a defect looks like unreadable
+# material and nobody investigates. The first version of this mapping downgraded an unrecognised
+# `COURSE_NOT_FOUND` to DOWNLOAD_ONLY, which the tests caught.
+FILE_SCOPED_REFUSALS: Final[frozenset[str]] = frozenset(
+    {
+        "INVALID_FILENAME",
+        "UNSUPPORTED_EXTENSION",
+        "INVALID_MEDIA_TYPE",
+        "INVALID_FILE_CONTENT",
+        "IMAGE_DIMENSIONS_TOO_LARGE",
+        "OFFICE_ARCHIVE_LIMIT_EXCEEDED",
+        "OFFICE_MACROS_NOT_ALLOWED",
+        "UNSAFE_OFFICE_ARCHIVE",
+    }
+)
+COURSE_SCOPED_QUOTA_REFUSALS: Final[frozenset[str]] = frozenset(
+    {"COURSE_FILE_QUOTA_EXCEEDED", "USER_STORAGE_QUOTA_EXCEEDED"}
+)
+
+
+@dataclass(frozen=True)
+class _Refusal:
+    status: str
+    reason: str
+    decision: MaterialDecision
+
+
+def _refusal_outcome(error: ApiError, *, planned: MaterialDecision, limit_bytes: int) -> _Refusal:
+    """What the ingestion layer's refusal means for campus material.
+
+    Found by running a batch: two large CS4182 lecture PDFs were recorded as `FAILED`, which reads
+    as a broken import. A file too large for the configured limit is not a failure — the same rule
+    the Canvas worker applies to `TOO_LARGE` — and 42 files in this plan are over it. The original
+    stays where it is, the material is recorded as stored-but-not-learnable, and it never counts as
+    coverage.
+    """
+    if error.code == "FILE_TOO_LARGE":
+        reason = (
+            f"the file is larger than the ingestion limit of {limit_bytes} bytes: the original is "
+            "kept and the material is stored, but no model can read it and it is not coverage"
+        )
+        return _Refusal(
+            DOWNLOAD_ONLY,
+            reason,
+            MaterialDecision(DOWNLOAD_ONLY, reason, REVIEW_NEEDS_RIGHTS),
+        )
+    if error.code == "EMPTY_FILE":
+        reason = "the file is empty"
+        return _Refusal(
+            DOWNLOAD_ONLY, reason, MaterialDecision(DOWNLOAD_ONLY, reason, REVIEW_NEEDS_RIGHTS)
+        )
+    if error.code in COURSE_SCOPED_QUOTA_REFUSALS:
+        # A course-level limit, not this file's fault: it must be visible as such rather than
+        # quietly downgrading one file and continuing into the same wall for the rest.
+        reason = f"{error.code}: {error.message}"
+        return _Refusal(BLOCKED, reason, MaterialDecision(BLOCKED, reason, REVIEW_NEEDS_OWNER))
+    if error.code in FILE_SCOPED_REFUSALS:
+        reason = f"{error.code}: {error.message}"
+        return _Refusal(
+            DOWNLOAD_ONLY, reason, MaterialDecision(DOWNLOAD_ONLY, reason, REVIEW_NEEDS_RIGHTS)
+        )
+    # Including 5xx and anything we did not anticipate: a failure the operator must see.
+    return _Refusal("FAILED", f"{error.code}: {error.message}", planned)
+
+
 def ingest_course(
     course_plan: CoursePlan,
     *,
@@ -576,8 +643,13 @@ def _ingest_one(
                 "identical content already in the course",
                 document_id=existing,
             )
-        repository.upsert(row, decision, target_course_id=target_course_id)
-        return IngestionOutcome(row.relative_path, "FAILED", f"{error.code}: {error.message}")
+        refusal = _refusal_outcome(
+            error, planned=decision, limit_bytes=service.settings.max_upload_bytes
+        )
+        # The record must say what actually happened: a file that could not be indexed is not
+        # "ingestable", whatever the plan hoped.
+        repository.upsert(row, refusal.decision, target_course_id=target_course_id)
+        return IngestionOutcome(row.relative_path, refusal.status, refusal.reason)
 
     service.process_document(accepted.document.id, accepted.job.id)
     ingest_job = service.get_job(accepted.job.id)

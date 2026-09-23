@@ -40,6 +40,7 @@ from app.campus_ingestion import (
 )
 from app.config import Settings
 from app.db import Database
+from app.errors import ApiError
 from app.models import CourseCreate, PublicationStatus
 from app.rag.embeddings import DeterministicEmbeddingProvider
 from app.services.ingestion import IngestionService
@@ -257,7 +258,9 @@ def test_the_campus_course_id_comes_from_the_external_key_only() -> None:
 
 
 # ---------------------------------------------------------------------------------- ingestion
-def service(tmp_path: pathlib.Path) -> tuple[IngestionService, Database, sqlite3.Connection]:
+def service(
+    tmp_path: pathlib.Path, *, max_upload_bytes: int = 20 * 1024 * 1024
+) -> tuple[IngestionService, Database, sqlite3.Connection]:
     settings = Settings(
         database_path=tmp_path / "rag.sqlite3",
         upload_dir=tmp_path / "uploads",
@@ -267,6 +270,7 @@ def service(tmp_path: pathlib.Path) -> tuple[IngestionService, Database, sqlite3
         v3_enabled=True,
         rag_provider_mode="deterministic",
         ui_web_dir=tmp_path / "no-web-build",
+        max_upload_bytes=max_upload_bytes,
     )
     database = Database(settings)
     database.initialize()
@@ -479,6 +483,142 @@ def test_a_file_whose_format_has_no_loader_is_download_only_even_when_parseable(
     assert report.chunks == 0
 
 
+def test_a_file_over_the_ingestion_limit_is_stored_not_failed(tmp_path) -> None:
+    """Found by running a batch of six offerings: two large CS4182 lecture PDFs were recorded as
+    FAILED, which reads as a broken import.
+
+    A file too large for the configured limit is not a failure — the same rule the Canvas worker
+    applies to `TOO_LARGE` — and 42 files in this plan are over it. The original stays where it is,
+    the material becomes stored-but-not-learnable, and it never counts as coverage.
+    """
+    ingestor, _database, connection = service(tmp_path, max_upload_bytes=1024)
+    source = tmp_path / "canvas"
+    big = real_row(source, "lecture.pdf", b"%PDF-1.4\n" + b"x" * 4096)
+    campus_course(ingestor, campus_course_id(CITYU, "359"))
+
+    report = ingest_course(
+        plan_for([big]),
+        service=ingestor,
+        repository=CampusMaterialRepository(connection),
+        target_course_id=campus_course_id(CITYU, "359"),
+    )
+
+    assert report.counts() == {DOWNLOAD_ONLY: 1}, report.as_dict()
+    assert report.indexed == 0
+    assert connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 0
+    stored = connection.execute(
+        "SELECT decision, decision_reason, review_status FROM campus_material_records"
+    ).fetchone()
+    # The record says what happened, not what the plan hoped.
+    assert stored["decision"] == DOWNLOAD_ONLY
+    assert "ingestion limit" in stored["decision_reason"]
+    assert stored["review_status"] == REVIEW_NEEDS_RIGHTS
+
+
+def test_an_empty_file_is_download_only_rather_than_a_failure(tmp_path) -> None:
+    ingestor, _database, connection = service(tmp_path)
+    source = tmp_path / "canvas"
+    empty = real_row(source, "nothing.md", b"")
+    campus_course(ingestor, campus_course_id(CITYU, "359"))
+
+    report = ingest_course(
+        plan_for([empty]),
+        service=ingestor,
+        repository=CampusMaterialRepository(connection),
+        target_course_id=campus_course_id(CITYU, "359"),
+    )
+
+    assert report.counts() == {DOWNLOAD_ONLY: 1}
+    stored = connection.execute("SELECT decision FROM campus_material_records").fetchone()
+    assert stored["decision"] == DOWNLOAD_ONLY
+
+
+def test_a_refusal_the_file_is_responsible_for_is_download_only(tmp_path) -> None:
+    """`INVALID_MEDIA_TYPE` is the file's own problem, so it joins the stored-but-unreadable set.
+
+    This pins the allow-list itself. Without it, the only two codes with their own tests are
+    `FILE_TOO_LARGE` and `EMPTY_FILE`, and the generic file-scoped branch could rot unnoticed.
+    """
+    ingestor, _database, connection = service(tmp_path)
+    source = tmp_path / "canvas"
+    item = real_row(source, "notes.md", MARKDOWN.encode())
+    campus_course(ingestor, campus_course_id(CITYU, "359"))
+
+    class WrongType:
+        settings = ingestor.settings
+
+        def queue_document(self, **kwargs):
+            raise ApiError(415, "INVALID_MEDIA_TYPE", "text/markdown is not accepted here")
+
+    report = ingest_course(
+        plan_for([item]),
+        service=WrongType(),  # type: ignore[arg-type]
+        repository=CampusMaterialRepository(connection),
+        target_course_id=campus_course_id(CITYU, "359"),
+    )
+
+    assert report.counts() == {DOWNLOAD_ONLY: 1}, report.as_dict()
+    assert "INVALID_MEDIA_TYPE" in report.outcomes[0].reason
+
+
+def test_a_server_side_failure_is_still_a_failure(tmp_path) -> None:
+    """The negative control: the mapping must not turn every refusal into "stored, fine".
+
+    If it did, a defect on our own side would look like unreadable material and nobody would
+    investigate it.
+    """
+    ingestor, _database, connection = service(tmp_path)
+    source = tmp_path / "canvas"
+    item = real_row(source, "notes.md", MARKDOWN.encode())
+    campus_course(ingestor, campus_course_id(CITYU, "359"))
+
+    class Exploding:
+        """Stands in for the ingestion layer failing on its own side, not the file's."""
+
+        settings = ingestor.settings
+
+        def queue_document(self, **kwargs):
+            raise ApiError(500, "INTERNAL", "the ingestion layer broke")
+
+    report = ingest_course(
+        plan_for([item]),
+        service=Exploding(),  # type: ignore[arg-type]
+        repository=CampusMaterialRepository(connection),
+        target_course_id=campus_course_id(CITYU, "359"),
+    )
+
+    assert report.counts() == {"FAILED": 1}, report.as_dict()
+    assert "INTERNAL" in report.outcomes[0].reason
+
+
+def test_a_course_level_quota_refusal_blocks_the_file_visibly(tmp_path) -> None:
+    """A quota is not this file's fault, so it must not be downgraded and hidden per file."""
+    ingestor, _database, connection = service(tmp_path)
+    source = tmp_path / "canvas"
+    item = real_row(source, "notes.md", MARKDOWN.encode())
+    campus_course(ingestor, campus_course_id(CITYU, "359"))
+
+    class Quota:
+        settings = ingestor.settings
+
+        def queue_document(self, **kwargs):
+            raise ApiError(429, "COURSE_FILE_QUOTA_EXCEEDED", "quota reached")
+
+    report = ingest_course(
+        plan_for([item]),
+        service=Quota(),  # type: ignore[arg-type]
+        repository=CampusMaterialRepository(connection),
+        target_course_id=campus_course_id(CITYU, "359"),
+    )
+
+    assert report.counts() == {BLOCKED: 1}
+    stored = connection.execute(
+        "SELECT decision, review_status FROM campus_material_records"
+    ).fetchone()
+    assert stored["decision"] == BLOCKED
+    assert stored["review_status"] == REVIEW_NEEDS_OWNER
+
+
 def test_the_review_list_contains_the_blocked_files_and_no_personal_names(tmp_path) -> None:
     ingestor, _database, connection = service(tmp_path)
     source = tmp_path / "canvas"
@@ -590,8 +730,6 @@ def test_a_course_under_review_is_frozen_which_is_why_campus_material_is_private
 
 
 def test_a_student_cannot_use_the_publication_override_to_publish(tmp_path) -> None:
-    from app.errors import ApiError
-
     ingestor, _database, _connection = service(tmp_path)
     with pytest.raises(ApiError) as raised:
         ingestor.create_course(
