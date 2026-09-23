@@ -56,6 +56,8 @@ from app.canvas.oauth import (
     CredentialStore,
     InMemoryStateStore,
     OAuthError,
+    SqlStateStore,
+    StateStore,
     token_provider_for,
 )
 from app.canvas.registry import InstitutionConnectionRegistry, UnknownInstitutionError
@@ -123,7 +125,13 @@ def _credential_store(request: Request) -> CredentialStore | None:
 
 
 def _oauth(request: Request) -> CanvasOAuthClient | None:
-    """The shared OAuth client, or a per-process one when the app did not wire a shared copy."""
+    """The shared OAuth client, or a per-process one when the app did not wire a shared copy.
+
+    A deployment that builds its own client here still gets the **shared** state store when the
+    schema is there, because a per-request client with an in-memory store could never validate its
+    own state on a later request. The in-memory store is the fallback only for a deployment without
+    the V3 schema, where the routes report `SCHEMA_NOT_READY` before any of this runs.
+    """
     existing = getattr(request.app.state, "canvas_oauth", None)
     if isinstance(existing, CanvasOAuthClient):
         # A client without a credential store cannot persist a token, so it is not configured:
@@ -132,11 +140,28 @@ def _oauth(request: Request) -> CanvasOAuthClient | None:
     store = _credential_store(request)
     if store is None:
         return None
+    state_store: StateStore = (
+        SqlStateStore(_database(request)) if _state_tables_ready(request) else InMemoryStateStore()
+    )
     return CanvasOAuthClient(
         registry=_registry(request),
-        state_store=InMemoryStateStore(),
+        state_store=state_store,
         credential_store=store,
     )
+
+
+def _state_tables_ready(request: Request) -> bool:
+    """Whether migration 034 has run, so the shared state store can be used."""
+    cached = getattr(request.app.state, "canvas_state_tables_ready", None)
+    if cached is not None:
+        return bool(cached)
+    with _database(request).connect() as connection:
+        row = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='canvas_oauth_states'"
+        ).fetchone()
+    ready = row is not None
+    request.app.state.canvas_state_tables_ready = ready
+    return ready
 
 
 def _tables_ready(request: Request) -> bool:

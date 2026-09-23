@@ -9,11 +9,11 @@ been applied to production**, and the production release is still `4ef5064` on i
 
 | Fact | Value | Where it comes from |
 |---|---|---|
-| Latest V3 schema version | **32** | `LATEST_V3_SCHEMA_VERSION` in `app/db.py` |
+| Latest V3 schema version | **34** | `LATEST_V3_SCHEMA_VERSION` in `app/db.py` |
 | Latest V2 schema version | 10 | `LATEST_V2_SCHEMA_VERSION` |
-| Registered V3 migrations | **22** (`011_learning_workspaces.sql` … `032_campus_material.sql`) | the explicit `V3_MIGRATIONS` tuple |
-| Migration files on disk | 26 | `services/rag-api/migrations/*.sql` |
-| Migrations added by this work | `029_entity_relations.sql`, `030_feedback_reports.sql`, `031_canvas_import.sql`, `032_campus_material.sql` | migration files |
+| Registered V3 migrations | **24** (`011_learning_workspaces.sql` … `034_canvas_oauth_states.sql`) | the explicit `V3_MIGRATIONS` tuple |
+| Migration files on disk | 28 | `services/rag-api/migrations/*.sql` |
+| Migrations added by this work | `029_entity_relations.sql`, `030_feedback_reports.sql`, `031_canvas_import.sql`, `032_campus_material.sql`, `033_canvas_local_bridge.sql`, `034_canvas_oauth_states.sql` — the newest is `034` | migration files |
 | Production release / schema | `4ef5064`, schema **25** | read-only production observation recorded in `COURSEJESUS_EXECUTION_STATE.md` |
 
 Two rules this repository already follows, and which the numbers above depend on:

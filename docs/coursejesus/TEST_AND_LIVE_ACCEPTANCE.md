@@ -13,6 +13,7 @@ so the relevant numbers are re-stated here rather than left to the older table b
 |---|---|---|
 | Backend regression (rag-api) | **1599 passed / 3 skipped / 0 failed** (1778 s, exit 0) | `work/current-change/full_run_round80.log` on `47bc2e1`; the +29 are the Canvas local-bridge tests. The three skips are the symlink case, the POSIX-permission case and the optional-SDK case |
 | Canvas local-bridge suite (new) | **29 passed / 0 failed** — replay, cross-user, expiry, unknown school, unselected course, forged digest, path-shaped name, idempotent retry, real quota, no credential column | `services/rag-api/tests/test_canvas_local_bridge.py`, real `create_app` wiring + real DB + real `IngestionService` |
+| Canvas shared state store (round 80) | **9 passed / 0 failed** — one use, expiry, unknown state, no plaintext state at rest, purge, and the **multi-worker callback journey** (worker A issues, worker B completes) | `services/rag-api/tests/test_canvas_oauth_state_store.py`; negative control: wiring the in-memory store makes that journey end in `canvas=failed` |
 | Neighbouring Canvas/schema suites | **88 passed / 0 failed** | `test_canvas_api_routes.py`, `test_canvas_import_schema.py`, `test_database.py`, `test_ui_extension_schema_compat.py`, `test_schema_rollback_compat.py`, `test_v3_migration_rehearsal.py`, `test_ingestion_api.py` |
 | Web unit tests | **96 passed / 22 files** | round 79; the 6 new ones cover the bridge client, the address matching and the required texts |
 | Web typecheck | `tsc -b --pretty false` **exit 0** | round 79 |

@@ -16,24 +16,29 @@ The second is that only the two documented token operations are non-`GET`; every
 in this feature is a read.
 
 Storage is injected. `InMemoryStateStore`/`InMemoryCredentialStore` are the test doubles and
-the single-process default; a multi-worker deployment needs the shared implementations the
-docstrings point at, which is called out rather than assumed.
+the single-process default. A multi-worker deployment uses **`SqlStateStore`** (migration 034),
+which every worker reads; the credential store is the encrypted file store in `credentials.py`,
+which is shared by construction.
 """
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import urlencode
 
 import httpx
 
 from .adapter import EXPIRED_TOKEN, INVALID_RESPONSE, NETWORK, CanvasReadError
 from .registry import Institution, InstitutionConnectionRegistry
+
+if TYPE_CHECKING:  # pragma: no cover - typing only, so the runtime import graph stays unchanged
+    from app.db import Database
 
 AUTHORIZE_PATH = "/login/oauth2/auth"
 TOKEN_PATH = "/login/oauth2/token"
@@ -127,6 +132,139 @@ class InMemoryStateStore:
             raise OAuthError("EXPIRED_STATE", "this authorisation expired before it was completed")
         record = AuthorizationState(**{**record.__dict__, "consumed": True})
         return record
+
+
+class SqlStateStore:
+    """Authorisation states in shared storage, so a callback can land on any worker.
+
+    `InMemoryStateStore` is correct for one process: the worker that answered `/connect` is the
+    worker that sees the callback. A deployment with more than one process is not that, and the
+    failure is quiet — the user grants access at the school, comes back, and is told the
+    authorisation was already used or never existed. This store puts the record where every worker
+    reads it.
+
+    Two deliberate choices:
+
+    * **the state is stored as a SHA-256 hash**, so a database dump cannot be replayed into a
+      callback; the plaintext value exists only in the redirect the browser follows;
+    * **one use is decided by the database**: the claim is
+      `UPDATE … WHERE state_hash=? AND consumed_at IS NULL`, so two callbacks racing the same state
+      cannot both complete. Expiry is judged against `created_at` through
+      `AuthorizationState.is_expired`, so the rule has exactly one home.
+    """
+
+    def __init__(
+        self,
+        database: Database,
+        *,
+        ttl: int = STATE_TTL_SECONDS,
+        now: Callable[[], float] = time.time,
+        purge_every: int = 50,
+    ) -> None:
+        self._database = database
+        self._ttl = ttl
+        self._now = now
+        self._purge_every = max(1, purge_every)
+        self._issued = 0
+
+    # ------------------------------------------------------------------ writing
+    def issue(
+        self, subject: str, institution: Institution, *, return_path: str = ""
+    ) -> AuthorizationState:
+        if not subject:
+            raise OAuthError("NO_SUBJECT", "a signed-in user is required to start an authorisation")
+        state = secrets.token_urlsafe(32)
+        moment = self._now()
+        with self._database.connect() as connection:
+            connection.execute(
+                "INSERT INTO canvas_oauth_states(state_hash, subject, institution_key, origin, "
+                "return_path, created_at, expires_at) VALUES(?,?,?,?,?,?,?)",
+                (
+                    _state_hash(state),
+                    subject,
+                    institution.key,
+                    institution.origin,
+                    return_path or "",
+                    moment,
+                    moment + self._ttl,
+                ),
+            )
+        self._issued += 1
+        if self._issued % self._purge_every == 0:
+            self.purge_expired()
+        return AuthorizationState(
+            state=state,
+            subject=subject,
+            institution_key=institution.key,
+            origin=institution.origin,
+            created_at=moment,
+            return_path=return_path or "/app/canvas/import",
+        )
+
+    def consume(self, state: str, *, now: float | None = None) -> AuthorizationState:
+        """Validate and consume a state. Always consumes, even when it then refuses.
+
+        The order matters and matches the in-memory store: the row is claimed first, so a replayed
+        callback is refused as `UNKNOWN_STATE` rather than being allowed to try again.
+        """
+        moment = self._now() if now is None else now
+        digest = _state_hash(state)
+        with self._database.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM canvas_oauth_states WHERE state_hash=?", (digest,)
+            ).fetchone()
+            if row is None:
+                raise OAuthError(
+                    "UNKNOWN_STATE", "this authorisation was already used or never existed"
+                )
+            claimed = connection.execute(
+                "UPDATE canvas_oauth_states SET consumed_at=? "
+                "WHERE state_hash=? AND consumed_at IS NULL",
+                (moment, digest),
+            ).rowcount
+        if claimed != 1:
+            raise OAuthError(
+                "UNKNOWN_STATE", "this authorisation was already used or never existed"
+            )
+        record = AuthorizationState(
+            state=state,
+            subject=str(row["subject"]),
+            institution_key=str(row["institution_key"]),
+            origin=str(row["origin"]),
+            created_at=float(row["created_at"]),
+            return_path=str(row["return_path"] or "/app/canvas/import"),
+        )
+        if record.is_expired(moment, self._ttl):
+            raise OAuthError("EXPIRED_STATE", "this authorisation expired before it was completed")
+        return AuthorizationState(**{**record.__dict__, "consumed": True})
+
+    # ------------------------------------------------------------------ housekeeping
+    def purge_expired(self, *, now: float | None = None) -> int:
+        """Delete states that can no longer be used. Returns how many rows went."""
+        moment = self._now() if now is None else now
+        with self._database.connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM canvas_oauth_states WHERE expires_at < ?", (moment,)
+            )
+        return int(cursor.rowcount)
+
+    def pending(self, *, subject: str = "") -> int:
+        """How many unconsumed, unexpired states exist. Used by tests and by the purge check."""
+        moment = self._now()
+        clause = "consumed_at IS NULL AND expires_at >= ?"
+        parameters: tuple[object, ...] = (moment,)
+        if subject:
+            clause += " AND subject=?"
+            parameters += (subject,)
+        with self._database.connect() as connection:
+            row = connection.execute(
+                f"SELECT COUNT(*) AS states FROM canvas_oauth_states WHERE {clause}", parameters
+            ).fetchone()
+        return int(row["states"])
+
+
+def _state_hash(state: str) -> str:
+    return hashlib.sha256(state.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)

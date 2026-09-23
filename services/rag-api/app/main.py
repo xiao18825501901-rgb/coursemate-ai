@@ -18,7 +18,7 @@ from app.api.tool_intent import router as tool_intent_router
 from app.auth import AuthVerifier, ClerkAuthVerifier, TestAuthVerifier
 from app.brand import BRAND
 from app.canvas.credentials import CredentialStoreUnavailable, credential_store_from_settings
-from app.canvas.oauth import CanvasOAuthClient, InMemoryStateStore
+from app.canvas.oauth import CanvasOAuthClient, SqlStateStore
 from app.canvas.registry import InstitutionConnectionRegistry
 from app.config import Settings
 from app.db import Database
@@ -271,12 +271,17 @@ def create_app(
     # state issued by one request is the state another request validates. The credential store is
     # absent when no key is configured, and the routes report NOT_CONFIGURED rather than storing
     # a token in the clear.
+    #
+    # The state store is `SqlStateStore`, not the in-memory one: a browser starts an authorisation
+    # on whichever worker answers `/connect` and the school's callback can land on another, so the
+    # state has to live where every worker reads it (migration 034). The in-memory store stays as
+    # the test double.
     application.state.canvas_registry = canvas_registry
     if canvas_credentials is not None:
         application.state.canvas_credentials = canvas_credentials
         application.state.canvas_oauth = CanvasOAuthClient(
             registry=canvas_registry,
-            state_store=InMemoryStateStore(),
+            state_store=SqlStateStore(database),
             credential_store=canvas_credentials,
         )
     if resolved_settings.v3_enabled:

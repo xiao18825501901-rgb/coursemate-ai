@@ -254,10 +254,14 @@ here rather than quietly half-fixed.
   (`GET /api/v1/accounts/:account_id/scopes`) and only a school administrator can read it.
 * Canvas's scope listing endpoint is documented as BETA, so the school's own console remains the
   final authority on what it will grant.
-* **The state and credential stores are per process.** `create_app` wires one shared pair for the
-  application, but a multi-worker deployment needs a shared state store before the flow is enabled
-  for real users, or a callback can land on a worker that did not issue the state. This is stated
-  in the router's own docstring rather than left to be discovered.
+* **The state store is shared as of round 80** (migration 034): `SqlStateStore` keeps the one-time
+  state as a SHA-256 hash in shared storage and `create_app` wires it, so a callback may land on any
+  worker. The property is proven the way it will be used —
+  `tests/test_canvas_oauth_state_store.py` has worker A issue the state and **worker B complete the
+  callback over the same database** — and the negative control (wiring the in-memory store instead)
+  makes that same journey end in `canvas=failed`, which is exactly the quiet failure the shared store
+  removes. The credential store is the encrypted file store, which is shared by construction. The
+  in-memory implementations remain the test doubles.
 * The canvas tables come from migration 031, which is applied with the V3 schema. A deployment
   without the private-course model therefore has no canvas tables, and the routes report
   `SCHEMA_NOT_READY` instead of failing with a missing-table error — the capability is genuinely
