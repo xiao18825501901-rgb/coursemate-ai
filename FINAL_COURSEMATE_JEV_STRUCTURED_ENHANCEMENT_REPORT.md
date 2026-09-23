@@ -1,5 +1,21 @@
 # FINAL_COURSEMATE_JEV_STRUCTURED_ENHANCEMENT_REPORT
 
+> **Snapshot, not a live status.** Every count below was measured on the revisions named in §1
+> (backend `169bd57`, browser `6ba70b0`) and is left as it was measured — rewriting a historical
+> measurement is how a report stops being evidence. What has moved since, measured at round 82 and
+> re-checked mechanically by `work/current-change/verify-jev-doc-claims.py`:
+>
+> | Figure | Here (as measured then) | Currently (round 82) | Evidence |
+> |---|---|---|---|
+> | V3 schema | 30 | **34** (033 the local bridge, 034 the shared OAuth state store) | `app/db.py`, `docs/coursejesus/DATA_MIGRATION_AND_ROLLBACK.md` |
+> | Backend gate | 1293 passed on `169bd57` | **1614 passed / 3 skipped / 0 failed** in 1728.14 s on `8d43dc6` | `work/current-change/full_run_round82.log` |
+> | Web unit tests | 73 (19 files) | **96 (22 files)**; `tsc -b` exit 0 | round 79/81 counts, `apps/web/src/**/*.test.ts` |
+> | Browser journeys | 46 totals across five suites, `ui-refresh` 19 | the two suites re-run green on `fba2291`: **`ui-refresh` 22/22 and `jev-structured` 6/6**; the five spec files now hold **49** journeys, and `coursemate` 4 / `learning` 3 / `codex-audit` 14 have not been re-run since their own older revisions | `work/current-change/browser_ui_round80c.log`, `browser_jev_round79c.log` |
+> | Canvas private import | routes + worker implemented | **the identity design was revised in round 79** (OAuth is the production route, the PAT is a local bridge) and the import result is now covered end to end | `docs/coursejesus/CANVAS_LOCAL_BRIDGE.md`, `tests/test_canvas_imported_course_lifecycle.py` |
+>
+> `CANVAS_OAUTH_LIVE` and both live model gates remain `NOT_RUN`/`WAITING_INSTITUTION`; nothing in the
+> table above changes that.
+
 Outcome of the "structured incremental enhancement built on the twelve Jev cases" round: what was
 adopted, merged, kept as development-only or deliberately not adopted; what actually changed in the
 code and where it is called from; which definitions exist and in what mode; the test evidence **for

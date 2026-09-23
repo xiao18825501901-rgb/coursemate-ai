@@ -1,5 +1,12 @@
 # CHATGPT REVIEW — CURRENT STATUS AND BLOCKERS
 
+> **Dated snapshot (2026-09-22), kept unedited.** Its numbers — the 46 journey totals across five
+> suites, schema 30, the then-current test counts — were measured at that moment and are **not**
+> today's. The current figures live in `COURSEJESUS_EXECUTION_STATE.md`,
+> `docs/recovery/CURRENT_BLOCKER_LEDGER.md` and the snapshot note at the top of
+> `FINAL_COURSEMATE_JEV_STRUCTURED_ENHANCEMENT_REPORT.md`; the measurable ones are re-checked
+> mechanically by `work/current-change/verify-jev-doc-claims.py`.
+
 Single self-contained status report for the CourseMate (DeepSeek + TypeSafe Jev) recovery round.
 Everything below names its revision, its command and its log path. Nothing here is a percentage, a
 "PASS total", or a claim that a shadow receipt is a business effect.

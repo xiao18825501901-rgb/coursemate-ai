@@ -13,10 +13,11 @@ and the harness raises rather than emit one from fake or unlabelled data.
 
 | Asset | Path | State |
 |---|---|---|
-| Judgment dataset (310 samples) | `benchmarks/jev-judgments.dataset.json` | real, self-describing, validated by the builder |
+| Judgment dataset (310 samples) | `benchmarks/jev-judgments.dataset.json` | real, self-describing, validated by the builder — **measured at round 82: 310 samples covering 13 definitions, splits 196/47/67** (the split manifest's own `count` fields) |
 | Frozen split manifest | `benchmarks/jev-calibration.split.json` | real; group-level splits + content hash |
-| Calibration maths | `services/rag-api/app/evaluation/jev_calibration.py` | real, 43 tests |
-| A/B/C/D/E ablation harness | `services/rag-api/app/evaluation/jev_semantic_ablation.py` | real, arms run offline |
+| Companion module dataset (49 samples) | `benchmarks/jev-module-judgments.dataset.json` | real — 7 samples each for the seven definitions the frozen set does not cover, which is what the six module arms are measured on |
+| Calibration maths | `services/rag-api/app/evaluation/jev_calibration.py` | real; covered by `test_jev_calibration.py` (**19 tests, collected at round 82** — an earlier version of this row said 43, which no suite in the tree collects) |
+| A/B/C/D/E ablation harness | `services/rag-api/app/evaluation/jev_semantic_ablation.py` | real, arms run offline; the measurement suite as a whole is **122 tests across eight files** (`test_jev_calibration`, `test_jev_ablation`, `test_jev_ablation_baselines`, `test_jev_module_metrics`, `test_jev_module_split_calibration`, `test_jev_semantic_ablation`, `test_jev_semantic_component_ablation`, `test_jev_semantic_ablation_cli`) |
 | Builders / CLIs | `scripts/build_jev_dataset.py`, `scripts/calibrate_jev.py`, `scripts/run_jev_semantic_ablation.py` | real, offline-safe |
 | Older A–D plumbing harness | `app/evaluation/jev_ablation.py`, `scripts/run_jev_ablation.py` | kept, untouched; superseded for reporting by the semantic harness |
 
