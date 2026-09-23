@@ -180,6 +180,51 @@ def deepseek_baseline_predictor(
     return predict
 
 
+def memoise_predictor(
+    predictor: Callable[[Any], dict[str, Any] | None],
+    *,
+    stats: dict[str, int] | None = None,
+) -> Callable[[Any], dict[str, Any] | None]:
+    """Answer each sample **once**, and give every arm that same answer.
+
+    The ablation runs the same dataset through five arms. A definition no arm turns on — for
+    example `corpus.quality.v1` — is answered by this baseline in every one of them, and a language
+    model does not answer identically twice. Without memoisation the same metric differs between
+    arms for reasons that have nothing to do with Jev, which makes the comparison unreadable: the
+    arms stopped being a controlled difference.
+
+    The key is the sample plus the exact question (type, instructions and options), so two samples
+    that ask different questions can never share an answer.
+    """
+    memo: dict[tuple[str, str, str], dict[str, Any] | None] = {}
+    counters = stats if stats is not None else {}
+
+    def memoised(sample: Any) -> dict[str, Any] | None:
+        question = sample.questions["q"]
+        key = (
+            str(sample.sample_id),
+            str(sample.definition_id),
+            json.dumps(
+                {
+                    "type": question.get("type"),
+                    "instructions": question.get("instructions"),
+                    "criteria": question.get("criteria"),
+                },
+                sort_keys=True,
+                ensure_ascii=False,
+            ),
+        )
+        if key in memo:
+            counters["reused"] = counters.get("reused", 0) + 1
+            return memo[key]
+        answer = predictor(sample)
+        memo[key] = answer
+        counters["asked"] = counters.get("asked", 0) + 1
+        return answer
+
+    return memoised
+
+
 def _response_text(raw: dict[str, Any]) -> str | None:
     """The assistant text from a Responses body, or None.
 

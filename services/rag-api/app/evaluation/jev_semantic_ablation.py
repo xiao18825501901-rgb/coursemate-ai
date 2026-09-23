@@ -1593,7 +1593,31 @@ def run_jev_semantic_ablation(
     }
     # The population behind every conditional metric, published so a rate is never read
     # alone: 0.0 with a denominator of 0 means "nothing to measure", not "no errors".
+    #
+    # The non-module metrics are listed here too, and that is not bookkeeping: on the calibration
+    # split several definitions have 1–3 labelled samples, so a single sample moves a rate by
+    # 33–100 points. Without the denominator, `key_fact_retention` falling from 1.000 to 0.000 looks
+    # like a regression when it is one sample, and a reader cannot tell the two apart.
     metric_denominators = {
+        "recall_at_k": len(retrieval_results),
+        "mrr": len(retrieval_results),
+        "ndcg_at_k": len(retrieval_results),
+        "locator_accuracy": len(locator_results),
+        "citation_support_accuracy": len(citation_results),
+        "unsupported_claim_rate": len(citation_results),
+        "span_selection_accuracy": len(span_results),
+        "key_fact_retention": len(context_results),
+        "context_compaction": len(context_results),
+        "intent_accuracy": len(intent_results),
+        "pedagogy_accuracy": len(pedagogy_results),
+        "classification_accuracy": len(classification_results),
+        "exercise_accuracy": len(exercise_results),
+        "prerequisite_accuracy": len(prerequisite_results),
+        "coverage_confusion": len(coverage_results),
+        "criterion_error": len(criterion_results),
+        "corpus_quality_mae": len(corpus_results),
+        "mainline_recovery_rate": len(trajectory_results),
+        "image_answer_accuracy": len(image_results),
         "extraction_false_acceptance": sum(
             1 for r in extraction_results if r.label_choice in EXTRACTION_DEFECT_LABELS
         ),

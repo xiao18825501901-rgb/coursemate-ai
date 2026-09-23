@@ -284,3 +284,38 @@ def test_score_label_metric_uses_ordinal_distance() -> None:
         ScoreLevelResult("b", 2, 1, 2),
     ]
     assert score_level_mae(results) == 0.5
+
+
+def test_the_definition_level_metrics_publish_their_denominator_too() -> None:
+    """Not only the module metrics: every rate whose population can be tiny.
+
+    On the calibration split `context.keep_segment.v1` has 2 labelled samples and
+    `assessment.criterion_review.v1` has 3, so one sample moves those rates by 33–100 points. The
+    live comparison read `key_fact_retention` 1.000 (arm A) against 0.000 (arm E) and
+    `criterion_error` 0.000 against 0.333 — without the denominator a reader cannot tell a
+    regression from a single sample, so the denominator is published beside every rate.
+    """
+    dataset = load_jev_dataset(COMPANION)
+    run = run_jev_semantic_ablation(dataset, "M-TOOL", transport=FakeJevTransport())
+    denominators = run["metric_denominators"]
+    counts = run["case_counts"]
+
+    # Each definition-level rate is published with the population it was computed over, and the two
+    # must agree with the case counts the same run reports.
+    assert denominators["key_fact_retention"] == counts["context"]
+    assert denominators["context_compaction"] == counts["context"]
+    assert denominators["criterion_error"] == counts["criterion"]
+    assert denominators["span_selection_accuracy"] == counts["span_selection"]
+    assert denominators["citation_support_accuracy"] == counts["citation"]
+    assert denominators["unsupported_claim_rate"] == counts["citation"]
+    assert denominators["intent_accuracy"] == counts["intent"]
+    assert denominators["pedagogy_accuracy"] == counts["pedagogy"]
+    assert denominators["coverage_confusion"] == counts["coverage"]
+    assert denominators["corpus_quality_mae"] == counts["corpus_quality"]
+    assert denominators["exercise_accuracy"] == counts["exercise"]
+    assert denominators["prerequisite_accuracy"] == counts["prerequisite"]
+
+    # And a rate with no population is 0.0 *with* a zero denominator, never a bare 0.0.
+    for metric, denominator in denominators.items():
+        assert isinstance(denominator, int), metric
+        assert denominator >= 0, metric

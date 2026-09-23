@@ -35,6 +35,10 @@ ROOT = Path(__file__).resolve().parents[1]
 RAG_SERVICE = ROOT / "services" / "rag-api"
 sys.path.insert(0, str(RAG_SERVICE))
 
+from app.evaluation.jev_deepseek_baseline import (  # noqa: E402 -- after sys.path bootstrap
+    deepseek_baseline_predictor,
+    memoise_predictor,
+)
 from app.evaluation.jev_semantic_ablation import (  # noqa: E402 -- after sys.path bootstrap
     ARM_NAMES,
     COMPONENT_ARM_NAMES,
@@ -46,6 +50,7 @@ from app.evaluation.jev_semantic_ablation import (  # noqa: E402 -- after sys.pa
     load_jev_dataset,
     run_jev_semantic_ablation,
 )
+from app.evaluation.provider_safety import validate_deepseek_base_url  # noqa: E402
 from app.jev.gateway import SdkTransport  # noqa: E402 -- after sys.path bootstrap
 
 DATASET_PATH = ROOT / "benchmarks" / "jev-judgments.dataset.json"
@@ -112,9 +117,6 @@ def _deepseek_baseline(args: argparse.Namespace) -> tuple[Any, list[dict]]:
         return None, []
     import httpx
 
-    from app.evaluation.jev_deepseek_baseline import deepseek_baseline_predictor
-    from app.evaluation.provider_safety import validate_deepseek_base_url
-
     api_key = os.environ.get("DEEPSEEK_API_KEY") or ""
     base_url = validate_deepseek_base_url(args.deepseek_base_url)
     client = httpx.Client(
@@ -136,7 +138,12 @@ def _deepseek_baseline(args: argparse.Namespace) -> tuple[Any, list[dict]]:
         model=args.deepseek_model,
         calls=calls,
     )
-    return predictor, calls
+    # The baseline answers each sample once and every arm sees that same answer; without this the
+    # arms are not a controlled difference. See `memoise_predictor` for why.
+    stats: dict[str, int] = {}
+    memoised = memoise_predictor(predictor, stats=stats)
+    memoised.cache_stats = stats  # type: ignore[attr-defined]
+    return memoised, calls
 
 
 def _summarize_arm(summary: dict) -> None:
@@ -258,6 +265,10 @@ def main() -> int:
             "provider": "deepseek" if baseline_predictor is not None else None,
             "model": args.deepseek_model if baseline_predictor is not None else None,
             "calls": len(baseline_calls),
+            "answered_once_per_sample": baseline_predictor is not None,
+            "cache_reuses_across_arms": getattr(
+                getattr(baseline_predictor, "cache_stats", None), "get", lambda *_: 0
+            )("count", 0),
             "call_log": baseline_calls,
             "note": (
                 ""

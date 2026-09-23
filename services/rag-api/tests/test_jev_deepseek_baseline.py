@@ -145,3 +145,49 @@ def test_the_endpoint_is_normalised(base: str) -> None:
     transport, sent = _transport_returning('{"answer": true}')
     deepseek_baseline_predictor(transport, base_url=base)(Sample(question))
     assert sent[0][0] == "https://api.deepseek.com/responses"
+
+
+def test_every_arm_sees_the_same_baseline_answer() -> None:
+    """The comparison is only controlled if the baseline answers each sample once.
+
+    The ablation runs the same dataset through five arms, and a definition no arm turns on is
+    answered by this baseline in every one of them. As a language model does not answer identically
+    twice, re-asking would make one metric differ between arms for reasons unrelated to Jev — which
+    is exactly what happened before this memo existed (`corpus_quality_mae` read 0.125 in arm A and
+    0.250 in arm E for a definition no arm ever arms).
+    """
+    from app.evaluation.jev_deepseek_baseline import memoise_predictor
+
+    question = {"type": "noul", "instructions": "x", "criteria": {}}
+    asked: list[str] = []
+
+    def counting_predictor(sample):
+        asked.append(sample.sample_id)
+        return {"noul": len(asked) % 2 == 0}  # a *different* answer on every call
+
+    stats: dict[str, int] = {}
+    memoised = memoise_predictor(counting_predictor, stats=stats)
+    sample = Sample(question)
+
+    first = memoised(sample)
+    for _ in range(4):  # four more arms
+        assert memoised(sample) == first, "a later arm must not see a different baseline answer"
+    assert asked == ["sample-1"], "the transport must be asked once per sample"
+    assert stats == {"asked": 1, "reused": 4}
+
+
+def test_two_different_questions_never_share_a_memoised_answer() -> None:
+    from app.evaluation.jev_deepseek_baseline import memoise_predictor
+
+    asked: list[str] = []
+
+    def counting_predictor(sample):
+        asked.append(sample.sample_id)
+        return {"noul": True}
+
+    memoised = memoise_predictor(counting_predictor)
+    first = {"type": "noul", "instructions": "is A true?", "criteria": {}}
+    second = {"type": "noul", "instructions": "is B true?", "criteria": {}}
+    memoised(Sample(first))
+    memoised(Sample(second))
+    assert len(asked) == 2, "the same sample asking a different question is a different question"
