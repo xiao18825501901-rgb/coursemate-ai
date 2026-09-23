@@ -168,6 +168,31 @@ than edited by hand. The gate on this revision is **1608 passed / 3 skipped / 0 
 (`work/current-change/full_run_round81.log`, exit 0; +9 are the new tests), with the neighbouring
 Canvas/schema suites re-run at 89 passed because the schema version moved to 34.
 
+**`de7fea9`** then tested the half of the Canvas product that nothing had tested: what happens *after* an
+import. The revision says an imported course can be used "按现有规则" — pinned, taught, assessed,
+deleted, shared — and that is a claim about the product, not about the import; a course only its
+importer can see, that cannot be renamed, extended, asked about or deleted would satisfy every import
+test and still be useless.
+
+`tests/test_canvas_imported_course_lifecycle.py` (6 tests) imports through the local bridge and then
+uses the result through the ordinary routes: it is listed for its owner as `user`/`private`/indexed with
+a real chunk count; another account cannot list, read, read-its-documents, rename or delete it while the
+owner still can; the owner can rename it and choose a language; the owner can add material through the
+product's own upload route and the ingestion job completes with chunks; **a question about the imported
+material is answered with a citation to the document the import created** (the citation arrives as its
+own SSE event carrying `documentId`, filename and excerpt — the real business effect the earlier suites
+stopped short of); and deleting the course removes its documents and chunks while **keeping the import
+receipts**, because a user deleting their own course must not rewrite where the material came from. The
+isolation assertions are mutation-proven: creating the imported course as an admin course instead is
+caught by exactly that test, with the module restored byte-for-byte.
+
+Three response shapes were settled by measurement rather than assumption (the page models are `items`,
+`preferred_language` is an enum, and a citation is its own event) — the probe that prints them is kept
+at `work/current-change/probe-course-json-keys.py`. The gate on this revision is **1614 passed / 3
+skipped / 0 failed** in 1728.14 s (`work/current-change/full_run_round82.log`, exit 0; +6 are the new
+tests), and nothing else moved: no schema change, no route change, no behaviour change — this round adds
+evidence about behaviour that already existed.
+
 **Audited revision.** branch `fix/codex-dsh-audit-20260919`, audited at HEAD
 `7e2e4db7cf99d85f92a82c9f97d72729fdaa5162` ("Record round 30's final revision and correct three
 stale deliverable claims", 2026-09-22 13:31 +08:00), working tree clean, **76 commits ahead of
