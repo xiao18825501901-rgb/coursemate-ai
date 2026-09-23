@@ -81,8 +81,81 @@ def set_verified(db: Database, owner: str, method: str, notes: str = "") -> None
     )
 
 
+# A qualification is only provably real when its method names the evidence:
+# `code` (a 7-digit code was redeemed), `admin` (an operator granted it), or
+# `grandfathered` (backfilled from an approved pre-enablement snapshot).
+_REAL_QUALIFICATION_METHODS = frozenset({'code', 'admin', 'grandfathered'})
+
+
+def qualification_origin(row) -> str:
+    """Classify one qualification record: real verification, or registration-auto.
+
+    `row` is a `cmui_verification`-shaped mapping (the shape
+    `verification_status` returns; `None` means "no row at all"). Returns:
+
+    - `'real'` — `code`, `admin` or `grandfathered`: the record names evidence.
+    - `'registration_auto'` — `registered`: the automatic grant an active
+      registration used to receive. That grant no longer happens, but every row
+      it already wrote is kept exactly as it is.
+    - `'none'` — no row, `verified=0`, or a verified row whose method proves
+      neither. Such a row is never counted as real.
+
+    The data gap, stated plainly: `cmui_verification` alone cannot prove real
+    verification for a user who redeemed a 7-digit code *after* having been
+    auto-granted. `redeem_code` deliberately refuses to overwrite an already
+    verified provenance, so that user keeps `method='registered'` even though a
+    real code was redeemed. The corroborating evidence for exactly that case is
+    `cmui_verification_codes` with `status='redeemed'` for the same owner (plus
+    its audit trail and `cmui_redemption_attempts`). This helper reads only the
+    qualification row it is handed, so those users are reported as
+    `'registration_auto'` and must be checked against the codes table before any
+    strict (verified-only) enforcement decision. Pure read.
+    """
+    if row is None:
+        return 'none'
+    if not row['verified']:
+        return 'none'
+    method = row['method']
+    if method == 'registered':
+        return 'registration_auto'
+    return 'real' if method in _REAL_QUALIFICATION_METHODS else 'none'
+
+
+def qualification_origin_counts(db: Database) -> dict[str, int]:
+    """Count every known identity by qualification origin, naming nobody.
+
+    The population is every `cmui_users` row left-joined to its qualification,
+    plus any `cmui_verification` row whose owner is missing from `cmui_users`.
+    That is what makes `'none'` meaningful: it is the number of accounts holding
+    no qualification at all, which is the class every new registration now lands
+    in since the registration auto-grant was removed.
+
+    Returns only aggregate ints; no subject id, name or code is read out. Pure
+    read: this function writes, moves and repairs nothing.
+    """
+    rows = db.all(
+        'SELECT COALESCE(v.verified,0) AS verified, v.method AS method '
+        'FROM cmui_users u LEFT JOIN cmui_verification v ON v.owner=u.id '
+        'UNION ALL '
+        'SELECT v.verified AS verified, v.method AS method FROM cmui_verification v '
+        'WHERE v.owner NOT IN (SELECT id FROM cmui_users)'
+    )
+    counts = {'real': 0, 'registration_auto': 0, 'none': 0}
+    for row in rows:
+        counts[qualification_origin(row)] += 1
+    return counts
+
+
 def ensure_registered_qualification(db: Database, owner: str) -> bool:
-    """Qualify a currently active authenticated identity exactly once.
+    """DEPRECATED AND UNUSED BY PRODUCTION: it has no production caller.
+
+    This is the old registration auto-grant. Both call sites were removed when
+    the owner stopped granting campus qualification to new registrations: the
+    `ensure_user` path (`auth.py`) and the campus access check itself
+    (`ui_extension/mount.py`). It is kept only so the removal is auditable and so
+    any out-of-tree caller can be found by name; nothing in `app/` calls it, and
+    it must never be called from an access check — an access check reads
+    qualification, it never writes one.
 
     Existing `code`, `admin`, and `grandfathered` records remain their original
     provenance. A disabled local directory subject is never changed here.

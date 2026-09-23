@@ -103,8 +103,12 @@ def test_failed_grandfather_snapshot_can_recover_without_losing_old_user(tmp_pat
         assert old["method"] == "grandfathered"
         ensure_user(recovered.state.db, "registered-after-cutoff")
         current = verification_status(recovered.state.db, "registered-after-cutoff")
-        assert current["verified"] is True
-        assert current["method"] == "registered"
+        # Registration no longer qualifies anyone. The approved snapshot is the
+        # only grant in this test, and it is pinned to the pre-cutoff population,
+        # so the post-cutoff identity stays unqualified — `verified=0` with no
+        # method at all, not a `registered` row.
+        assert current["verified"] is False
+        assert current["method"] is None
 
 
 def test_schema6_verification_upgrade_retains_tombstones_and_scrubs_secrets(tmp_path: Path) -> None:
@@ -200,8 +204,13 @@ def test_grandfather_snapshot_atomic_and_one_time(tmp_path: Path) -> None:
     ensure_user(db, 'new')
     social.grandfather_existing_users(db, ['old', 'new'])
     current = social.verification_status(db, 'new')
-    assert current['verified'] is True
-    assert current['method'] == 'registered'
+    # The boundary is one-time: the late `new` identity is not grandfathered. It
+    # also gets nothing from registering, so it ends with no qualification row at
+    # all. Asserting the absent row (rather than a `verified` flag) is what proves
+    # the second call did nothing for a user it merely learned about.
+    assert current['verified'] is False
+    assert current['method'] is None
+    assert db.one('SELECT * FROM cmui_verification WHERE owner=?', ('new',)) is None
 
 
 def test_public_directory_id_can_block_and_unblock_messages(client):

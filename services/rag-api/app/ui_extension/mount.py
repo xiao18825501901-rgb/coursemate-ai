@@ -42,6 +42,22 @@ def ui_allowed_origins(settings: Settings) -> tuple[str, ...]:
     return (settings.web_origin,)
 
 
+def _policy_requires_real_origin(cfg: object) -> bool:
+    """Whether the deployment asks for a provable (non-registration) qualification.
+
+    `CMUI_CAMPUS_QUALIFICATION_POLICY=registered_active` is the unchanged default:
+    any verified qualification row is accepted, including the historical
+    registration-auto rows that this change deliberately keeps alive.
+    `verified_only` additionally requires an origin of `code`, `admin` or
+    `grandfathered`; a row that only says `registered` cannot prove it.
+
+    The policy decides how strict the gate is. It never decides who is granted a
+    qualification — no value of this setting makes an access check write one.
+    """
+
+    return getattr(cfg, 'campus_qualification_policy', 'registered_active') == 'verified_only'
+
+
 def _coverage_reviewer(settings: Settings) -> object:
     """Resolve the injected free-text coverage reviewer.
 
@@ -204,12 +220,22 @@ def mount_ui_extension(
         fields=set(course.keys())
         required=('requires_student_verification' in fields and course['requires_student_verification']) or ('display_type' in fields and course['display_type']=='campus') or ('course_type' in fields and course['course_type']=='official')
         if required:
-            # The legacy V3 routes do not enter cm_update.current_user(), so
-            # apply exactly the same active-registration qualification here.
-            social.ensure_registered_qualification(ui.state.db, subject)
-            verification=ui.state.db.one('SELECT verified FROM cmui_verification WHERE owner=?',(subject,))
-            if not verification or not verification['verified']:
-                raise ApiError(403,'STUDENT_VERIFICATION_REQUIRED','注册登录后将自动开通学生资格')
+            # The legacy V3 routes do not enter cm_update.current_user(), so the
+            # campus qualification gate is applied here as well.
+            #
+            # This check READS a qualification; it never writes one. It used to
+            # call social.ensure_registered_qualification first, which granted
+            # `method='registered'` inside the access check itself — so the gate
+            # certified the very row it then accepted. Registration no longer
+            # qualifies anyone, and no access check may.
+            status=social.verification_status(ui.state.db, subject)
+            unproven_origin=(
+                _policy_requires_real_origin(ui.state.cfg)
+                and social.qualification_origin(status)!='real'
+            )
+            if not status['verified'] or unproven_origin:
+                raise ApiError(403,'STUDENT_VERIFICATION_REQUIRED',
+                    '此课程为校园课程：请先在账户中完成学生认证（7 位认证码）。')
     database.course_content_authorizer=authorize_content
     return ui
 

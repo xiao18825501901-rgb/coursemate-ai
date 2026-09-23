@@ -2,7 +2,9 @@ import pytest
 from fastapi.testclient import TestClient
 from app.cm_update.app import create_app
 from app.cm_update.config import Settings
+from app.cm_update.db import Database
 from app.cm_update.seed import seed
+from app.cm_update.social import set_verified
 from app.cm_update.provider import ProviderError
 
 class ContractProvider:
@@ -49,6 +51,23 @@ def _sample_pdf(path) -> None:
     writer.close()
 
 
+def qualify_fixture_accounts(cfg) -> None:
+    """Give the standalone local fixture accounts campus qualification, explicitly.
+
+    `seed()` creates `local-alice`/`local-bob`/`local-admin` as demo identities,
+    and every test in this directory reads the campus courses `cs3481`/`ge2324`.
+    That used to work because the first authenticated request auto-granted
+    `method='registered'`; that grant is removed, so the fixture states the
+    qualification itself. This is the same explicit operator grant
+    `tests/campus_actor_fixture.py` uses — deliberately not `CMUI_AUTO_VERIFY_NEW_USERS`,
+    which would label these contracts' fixtures `grandfathered`, i.e. claim an
+    approved snapshot that never existed.
+    """
+    db = Database(cfg.data_dir / 'ui.sqlite3')
+    for account in ('alice', 'bob', 'admin'):
+        set_verified(db, 'local-' + account, 'admin', 'standalone contract fixture account')
+
+
 @pytest.fixture
 def env(tmp_path):
     samples = tmp_path / "sample-documents"
@@ -57,6 +76,7 @@ def env(tmp_path):
         _sample_pdf(samples / name)
     cfg=Settings(data_dir=tmp_path/'data',environment='test',provider_mode='test')
     seed(cfg, documents=samples)
+    qualify_fixture_accounts(cfg)
     provider=ContractProvider();provider.calls=[]
     app=create_app(cfg,provider=provider)
     with TestClient(app) as client:

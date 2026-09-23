@@ -21,6 +21,11 @@ UI = "/ui-extension/api/ui/v1"
 SUBJECTS = {
     "Bearer token-a": "user-a",
     "Bearer token-b": "user-b",
+    # token-c / token-d are the actors the campus-qualification-origin tests use
+    # for "never granted" and "only a simulated historical registration row".
+    # They are never qualified by any helper in this suite.
+    "Bearer token-c": "user-c",
+    "Bearer token-d": "user-d",
     "Bearer admin-token": "user-admin",
 }
 
@@ -51,8 +56,9 @@ def make_settings(tmp_path: Path) -> Settings:
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     monkeypatch.setenv("CMUI_PROVIDER_MODE", "test")
-    # The registration policy is exercised through the real current-user path;
-    # the old test-only auto-verify convenience remains disabled.
+    # No test-only auto-verify either: registration grants nothing, so the
+    # campus-content tests must qualify their actors explicitly
+    # (see qualify_for_campus above) instead of leaning on a removed auto-grant.
     monkeypatch.setenv("CMUI_AUTO_VERIFY_NEW_USERS", "false")
     application = create_app(
         settings=make_settings(tmp_path),
@@ -85,6 +91,28 @@ def wait_terminal(client: TestClient, run_id: str, timeout: float = 15.0) -> dic
     raise AssertionError(f"run {run_id} did not finish in {timeout}s")
 
 
+def qualify_for_campus(client: TestClient, *subjects: str) -> None:
+    """Grant campus qualification EXPLICITLY to named synthetic actors.
+
+    Production used to grant `method='registered'` automatically on the first
+    authenticated request, and the campus suites of this round relied on that to
+    reach a campus course's content. That auto-grant is gone: it ran inside the
+    access check itself, so the gate certified the very row it then accepted, and
+    it erased the difference between a real verification and a registration.
+
+    A test that needs campus content must therefore say so out loud here. This is
+    the same explicit operator grant `tests/campus_actor_fixture.py` uses for the
+    isolated integrated-host suites — not a re-introduction of the auto-grant: it
+    is written in the test, it names the actor, and it never runs inside an access
+    check. `user-c` is deliberately never granted, so the tests that pin "a new
+    registration is unqualified" have an actor to use.
+    """
+    from app.cm_update.social import set_verified
+    db = client.app.state.ui_extension_app.state.db
+    for subject in subjects:
+        set_verified(db, subject, 'admin', 'explicit test qualification, auto-grant removed')
+
+
 def make_course(client: TestClient) -> None:
     created = client.post(
         "/api/courses",
@@ -95,8 +123,12 @@ def make_course(client: TestClient) -> None:
     # ensure the two student users exist in the UI user table
     for token in ("token-a", "token-b"):
         client.get(f"{UI}/me", headers=auth(token))
-    # Both normal active identities are now automatically qualified. Individual
-    # tests that exercise a deleted/disabled identity create a local tombstone.
+    # cs3481 is an official (campus) course, so every campus-content test in this
+    # round needs real qualification. Registration no longer grants it, so the two
+    # declared synthetic actors are qualified explicitly; tests that exercise a
+    # deleted/disabled identity still create a local tombstone, which dominates
+    # this grant. `user-c` is intentionally left unqualified.
+    qualify_for_campus(client, "user-a", "user-b")
     # Exercise/binding contracts now require real authorized nodes rather than
     # accepting invented IDs or generating a question from an empty tree.
     with client.app.state.database.connect() as db:
@@ -168,17 +200,33 @@ def test_pair_lifecycle_restores_both_lanes(client: TestClient) -> None:
     assert client.get(f"{UI}/pairs/{pair_id}", headers=auth("token-a")).status_code == 404
 
 
-def test_active_registration_is_automatically_qualified_before_first_campus_pin(client: TestClient) -> None:
-    """A normal identity must not need a code or a second request to use campus content."""
-    make_course(client)
-    status = client.get(f"{UI}/me/verification", headers=auth("token-b"))
-    assert status.status_code == 200, status.text
-    assert status.json()["verified"] is True
-    assert status.json()["method"] == "registered"
+def test_a_new_registration_is_not_qualified_and_campus_content_is_refused(
+    client: TestClient,
+) -> None:
+    """Registration grants no campus qualification any more.
 
-    pinned = client.put(f"{UI}/courses/cs3481/pin", headers=auth("token-b"))
-    assert pinned.status_code == 200, pinned.text
-    assert client.get(f"{UI}/courses/cs3481/files", headers=auth("token-b")).status_code == 200
+    This test used to assert the opposite — that the first authenticated request
+    returned `{"verified": true, "method": "registered"}` and that campus content
+    then answered 200 without a code, a second login or an operator. The owner
+    stopped that auto-grant: it was written by the access check itself (so the
+    gate certified the row it accepted) and it made a registration
+    indistinguishable from a real verification.
+
+    `user-c` is used because no helper in this suite qualifies it: `make_course`
+    qualifies `user-a`/`user-b` explicitly for the campus-content tests. Nothing
+    is denied by deletion — the actor simply was never granted anything, and
+    `user-a`/`user-b`'s own rows are untouched by this test.
+    """
+    make_course(client)
+    status = client.get(f"{UI}/me/verification", headers=auth("token-c"))
+    assert status.status_code == 200, status.text
+    assert status.json() == {"verified": False, "method": None, "verified_at": None}
+    db = client.app.state.ui_extension_app.state.db
+    assert db.one('SELECT * FROM cmui_verification WHERE owner=?', ("user-c",)) is None, \
+        "registration must leave no qualification row at all (verified=0, method NULL)"
+
+    assert client.put(f"{UI}/courses/cs3481/pin", headers=auth("token-c")).status_code == 403
+    assert client.get(f"{UI}/courses/cs3481/files", headers=auth("token-c")).status_code == 403
 
 
 def test_disabled_local_identity_is_not_requalified_or_given_campus_content(client: TestClient) -> None:
@@ -333,28 +381,36 @@ def test_explanation_flow_and_reuse(client: TestClient) -> None:
 # --------------------------------------------------------------- verification
 
 
-def test_registration_qualification_and_legacy_code_audit(client: TestClient) -> None:
+def test_code_redemption_is_what_qualifies_and_legacy_provenance_is_never_overwritten(client: TestClient) -> None:
+    """A 7-digit code is the way in, and it is recorded as the real origin.
+
+    The old version of this test asserted that a first authenticated request
+    auto-qualified an active registration and that a later code redemption must
+    not overwrite that provenance. Registration grants nothing now, so the
+    redemption is what qualifies `user-c`, and `method='code'` is preserved as
+    the honest origin. The "never overwrite a real provenance" half is kept
+    against `user-b`, whose explicit operator grant must survive a redemption.
+    """
     make_course(client)
     issued = client.post(f"{UI}/admin/verification-codes", headers=auth("admin-token"), json={"count": 2})
     assert issued.status_code == 201
     codes = issued.json()["codes"]
     assert len(codes) == 2 and all(len(c) == 7 and c.isdigit() for c in codes)
 
-    # A first authenticated request qualifies an active registered identity;
-    # the first course-content request works without a second login or code.
-    allowed = client.get(f"{UI}/courses/cs3481/files", headers=auth("token-b"))
-    assert allowed.status_code == 200
-    before = client.get(f"{UI}/me/verification", headers=auth("token-b")).json()
-    assert before["verified"] is True and before["method"] == "registered"
+    # An unqualified registration cannot read campus content and holds no row ...
+    assert client.get(f"{UI}/courses/cs3481/files", headers=auth("token-c")).status_code == 403
+    before = client.get(f"{UI}/me/verification", headers=auth("token-c")).json()
+    assert before["verified"] is False and before["method"] is None
 
+    # ... and redeeming a valid code grants it, with a provable origin.
     redeemed = client.post(
-        f"{UI}/me/verification/redeem", headers=auth("token-b"),
+        f"{UI}/me/verification/redeem", headers=auth("token-c"),
         json={"code": codes[0], "request_id": "redeem-0001"},
     )
     assert redeemed.status_code == 200, redeemed.text
     assert redeemed.json()["verified"] is True
-    after = client.get(f"{UI}/me/verification", headers=auth("token-b")).json()
-    assert after["method"] == "registered", "legacy redemption must not overwrite qualification provenance"
+    after = client.get(f"{UI}/me/verification", headers=auth("token-c")).json()
+    assert after["verified"] is True and after["method"] == "code"
 
     # same code cannot be used by another account
     second = client.post(
@@ -365,12 +421,21 @@ def test_registration_qualification_and_legacy_code_audit(client: TestClient) ->
 
     # idempotent for the redeemer
     again = client.post(
-        f"{UI}/me/verification/redeem", headers=auth("token-b"),
+        f"{UI}/me/verification/redeem", headers=auth("token-c"),
         json={"code": codes[0], "request_id": "redeem-0003"},
     )
     assert again.status_code == 200
 
-    assert client.get(f"{UI}/courses/cs3481/files", headers=auth("token-b")).status_code == 200
+    assert client.get(f"{UI}/courses/cs3481/files", headers=auth("token-c")).status_code == 200
+
+    # Redemption succeeds for a user who is already qualified, but the existing
+    # provenance wins: the operator grant on user-b is not rewritten to 'code'.
+    proven = client.post(
+        f"{UI}/me/verification/redeem", headers=auth("token-b"),
+        json={"code": codes[1], "request_id": "redeem-0004"},
+    )
+    assert proven.status_code == 200, proven.text
+    assert client.get(f"{UI}/me/verification", headers=auth("token-b")).json()["method"] == "admin"
 
 
 def test_grandfather_boundary_is_one_time() -> None:

@@ -7,7 +7,7 @@ from app.cm_update.app import create_app
 from app.cm_update.config import Settings
 from app.cm_update.db import Database
 from app.cm_update.seed import seed
-from conftest import P,login,ContractProvider
+from conftest import P,login,ContractProvider,qualify_fixture_accounts
 
 def k():return uuid4().hex
 def create(c,name='私人机器学习'):
@@ -171,7 +171,11 @@ def test_data_survives_application_restart(client,env):
   assert app2.state.db.one('PRAGMA integrity_check')['integrity_check']=='ok';assert app2.state.db.all('PRAGMA foreign_key_check')==[]
 
 def test_no_disabled_model_fake_answer(tmp_path):
- cfg=Settings(data_dir=tmp_path/'x',provider_mode='disabled');seed(cfg)
+ # This test seeds its own app instead of using the `env` fixture, so it must
+ # state the fixture accounts' campus qualification itself: registration no
+ # longer grants it, and `convo()` targets the campus course cs3481.
+ cfg=Settings(data_dir=tmp_path/'x',provider_mode='disabled')
+ seed(cfg);qualify_fixture_accounts(cfg)
  with TestClient(create_app(cfg)) as c:
   login(c,'alice');cv=convo(c);r=c.post(P+f"/conversations/{cv['id']}/runs",json={'text':'你好','request_id':k()});assert r.status_code==503
 

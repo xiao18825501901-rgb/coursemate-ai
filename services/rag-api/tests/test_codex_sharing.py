@@ -205,7 +205,15 @@ def test_snapshot_import_failure_is_retryable_and_not_joined(client,monkeypatch)
     assert len(client.get(f"{UI}/courses/{receipt['course']}/files",headers=auth('token-b')).json())==3
 
 
-def test_active_registered_recipient_is_qualified_before_campus_snapshot_import(client):
+def test_qualified_recipient_keeps_explicit_provenance_through_campus_snapshot_import(client):
+    """A campus snapshot still imports for a qualified recipient.
+
+    The recipient's qualification is now the explicit operator grant `make_course`
+    writes for the declared synthetic actor (`method='admin'`), not the removed
+    registration auto-grant that used to record `method='registered'` here. The
+    join behaviour itself is unchanged; only the provenance string is, and it is
+    asserted so a future silent re-introduction of the auto-grant is caught.
+    """
     make_course(client)
     sid=client.post(f'{UI}/shares',headers=auth('token-a'),json={
         'course':'cs3481','recipients':['user-b'],'history_scope':'none','request_id':'campus-snapshot'}).json()['id']
@@ -214,7 +222,8 @@ def test_active_registered_recipient_is_qualified_before_campus_snapshot_import(
     assert joined.status_code==200,joined.text
     db=client.app.state.ui_extension_app.state.db
     assert db.one('SELECT status FROM cmui_share_imports WHERE share=?',(sid,))['status']=='READY'
-    assert db.one('SELECT method FROM cmui_verification WHERE owner=?',('user-b',))['method']=='registered'
+    provenance=db.one('SELECT method FROM cmui_verification WHERE owner=?',('user-b',))
+    assert provenance['method']=='admin'
 
 
 def test_share_request_id_rejects_different_payload(client):
@@ -254,6 +263,11 @@ def test_share_restores_exercise_answer_and_cached_explanation(client):
     client.post(f'{UI}/me/verification/redeem',headers=auth('token-b'),json={'code':issued['codes'][0],'request_id':'verify-history-recipient'})
     joined=client.post(f"{UI}/shares/{sent['id']}/join",headers=auth('token-b'))
     assert joined.status_code==200,joined.text
+    # The recipient was already qualified explicitly by make_course, so this
+    # redemption succeeds without rewriting that provenance — campus access here
+    # never depended on the removed registration auto-grant.
+    provenance=db.one('SELECT method FROM cmui_verification WHERE owner=?',('user-b',))
+    assert provenance['method']=='admin'
     copied=db.one('SELECT * FROM cmui_exercises WHERE owner=? AND course=?',('user-b',joined.json()['joined_course_id']))
     assert copied, 'Frozen exercise and answer version must be copied with visible history'
     assert copied['id']!=exercise and copied['run'] is None

@@ -523,8 +523,30 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         row = db.one('SELECT active FROM cmui_directory WHERE subject=?', (user['id'],))
         return row is None or bool(row['active'])
 
+    def campus_qualified(user_id):
+        """Campus qualification under the deployment policy. Read-only, always.
+
+        `campus_qualification_policy` selects how strict this is:
+
+        - `registered_active` (the default, unchanged): any verified qualification
+          row is enough. That deliberately includes the historical
+          `method='registered'` rows the auto-grant wrote before it was removed —
+          those users keep campus access, and nobody's row is downgraded here.
+        - `verified_only`: the row must also *prove* its origin, i.e.
+          `code`/`admin`/`grandfathered`. A row that only says `registered`
+          cannot, so such a user is refused until they redeem a real code.
+
+        Never writes: an access check reads qualification, it never grants one.
+        """
+        status = social.verification_status(db, user_id)
+        if not status['verified']:
+            return False
+        if getattr(cfg, 'campus_qualification_policy', 'registered_active') != 'verified_only':
+            return True
+        return social.qualification_origin(status) == 'real'
+
     def verified(user):
-        return identity_active(user) and bool(social.verification_status(db,user['id'])['verified'])
+        return identity_active(user) and campus_qualified(user['id'])
 
     def is_admin(user):
         return identity_active(user) and user['id'] in cfg.admin_ids
@@ -537,7 +559,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             return
         requires = course_dto.get('requires_student_verification') or course_dto.get('display_type')=='campus'
         if requires and not verified(user):
-            raise HTTPException(403,'此课程为校园课程：注册登录后将自动开通学生资格。')
+            raise HTTPException(403,'此课程为校园课程：请先在账户中完成学生认证（7 位认证码）。')
 
     @r.get('/config')
     def config():

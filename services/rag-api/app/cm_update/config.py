@@ -53,6 +53,13 @@ class Settings:
     web_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parents[2] / 'web' / 'dist')
     verification_secret: str = field(default_factory=lambda: os.getenv('CMUI_VERIFICATION_SECRET', ''))
     auto_verify_new_users: bool = field(default_factory=lambda: flag('CMUI_AUTO_VERIFY_NEW_USERS'))
+    # How strict the campus access gate is. `registered_active` (default, and the
+    # only value that ever existed) accepts any verified qualification row,
+    # including the historical registration-auto rows, which are kept as they
+    # are. `verified_only` additionally requires a provable origin
+    # (`code`/`admin`/`grandfathered`). Neither value grants anything: since the
+    # registration auto-grant was removed, only a redeemed code, an operator
+    # grant or the approved pre-enablement snapshot creates a qualification.
     campus_qualification_policy: str = field(default_factory=lambda: os.getenv(
         'CMUI_CAMPUS_QUALIFICATION_POLICY', 'registered_active'))
 
@@ -64,7 +71,7 @@ class Settings:
         if not 10<=self.timeout<=300: raise ValueError('Model timeout invalid')
         if self.auth_mode not in {'development', 'clerk', 'injected'}:
             raise ValueError('Unsupported authentication mode')
-        if self.campus_qualification_policy not in {'registered_active'}:
+        if self.campus_qualification_policy not in {'registered_active', 'verified_only'}:
             raise ValueError('Unsupported campus qualification policy')
         if self.environment == 'production':
             marker=self.web_dir/'build-info.json'
