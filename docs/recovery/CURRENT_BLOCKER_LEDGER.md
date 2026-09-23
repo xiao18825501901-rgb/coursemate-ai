@@ -32,6 +32,13 @@ difference was `ruff format` churn in two files), `mypy app` again at 1004 error
 (`work/current-change/mutation-check-canvas-routes.py`). The third skip is the POSIX-permission
 case, which cannot run on this Windows host.
 
+**`a574fc5`** then added the wizard and its local-upload fallback — the two entry points, the
+"学校连接尚未开通" screen, and the return-path fix that stops a real student landing on a 404 after
+granting access — at **1515 passed / 3 skipped / 0 failed** in 1508.13 s
+(`work/current-change/full_run_round70.log`, exit 0), `mypy app` still at 1004 errors / 32 files,
+**90 web unit tests** passing, and **21 of 21 real-Chrome `ui-refresh` journeys** passing
+(`work/current-change/ui_refresh_round70.log`, the 19 existing plus two new Canvas ones).
+
 **Audited revision.** branch `fix/codex-dsh-audit-20260919`, audited at HEAD
 `7e2e4db7cf99d85f92a82c9f97d72729fdaa5162` ("Record round 30's final revision and correct three
 stale deliverable claims", 2026-09-22 13:31 +08:00), working tree clean, **76 commits ahead of
