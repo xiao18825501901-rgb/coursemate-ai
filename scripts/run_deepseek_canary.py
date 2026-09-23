@@ -26,6 +26,9 @@ RAG_SERVICE = ROOT / "services" / "rag-api"
 sys.path.insert(0, str(RAG_SERVICE))
 
 from app.evaluation.deepseek_canary import (
+    COST_POLICIES,
+    COST_POLICY_CAPPED,
+    COST_POLICY_OWNER_AUTHORIZED_UNLIMITED,
     CanaryContractError,
     DeepSeekPrices,
     build_evidence,
@@ -67,6 +70,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input-price-per-million", type=float)
     parser.add_argument("--output-price-per-million", type=float)
     parser.add_argument("--max-cost", type=float)
+    parser.add_argument(
+        "--cost-policy",
+        choices=list(COST_POLICIES),
+        default=COST_POLICY_CAPPED,
+        help=(
+            "how the spend is authorised: 'capped' requires --max-cost and refuses above it; "
+            "'owner_authorized_unlimited_for_this_workflow' is the owner's explicit grant for this "
+            "workflow, still records the conservative ceiling and the real usage, and is never the "
+            "default"
+        ),
+    )
     parser.add_argument("--currency", default="USD")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--timeout", type=float, default=180.0)
@@ -166,10 +180,11 @@ def main() -> int:
     if not api_key:
         print(f"Missing credential environment variable: {args.api_key_env}")
         return 2
-    if args.max_cost is None:
+    unlimited = args.cost_policy == COST_POLICY_OWNER_AUTHORIZED_UNLIMITED
+    if args.max_cost is None and not unlimited:
         print("Refusing provider calls: --max-cost is required for a billable run.")
         return 2
-    if not math.isfinite(args.max_cost) or args.max_cost <= 0:
+    if args.max_cost is not None and (not math.isfinite(args.max_cost) or args.max_cost <= 0):
         print("--max-cost must be finite and positive.")
         return 2
     if prices is None:
@@ -179,10 +194,21 @@ def main() -> int:
         )
         return 2
     cost_ceiling = total_cost_ceiling(plan, prices)
-    refusal = refusal_message(currency=args.currency, ceiling=cost_ceiling, max_cost=args.max_cost)
-    if refusal is not None:
-        print(refusal)
-        return 2
+    if unlimited:
+        # The owner authorized this workflow without a new USD cap. The ceiling is still computed
+        # and printed, because an unlimited run has to stay an auditable one; it does not gate the
+        # calls. Nothing here invents a fake limit (99999) or makes the mode the default.
+        print(
+            f"Cost policy: {args.cost_policy}. Worst-case {args.currency} ceiling for this plan is "
+            f"{cost_ceiling:.8f}; it is recorded in the evidence and does not gate the run."
+        )
+    else:
+        refusal = refusal_message(
+            currency=args.currency, ceiling=cost_ceiling, max_cost=args.max_cost
+        )
+        if refusal is not None:
+            print(refusal)
+            return 2
 
     output = args.out
     partial_path = output.with_name(f".{output.name}.partial")
@@ -204,6 +230,7 @@ def main() -> int:
             live_verification="NOT_VERIFIED_UNTIL_CALLS_AND_HUMAN_REVIEW_COMPLETE",
             started_at=started_at,
             approved_max_cost=args.max_cost,
+            cost_policy=args.cost_policy,
         )
         _write_json_atomically(checkpoint_path, evidence)
 
@@ -232,6 +259,7 @@ def main() -> int:
         started_at=started_at,
         finished_at=finished_at,
         approved_max_cost=args.max_cost,
+        cost_policy=args.cost_policy,
     )
     _write_json_atomically(output, evidence)
     checkpoint_path.unlink()

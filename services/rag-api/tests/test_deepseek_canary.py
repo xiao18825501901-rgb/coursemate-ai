@@ -20,6 +20,9 @@ import pytest
 
 from app.cm_update import templates
 from app.evaluation.deepseek_canary import (
+    COST_POLICIES,
+    COST_POLICY_CAPPED,
+    COST_POLICY_OWNER_AUTHORIZED_UNLIMITED,
     ROLE_BY_NAME,
     CanaryContractError,
     DeepSeekPrices,
@@ -505,3 +508,181 @@ def test_cli_refuses_when_the_ceiling_exceeds_max_cost(tmp_path: Path) -> None:
     assert "exceeds approved maximum" in process.stdout
     assert "not-a-real-key" not in process.stdout + process.stderr
     assert not output.exists()
+
+
+# ---------------------------------------------------------------------------
+# Cost policy: the owner's explicit authorisation, and what it does not change
+# ---------------------------------------------------------------------------
+
+
+def test_the_default_cost_policy_is_the_capped_one() -> None:
+    """Unlimited is never the default: a caller has to ask for it by name."""
+    assert COST_POLICY_CAPPED == "capped"
+    assert COST_POLICY_CAPPED in COST_POLICIES
+    assert COST_POLICY_OWNER_AUTHORIZED_UNLIMITED in COST_POLICIES
+
+    prices = DeepSeekPrices(1.0, 2.0, "USD")
+    plan = plan_canary(
+        model="deepseek-flash",
+        base_url=BASE_URL,
+        prices=prices,
+        max_output_tokens=100,
+        image_data_url=IMAGE_DATA_URL,  # the plan has an image role
+    )
+    evidence = build_evidence(
+        plan,
+        [],
+        prices=prices,
+        status="RUNNING",
+        live_verification="NOT_VERIFIED",
+        started_at="2026-09-24T00:00:00Z",
+    )
+    assert evidence["cost_policy"] == COST_POLICY_CAPPED
+
+
+def test_the_owner_authorized_policy_is_recorded_beside_the_ceiling_not_instead_of_it() -> None:
+    """An unlimited run still has to be an auditable one."""
+    prices = DeepSeekPrices(1.0, 2.0, "USD")
+    plan = plan_canary(
+        model="deepseek-flash",
+        base_url=BASE_URL,
+        prices=prices,
+        max_output_tokens=100,
+        image_data_url=IMAGE_DATA_URL,  # the plan has an image role
+    )
+    evidence = build_evidence(
+        plan,
+        [],
+        prices=prices,
+        status="LIVE_CALLS_COMPLETED_MANUAL_REVIEW_REQUIRED",
+        live_verification="PENDING_HUMAN_QUALITY_REVIEW",
+        started_at="2026-09-24T00:00:00Z",
+        cost_policy=COST_POLICY_OWNER_AUTHORIZED_UNLIMITED,
+    )
+    assert evidence["cost_policy"] == COST_POLICY_OWNER_AUTHORIZED_UNLIMITED
+    # The ceiling is still computed and written, and no number is invented to stand in for a cap.
+    assert evidence["conservative_cost_ceiling"] == total_cost_ceiling(plan, prices)
+    assert evidence["approved_max_cost"] is None
+
+
+def test_cli_unlimited_mode_still_requires_the_explicit_prices(tmp_path: Path) -> None:
+    """The authorisation removes the USD cap, not the accuracy requirements around it."""
+    process, output = _run_cli(
+        tmp_path,
+        "--allow-billable",
+        "--cost-policy",
+        COST_POLICY_OWNER_AUTHORIZED_UNLIMITED,
+        key="not-a-real-key",
+    )
+    assert process.returncode == 2
+    assert "price" in process.stdout.casefold()
+    assert "not-a-real-key" not in process.stdout + process.stderr
+    assert not output.exists()
+
+
+def test_cli_unlimited_mode_does_not_refuse_above_a_numeric_cap(tmp_path: Path) -> None:
+    """A cap that would refuse is irrelevant under this policy — and is never faked as 99999."""
+    process, output = _run_cli(
+        tmp_path,
+        "--allow-billable",
+        "--cost-policy",
+        COST_POLICY_OWNER_AUTHORIZED_UNLIMITED,
+        "--input-price-per-million",
+        "1",
+        "--output-price-per-million",
+        "1",
+        "--max-cost",
+        "0.00000001",
+        key="not-a-real-key",
+    )
+    # It gets past the ceiling gate: the run then fails on the transport, with a real key absent.
+    assert "exceeds approved maximum" not in process.stdout
+    assert COST_POLICY_OWNER_AUTHORIZED_UNLIMITED in process.stdout
+    assert "not-a-real-key" not in process.stdout + process.stderr
+
+
+def test_cli_still_needs_the_billable_opt_in_under_the_unlimited_policy(tmp_path: Path) -> None:
+    """The authorisation replaces the USD cap, never the opt-in that gates provider calls at all."""
+    process, output = _run_cli(
+        tmp_path,
+        "--cost-policy",
+        COST_POLICY_OWNER_AUTHORIZED_UNLIMITED,
+        "--input-price-per-million",
+        "1",
+        "--output-price-per-million",
+        "1",
+        key="not-a-real-key",
+    )
+    # Without --allow-billable the runner stops after the preflight: exit 0, no call, no evidence.
+    assert process.returncode == 0
+    assert "preflight" in process.stdout.casefold()
+    assert not output.exists()
+    assert "not-a-real-key" not in process.stdout + process.stderr
+
+
+# ---------------------------------------------------------------------------
+# Response shapes: DeepSeek sends `output[]`, not the OpenAI `output_text`
+# ---------------------------------------------------------------------------
+
+
+def _responses_body(text: str, *, status: str = "completed") -> dict:
+    """A body shaped like the one the live endpoint really returns (no `output_text`)."""
+    return {
+        "id": "resp_1",
+        "object": "response",
+        "status": status,
+        "model": "deepseek-flash",
+        "output": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": text}],
+            }
+        ],
+        "usage": {"input_tokens": 290, "output_tokens": 71, "total_tokens": 361},
+    }
+
+
+def test_deepseek_responses_body_is_read_from_the_output_items() -> None:
+    """The shape measured on the live endpoint: text under `output[]`, no `output_text`."""
+    role = ROLE_BY_NAME["PLAN"]  # a responses-protocol role
+    body = _responses_body('{"answer": "grounded"}' if role.structured else "grounded answer")
+    validated = validate_response(role, body)
+    assert validated.model == "deepseek-flash"
+    assert validated.input_tokens == 290
+    assert validated.output_tokens == 71
+    assert "grounded" in validated.text
+
+
+def test_the_openai_output_text_field_is_still_honoured() -> None:
+    """A provider that does send the convenience field must keep working."""
+    role = ROLE_BY_NAME["PLAN"]
+    body = _responses_body("ignored when output_text is present")
+    body["output_text"] = '{"answer": "from output_text"}'
+    validated = validate_response(role, body)
+    assert validated.text == '{"answer": "from output_text"}'
+
+
+def test_a_responses_body_without_any_text_is_still_refused() -> None:
+    role = ROLE_BY_NAME["PLAN"]
+    body = _responses_body("")
+    body["output"] = [{"type": "message", "content": [{"type": "output_text", "text": ""}]}]
+    with pytest.raises(UnusableResponseError):
+        validate_response(role, body)
+
+
+def test_an_incomplete_responses_body_says_why() -> None:
+    """A reasoning model that exhausts its budget must not look like an unexplained refusal."""
+    role = ROLE_BY_NAME["PLAN"]
+    body = _responses_body("", status="incomplete")
+    body["incomplete_details"] = {"reason": "max_output_tokens"}
+    body["usage"] = {
+        "input_tokens": 315,
+        "output_tokens": 4000,
+        "output_tokens_details": {"reasoning_tokens": 3647},
+    }
+    with pytest.raises(UnusableResponseError) as raised:
+        validate_response(role, body)
+    message = str(raised.value)
+    assert "max_output_tokens" in message
+    assert "3647" in message

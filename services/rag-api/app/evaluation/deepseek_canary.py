@@ -60,6 +60,14 @@ PROTOCOL_OVERHEAD_TOKENS = 512
 IMAGE_DETAIL_DEFAULT = "auto"
 ARTIFACT_VERSION = "deepseek-live-canary-v1"
 
+# How the spend of a run was authorised. `CAPPED` is the default everywhere and the only mode a
+# caller gets without asking for the other one by name; `OWNER_AUTHORIZED_UNLIMITED` is what the
+# owner granted for this workflow, and it is recorded in the evidence beside the conservative
+# ceiling rather than replacing it — an unlimited run must still be an auditable one.
+COST_POLICY_CAPPED = "capped"
+COST_POLICY_OWNER_AUTHORIZED_UNLIMITED = "owner_authorized_unlimited_for_this_workflow"
+COST_POLICIES = (COST_POLICY_CAPPED, COST_POLICY_OWNER_AUTHORIZED_UNLIMITED)
+
 # ---------------------------------------------------------------------------
 # Errors
 # ---------------------------------------------------------------------------
@@ -617,6 +625,36 @@ class ValidatedResponse:
     structured: dict[str, Any] | None
 
 
+def _responses_text(raw: dict[str, Any]) -> str:
+    """The assistant text from a Responses body, wherever this provider puts it.
+
+    The OpenAI Responses API offers an `output_text` convenience field, and the validator used to
+    read only that. DeepSeek's endpoint does not send it — measured on the live endpoint on
+    2026-09-24, the body has `output` and no `output_text` — so every `responses`-protocol role
+    came back "unusable" while the call itself had succeeded. The text is read from the `output[]`
+    message items, and `output_text` is still honoured first when a provider does send it.
+    """
+    direct = raw.get("output_text")
+    if isinstance(direct, str) and direct.strip():
+        return direct
+    parts: list[str] = []
+    output = raw.get("output")
+    if isinstance(output, list):
+        for item in output:
+            if not isinstance(item, dict):
+                continue
+            content = item.get("content")
+            if isinstance(content, str):
+                parts.append(content)
+                continue
+            if not isinstance(content, list):
+                continue
+            for part in content:
+                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                    parts.append(part["text"])
+    return "".join(parts)
+
+
 def validate_response(role: CanaryRole, raw: dict[str, Any]) -> ValidatedResponse:
     """Extract observed model id, usage, text and (when structured) parsed JSON.
 
@@ -627,12 +665,27 @@ def validate_response(role: CanaryRole, raw: dict[str, Any]) -> ValidatedRespons
         raise UnusableResponseError("response is not a JSON object")
     if role.protocol == "responses":
         if raw.get("status") != "completed":
-            raise UnusableResponseError(f"response status {raw.get('status')!r} is not completed")
+            # Say *why*: a reasoning model that spends the whole output budget on reasoning comes
+            # back `incomplete` with reason `max_output_tokens`, and an evidence record that only
+            # says "not completed" cannot tell that apart from a provider error. Measured live:
+            # endpoint: with `reasoning: {effort: none}` the same payload completes in 71 output
+            # tokens; without it, all 4000 were reasoning tokens and the response was incomplete.
+            details = raw.get("incomplete_details") or {}
+            reason = details.get("reason") if isinstance(details, dict) else None
+            usage = raw.get("usage") or {}
+            output_details = usage.get("output_tokens_details") or {}
+            reasoning_tokens = (
+                output_details.get("reasoning_tokens") if isinstance(output_details, dict) else None
+            )
+            raise UnusableResponseError(
+                f"response status {raw.get('status')!r} is not completed"
+                f" (reason={reason!r}, reasoning_tokens={reasoning_tokens!r})"
+            )
         model = str(raw.get("model") or "")
         usage = raw.get("usage") or {}
         input_tokens = int(usage.get("input_tokens", 0) or 0)
         output_tokens = int(usage.get("output_tokens", 0) or 0)
-        text = str(raw.get("output_text") or "")
+        text = _responses_text(raw)
     else:
         choices = raw.get("choices") or []
         if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
@@ -685,6 +738,31 @@ class CanaryCallResult:
     cost: float
     structured_output: dict[str, Any] | None = None
     error_class: str | None = None
+    error_detail: str | None = None
+
+
+def _reported_usage(role: CanaryRole, raw: Any) -> tuple[int, int]:
+    """Tokens the provider says it used, even when the response itself is unusable.
+
+    A response that cannot be turned into evidence may still have been billed. The live run's
+    `EXERCISE_V2` call consumed 4,816 tokens and the record said zero, which understates the ledger
+    — the opposite of the "never invent usage" rule, because the usage here is *reported*, not
+    inferred.
+    """
+    if not isinstance(raw, dict):
+        return (0, 0)
+    usage = raw.get("usage")
+    if not isinstance(usage, dict):
+        return (0, 0)
+    if role.protocol == "responses":
+        return (
+            int(usage.get("input_tokens", 0) or 0),
+            int(usage.get("output_tokens", 0) or 0),
+        )
+    return (
+        int(usage.get("prompt_tokens", 0) or 0),
+        int(usage.get("completion_tokens", 0) or 0),
+    )
 
 
 def run_canary_call(
@@ -719,15 +797,25 @@ def run_canary_call(
     try:
         validated = validate_response(role, raw)
     except CanaryContractError as error:
+        # Record *why* it was refused, and the tokens the provider reported: a refused response can
+        # still have been billed, and a bare exception class is not diagnosable evidence.
+        billed_input, billed_output = _reported_usage(role, raw)
+        billed_cost = round(
+            (billed_input * prices.input_price_per_million
+             + billed_output * prices.output_price_per_million)
+            / 1_000_000,
+            8,
+        )
         return CanaryCallResult(
             role=call.role,
             status="failed",
             latency_ms=latency_ms,
-            input_tokens=0,
-            output_tokens=0,
+            input_tokens=billed_input,
+            output_tokens=billed_output,
             observed_model=None,
-            cost=0.0,
+            cost=billed_cost,
             error_class=type(error).__name__,
+            error_detail=str(error)[:500],
         )
     cost = round(
         (validated.input_tokens * prices.input_price_per_million
@@ -767,6 +855,8 @@ def call_evidence(result: CanaryCallResult) -> dict[str, Any]:
         record["structured_output"] = result.structured_output
     if result.error_class is not None:
         record["error_class"] = result.error_class
+    if result.error_detail is not None:
+        record["error_detail"] = result.error_detail
     return record
 
 
@@ -780,8 +870,16 @@ def build_evidence(
     started_at: str,
     finished_at: str | None = None,
     approved_max_cost: float | None = None,
+    cost_policy: str = COST_POLICY_CAPPED,
 ) -> dict[str, Any]:
-    """Assemble the complete evidence record for a run (or a partial checkpoint)."""
+    """Assemble the complete evidence record for a run (or a partial checkpoint).
+
+    `cost_policy` records *how* the spend was authorised. In the owner-authorized unlimited mode the
+    conservative ceiling is still computed and written here — an unlimited run is an auditable run,
+    not an unmeasured one — it simply does not gate execution. `approved_max_cost` is `None` in that
+    mode, which is exactly why the policy has to be recorded separately instead of being inferred
+    from a missing number.
+    """
     ceiling = total_cost_ceiling(plan, prices) if prices is not None else None
     return {
         "artifact_version": ARTIFACT_VERSION,
@@ -789,6 +887,8 @@ def build_evidence(
         "live_verification": live_verification,
         "started_at": started_at,
         "finished_at": finished_at,
+        "cost_policy": cost_policy,
+        "conservative_cost_ceiling": ceiling,
         "provider": "DEEPSEEK_API",
         "model": plan.model,
         "base_url": plan.base_url,
