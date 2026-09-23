@@ -45,6 +45,13 @@ course — at **1537 passed / 3 skipped / 0 failed** in 1527.38 s
 (`work/current-change/full_run_round71.log`, exit 0; the +22 are that module's tests), `mypy app`
 still 1004 errors / 32 files.
 
+**`1759779`** then finished task A1's backend half — `app/brand.py` as the backend's brand source,
+the identity strings wired to it, and a structural guard that refuses an unrecorded old-name
+identifier — at **1548 passed / 3 skipped / 0 failed** (`work/current-change/full_run_round72b.log`,
+exit 0; the +11 are the brand suite), `mypy app` still 1004 errors / 32 files. The gate was re-run on
+the amended revision rather than passed off from the pre-amend run, whose only difference was the
+brand suite's own file.
+
 **Audited revision.** branch `fix/codex-dsh-audit-20260919`, audited at HEAD
 `7e2e4db7cf99d85f92a82c9f97d72729fdaa5162` ("Record round 30's final revision and correct three
 stale deliverable claims", 2026-09-22 13:31 +08:00), working tree clean, **76 commits ahead of
