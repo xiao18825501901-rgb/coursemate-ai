@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import { expect, test } from "@playwright/test";
 
 /**
@@ -843,12 +846,18 @@ test("each learning pane persists its own accessible reasoning strength and subm
 
 test("the shipped shell carries the owner's artwork wherever the brand appears", async ({
   page,
-}, testInfo) => {
+}) => {
   // The mark used to be a drawn icon (an inline SVG in the legacy shell, a generic book glyph in this
   // one). The owner supplied the real artwork, so what has to hold is that the *shipped* shell serves
   // the derived file in every brand slot: the loading screen, the sign-in card and the global
   // navigation. Screenshots are written for a human to look at, because this check can prove the
-  // markup and the bytes but not the appearance.
+  // markup and the bytes but not the appearance — and they go to a stable directory rather than
+  // `testInfo.outputPath`, which Playwright removes when a test *passes* (so the first version of this
+  // journey left nothing behind for that review).
+  const shots = path.resolve(__dirname, "..", "..", "work", "current-change", "brand-screenshots");
+  fs.mkdirSync(shots, { recursive: true });
+  const shot = (name: string) => path.join(shots, name);
+
   await page.goto("/app");
   await assertShellDocument(page);
 
@@ -887,7 +896,7 @@ test("the shipped shell carries the owner's artwork wherever the brand appears",
   expect(navBox).toEqual([28, 28]);
 
   await page.locator("nav.global-nav").screenshot({
-    path: testInfo.outputPath("brand-nav-light.png"),
+    path: shot("brand-nav-light.png"),
   });
 
   const toggle = page.getByRole("button", { name: "切换至深色模式" });
@@ -900,13 +909,13 @@ test("the shipped shell carries the owner's artwork wherever the brand appears",
   });
   expect(darkBox).toEqual([28, 28]);
   await page.locator("nav.global-nav").screenshot({
-    path: testInfo.outputPath("brand-nav-dark.png"),
+    path: shot("brand-nav-dark.png"),
   });
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(navMark).toBeVisible();
   await page.locator("nav.global-nav").screenshot({
-    path: testInfo.outputPath("brand-nav-dark-390.png"),
+    path: shot("brand-nav-dark-390.png"),
   });
 
   // The theme is server-persisted, so leaving it dark here changed the state every later journey in
