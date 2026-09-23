@@ -144,6 +144,30 @@ screen. `CANVAS_OAUTH_LIVE` stays **`WAITING_INSTITUTION`**: no school key exist
 reported as a production OAuth verification, and the local bridge's results are never made to stand in
 for one.
 
+**`4e3fb8e`** then closed the multi-worker gap the Canvas OAuth design had recorded as open. The
+one-time authorisation `state` lived in the process that issued it, and the failure that hides is a
+quiet one: the browser starts an authorisation on whichever worker answers `/connect`, the school
+redirects back to whichever worker the load balancer picks, and that worker has never heard of the
+state it is asked to validate — the user grants access and is told the authorisation "was already used
+or never existed". Migration 034 and `SqlStateStore` put the state in shared storage as a SHA-256 hash
+(so a database dump cannot be replayed into a callback), with one use decided by the database
+(`UPDATE … WHERE consumed_at IS NULL`) and expiry still judged by `AuthorizationState.is_expired`, so
+that rule keeps one home. `create_app` wires it, and the router's fallback client uses it too when the
+schema is present, so a deployment that builds its own client cannot end up with a per-request store
+that could never validate its own state.
+
+Nine tests in `tests/test_canvas_oauth_state_store.py` drive the real application **twice over one
+database**: worker A issues the state, worker B completes the callback and the connection exists, and a
+replay is refused afterwards. The negative control is the honest version — wiring `InMemoryStateStore`
+instead makes that same journey end in `canvas=failed`, the user-visible failure this change removes.
+The rest cover one use, expiry, unknown state, no plaintext state at rest, purging, and that the
+in-memory double still implements the same protocol. The same round corrected a stale measurement of
+its own: `DATA_MIGRATION_AND_ROLLBACK.md` §1 still said "schema 32 / 22 registered migrations" and now
+says 34 / 24 / 28 files, re-derived from `app/db.py` and the migrations directory by a script rather
+than edited by hand. The gate on this revision is **1608 passed / 3 skipped / 0 failed** in 1675.77 s
+(`work/current-change/full_run_round81.log`, exit 0; +9 are the new tests), with the neighbouring
+Canvas/schema suites re-run at 89 passed because the schema version moved to 34.
+
 **Audited revision.** branch `fix/codex-dsh-audit-20260919`, audited at HEAD
 `7e2e4db7cf99d85f92a82c9f97d72729fdaa5162` ("Record round 30's final revision and correct three
 stale deliverable claims", 2026-09-22 13:31 +08:00), working tree clean, **76 commits ahead of
