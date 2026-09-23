@@ -10,7 +10,18 @@ DeepSeek/Jev items. They did add code to the same tree: the campus inventory too
 (`bf31474`, **1324 passed / 2 skipped / 0 failed** in 1660.36 s), then the stateless Canvas
 read-only adapter and its tests (`184d973`, **1355 passed / 2 skipped / 0 failed** in 1689.01 s,
 `work/current-change/full_run_round46.log`). The second skip is that tool's symlink-creation case.
-Everything below still describes the Jev/DeepSeek work on the revision named in each row.
+The Canvas stream then continued through the OAuth flow (`8aae4b2`, **1377 passed / 2 skipped /
+0 failed**), the import-job state machine (`47228c8`), migration 031 (`8e92aec`), the job repository
+(`19e09d2`, **1418 passed / 2 skipped / 0 failed** in 1350.74 s) and the failure-decision table
+(`7b6316a`, **1434 passed / 2 skipped / 0 failed** in 1361.67 s), and reached an import that runs
+end to end in **`befdd73`** — the worker loop, its checkpoint writes and the adapter's per-file
+download URL — at **1474 passed / 2 skipped / 0 failed** in 1456.27 s
+(`work/current-change/full_run_round68b.log`, exit 0), with `mypy app` at exactly the frozen
+baseline (1004 errors / 32 files) and **0 errors in `app/canvas`**, `ruff check` clean, and 6 of 6
+worker guards proven by mutation (`work/current-change/mutation-check-canvas-worker.py`). Those
+figures name the revisions they were measured on; each is a working-tree run whose code files are
+identical to the named commit, which was made from that same clean tree. Everything below still
+describes the Jev/DeepSeek work on the revision named in each row.
 
 **Audited revision.** branch `fix/codex-dsh-audit-20260919`, audited at HEAD
 `7e2e4db7cf99d85f92a82c9f97d72729fdaa5162` ("Record round 30's final revision and correct three
