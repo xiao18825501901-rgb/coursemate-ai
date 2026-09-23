@@ -39,7 +39,7 @@ uncommitted work, and the running cwd was not renamed.
 | `CANVAS_PRIVATE_IMPORT` | **LOOP IMPLEMENTED AND TESTED (mock-verified), no HTTP route yet** | `app/canvas/job.py` (states, legal transitions, frozen-selection fingerprint, per-file records, earned verdict), `migrations/031_canvas_import.sql` + `app/canvas/store.py` (idempotent creation, lease-based claiming, per-file checkpoints) and now `app/canvas/worker.py`: claim → re-check the selection against the student's own live enrolments → list files → download → verify → ingest through the real `IngestionService` → checkpoint → earned terminal state. The private course is created by the real course service (`course_type='user'`, private, owner-scoped, quota-respecting) and its id is stored in `target_course_id`. **148 Canvas tests pass** in 60.29 s (26 of them new worker tests, which run the real adapter, the real migrated schema and the real ingestion path — only the school's HTTP surface is simulated). Two worker defects were found by those tests and fixed: the `NEEDS_REAUTH` branch released the lease instead of writing the verdict, and a cancel result reported the state constant instead of the outcome. Still missing: the HTTP routes, the wizard entries, and any real school call |
 | `CANVAS_READ_ONLY_AND_ISOLATION` | **ENFORCED IN CODE (mock-verified)** | GET-only single request path; exact-pattern endpoint allow-list (`/assignments`, `/submissions`, `/messages` and a generic `/read_api` are refused); token only in the `Authorization` header; per-hop download validation with a token-free client; two adapters demonstrably do not share tokens or state. Proven by mutations that remove each guard |
 | `CAMPUS_LIBRARY_SCAN` | **DONE (read-only)** | `scripts/scan_campus_inventory.py` + `docs/coursejesus/LOCAL_CAMPUS_INVENTORY.csv` + `docs/coursejesus/CAMPUS_SOURCE_AND_PUBLICATION_MATRIX.md`: 1919 manifest rows reconciled against disk with 0 missing, 0 size mismatches, 0 unlisted files, 8.26 GiB, SHA-256 for every file |
-| `CAMPUS_FILES_INGESTED` | **ONE COURSE DONE (measured), nothing published** | `scripts/plan_campus_ingestion.py` decided all 1919 files (1479 `INGESTABLE`, 186 `DOWNLOAD_ONLY`, 254 `BLOCKED`; 28 of 34 offerings have ingestable material) and `scripts/ingest_campus_course.py` ingested the first verification course — 社会实践 (`628`, CityU (DG)) — through the real `IngestionService` into a **private** campus course: one document with 2 chunks, the shadow-library book in that course now `BLOCKED`, and `visibility=private`, `publication_status=private`, `published_at=NULL` afterwards. Migration 032 records one row per file with its decision, reason and rights metadata. 22 tests; a re-run reports `SKIPPED_IDENTICAL` instead of duplicating a document; a `pending`/`published` course is refused rather than written into |
+| `CAMPUS_FILES_INGESTED` | **ONE COURSE DONE (measured), nothing published** | `scripts/plan_campus_ingestion.py` decided all 1919 files (1479 `INGESTABLE`, 186 `DOWNLOAD_ONLY`, 254 `BLOCKED`; 28 of 34 offerings have ingestable material) and `scripts/ingest_campus_course.py` ingested the first verification course — 社会实践 (`628`, CityU (DG)) — through the real `IngestionService` into a **private** campus course: one document with 2 chunks, the shadow-library book in that course now `BLOCKED`, and `visibility=private`, `publication_status=private`, `published_at=NULL` afterwards. It is labelled `display_type='campus'` and carries `requires_student_verification=1` (round 74), so it cannot be read by an unverified account once visible. Migration 032 records one row per file with its decision, reason and rights metadata. 29 tests (22 + 7); a re-run reports `SKIPPED_IDENTICAL` instead of duplicating a document; a `pending`/`published` course is refused rather than written into |
 | `CAMPUS_CONTENT_PUBLISHED` | **NOT_STARTED (and cannot start here)** | 1715 rows are listed in `docs/coursejesus/CAMPUS_RIGHTS_REVIEW_LIST.csv` waiting for one owner decision; every campus course stays private until then. Publication needs the rights declaration, not code |
 | `EXISTING_COURSE_PRESERVATION` | **OK (untouched)** | CS3481 (`630`) and GE2324 (`629`) found locally as Summer Term 2026 offerings; production `course_id`, trees, history, grades and bindings untouched; no re-download |
 | `DEEPSEEK_JEV_EXISTING_SCOPE` | **UNCHANGED** | The three appended tasks did not modify the DeepSeek/Jev work; its gate is still the 1314-pass run above |
@@ -151,6 +151,27 @@ localhost screenshot or a `health=200`.
    judgment call is recorded rather than hidden: `coursemate-dev-verification-secret` and
    `coursemate-ui-update` keep their spelling because they are a credential default and a status
    contract, not visible names.
+16. **Course display type and the student-verification gate (round 74)**: a probe found that a course
+   created *after* migration 025 kept `display_type=NULL` and `requires_student_verification=0`,
+   while that migration's own header states "official courses display as campus courses and require
+   verification" — its backfill only touched rows that existed when the column was added. **Measured
+   first, and it was not an access-control hole:** every gate ORs the flag with
+   `display_type=='campus'` (`ui_extension/domain.py` reports campus for an official course with an
+   empty column; `ui_extension/mount.py`'s authorizer adds `course_type=='official'`; the shell's
+   `isCampusUnverified` and the cmui share creation do the same), so nothing was ever let through.
+   What was wrong was the *column* disagreeing with the policy — which a future reader of the flag
+   alone would inherit — so `create_course` now writes both values explicitly, with no backfill and
+   no change to existing rows. 8 tests pin the created values, the effect the shell sees, the
+   no-backfill rule, the non-V3 case and the very fallback that kept the legacy rows gated; 4 of 4
+   mutations caught (`work/current-change/mutation-check-course-gate.py`). **Two consequences are
+   recorded rather than quietly repaired:** the campus course ingested in round 71 predates this
+   change and still reads `display_type=NULL, requires_student_verification=0` (measured in
+   `work/current-change/campus-ingest.sqlite3`), so its gate holds through the fallback alone — a
+   backfill of pre-existing rows is a data-migration decision, not something to slip into an
+   importer that deliberately does not rewrite the courses it reuses; and the first attempt named
+   those two columns unconditionally, which the **full suite caught** (54 failures,
+   `table courses has no column named display_type`, because the columns arrive with the V3 schema)
+   and which is now itself a mutation-proofed test.
 
 ## 3. Next steps, in order
 

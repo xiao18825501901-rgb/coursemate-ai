@@ -147,26 +147,52 @@ class IngestionService:
                             "The private-course quota has been reached.",
                             details={"limit": self.settings.user_course_max_courses},
                         )
+                # `display_type` and `requires_student_verification` arrive with the V3 schema
+                # (migration 025 adds them under a table_info guard), so a deployment without V3
+                # does not have them and the INSERT must not name them. The full suite caught that
+                # the hard way: naming them unconditionally broke every non-V3 test with
+                # "table courses has no column named display_type".
+                course_columns = {
+                    info["name"] for info in connection.execute("PRAGMA table_info(courses)")
+                }
+                has_display_columns = {
+                    "display_type",
+                    "requires_student_verification",
+                } <= course_columns
+                optional_columns = (
+                    ", display_type, requires_student_verification" if has_display_columns else ""
+                )
+                optional_placeholders = ", ?, ?" if has_display_columns else ""
+                values: list[object] = [
+                    payload.id,
+                    payload.name,
+                    payload.description,
+                    owner,
+                    course_type,
+                    visibility,
+                    publication_status.value,
+                    publication_status.value,
+                ]
+                if has_display_columns:
+                    # Migration 025 states the policy -- "official courses display as campus
+                    # courses and require verification" -- but its backfill only touches rows that
+                    # existed when the column was added, so a course created afterwards kept
+                    # `display_type=NULL, requires_student_verification=0`. The access gates OR that
+                    # flag with `display_type == 'campus'` and `course_type == 'official'`, so
+                    # nothing was ever let through; what was wrong was the column disagreeing with
+                    # the policy, which a future reader of the flag alone would inherit.
+                    values.extend(["campus" if is_admin else "private", 1 if is_admin else 0])
                 connection.execute(
-                    """
+                    f"""
                     INSERT INTO courses (
                         id, name, description, owner_user_id, course_type, visibility,
-                        publication_status, published_at, updated_at
+                        publication_status, published_at, updated_at{optional_columns}
                     ) VALUES (?, ?, ?, ?, ?, ?, ?,
                         CASE WHEN ? = 'published'
                             THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE NULL END,
-                        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'){optional_placeholders})
                     """,
-                    (
-                        payload.id,
-                        payload.name,
-                        payload.description,
-                        owner,
-                        course_type,
-                        visibility,
-                        publication_status.value,
-                        publication_status.value,
-                    ),
+                    values,
                 )
                 row = connection.execute(
                     "SELECT * FROM courses WHERE id = ?", (payload.id,)
