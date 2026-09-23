@@ -3,9 +3,19 @@
 How the Jev decision layer is measured: the judgment dataset, the calibration procedure, the
 A/B/C/D/E arms and the honesty rules that stop a plumbing run from being read as a quality result.
 
-**Ablation result: `NOT_RUN`.** There is no TypeSafe credential and no DeepSeek key in this
-environment, so no live and no labelled run has happened. Nothing in this report is a quality claim,
-and the harness raises rather than emit one from fake or unlabelled data.
+**Ablation result: live A–E run done on the calibration split; the *comparison* is
+`NOT_INTERPRETABLE` and that is the harness's own verdict.** The Jev half of the ablation now runs
+against the real service (`typesafe-sdk==0.7.0`, live transport, 53 calls over the 47-sample
+calibration split), and each arm's absolute metrics against the labels are real numbers (§8). What
+is still missing is a **production/DeepSeek baseline predictor**, so arm A abstains on every sample
+and the harness refuses to read the difference as a quality claim
+(`reason: "placeholder baseline (no production predictor injected)"`). Nothing in this report is a
+claim that Jev beats DeepSeek; the per-arm numbers in §8 are what the live model actually scored,
+and the calibration thresholds remain untuned (`thresholds = UNSET_UNTIL_CALIBRATED_ON_LABELLED_DATA`).
+
+The DeepSeek side of the earlier statement still holds for the *comparison*: no live DeepSeek
+baseline has been run in this harness. (The separate DeepSeek canary did run live — 10/10 roles —
+and that is reported in `docs/coursejesus/MODEL_SECRET_IMPORT_AND_LIVE_RESULTS.md`, not here.)
 
 ---
 
@@ -275,3 +285,56 @@ if the two disagree.
    The remaining thin spot is population size (`entity_missed_alias` divides by 1), not missing labels.
 5. Only then may a definition leave `shadow` — and the promotion is per definition, with the
    non-inferiority evidence recorded here. Coverage and assessment stay advisory even when enabled.
+
+## 8. The live A–E run, measured 2026-09-24 (calibration split only)
+
+**Setup.** `--transport live --allow-billable`, the real `SdkTransport`, the calibration split of
+the frozen manifest written out as its own dataset file
+(`work/current-change/jev-calibration-split.dataset.json`, 47 samples taken by sample id from
+`benchmarks/jev-calibration.split.json`; train and test excluded, asserted in the builder). The test
+split was **not** touched, because thresholds are tuned on calibration and the test set is looked at
+once.
+
+**53 live calls, every one answered** (arm A 0, B 0, C 9, D 17, E 27), latency p50 745–784 ms, max
+1,421 ms. Evidence: `work/current-change/jev-ablation-live-abcde.json` (+`.log`), and every call's
+raw answer is recorded inside it next to the label it was compared with.
+
+| metric | A | B | C | D | E |
+|---|---|---|---|---|---|
+| `intent_accuracy` | 0.000 | 0.000 | **0.667** | 0.667 | 0.667 |
+| `pedagogy_accuracy` | 0.000 | 0.000 | **1.000** | 1.000 | 1.000 |
+| `context_compaction` | 0.000 | 0.000 | **1.000** | 1.000 | 1.000 |
+| `criterion_error` | 1.000 | 1.000 | 1.000 | **0.333** | 0.333 |
+| `coverage_confusion` (tp/fn) | 0/3 | 0/3 | 0/3 | **2/1** | 2/1 |
+| `citation_support_accuracy` | 0.000 | 0.000 | 0.000 | 0.000 | **0.833** |
+| `span_selection_accuracy` | 0.000 | 0.000 | 0.000 | 0.000 | **0.750** |
+| `unsupported_claim_rate` | 1.000 | 1.000 | 1.000 | 1.000 | **0.500** |
+
+Each arm improves exactly the metric its added definition owns, which is the nesting behaving as
+designed rather than a coincidence of one definition lifting everything.
+
+**What this is not.** The comparison verdict is `NOT_INTERPRETABLE`, with the harness's own reason:
+`placeholder baseline (no production predictor injected)`. Arm A abstains on every sample, so the
+gaps above are **not** "Jev beats DeepSeek" — they are "the definition answers correctly where
+nothing answered before". Reading them as lift over DeepSeek would be exactly the substitution the
+task forbids.
+
+**Three honest limits of these numbers.**
+
+1. **No live DeepSeek baseline predictor exists**, so arms A and B cannot yet produce a comparable
+   number. Wiring one is the next step; until then the A/B rows are abstention baselines.
+2. **`locator_accuracy = 0.000`, `corpus_quality_mae = 3.0`, `key_fact_retention = 0.000` are
+   abstention baselines too**, not failures: the calibration split carries no locator samples
+   (those are `source.select_span`/locator families in other splits), and `corpus.quality.v1` is an
+   ingestion-time definition that no A–E arm turns on. Arm B is empty for the same reason: the
+   calibration split has no `retrieval.support.v1` samples (all 58 are in train/test).
+3. **The continuous Score value is discretised by rounding to the nearest declared level** in the
+   predictor, and `noul` is binarised at 0.5. Both are the *comparison's* mapping, stated in the
+   predictor's docstring and recorded in each call, not calibrated boundaries. The measured
+   separation lives in the "Live evidence" section of `JEV_CALLSITE_MATRIX.md` (3.99 vs 0.0 on
+   `retrieval.support.v1`; 1.77–1.82 vs 0.95–1.05 on `corpus.quality.v1`; 2.0 vs 0.03 on
+   `feedback.severity.v1`).
+
+**What it takes to finish this measurement.** A production/DeepSeek baseline predictor, then the
+same run on the calibration split to fit thresholds, and one evaluation on the test split — after
+which the per-definition promotion decision in §14 of the task can be taken on evidence.

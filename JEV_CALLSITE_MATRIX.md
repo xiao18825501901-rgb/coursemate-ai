@@ -7,6 +7,66 @@ Two tables, because the system now has two kinds of definition:
    each of which either reaches a real business path or is explicitly marked
    `MODULE_ONLY` with the reason.
 
+## Live evidence — measured 2026-09-24, and it supersedes the `NOT_RUN` column below
+
+The section after this one was measured at revision `a0e7587` and every `live evidence` cell in
+table 1 says `NOT_RUN`, because at that time no live Jev call had ever been made. **That is no
+longer true**: `typesafe-sdk==0.7.0` is installed, the key is in the protected store, and the
+catalog has now been exercised against the real service, one call per question, through the real
+gateway (`SdkTransport`, `default_mode="on"`, caching disabled so a receipt cannot be mistaken for
+an answer).
+
+**31 live cases over 19 definitions: 31/31 completed as valid typed answers, 30/31 met the
+expectation recorded before the call.** Evidence: `work/current-change/jev-live-cases.json`,
+`jev-live-cases.log`, runner `work/current-change/run-live-jev-cases.py`.
+
+| definition | primitive | live cases | expectations met | live answer(s) |
+|---|---|---|---|---|
+| `intent.next_action.v1` | Choice | 2 | 2/2 | ambiguous-detour = `ANSWER_AND_RESUME`; clear-continue = `CONTINUE` |
+| `retrieval.support.v1` | Score | 2 | 2/2 | direct support = **3.99**; unrelated = **0.0** |
+| `source.supports_claim.v1` | Noul | 2 | 2/2 | supports = **0.98**; does not address = **0.01** |
+| `source.select_span.v1` | Choice | 1 | 1/1 | selects the one supporting span (`s1`) |
+| `context.keep_segment.v1` | Noul | 2 | 2/2 | still-relevant constraint = **0.74**; lunch chatter = **0.08** |
+| `pedagogy.next_method.v1` | Choice | 1 | 1/1 | `WORKED_EXAMPLE` |
+| `coverage.item_support.v1` | Choice | 2 | 2/2 | genuinely taught = `SUPPORTED`; acceptance text only = `UNSUPPORTED` |
+| `assessment.criterion_review.v1` | Choice | 2 | 2/2 | alternative correct answer = `SATISFIED`; not addressed = `NOT_SATISFIED` |
+| `template.match.v1` | Choice | 1 | 1/1 | `OTHER` for a course whose needs no template matched |
+| `exercise.prototype.v1` | Choice | 1 | 1/1 | an authorized main prototype (`p1`) |
+| `graph.prerequisite.v1` | Choice | 1 | 1/1 | the current-course node that explains the error (`n1`) |
+| `corpus.quality.v1` | Score | 2 | 0/2 | clean notes = **1.77**; garbled scan = **1.05** (see below) |
+| `extraction.field_grounded.v1` | Choice | 2 | 2/2 | grounded value = `GROUNDED`; value belonging to another part = `SOURCE_INSUFFICIENT` |
+| `evidence.consistency.v1` | Choice | 2 | 2/2 | same-context conflict = `SAME_CONTEXT_CONTRADICTION`; different assumptions = `DIFFERENT_ASSUMPTIONS` |
+| `entity.relation.v1` | Choice | 2 | 2/2 | 中英别名 = `ALIAS`; same word, different meaning = `DIFFERENT` |
+| `teaching.capability.v1` | Choice | 1 | 1/1 | `direct_qa` for an ambiguous request |
+| `tool.intent.v1` | Choice | 2 | 2/2 | destructive intent not stated = `AMBIGUOUS`; explicit authorised read = `CONSISTENT` |
+| `feedback.category.v1` | Choice | 2 | 2/2 | wrong coefficient = `ANSWER_WRONG`; page error = `SERVICE_FAULT` |
+| `feedback.severity.v1` | Score | 1 | 1/1 | blocking grading dispute = **2.0** (its scale is 0..2) |
+
+Notes that matter more than the raw counts:
+
+1. **The negative cases are the ones that prove anything.** Each definition was given a case that
+   must *not* get the positive answer, and the live model separated them: 0.98 vs 0.01, 0.74 vs 0.08,
+   `SUPPORTED` vs `UNSUPPORTED`, `SATISFIED` vs `NOT_SATISFIED`, `ALIAS` vs `DIFFERENT`,
+   `GROUNDED` vs `SOURCE_INSUFFICIENT`. A definition that answered the same thing to both would have
+   failed here.
+2. **One definition discriminates only weakly on this pair.** `corpus.quality.v1` scored clean notes
+   **1.77–1.82** and a deliberately garbled scan **0.95–1.05** across three runs — the right order,
+   a narrow band, on a 0–3 scale. The `0/2` above is **not** a model failure: the thresholds
+   (`≥2.0`, `≤1.0`) were chosen by the harness author before any calibration, which the catalogue
+   itself forbids (`thresholds = UNSET_UNTIL_CALIBRATED_ON_LABELLED_DATA`). It is evidence for the
+   calibration work, and it is why this definition stays `shadow`.
+3. **The Score primitive needed a code change to be usable at all, and this run found it.** The live
+   service answers a Score question with a **decimal on the definition's own scale** (`3.99` on a
+   0..4 definition, `2.0` on a 0..2 one, `1.82` on a 0..3 one) rather than with a level key, so the
+   typed validator refused every Score answer as `invalid_response` — 5 of the first 26 cases. The
+   validator now carries that number as `JevAnswer.score_value` **without inventing a level**
+   (`score` stays `None`), the cache and receipt payloads round-trip it, and the service passes it
+   through as the provider's own number. The level boundaries remain the calibration decision.
+4. **Everything is still `shadow`.** These calls were made with `default_mode="on"` *for the
+   measurement*; the catalogue's own default is unchanged and no production path is promoted by this
+   run. What changed is that the definitions are now known to answer correctly, which is the
+   precondition for the advisory/on decision in §14 of the task.
+
 ## Verified against the tree (revision `a0e7587`, measured)
 
 The code, tests and catalog are byte-identical to `a0e7587`; this document is the only tracked file

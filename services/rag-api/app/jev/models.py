@@ -42,6 +42,13 @@ class JevAnswer:
     noul: float | None = None
     score: str | None = None  # Score level key, e.g. "0".."4"
     probability: float | None = None
+    # The Score primitive's own numeric value when the provider answered with a decimal on the
+    # definition's scale instead of a level key — measured live: `3.99` on a 0..4 definition, `2.0`
+    # on a 0..2 one. It is carried unmodified and `score` stays None, because which level a `3.99`
+    # is depends on boundaries the catalogue has not calibrated yet. Consumers that can use a
+    # continuous value (reranking does) read this; consumers that need a level wait for the
+    # calibration rather than being handed a guess.
+    score_value: float | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
 

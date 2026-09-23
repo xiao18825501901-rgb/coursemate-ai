@@ -3,14 +3,23 @@
 Offline mode (``--transport fake``, the default) needs zero credentials and produces a
 result tagged ``NON_INTERPRETABLE_PLUMBING_ONLY``; :func:`compare_jev_arms` then
 returns ``NOT_INTERPRETABLE`` and no quality claim is possible. Live mode requires
-``--allow-billable`` and a configured Jev service + DeepSeek key; neither exists in
-this environment, so a live run is refused rather than faked. Nothing here can cost
-money without the explicit ``--allow-billable`` flag.
+``--allow-billable``, a Jev key in the environment, and a **labelled** dataset, and it wires the
+semantic harness's Jev predictor to the real ``SdkTransport``; every call is recorded in the
+artefact next to the label it was compared with.
+
+Two limitations the artefact states rather than hides:
+
+* there is no live **DeepSeek** baseline predictor yet, so the A–E comparison measures Jev against
+  the harness's non-Jev behaviour, not against DeepSeek;
+* a live ``Score`` answer is a decimal on the definition's scale and is discretised by rounding to
+  the nearest declared level, which is the metric's comparison, not a calibrated boundary.
 
 Arms: ``--arm A|B|C|D|E`` (the historical nesting), ``--arm M-EXTRACT|M-ENTITY|
 M-CONSISTENCY|M-CITATION|M-CAPABILITY|M-TOOL`` (the six structured-enhancement
 component arms), ``--arm all`` (A–E), or ``--arm all-components`` (the six component
 arms).
+
+Nothing here can cost money without the explicit ``--allow-billable`` flag.
 """
 
 from __future__ import annotations
@@ -32,9 +41,11 @@ from app.evaluation.jev_semantic_ablation import (  # noqa: E402 -- after sys.pa
     FakeJevTransport,
     compare_jev_arms,
     deterministic_fake_jev_predictor,
+    live_jev_predictor,
     load_jev_dataset,
     run_jev_semantic_ablation,
 )
+from app.jev.gateway import SdkTransport  # noqa: E402 -- after sys.path bootstrap
 
 DATASET_PATH = ROOT / "benchmarks" / "jev-judgments.dataset.json"
 DEFAULT_OUT = ROOT / "work" / "current-change" / "jev-ablation-offline.json"
@@ -147,22 +158,21 @@ def main() -> int:
                 jev_predictor=deterministic_fake_jev_predictor,
             )
         else:
-            # Refuse rather than fall through to the fake transport. This branch used
-            # to call the runner with ``FakeJevTransport()`` and rely on
-            # ``_live_preflight`` refusing first - which it only does while the
-            # credentials are absent. With both keys present and --allow-billable the
-            # preflight passes, so a "live" run wrote an artefact whose top-level
-            # transport said "live" while every number in it came from the fake
-            # transport. No live predictor wiring exists yet, so the honest answer is
-            # to stop.
-            print(
-                "Refusing a live run: this CLI has no live predictor wiring, so it "
-                "would run the fake transport and label the output 'live'. No call was "
-                "made and no output was written. The live Jev transport for the A-E "
-                "arms lives in scripts/run_jev_ablation.py; the six component arms "
-                "need live predictors that do not exist yet."
+            # The live path, which used to be a refusal: the semantic harness has an injectable
+            # predictor interface and the Jev side of it is now wired to the real transport. The
+            # DeepSeek baseline predictor still does not exist, so arm A runs against the harness's
+            # own non-Jev behaviour and the artefact records that as a limitation rather than
+            # pretending the comparison is Jev-versus-DeepSeek.
+            live_calls: list[dict] = []
+            transport = SdkTransport()
+            summary = run_jev_semantic_ablation(
+                dataset,
+                arm,
+                transport=transport,
+                jev_predictor=live_jev_predictor(transport, calls=live_calls),
             )
-            return 3
+            summary["live_calls"] = live_calls
+            summary["live_call_count"] = len(live_calls)
         arm_summaries.append(summary)
 
     runs = {summary["arm"]: summary for summary in arm_summaries}

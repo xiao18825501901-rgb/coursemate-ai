@@ -196,3 +196,86 @@ def test_invalid_score_level_rejected() -> None:
     decision = gateway.evaluate(_score_request())
     assert decision.outcome == "invalid_response"
     assert decision.suggestion is None
+
+
+def test_a_live_decimal_score_on_the_scale_is_carried_without_inventing_a_level() -> None:
+    """Measured behaviour of the live primitive: a decimal on the definition's own scale.
+
+    `retrieval.support.v1` declares levels `0..4`; the live service answered `3.99` for a candidate
+    that directly supports the query. That is a legitimate answer on that scale, so it is carried as
+    the provider's own number — and `score` stays `None`, because which level `3.99` *is* depends on
+    boundaries the catalogue explicitly leaves to calibration.
+    """
+
+    def responder(call):
+        return JevResult(answers={"retrieval.support.v1": JevAnswer(score="3.99")})
+
+    gateway = _gateway(FakeTransport(responder), modes={"retrieval.support.v1": "on"})
+    decision = gateway.evaluate(_score_request())
+
+    assert decision.outcome == "ok"
+    assert decision.suggestion is not None
+    assert decision.suggestion.score_value == 3.99
+    assert decision.suggestion.score is None, "no level may be inferred from a decimal"
+
+
+def test_a_decimal_outside_the_declared_scale_is_still_refused() -> None:
+    """The scale is the definition's, so 4.01 on a 0..4 definition is not an answer."""
+
+    def responder(call):
+        return JevResult(answers={"retrieval.support.v1": JevAnswer(score="4.01")})
+
+    gateway = _gateway(FakeTransport(responder), modes={"retrieval.support.v1": "on"})
+    decision = gateway.evaluate(_score_request())
+    assert decision.outcome == "invalid_response"
+    assert decision.suggestion is None
+
+
+def test_a_decimal_on_a_three_level_definition_is_carried_on_its_own_scale() -> None:
+    """`feedback.severity.v1` declares `0..2`, and the live service answered `2.0` and `0.03`."""
+
+    definition = CATALOG.get("feedback.severity.v1")
+
+    def responder(call):
+        return JevResult(answers={"feedback.severity.v1": JevAnswer(score="2.0")})
+
+    gateway = _gateway(FakeTransport(responder), modes={"feedback.severity.v1": "on"})
+    request = DecisionRequest(
+        definition=definition,
+        state={"user_report": "the grader marked my correct answer wrong", "category": "GRADING"},
+        caller_role="feedback",
+        cache_scope=CacheScope(owner_scope_hash="o", course_id="c"),
+    )
+    decision = gateway.evaluate(request)
+    assert decision.outcome == "ok"
+    assert decision.suggestion is not None
+    assert decision.suggestion.score_value == 2.0
+
+
+def test_a_level_key_is_still_a_level_and_not_a_number() -> None:
+    """A certain answer still names a level, and the level survives as the level."""
+
+    def responder(call):
+        return JevResult(answers={"retrieval.support.v1": JevAnswer(score="3")})
+
+    gateway = _gateway(FakeTransport(responder), modes={"retrieval.support.v1": "on"})
+    decision = gateway.evaluate(_score_request())
+    assert decision.outcome == "ok"
+    assert decision.suggestion is not None
+    assert decision.suggestion.score == "3"
+    assert decision.suggestion.score_value is None
+
+
+def test_the_cached_payload_round_trips_a_decimal_score() -> None:
+    """A cached decimal must come back as a decimal, not as a level or as nothing."""
+    from app.jev.gateway import _suggestion_payload
+
+    definition = CATALOG.get("retrieval.support.v1")
+    gateway = _gateway(FakeTransport(lambda call: JevResult(answers={})))
+    payload = _suggestion_payload(
+        JevAnswer(score=None, score_value=1.82), outcome="ok", model_version="jev-latest"
+    )
+    assert payload["score_value"] == 1.82
+    restored = gateway._suggestion_from_cache(definition, payload)
+    assert restored.score_value == 1.82
+    assert restored.score is None

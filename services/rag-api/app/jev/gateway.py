@@ -254,6 +254,35 @@ def _result_from_dict(payload: dict[str, Any], model_version: str) -> JevResult:
     )
 
 
+def _score_within_scale(definition: DecisionDefinition, value: Any) -> float | None:
+    """The numeric score when it lies inside the definition's declared scale, else None.
+
+    The scale is the definition's own: the numeric range its level keys span (`0..4`, `0..3`,
+    `0..2`). A live answer inside that range is a legitimate answer and is carried as the
+    provider's own number.
+
+    Deliberately **not** done here: choosing which level the number is. `3.99` is only level `4`
+    once the boundaries between levels have been calibrated on labelled data — the catalogue's own
+    `thresholds` field says `UNSET_UNTIL_CALIBRATED_ON_LABELLED_DATA` — so this function returns the
+    number and leaves `score` unset. A definition whose level keys are not numeric has no numeric
+    scale, and a decimal for it is refused exactly as before.
+    """
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not definition.score_levels:
+        return None
+    try:
+        bounds = sorted(float(level) for level in definition.score_levels)
+    except (TypeError, ValueError):
+        return None
+    low, high = bounds[0], bounds[-1]
+    if low <= numeric <= high:
+        return numeric
+    return None
+
+
 def _normalize_score(value: Any) -> str | None:
     if value is None:
         return None
@@ -499,15 +528,21 @@ class JevGateway:
             if level is None:
                 raise JevInvalidResponseError(f"{definition.key}: missing score level")
             if level not in definition.score_levels:
-                # The SDK's `.score` return type is unverified; tolerate a level
-                # description by mapping it back to its ordered key.
+                # The SDK's `.score` return type is unverified in two ways, and both were measured
+                # against the live service rather than guessed at: it may return a level
+                # *description* (mapped back to its ordered key below), or a **decimal on the
+                # definition's own scale** — `3.99` for a 0..4 definition, `2.0` for a 0..2 one.
                 by_description = {v: k for k, v in (definition.criteria or {}).items()}
                 if level in by_description:
                     level = by_description[level]
                 else:
-                    raise JevInvalidResponseError(
-                        f"{definition.key}: score level {level!r} not in {definition.score_levels}"
-                    )
+                    value = _score_within_scale(definition, level)
+                    if value is None:
+                        raise JevInvalidResponseError(
+                            f"{definition.key}: score level {level!r} not in "
+                            f"{definition.score_levels}"
+                        )
+                    return JevAnswer(score=None, score_value=value, raw=answer.raw)
             return JevAnswer(score=level, raw=answer.raw)
         probability = answer.noul
         if probability is None or not (0.0 <= probability <= 1.0):
@@ -579,7 +614,16 @@ class JevGateway:
         if definition.primitive == Primitive.CHOICE:
             return JevAnswer(choice=cached.get("choice"), raw=cached)
         if definition.primitive == Primitive.SCORE:
-            return JevAnswer(score=cached.get("score"), raw=cached)
+            raw_value = cached.get("score_value")
+            return JevAnswer(
+                score=cached.get("score"),
+                score_value=(
+                    float(raw_value)
+                    if isinstance(raw_value, (int, float)) and not isinstance(raw_value, bool)
+                    else None
+                ),
+                raw=cached,
+            )
         probability = _coerce_probability(cached.get("noul", cached.get("probability")))
         return JevAnswer(noul=probability, probability=probability, raw=cached)
 
@@ -593,6 +637,7 @@ def _suggestion_payload(
         "choice": suggestion.choice,
         "noul": suggestion.noul,
         "score": suggestion.score,
+        "score_value": suggestion.score_value,
         "probability": suggestion.probability,
         "model_version": model_version,
     }

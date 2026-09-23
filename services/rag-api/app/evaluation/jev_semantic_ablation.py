@@ -73,6 +73,7 @@ import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter as _perf_counter
 from typing import Any
 
 from app.evaluation.jev_ablation import (
@@ -102,7 +103,8 @@ from app.evaluation.jev_ablation import (
     recall_at_k,
     unsupported_claim_rate,
 )
-from app.jev.catalog import load_catalog
+from app.jev.catalog import Primitive, load_catalog
+from app.jev.models import JevCall, JevQuestion
 from app.learning.intent_commands import route_explicit_command
 
 # --------------------------------------------------------------------------- arms
@@ -1044,6 +1046,116 @@ def deterministic_fake_jev_predictor(sample: JevJudgment) -> dict[str, Any]:
         criteria = question.get("criteria") or {}
         return {"score_index": 0 if criteria else None}
     return {"noul": False}
+
+
+def live_jev_predictor(
+    transport: Any,
+    *,
+    timeout_seconds: float = 60.0,
+    calls: list[dict[str, Any]] | None = None,
+) -> Callable[[JevJudgment], dict[str, Any] | None]:
+    """A predictor backed by the real Jev transport, for a labelled run.
+
+    The dataset's own question shape is translated to the gateway's: ``choice`` keeps its
+    ``id -> label`` criteria, ``score`` becomes the ordered list of level descriptions, and ``noul``
+    carries instructions only. The answer comes back through the same typed validation every
+    production call goes through, so a run cannot be more permissive than the product.
+
+    Two mappings are applied to compare against a discrete label, and both are stated here rather
+    than hidden, because each is a boundary the catalogue has not calibrated:
+
+    * ``noul`` (a probability in ``[0, 1]``) becomes the boolean label at ``0.5``;
+    * a live ``Score`` answer usually arrives as a decimal on the definition's scale, and becomes an
+      index by rounding to the nearest declared level, clamped to the scale. A level key, when the
+      model gives one, is used directly.
+
+    Every call is appended to `calls` (sample id, primitive, raw answer fields, latency) so the
+    evidence records what the model actually said next to the label it was compared with.
+    """
+
+    def predict(sample: JevJudgment) -> dict[str, Any] | None:
+        definition = _catalog_definition(sample.definition_id)
+        question = sample.questions[QUESTION_KEY]
+        kind = str(question.get("type")).lower()
+        criteria = question.get("criteria") or {}
+        instructions = str(question.get("instructions") or "")
+        if kind == "choice":
+            jev_question = JevQuestion(
+                key=QUESTION_KEY,
+                primitive=Primitive.CHOICE,
+                instructions=instructions,
+                criteria=dict(criteria),
+            )
+        elif kind == "score":
+            ordered = [criteria[key] for key in sorted(criteria, key=lambda item: int(item))]
+            jev_question = JevQuestion(
+                key=QUESTION_KEY,
+                primitive=Primitive.SCORE,
+                instructions=instructions,
+                criteria=ordered,
+            )
+        else:
+            jev_question = JevQuestion(
+                key=QUESTION_KEY, primitive=Primitive.NOUL, instructions=instructions
+            )
+        call = JevCall(state=dict(sample.state), questions={QUESTION_KEY: jev_question})
+        started = _perf_counter()
+        result = transport.call(call, timeout_seconds=timeout_seconds)
+        latency_ms = round((_perf_counter() - started) * 1000, 1)
+        answer = result.answers.get(QUESTION_KEY)
+        record: dict[str, Any] = {
+            "sample_id": sample.sample_id,
+            "definition_id": sample.definition_id,
+            "question_type": kind,
+            "latency_ms": latency_ms,
+            "request_id": result.request_id,
+            "model_version": result.model_version,
+            "raw_choice": None if answer is None else answer.choice,
+            "raw_noul": None if answer is None else answer.noul,
+            "raw_score": None if answer is None else answer.score,
+            "raw_score_value": None if answer is None else answer.score_value,
+        }
+        if answer is None:
+            record["prediction"] = None
+            if calls is not None:
+                calls.append(record)
+            return None
+        if kind == "choice":
+            prediction: dict[str, Any] = {"choice": answer.choice}
+        elif kind == "score":
+            prediction = {"score_index": _score_index(definition, answer)}
+        else:
+            prediction = {"noul": bool(answer.noul is not None and answer.noul >= 0.5)}
+        record["prediction"] = prediction
+        if calls is not None:
+            calls.append(record)
+        return prediction
+
+    return predict
+
+
+def _score_index(definition: Any, answer: Any) -> int | None:
+    """The declared-level index a live Score answer corresponds to, or None.
+
+    Nearest-level rounding is the comparison's discretisation, not a calibrated boundary: it is
+    recorded here so the calibration work can replace it with measured boundaries.
+    """
+    levels = list(getattr(definition, "score_levels", ()) or ())
+    if not levels:
+        return None
+    if answer.score is not None and str(answer.score) in levels:
+        return levels.index(str(answer.score))
+    if answer.score_value is None:
+        return None
+    # Nearest declared level, clamped to the scale. The catalogue's level keys are the ordered
+    # `0..n` strings the scale is defined over, so the rounded value is the index.
+    nearest = int(round(float(answer.score_value)))
+    return max(0, min(len(levels) - 1, nearest))
+
+
+def _catalog_definition(definition_id: str) -> Any:
+    catalog = load_catalog()
+    return catalog.get(definition_id)
 
 
 # ------------------------------------------------------------------ runner

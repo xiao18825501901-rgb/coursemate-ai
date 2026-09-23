@@ -1047,6 +1047,13 @@ class SemanticDecisionService:
         if definition.primitive == "Choice":
             return getattr(suggestion, "choice", None)
         if definition.primitive == "Score":
+            # The live primitive answers with a decimal on the definition's own scale most of the
+            # time, and with a level key when it is confident enough to name one. The numeric value
+            # wins when it is present: it is the provider's own number, and quantising it here would
+            # be this layer inventing the level boundaries the catalogue leaves uncalibrated.
+            value = getattr(suggestion, "score_value", None)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return float(value)
             score = getattr(suggestion, "score", None)
             return int(score) if score is not None else None
         return getattr(suggestion, "noul", None)
@@ -1076,9 +1083,16 @@ class SemanticDecisionService:
             return None
 
     @staticmethod
-    def _level(result: DecisionResult | None) -> int:
+    def _level(result: DecisionResult | None) -> float:
+        """The sort key for one candidate: the Jev support value, or -1 when there is none.
+
+        A live `Score` answer is usually a decimal on the definition's scale, so this accepts floats
+        as well as the level keys a fake or a certain answer produces; both sort the same way.
+        """
         value = result.value if result is not None else None
-        return value if isinstance(value, int) else -1
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return -1.0
+        return float(value)
 
     @staticmethod
     def _candidate_state(entry: Any, query: str) -> dict[str, Any]:
