@@ -88,6 +88,34 @@ files, `ruff check` clean on both changed files, and 4 of 4 new guards proven by
 source in text mode, relined the whole file to CRLF and was caught by its own byte-for-byte restore
 check, so it now uses binary I/O.
 
+**`276ca07`** then gave the campus ingest CLI the tests it never had, and ingested the whole library
+through it. `tests/test_campus_ingest_cli.py` (9 tests) drives `main(argv)` with the real planner
+writing the plan and the real CLI ingesting into a temporary database; writing it found a real
+ordering defect — the staleness check ran *after* the course was created, so a plan the CLI refused
+could still leave an empty private campus course behind (the test asserted no course rows and found
+one) — so everything that can refuse a plan is now checked before anything is written. It also adds a
+guard for a failure the data does not have: two scan roots exist and the CLI took the first match for a
+course id, which would silently ingest one institution's files under another's id if the same Canvas
+course id ever appeared under both (measured: 34 offerings, 0 duplicate ids today). 4 of 4 guards
+proven by mutation (`work/current-change/mutation-check-campus-cli-guards.py`).
+
+The same run ingested **all 28 offerings that have material** — 28 private courses, 831 documents (754
+with readable text), 21,056 chunks, 1728 material rows (783 `INGESTABLE`, 876 `DOWNLOAD_ONLY`, 69
+`BLOCKED`), **0 `FAILED`**, 0 offerings failed, 0 published, in 3514 s
+(`work/current-change/full_run_round78_library.log`, read back from the database by
+`inspect-library.py`). The plan's `INGESTABLE` count is an upper bound and the difference is now
+measured file by file (`explain-plan-gap.py`: 1919 rows joined, 0 unmatched): of the 696 not indexed,
+**575 are source code and web assets outside the shared upload allow-list** (`.java` 244, `.html` 209,
+`.css` 90, others 32), 42 are over the 20 MB limit and ~78 have no extractable text. Both are recorded
+as decisions for the owner rather than widened unilaterally.
+
+**`f97dab3`** repaired the one document that was not valid UTF-8 — four GBK byte runs a PowerShell
+round-trip through this shell's console had left inside `CAMPUS_SOURCE_AND_PUBLICATION_MATRIX.md`
+(the course name 社会实践, two em-dash pairs, one section sign) — and re-checked all 172 documents:
+0 invalid, 0 with a wrong-codec marker. The gate on this revision is **1570 passed / 3 skipped /
+0 failed** in 2520.02 s (`work/current-change/full_run_round78.log`, exit 0; +9 are the new CLI tests),
+`mypy app` again at exactly 1004 errors / 32 files, and `ruff check` clean on both changed files.
+
 **Audited revision.** branch `fix/codex-dsh-audit-20260919`, audited at HEAD
 `7e2e4db7cf99d85f92a82c9f97d72729fdaa5162` ("Record round 30's final revision and correct three
 stale deliverable claims", 2026-09-22 13:31 +08:00), working tree clean, **76 commits ahead of
