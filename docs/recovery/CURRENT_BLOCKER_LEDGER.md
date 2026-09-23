@@ -52,6 +52,14 @@ exit 0; the +11 are the brand suite), `mypy app` still 1004 errors / 32 files. T
 the amended revision rather than passed off from the pre-amend run, whose only difference was the
 brand suite's own file.
 
+**`705606f`** then did the operations half of the same task — the console messages, CLI help,
+recovery docstrings and model persona in `ops/` and `scripts/`, with every production identifier
+(`/etc/coursemate/*.env`, `/srv/coursemate/**`, the systemd units, the service user,
+`COURSEMATE_API_PROXY`, the `coursemate-v2-*` backup prefix, the monitor user-agent, the synthetic
+Clerk user's name) kept and each keep recorded with its reason — at **1548 passed / 3 skipped /
+0 failed** in 2391.45 s (`work/current-change/full_run_round73.log`, exit 0; no new tests, which is
+why the count is unchanged). It also added the missing `docs/coursejesus/DATA_MIGRATION_AND_ROLLBACK.md`.
+
 **Audited revision.** branch `fix/codex-dsh-audit-20260919`, audited at HEAD
 `7e2e4db7cf99d85f92a82c9f97d72729fdaa5162` ("Record round 30's final revision and correct three
 stale deliverable claims", 2026-09-22 13:31 +08:00), working tree clean, **76 commits ahead of
