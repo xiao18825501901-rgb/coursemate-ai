@@ -1,5 +1,43 @@
 # MINIMAL OWNER ACTION CARD — Jev + DeepSeek round
 
+> ## Update 2026-09-24 (rounds 83–84) — read this before §1 and §2 below
+>
+> **The requests in §1 and §2 are answered and no longer block anything.** The TypeSafe key and the
+> DeepSeek key are in the protected local store (`C:\Users\Hp\.coursemate\rag.env`, ACL reduced to one
+> principal), `typesafe-sdk==0.7.0` is installed, and both providers have now been called live:
+> 31 live Jev cases over all **19** definitions, plus a live DeepSeek baseline (162 answered calls).
+> **No key was requested in chat and none was sent.**
+>
+> What the live validation changed, stated plainly: **the quality gate does not pass.** Against a real
+> DeepSeek baseline on the 47-sample calibration split, Jev improves citation support (0.667 → 0.833)
+> and the unsupported-claim rate (0.667 → 0.500), worsens `intent_accuracy` (1.000 → 0.667),
+> `criterion_error` (0.000 → 0.333) and `key_fact_retention` (1.000 → 0.000, one sample of two), and
+> ties elsewhere. So **every definition stays `shadow` and nothing is promoted**, including the
+> retrieval-rerank promotion §1 previously proposed as the default. The per-definition populations are
+> 2–7 samples, so the promotion decision belongs on the test split once thresholds are frozen
+> (`JEV_CALIBRATION_AND_ABLATION_REPORT.md` §9).
+>
+> **What is still yours, in this order:**
+>
+> 1. **Production native approvals and one real login** — the release sequence in §15 of the task
+>    (local final green → live validation → freeze release → consistent backup → isolated restore →
+>    migrations rehearsal → rollback check → immutable backend → protected env → frontend build →
+>    Netlify → real users → post backup → monitoring → push → final report). The backend release needs
+>    your server-side approval; the frontend needs one real sign-in.
+> 2. **The school's Canvas Developer Key** — still the only gate on the *public* OAuth path
+>    (`CANVAS_OAUTH_LIVE = WAITING_INSTITUTION`), and the reason the owner-mode one-off token path
+>    exists at all.
+> 3. **Revoke the two Canvas tokens pasted into chat** and supply a replacement through the local
+>    hidden prompt, so your own small-sample live test can run
+>    (`scripts/canvas_owner_smoke_test.py`).
+> 4. **Two decisions, not blockers:** whether to take the promotion decision on the test split now
+>    that calibration numbers exist, and separately whether the campus qualification policy moves to
+>    `verified_only` (its count must be measured on the production database with the read-only tool —
+>    it is stated as unmeasured, not estimated).
+>
+> A production **budget** request is still owed before the live production journeys, with the ceiling
+> stated before any call; it is not made here yet because the local gate has not finished.
+
 Only what cannot be done without you. No secret is requested in chat: every item says where the value
 belongs. Everything else (source work, call sites, dataset, calibration, tests, release rehearsal) is
 being done without you.
