@@ -420,6 +420,33 @@ wired, and the reason the earlier decision was wrong is part of the record.
 > Both are recorded in `docs/recovery/CURRENT_BLOCKER_LEDGER.md` B-27, and the publish path's local
 > half in B-35.
 
+> **Added 2026-09-24 (round 88) — the browser acceptance can now tell a promotion apart from shadow,
+> and it has been run both ways.**
+>
+> Round 87 added `JEV_DEFINITION_MODES`; round 88 uses it to make the claim the suite could not
+> previously make. `capability_router.py` honours `mode == "on"` explicitly, so promoting
+> `teaching.capability.v1` makes `used_jev` observable in the shipped shell — which is exactly what
+> the round-86 note said was missing.
+>
+> | Configuration | `jev-structured` result |
+> |---|---|
+> | Committed default (no key, nothing promoted) | **6 passed, 1 skipped**, exit 0 (`browser_jev_round88.log`) — the skipped one is the promotion journey, stating its own precondition |
+> | Live key + `JEV_DEFINITION_MODES=teaching.capability.v1=on` | the promotion journey **passed**, 53.2 s (`browser_jev_promoted_round88b.log`): the run the client reads back reports `used_jev: true`, a legal `skill_id`, and a completed run |
+>
+> That second row is the first browser evidence that a promotion is *used* by the product rather than
+> merely recorded, and it is why `BROWSER_ACCEPTANCE` is no longer limited to the no-credential shape.
+> It is **not** a claim that any definition *should* be promoted: the quality gate still does not pass
+> (§9 of `JEV_CALIBRATION_AND_ABLATION_REPORT.md`), the promotion existed only for the measurement, and
+> the committed configuration promotes nothing.
+>
+> One thing left unexplained, recorded rather than smoothed over: the **first** attempt of that journey
+> answered **409 on run creation** and the immediate re-run passed. The two candidates are a run
+> conflict while a previous run was still active, and contention with the backend gate that was running
+> on the same machine at the time; neither is proven. The QA helper now reports the response body when
+> run creation is not a 202 (it previously asserted the status alone), so the next occurrence will name
+> itself instead of repeating this ambiguity. Both journeys that assert "no Jev signal" now skip, with
+> the reason, when a promotion is active — otherwise they would fail correctly and confusingly.
+
 > **Added 2026-09-24 (round 86) — a false alarm corrected, and what a live browser run can and
 > cannot show.**
 >

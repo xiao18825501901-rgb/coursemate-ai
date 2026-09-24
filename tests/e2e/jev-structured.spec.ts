@@ -38,6 +38,21 @@ const TERMINAL = ["completed", "failed", "cancelled"];
 
 test.describe.configure({ mode: "serial" });
 
+/**
+ * Whether this run has a definition promoted to `on`.
+ *
+ * It matters to two journeys and in opposite directions. `used_jev` is false in shadow whether or
+ * not a credential exists, so the journeys that assert "no Jev signal" hold in the default shape and
+ * would break — correctly — once a definition is promoted. The journey that proves a promotion is
+ * *used* can only run when one is. Each states its own precondition and skips with the reason rather
+ * than being silently wrong in the other configuration.
+ */
+const PROMOTION = process.env.JEV_DEFINITION_MODES ?? "";
+const PROMOTED = PROMOTION.includes("=on");
+const PROMOTION_NOTE =
+  "JEV_DEFINITION_MODES has a definition promoted to `on`, which changes `used_jev` by design; " +
+  "the promoted-capability journey covers that configuration";
+
 type CapabilityReport = {
   skill_id: string;
   teaching_flow: boolean;
@@ -94,7 +109,15 @@ async function askTeach(
   );
   await send.click();
   const response = await created;
-  expect(response.status()).toBe(202);
+  if (response.status() !== 202) {
+    // Say *why*, not just "expected 202". A refusal here is the product telling the caller
+    // something, and a bare status code throws that away — which is how a promoted definition's
+    // 409 stayed unexplained on its first run.
+    const body = await response.text();
+    throw new Error(
+      `run creation answered ${response.status()} instead of 202: ${body.slice(0, 600)}`,
+    );
+  }
   return (await response.json()) as RunBody;
 }
 
@@ -120,6 +143,7 @@ async function waitTerminal(
 }
 
 test("the shipped shell reports the capability it dispatched", async ({ page, request }) => {
+  test.skip(PROMOTED, PROMOTION_NOTE);
   await bindNode(page);
 
   // An explicit "answer only" is honoured deterministically: no Jev call, and the
@@ -146,6 +170,53 @@ test("the shipped shell reports the capability it dispatched", async ({ page, re
 
   // The decision is on the run the client can read back, not only in a ledger.
   expect(teaching.id).not.toBe(answerOnly.id);
+});
+
+test("a promoted capability definition is actually used, which shadow alone can never show", async ({
+  page,
+  request,
+}) => {
+  // This is the assertion the rest of the suite cannot make. Every other journey here runs with
+  // `used_jev === false`, and that is false in shadow **whether or not a credential exists** — so a
+  // run with a live key looks exactly like a run without one (round-86 note in
+  // DSH_JEV_DEEPSEEK_EXECUTION_STATE.md). The router honours `mode == "on"` explicitly
+  // (`capability_router.py`: `decision.mode == "on" and decision.suggestion is not None and
+  // decision.suggestion.choice in offered`), so promoting this one definition is what makes the
+  // difference observable — and the journey is skipped, with its reason, when the run cannot show it.
+  const key = process.env.TYPESAFE_API_KEY ?? "";
+  const modes = process.env.JEV_DEFINITION_MODES ?? "";
+  test.skip(
+    key === "" || !modes.includes("teaching.capability.v1=on"),
+    "needs a live TypeSafe credential AND JEV_DEFINITION_MODES=teaching.capability.v1=on in the " +
+      "environment Playwright starts the RAG service with (the config spreads process.env)",
+  );
+
+  await bindNode(page);
+
+  // A ruled-out request still spends no Jev call: the deterministic filter runs first, and a
+  // promotion must not turn "answer only" into a model decision.
+  const answerOnly = await askTeach(page, "只回答");
+  expect(answerOnly.capability.skill_id).toBe("direct_qa");
+  expect(answerOnly.capability.explicit_command).toBe("ANSWER_ONLY");
+  expect(answerOnly.capability.used_jev).toBe(false);
+
+  // A normal teaching request now goes through the promoted definition, and the product uses it.
+  const teaching = await askTeach(page, "请从零教我理解这个节点");
+  expect(teaching.capability.used_jev).toBe(true);
+  expect(teaching.capability.teaching_flow).toBe(true);
+  // The chosen skill must be one the catalogue actually defines, and one this mode allows.
+  expect([
+    "node_lesson",
+    "worked_example",
+    "step_explanation",
+    "direct_qa",
+    "prerequisite_explanation",
+    "code_trace",
+    "figure_explanation",
+    "exercise",
+  ]).toContain(teaching.capability.skill_id);
+  const row = await waitTerminal(page, request, teaching.id);
+  expect(row.status).toBe("completed");
 });
 
 test("the shipped shell can file a problem report without leaving the lesson", async ({
@@ -207,6 +278,7 @@ test("with no TypeSafe credential every decision degrades and teaching still wor
   page,
   request,
 }) => {
+  test.skip(PROMOTED, PROMOTION_NOTE);
   await bindNode(page);
 
   const run = await askTeach(page, "请用一个例子解释聚类的基本思想");
