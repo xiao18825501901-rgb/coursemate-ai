@@ -84,6 +84,8 @@ export const bindPair = (id, node) => send(`/pairs/${id}/bind`, { node });
 export const createExercise = (courseId, node = null, pairId = null) => send(`/courses/${courseId}/exercises`, { request_id: key(), node, pair_id: pairId });
 export const getExercise = (id) => request('/exercises/' + id);
 export const revealExercise = (id) => send(`/exercises/${id}/reveal`, { request_id: key() });
+export const requestExerciseHint = (id) => send(`/exercises/${id}/hints`, { request_id: key() });
+export const submitPracticeAttempt = (id, answer) => send(`/exercises/${id}/attempts`, { answer, request_id: key() });
 // Step explanations (详解) and follow-ups.
 export const createExplanation = (exerciseId, stepId) => send(`/exercises/${exerciseId}/steps/${stepId}/explanation`, { request_id: key() });
 export const getExplanation = (id) => request('/explanations/' + id);

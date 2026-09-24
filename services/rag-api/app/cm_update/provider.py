@@ -267,6 +267,30 @@ class QwenProvider:
             },
         ])
 
+    def estimate_practice_interaction(self) -> OperationEstimate:
+        """Conservative ceiling for one DeepSeek hint or feedback call."""
+
+        from app.learning.practice_feedback import (
+            FEEDBACK_PROMPT_PATH,
+            HINT_PROMPT_PATH,
+        )
+
+        instruction = max(
+            (
+                FEEDBACK_PROMPT_PATH.read_text(encoding='utf-8'),
+                HINT_PROMPT_PATH.read_text(encoding='utf-8'),
+            ),
+            key=len,
+        )
+        return self._estimate([{
+            'name': 'practice_interaction',
+            'messages': [
+                {'role': 'system', 'content': instruction},
+                {'role': 'user', 'content': 'x' * 60_000},
+            ],
+            'max_output_tokens': self.cfg.answer_tokens,
+        }])
+
     def estimate_explanation(self, course, question_text, answer_context, step_text, profile, sources) -> OperationEstimate:
         return self._estimate([{
             'name': 'explanation',

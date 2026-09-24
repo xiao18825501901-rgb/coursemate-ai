@@ -1514,6 +1514,52 @@ class V3DomainAdapter:
             status = 503 if error.code in unavailable else 409
             raise ApiError(status, error.code, str(error)) from error
 
+    def _practice_scope(self, subject: str, payload: dict[str, Any]) -> tuple[str, sqlite3.Row]:
+        if self.question_engine is None:
+            raise ApiError(503, "QUESTION_ENGINE_DISABLED", "The Question Engine is disabled.")
+        course_id = str(payload["course"])
+        self._course_row(course_id, subject)
+        return course_id, self._workspace_for_node(course_id, subject)
+
+    def _practice_hint(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        _, workspace = self._practice_scope(subject, payload)
+        try:
+            return self.question_engine.generate_hint(
+                owner_user_id=subject,
+                workspace_id=str(workspace["id"]),
+                question_revision_id=str(payload["question_revision_id"]),
+                operation_id=str(payload["operation_id"]),
+            )
+        except QuestionEngineRuntimeError as error:
+            status = 503 if "PROVIDER" in error.code else 409
+            raise ApiError(status, error.code, str(error)) from error
+
+    def _practice_attempt(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        _, workspace = self._practice_scope(subject, payload)
+        try:
+            return self.question_engine.grade_practice_attempt(
+                owner_user_id=subject,
+                workspace_id=str(workspace["id"]),
+                question_revision_id=str(payload["question_revision_id"]),
+                operation_id=str(payload["operation_id"]),
+                submitted_answer=str(payload["submitted_answer"]),
+                answer_revealed=bool(payload.get("answer_revealed")),
+            )
+        except QuestionEngineRuntimeError as error:
+            status = 503 if "PROVIDER" in error.code else 409
+            raise ApiError(status, error.code, str(error)) from error
+
+    def _practice_state(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        _, workspace = self._practice_scope(subject, payload)
+        try:
+            return self.question_engine.practice_state(
+                owner_user_id=subject,
+                workspace_id=str(workspace["id"]),
+                question_revision_id=str(payload["question_revision_id"]),
+            )
+        except QuestionEngineRuntimeError as error:
+            raise ApiError(404, error.code, str(error)) from error
+
     # ----------------------------------------- V3 learning state (write paths)
 
     def _workspace_for_node(self, course_id: str, subject: str) -> sqlite3.Row:
@@ -1956,6 +2002,9 @@ class V3DomainAdapter:
             "knowledge.tree",
             "knowledge.assessment",
             "knowledge.exercise.generate",
+            "knowledge.exercise.hint",
+            "knowledge.exercise.attempt",
+            "knowledge.exercise.state",
             "knowledge.begin_learning",
             "knowledge.assessment.start",
             "knowledge.assessment.view",
@@ -2039,6 +2088,12 @@ class V3DomainAdapter:
             return self._knowledge_assessment(subject, payload)
         if operation == "knowledge.exercise.generate":
             return await asyncio.to_thread(self._generate_exercise, subject, payload)
+        if operation == "knowledge.exercise.hint":
+            return await asyncio.to_thread(self._practice_hint, subject, payload)
+        if operation == "knowledge.exercise.attempt":
+            return await asyncio.to_thread(self._practice_attempt, subject, payload)
+        if operation == "knowledge.exercise.state":
+            return await asyncio.to_thread(self._practice_state, subject, payload)
         if operation == "knowledge.begin_learning":
             return self._begin_learning(subject, payload)
         if operation == "knowledge.submit_delivery":

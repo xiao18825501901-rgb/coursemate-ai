@@ -1,19 +1,21 @@
 # DATA MIGRATION AND ROLLBACK (CourseJesus work)
 
-**State of this document.** Written in round 73, covering the schema and rollback position of the
-CourseJesus work (brand/domain, Canvas private import, campus material) against the production
-release. It is a *plan plus current measurement*, not a record of a deployment: **nothing here has
-been applied to production**, and the production release is still `4ef5064` on its own schema.
+**State of this document.** Written in round 73 and updated during the Codex Question Engine
+continuation. It covers the schema and rollback position of the CourseJesus work against the last
+verified production release. It is a *plan plus current measurement*, not a deployment record:
+**nothing added by the Codex continuation has been applied to production**, and the last inherited
+production evidence remains `4ef5064` on its own schema until a fresh authorised check proves
+otherwise.
 
 ## 1. Where the schema stands (measured, not assumed)
 
 | Fact | Value | Where it comes from |
 |---|---|---|
-| Latest V3 schema version | **34** | `LATEST_V3_SCHEMA_VERSION` in `app/db.py` |
+| Latest V3 schema version | **37** | `LATEST_V3_SCHEMA_VERSION` in `app/db.py` |
 | Latest V2 schema version | 10 | `LATEST_V2_SCHEMA_VERSION` |
-| Registered V3 migrations | **24** (`011_learning_workspaces.sql` … `034_canvas_oauth_states.sql`) | the explicit `V3_MIGRATIONS` tuple |
-| Migration files on disk | 28 | `services/rag-api/migrations/*.sql` |
-| Migrations added by this work | `029_entity_relations.sql`, `030_feedback_reports.sql`, `031_canvas_import.sql`, `032_campus_material.sql`, `033_canvas_local_bridge.sql`, `034_canvas_oauth_states.sql` — the newest is `034` | migration files |
+| Registered V3 migrations | **27** (`011_learning_workspaces.sql` … `037_practice_question_interactions.sql`) | the explicit `V3_MIGRATIONS` tuple |
+| Migration files on disk | 31 | `services/rag-api/migrations/*.sql` |
+| Migrations added by the CourseJesus work | `029` through `037`; the newest is `037_practice_question_interactions.sql` | migration files |
 | Production release / schema | `4ef5064`, schema **25** | read-only production observation recorded in `COURSEJESUS_EXECUTION_STATE.md` |
 
 Two rules this repository already follows, and which the numbers above depend on:
@@ -31,9 +33,16 @@ Two rules this repository already follows, and which the numbers above depend on
 | `030_feedback_reports.sql` | the user-initiated feedback queue | records identifiers, and a body only when the user opted in |
 | `031_canvas_import.sql` | `canvas_connections`, `canvas_import_jobs`, `canvas_import_files` | **no token column exists**; a job references a connection, and the credential lives in the encrypted store keyed by `connection_id` |
 | `032_campus_material.sql` | `campus_material_records` | one row per source file with `usage_rights`, `publication_basis` and a NOT NULL `review_status` |
+| `033_canvas_local_bridge.sql` | local Canvas bridge state | private, owner-scoped import coordination |
+| `034_canvas_oauth_states.sql` | Canvas OAuth state | bounded OAuth lifecycle state; no plaintext token column |
+| `035_question_blueprints.sql` | Question Engine blueprint/slot structures | immutable target-selection inputs for generated questions |
+| `036_question_engine_provenance.sql` | `question_engine_provenance` | binds existing question/rubric/reference rows to exact evidence and validation receipts |
+| `037_practice_question_interactions.sql` | operation ledger, hint events, practice attempts | owner-scoped diagnostic practice evidence; never grades, coverage, or `LEARNED` |
 
-Nothing in these migrations drops or rewrites a column, changes an existing table's shape, or
-touches any table that existed before them. That is what makes the rollback in §4 possible.
+These migrations are additive: they do not drop or rewrite an existing column. Migrations 036 and
+037 deliberately reference existing Question/Workspace rows so ownership and lifecycle constraints
+remain enforceable. That additive shape is what makes the rollback process in §4 possible, subject
+to verification against the exact release candidate.
 
 ## 3. Applying them (forward)
 
@@ -46,7 +55,7 @@ touches any table that existed before them. That is what makes the rollback in �
 3. **Apply during the bounded window.** `ops/production_switch_four_changes.sh` stops the two
    services, switches the release symlink, starts them, and verifies health; it refuses to proceed if
    either service was unhealthy to begin with.
-4. **Verify afterwards.** Schema version equals 32, the four tables above exist, and the course,
+4. **Verify afterwards.** Schema version equals 37, the tables above exist, and the course,
    document, node, assessment and user identifiers from before the migration are unchanged.
 
 ## 4. Rolling back

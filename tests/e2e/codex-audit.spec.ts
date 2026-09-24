@@ -4,7 +4,7 @@ const API="http://127.0.0.1:8200/ui-extension/api/ui/v1";
 const auth={Authorization:"Bearer test-session-token"};
 const unverified={Authorization:"Bearer audit-unverified-token"};
 const windowAuth={Authorization:"Bearer audit-windows-token"};
-const answerCanary="MinPts 增大，聚类更保守，噪声点倾向增多";
+const answerCanary="[FAKE TEST FIXTURE] Synthetic candidate answer.";
 
 async function post(request:APIRequestContext,path:string,data:unknown={},headers=auth) {
   const response=await request.post(API+path,{headers,data});
@@ -61,7 +61,7 @@ test("production shell sends normal and Thinking modes through integrated servic
   await page.screenshot({path:info.outputPath("normal-thinking.png"),fullPage:true});
 });
 
-test("reload preserves current Pair and generated answer stays hidden until reveal",async({page,request},info)=>{
+test("Question Engine practice journey persists feedback and keeps answers private until reveal",async({page,request},info)=>{
   const pairA=await post(request,"/courses/cs3481/nodes/e2e-tree-kmeans/open");
   await terminal(request,pairA.run);
   await post(request,"/courses/cs3481/nodes/e2e-tree-clustering/open");
@@ -80,20 +80,65 @@ test("reload preserves current Pair and generated answer stays hidden until reve
   expect(response.ok(),await response.text()).toBeTruthy();
   expect(response.request().postDataJSON().pair_id).toBe(pairA.pair_id);
   const run=await response.json();await terminal(request,run.id);
-  await expect(page.locator(".pane-problem")).toContainText("诊断题 · K-means 聚类");
+  await expect(page.locator(".pane-problem")).toContainText("[FAKE TEST FIXTURE] Apply the bounded course rule");
   await expect(page.getByRole("button",{name:"显示答案",exact:true}).last()).toBeVisible();
   const saved=await request.get(API+"/pairs/"+pairA.pair_id,{headers:auth});
   const history=await saved.json();
   const exercise=history.problem.messages.find((m:any)=>m.exercise).exercise;
+  const teachingCount=await page.locator(".pane-teach .chat-message-new").count();
+  const hintPending=page.waitForResponse(r=>r.request().method()==="POST"&&r.url().endsWith(`/exercises/${exercise}/hints`));
+  await page.getByRole("button",{name:"给我提示",exact:true}).last().click();
+  const hintResponse=await hintPending;expect(hintResponse.ok(),await hintResponse.text()).toBeTruthy();
+  const hint=await hintResponse.json();expect(hint.assistance).toBe("HINT");
+  await expect(page.locator(".practice-hint")).toContainText("First identify the bounded course rule");
+  await expect(page.locator(".pane-teach .chat-message-new")).toHaveCount(teachingCount);
+
+  await page.getByRole("textbox",{name:"练习答案"}).fill("I would apply the course rule to the intermediate value.");
+  const attemptPending=page.waitForResponse(r=>r.request().method()==="POST"&&r.url().endsWith(`/exercises/${exercise}/attempts`));
+  await page.getByRole("button",{name:"提交作答",exact:true}).click();
+  const attemptResponse=await attemptPending;expect(attemptResponse.ok(),await attemptResponse.text()).toBeTruthy();
+  const attempt=await attemptResponse.json();
+  expect(attempt.assistance).toBe("HINT");expect(attempt.independent).toBe(false);
+  await expect(page.locator(".practice-feedback")).toContainText("提示后作答");
+  await expect(page.locator(".practice-feedback")).toContainText("rule-to-conclusion link");
+  await expect(page.locator(".pane-teach .chat-message-new")).toHaveCount(teachingCount);
   for(const path of ["/runs/"+run.id,"/runs/"+run.id+"/events","/pairs/"+pairA.pair_id,"/exercises/"+exercise]) {
     const hidden=await request.get(API+path,{headers:auth});
     expect(hidden.ok()).toBeTruthy();expect(await hidden.text()).not.toContain(answerCanary);
   }
   await expect(page.locator("body")).not.toContainText(answerCanary);
+  await page.screenshot({path:info.outputPath("practice-light.png"),fullPage:true});
+
+  await page.reload();
+  await expect(page.locator(".practice-hint")).toContainText("First identify the bounded course rule");
+  await expect(page.locator(".practice-feedback")).toContainText("提示后作答");
+  await expect(page.locator("body")).not.toContainText(answerCanary);
+
+  await page.goto("/app#/dashboard");
+  const themeSaved=page.waitForResponse(r=>r.request().method()==="PUT"&&r.url().endsWith("/me/preferences"));
+  await page.getByRole("button",{name:"切换至深色模式"}).click();
+  expect((await themeSaved).ok()).toBeTruthy();
+  await page.goto("/app#/course/cs3481/learn");
+  await expect(page.locator("html")).toHaveAttribute("data-theme","dark");
+  await expect(page.locator(".practice-feedback")).toContainText("提示后作答");
+  await page.screenshot({path:info.outputPath("practice-dark.png"),fullPage:true});
+
   await page.getByRole("button",{name:"显示答案",exact:true}).last().click();
   await expect(page.locator(".exercise-steps")).toContainText(answerCanary);
+  await page.getByRole("button",{name:"详解",exact:true}).last().click();
+  await expect(page.locator(".explain-window")).toBeVisible();
   await page.reload();await expect(page.locator(".exercise-steps")).toContainText(answerCanary);
-  await page.screenshot({path:info.outputPath("pair-reload-reveal.png"),fullPage:true});
+
+  const secondPending=page.waitForResponse(r=>r.request().method()==="POST"&&r.url().endsWith("/courses/cs3481/exercises"));
+  await page.getByRole("button",{name:"再练同一目标",exact:true}).click();
+  const secondResponse=await secondPending;expect(secondResponse.ok(),await secondResponse.text()).toBeTruthy();
+  expect(secondResponse.request().postDataJSON().node).toBe("e2e-tree-kmeans");
+  const secondRun=await secondResponse.json();await terminal(request,secondRun.id);
+  const after=await (await request.get(API+"/pairs/"+pairA.pair_id,{headers:auth})).json();
+  const exerciseIds=after.problem.messages.filter((m:any)=>m.exercise).map((m:any)=>m.exercise);
+  expect(new Set(exerciseIds).size).toBeGreaterThanOrEqual(2);
+  await expect(page.locator(".pane-problem")).toContainText("[FAKE TEST FIXTURE] Apply the bounded course rule");
+  await page.screenshot({path:info.outputPath("practice-reveal-repractice.png"),fullPage:true});
 });
 
 test("supplied problem exposes steps and opens explanation",async({page,request},info)=>{

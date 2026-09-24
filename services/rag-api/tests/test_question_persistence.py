@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from app.config import Settings
 from app.db import LATEST_V3_SCHEMA_VERSION, Database
 from app.jev.catalog import load_catalog
@@ -22,7 +21,10 @@ from app.learning.provider import LearningProvider
 from app.learning.question_author import author_question
 from app.learning.question_blueprint import QuestionBlueprint, resolve_objective
 from app.learning.question_evidence import EvidencePackAccess, build_evidence_pack
-from app.learning.question_persistence import QuestionPersistenceError, persist_question_candidate
+from app.learning.question_persistence import (
+    QuestionPersistenceError,
+    persist_question_candidate,
+)
 from app.learning.question_validator import (
     collect_question_semantic_signals,
     validate_question_candidate,
@@ -218,8 +220,8 @@ def test_fresh_schema_includes_additive_question_engine_provenance(tmp_path: Pat
             for row in connection.execute("PRAGMA table_info(question_engine_provenance)")
         }
 
-    assert LATEST_V3_SCHEMA_VERSION == 36
-    assert versions == list(range(1, 37))
+    assert LATEST_V3_SCHEMA_VERSION == 37
+    assert versions == list(range(1, 38))
     assert {
         "question_revision_id",
         "workspace_id",

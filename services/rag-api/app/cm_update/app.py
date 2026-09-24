@@ -63,6 +63,8 @@ from .models import (
     MessageCreate,
     PairBind,
     PairCreate,
+    PracticeAttemptCreate,
+    PracticeHintCreate,
     Profile,
     ReceiptClaim,
     ReceiptFinish,
@@ -498,6 +500,13 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             n=c.execute('SELECT count FROM cmui_limits WHERE owner=? AND bucket=? AND window=?',(user['id'],bucket,window)).fetchone()[0]
             c.execute('DELETE FROM cmui_limits WHERE window<?',(window-10,))
         if n>limit: raise HTTPException(429,'操作太频繁，请稍后再试',headers={'Retry-After':'60'})
+
+    def model_rate(user):
+        # The isolated browser suite intentionally exercises several paid-path
+        # contracts back-to-back with one synthetic identity.  Give only the
+        # explicitly labelled test environment enough room for that journey;
+        # development and production retain the existing eight/minute guard.
+        rate(user,'model-runs',100 if cfg.environment=='test' else 8)
 
     def conversation(user,conversation_id):
         row=db.one('SELECT * FROM cmui_conversations WHERE id=? AND owner=?',(conversation_id,user['id']))
@@ -1111,7 +1120,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 for item in json.loads(row['attachments'])
                 if item.get('id') in accessible_ids or (message.get('provenance') or '').startswith('share:')]
 
-    def message_exercise(message,user):
+    async def message_exercise(message,user,request):
         if not message.get('exercise'): return None
         row=db.one('SELECT * FROM cmui_exercises WHERE id=? AND owner=?',(message['exercise'],user['id']))
         if not row: return None
@@ -1119,9 +1128,14 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         run=db.one('SELECT user_text FROM cmui_runs WHERE id=?',(row['run'],))
         source='generated' if (str(row['generation_version']).startswith('exercise.') or
             (run and run['user_text']=='做一题') or message.get('text')==row['question']) else 'user_problem'
-        return {'id':row['id'],'source':source,'revealed':revealed,
+        practice={'hint_count':0,'latest_hint':None,'latest_attempt':None}
+        if domain is not None and row.get('question_revision_id'):
+            practice=await remote('knowledge.exercise.state',user,{
+                'course':row['course'],'question_revision_id':row['question_revision_id']},request)
+        return {'id':row['id'],'source':source,'node':row['node'],'revealed':revealed,
                 'steps':json.loads(row['answer_steps']) if revealed else [],
-                'generation_version':row['generation_version'],'verification_status':row['verification_status']}
+                'generation_version':row['generation_version'],'verification_status':row['verification_status'],
+                **practice}
 
     @r.get('/conversations/{conv_id}')
     async def restore_conversation(conv_id:str,user:User,request:Request):
@@ -1133,7 +1147,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         for m in messages:
             m['steps']=solution_steps(m['text']) if row['lane']=='problem' and m['role']=='assistant' else []
             m['attachments']=message_attachments(m,accessible_ids)
-            m['exercise_state']=message_exercise(m,user)
+            m['exercise_state']=await message_exercise(m,user,request)
             m['citations']=[x if x.get('document_id') in accessible_ids else
                 {'available':False,'name':'原共享来源当前不可用'}
                 for x in json.loads(m['citations'])
@@ -1423,7 +1437,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             recorded=db.one('SELECT payload_hash FROM cmui_run_inputs WHERE run=?',(old['id'],))
             if recorded and recorded['payload_hash']!=digest: raise HTTPException(409,'重复请求 ID 的附件或上下文不同')
             return {'id':old['id'],'status':old['status'],'reused':True}
-        rate(user,'model-runs',8)
+        model_rate(user)
         if cfg.provider_mode=='disabled' and provider is None: raise HTTPException(503,'模型尚未配置；数据功能可用，不会返回预设答案冒充模型生成。')
         if cfg.provider_mode in {'qwen','deepseek'} and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
         teaching_mode=data.teaching_mode
@@ -1844,7 +1858,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             for m in messages:
                 m['steps']=solution_steps(m['text']) if key=='problem' and m['role']=='assistant' else []
                 m['attachments']=message_attachments(m,accessible_ids)
-                m['exercise_state']=message_exercise(m,user)
+                m['exercise_state']=await message_exercise(m,user,request)
                 m['citations']=[x if x.get('document_id') in accessible_ids else
                     {'available':False,'name':'原共享来源当前不可用'}
                     for x in json.loads(m['citations'])
@@ -2397,7 +2411,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             receipt=db.one('SELECT payload_hash FROM cmui_run_inputs WHERE run=?',(old['id'],))
             if not receipt or receipt['payload_hash']!=digest: raise HTTPException(409,'重复请求 ID 的内容不同')
             return {'id':old['id'],'status':old['status'],'reused':True}
-        rate(user,'model-runs',8)
+        model_rate(user)
         if domain is not None:
             if cfg.provider_mode!='test' and not cfg.allow_billable:
                 raise HTTPException(402,'尚未授权模型调用费用')
@@ -2465,10 +2479,53 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         message=db.one('SELECT text FROM cmui_messages WHERE exercise=?',(exercise_id,))
         source='generated' if (str(row['generation_version']).startswith('exercise.') or
             (run and run['user_text']=='做一题') or (message and message['text']==row['question'])) else 'user_problem'
+        practice={'hint_count':0,'latest_hint':None,'latest_attempt':None}
+        if domain is not None and row.get('question_revision_id'):
+            practice=await remote('knowledge.exercise.state',user,{
+                'course':row['course'],'question_revision_id':row['question_revision_id']},request)
         return {'id':row['id'],'course':row['course'],'node':row['node'],'target_node':row['target_node'],
             'question':row['question'],'source':source,'revealed':revealed,'verification_status':row['verification_status'],
             'generation_version':row['generation_version'],'created_at':row['created_at'],
-            'steps':json.loads(row['answer_steps']) if revealed else []}
+            'steps':json.loads(row['answer_steps']) if revealed else [],**practice}
+
+    def practice_question(row):
+        if not row:
+            raise HTTPException(404,'题目不存在')
+        if not row.get('question_revision_id'):
+            raise HTTPException(409,'该历史题目不支持诊断反馈')
+
+    async def practice_billable_gate(user,course_id):
+        model_rate(user)
+        if cfg.provider_mode!='test' and not cfg.allow_billable:
+            raise HTTPException(402,'尚未授权模型调用费用')
+        strength=problem_strength(user,course_id)
+        return qwen_operation_budget('estimate_practice_interaction',strength=strength)
+
+    @r.post('/exercises/{exercise_id}/hints')
+    async def exercise_hint(exercise_id:str,data:PracticeHintCreate,user:User,request:Request):
+        row=db.one('SELECT * FROM cmui_exercises WHERE id=? AND owner=?',(exercise_id,user['id']))
+        practice_question(row)
+        course_data=await course(user,row['course'],request)
+        course_gate(course_data,user)
+        if db.one('SELECT 1 FROM cmui_answer_reveals WHERE owner=? AND exercise=?',(user['id'],exercise_id)):
+            raise HTTPException(409,'答案已显示，请直接查看步骤或生成同目标新题')
+        await practice_billable_gate(user,row['course'])
+        return await remote('knowledge.exercise.hint',user,{
+            'course':row['course'],'question_revision_id':row['question_revision_id'],
+            'operation_id':data.request_id},request)
+
+    @r.post('/exercises/{exercise_id}/attempts')
+    async def exercise_attempt(exercise_id:str,data:PracticeAttemptCreate,user:User,request:Request):
+        row=db.one('SELECT * FROM cmui_exercises WHERE id=? AND owner=?',(exercise_id,user['id']))
+        practice_question(row)
+        course_data=await course(user,row['course'],request)
+        course_gate(course_data,user)
+        revealed=bool(db.one('SELECT 1 FROM cmui_answer_reveals WHERE owner=? AND exercise=?',(user['id'],exercise_id)))
+        await practice_billable_gate(user,row['course'])
+        return await remote('knowledge.exercise.attempt',user,{
+            'course':row['course'],'question_revision_id':row['question_revision_id'],
+            'operation_id':data.request_id,'submitted_answer':data.answer,
+            'answer_revealed':revealed},request)
 
     @r.post('/exercises/{exercise_id}/reveal')
     async def exercise_reveal(exercise_id:str,user:User,request:Request):
@@ -2591,7 +2648,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             if replay: return replay
             replay=reuse_explanation(c,existing_explanation(c))
             if replay: return replay
-        rate(user,'model-runs',8)
+        model_rate(user)
         if cfg.provider_mode=='disabled' and provider is None: raise HTTPException(503,'模型尚未配置')
         if cfg.provider_mode in {'qwen','deepseek'} and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
         answer_context='\n\n'.join(s['text'] for s in steps)
@@ -2657,7 +2714,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         replay=explanation_replay(user,data.request_id,digest)
         if replay: return replay
         if row['status']!='completed': raise HTTPException(409,'详解尚未完成，不能追问')
-        rate(user,'model-runs',8)
+        model_rate(user)
         if cfg.provider_mode=='disabled' and provider is None: raise HTTPException(503,'模型尚未配置')
         if cfg.provider_mode in {'qwen','deepseek'} and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
         prior='\n\n'.join(m['text'] for m in db.all('SELECT text FROM cmui_explanation_messages WHERE explanation=? ORDER BY created_at,rowid',(explanation_id,)))

@@ -18,6 +18,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Final, Literal
+from uuid import uuid4
 
 from pydantic import Field
 
@@ -27,6 +28,11 @@ from app.jev import callsites
 from app.jev.service import SemanticDecisionService
 from app.learning.blind_solve import BlindSolveError, run_blind_solve
 from app.learning.models import Contract, Identifier, Text
+from app.learning.practice_feedback import (
+    PracticeInteractionError,
+    generate_practice_feedback,
+    generate_practice_hint,
+)
 from app.learning.question_author import (
     QUESTION_AUTHOR_PROMPT_VERSION,
     AuthorGenerationError,
@@ -208,6 +214,389 @@ class QuestionEngineRuntime:
                     (workspace_id, node_id),
                 ).fetchall()
             ]
+
+    def _practice_context(
+        self,
+        *,
+        owner_user_id: str,
+        workspace_id: str,
+        question_revision_id: str,
+    ) -> dict[str, Any]:
+        """Load one READY revision through its exact owner/workspace boundary."""
+
+        workspace_for(self.database, workspace_id, owner_user_id)
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT question.prompt_text,question.options_json,"
+                "provenance.node_id,provenance.spec_version,provenance.objective_id,"
+                "provenance.blueprint_json,reference.steps_json,reference.answer_json "
+                "FROM question_engine_provenance AS provenance "
+                "JOIN assessment_question_revisions AS question "
+                "ON question.id=provenance.question_revision_id "
+                "JOIN learning_workspaces AS workspace ON workspace.id=provenance.workspace_id "
+                "JOIN assessment_reference_solutions AS reference "
+                "ON reference.question_revision_id=question.id "
+                "WHERE provenance.question_revision_id=? AND provenance.workspace_id=? "
+                "AND provenance.publication_status='READY' "
+                "AND question.owner_user_id=? AND workspace.owner_user_id=? "
+                "ORDER BY reference.solution_revision DESC LIMIT 1",
+                (
+                    question_revision_id,
+                    workspace_id,
+                    owner_user_id,
+                    owner_user_id,
+                ),
+            ).fetchone()
+            if row is None:
+                raise QuestionEngineRuntimeError(
+                    "PRACTICE_QUESTION_NOT_FOUND",
+                    "The READY practice question is not available in this learner workspace.",
+                )
+            rubric_rows = connection.execute(
+                "SELECT criterion_id,dimension,max_fraction,description "
+                "FROM assessment_rubric_criteria WHERE question_revision_id=? "
+                "ORDER BY criterion_id",
+                (question_revision_id,),
+            ).fetchall()
+        try:
+            blueprint = json.loads(row["blueprint_json"])
+            options = json.loads(row["options_json"])
+            steps = json.loads(row["steps_json"])
+            answer = json.loads(row["answer_json"])
+        except (TypeError, ValueError) as error:
+            raise QuestionEngineRuntimeError(
+                "PRACTICE_REFERENCE_INVALID",
+                "The immutable practice reference could not be verified.",
+            ) from error
+        rubric = [dict(item) for item in rubric_rows]
+        if not rubric:
+            raise QuestionEngineRuntimeError(
+                "PRACTICE_RUBRIC_MISSING", "The practice rubric is unavailable."
+            )
+        return {
+            "question_revision_id": question_revision_id,
+            "question": {"text": row["prompt_text"], "options": options},
+            "objective": {
+                "node_id": row["node_id"],
+                "spec_version": row["spec_version"],
+                "objective_id": row["objective_id"],
+                "text": blueprint.get("objective_text"),
+            },
+            "rubric": rubric,
+            "reference_solution": {"answer": answer, "steps": steps},
+        }
+
+    def _claim_practice_operation(
+        self,
+        *,
+        owner_user_id: str,
+        workspace_id: str,
+        question_revision_id: str,
+        operation_id: str,
+        kind: Literal["HINT", "ATTEMPT"],
+        input_hash: str,
+    ) -> dict[str, Any] | None:
+        if not 8 <= len(operation_id.strip()) <= 100:
+            raise QuestionEngineRuntimeError(
+                "PRACTICE_OPERATION_REQUIRED",
+                "A stable practice operation id between 8 and 100 characters is required.",
+            )
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            inserted = connection.execute(
+                "INSERT OR IGNORE INTO practice_interaction_operations("
+                "workspace_id,operation_id,question_revision_id,owner_user_id,kind,"
+                "input_hash,status) "
+                "VALUES(?,?,?,?,?,?,'CLAIMED')",
+                (
+                    workspace_id,
+                    operation_id,
+                    question_revision_id,
+                    owner_user_id,
+                    kind,
+                    input_hash,
+                ),
+            ).rowcount
+            row = connection.execute(
+                "SELECT * FROM practice_interaction_operations "
+                "WHERE workspace_id=? AND operation_id=?",
+                (workspace_id, operation_id),
+            ).fetchone()
+        if inserted == 1:
+            return None
+        if row is None or any(
+            str(row[key]) != value
+            for key, value in (
+                ("question_revision_id", question_revision_id),
+                ("owner_user_id", owner_user_id),
+                ("kind", kind),
+                ("input_hash", input_hash),
+            )
+        ):
+            raise QuestionEngineRuntimeError(
+                "PRACTICE_IDEMPOTENCY_CONFLICT",
+                "The practice operation id is already bound to different input.",
+            )
+        if row["status"] == "COMPLETED":
+            return json.loads(row["result_json"])
+        if row["status"] == "FAILED":
+            raise QuestionEngineRuntimeError(
+                str(row["error_code"]),
+                "The original practice operation failed and was not billed again.",
+            )
+        raise QuestionEngineRuntimeError(
+            "PRACTICE_OPERATION_IN_PROGRESS",
+            "The same practice operation is already in progress.",
+        )
+
+    def _fail_practice_operation(
+        self, *, workspace_id: str, operation_id: str, error_code: str
+    ) -> None:
+        try:
+            with self.database.connect() as connection:
+                connection.execute(
+                    "UPDATE practice_interaction_operations SET status='FAILED',error_code=?,"
+                    "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                    "WHERE workspace_id=? AND operation_id=? AND status='CLAIMED'",
+                    (error_code[:100], workspace_id, operation_id),
+                )
+        except Exception:
+            # Preserve the original stable provider/contract failure. A stale
+            # CLAIMED receipt still prevents a duplicate paid call.
+            return
+
+    def generate_hint(
+        self,
+        *,
+        owner_user_id: str,
+        workspace_id: str,
+        question_revision_id: str,
+        operation_id: str,
+    ) -> dict[str, Any]:
+        context = self._practice_context(
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            question_revision_id=question_revision_id,
+        )
+        input_hash = _hash("HINT", question_revision_id, context)
+        replay = self._claim_practice_operation(
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            question_revision_id=question_revision_id,
+            operation_id=operation_id,
+            kind="HINT",
+            input_hash=input_hash,
+        )
+        if replay is not None:
+            return replay
+        try:
+            output, run = generate_practice_hint(self.provider, context=context)
+            event_id = f"ph_{uuid4().hex}"
+            result = {
+                "id": event_id,
+                "question_revision_id": question_revision_id,
+                "assistance": "HINT",
+                "independent": False,
+                "hint": output.hint,
+                "strategy": output.strategy,
+                "usage": _public_run(run),
+            }
+            encoded_result = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+            with self.database.connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    "INSERT INTO practice_hint_events("
+                    "id,workspace_id,question_revision_id,owner_user_id,operation_id,input_hash,"
+                    "hint_json,provider_run_json) VALUES(?,?,?,?,?,?,?,?)",
+                    (
+                        event_id,
+                        workspace_id,
+                        question_revision_id,
+                        owner_user_id,
+                        operation_id,
+                        input_hash,
+                        json.dumps(output.model_dump(mode="json"), ensure_ascii=False),
+                        json.dumps(run.model_dump(mode="json"), ensure_ascii=False),
+                    ),
+                )
+                updated = connection.execute(
+                    "UPDATE practice_interaction_operations SET status='COMPLETED',result_json=?,"
+                    "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                    "WHERE workspace_id=? AND operation_id=? AND status='CLAIMED'",
+                    (encoded_result, workspace_id, operation_id),
+                ).rowcount
+                if updated != 1:
+                    raise QuestionEngineRuntimeError(
+                        "PRACTICE_OPERATION_LOST", "The hint operation receipt was lost."
+                    )
+            return result
+        except QuestionEngineRuntimeError:
+            raise
+        except PracticeInteractionError as error:
+            self._fail_practice_operation(
+                workspace_id=workspace_id,
+                operation_id=operation_id,
+                error_code=error.code,
+            )
+            raise QuestionEngineRuntimeError(error.code, str(error)) from error
+
+    def practice_state(
+        self,
+        *,
+        owner_user_id: str,
+        workspace_id: str,
+        question_revision_id: str,
+    ) -> dict[str, Any]:
+        """Return the learner-visible interaction projection without private answers."""
+
+        self._practice_context(
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            question_revision_id=question_revision_id,
+        )
+        with self.database.connect() as connection:
+            hint_count = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM practice_hint_events WHERE workspace_id=? "
+                    "AND question_revision_id=?",
+                    (workspace_id, question_revision_id),
+                ).fetchone()[0]
+            )
+            hint = connection.execute(
+                "SELECT operation.result_json FROM practice_hint_events AS event "
+                "JOIN practice_interaction_operations AS operation "
+                "ON operation.workspace_id=event.workspace_id "
+                "AND operation.operation_id=event.operation_id "
+                "WHERE event.workspace_id=? AND event.question_revision_id=? "
+                "ORDER BY event.created_at DESC,event.rowid DESC LIMIT 1",
+                (workspace_id, question_revision_id),
+            ).fetchone()
+            attempt = connection.execute(
+                "SELECT operation.result_json FROM practice_question_attempts AS item "
+                "JOIN practice_interaction_operations AS operation "
+                "ON operation.workspace_id=item.workspace_id "
+                "AND operation.operation_id=item.operation_id "
+                "WHERE item.workspace_id=? AND item.question_revision_id=? "
+                "ORDER BY item.created_at DESC,item.rowid DESC LIMIT 1",
+                (workspace_id, question_revision_id),
+            ).fetchone()
+        return {
+            "hint_count": hint_count,
+            "latest_hint": json.loads(hint["result_json"]) if hint else None,
+            "latest_attempt": json.loads(attempt["result_json"]) if attempt else None,
+        }
+
+    def grade_practice_attempt(
+        self,
+        *,
+        owner_user_id: str,
+        workspace_id: str,
+        question_revision_id: str,
+        operation_id: str,
+        submitted_answer: str,
+        answer_revealed: bool,
+    ) -> dict[str, Any]:
+        answer = submitted_answer.strip()
+        if not 1 <= len(answer) <= 6000:
+            raise QuestionEngineRuntimeError(
+                "PRACTICE_ANSWER_INVALID",
+                "A practice answer between 1 and 6000 characters is required.",
+            )
+        context = self._practice_context(
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            question_revision_id=question_revision_id,
+        )
+        with self.database.connect() as connection:
+            hinted = connection.execute(
+                "SELECT 1 FROM practice_hint_events WHERE workspace_id=? "
+                "AND question_revision_id=? LIMIT 1",
+                (workspace_id, question_revision_id),
+            ).fetchone()
+        assistance = "ANSWER_REVEALED" if answer_revealed else "HINT" if hinted else "NONE"
+        provider_context = {
+            **context,
+            "submitted_answer": answer,
+            "assistance": assistance,
+        }
+        input_hash = _hash("ATTEMPT", question_revision_id, provider_context)
+        replay = self._claim_practice_operation(
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            question_revision_id=question_revision_id,
+            operation_id=operation_id,
+            kind="ATTEMPT",
+            input_hash=input_hash,
+        )
+        if replay is not None:
+            return replay
+        try:
+            output, run = generate_practice_feedback(self.provider, context=provider_context)
+            expected = {str(item["criterion_id"]) for item in context["rubric"]}
+            actual = {item.criterion_id for item in output.criteria}
+            if actual != expected:
+                raise PracticeInteractionError(
+                    "PRACTICE_FEEDBACK_RUBRIC_MISMATCH",
+                    "The feedback did not cover the immutable practice rubric.",
+                )
+            attempt_id = f"pa_{uuid4().hex}"
+            status = "NEEDS_REVIEW" if output.verdict == "NEEDS_REVIEW" else "GRADED"
+            result = {
+                "id": attempt_id,
+                "question_revision_id": question_revision_id,
+                "verdict": output.verdict,
+                "feedback": output.feedback,
+                "strengths": output.strengths,
+                "gaps": output.gaps,
+                "next_step": output.next_step,
+                "criteria": [item.model_dump(mode="json") for item in output.criteria],
+                "assistance": assistance,
+                "independent": assistance == "NONE",
+                "status": status,
+                "usage": _public_run(run),
+            }
+            encoded_result = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+            with self.database.connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    "INSERT INTO practice_question_attempts("
+                    "id,workspace_id,question_revision_id,owner_user_id,operation_id,input_hash,"
+                    "submitted_answer,assistance,status,feedback_json,provider_run_json) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        attempt_id,
+                        workspace_id,
+                        question_revision_id,
+                        owner_user_id,
+                        operation_id,
+                        input_hash,
+                        answer,
+                        assistance,
+                        status,
+                        json.dumps(output.model_dump(mode="json"), ensure_ascii=False),
+                        json.dumps(run.model_dump(mode="json"), ensure_ascii=False),
+                    ),
+                )
+                updated = connection.execute(
+                    "UPDATE practice_interaction_operations SET status='COMPLETED',result_json=?,"
+                    "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                    "WHERE workspace_id=? AND operation_id=? AND status='CLAIMED'",
+                    (encoded_result, workspace_id, operation_id),
+                ).rowcount
+                if updated != 1:
+                    raise QuestionEngineRuntimeError(
+                        "PRACTICE_OPERATION_LOST", "The attempt operation receipt was lost."
+                    )
+            return result
+        except QuestionEngineRuntimeError:
+            raise
+        except PracticeInteractionError as error:
+            self._fail_practice_operation(
+                workspace_id=workspace_id,
+                operation_id=operation_id,
+                error_code=error.code,
+            )
+            raise QuestionEngineRuntimeError(error.code, str(error)) from error
 
     @staticmethod
     def _check_cancelled(should_cancel: Callable[[], bool] | None) -> None:

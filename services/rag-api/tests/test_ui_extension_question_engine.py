@@ -16,9 +16,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fastapi import Request
-from fastapi.testclient import TestClient
-
 from app.config import Settings
 from app.jev.catalog import load_catalog
 from app.jev.errors import JevNotConfiguredError
@@ -27,6 +24,8 @@ from app.jev.models import JevAnswer, JevResult
 from app.jev.receipt_store import SqlReceiptStore
 from app.jev.service import SemanticDecisionService
 from app.learning.workspaces import join_course
+from fastapi import Request
+from fastapi.testclient import TestClient
 
 UI = "/ui-extension/api/ui/v1"
 SUBJECT = "user-a"
@@ -217,6 +216,49 @@ def test_mounted_do_one_question_uses_ready_revision_and_keeps_answer_private(
     assert hidden.json()["steps"] == []
     assert private_answer not in hidden.text
 
+    hint = test_client.post(
+        f"{UI}/exercises/{exercise['id']}/hints",
+        headers=auth(),
+        json={"request_id": "question-engine-hint-0001"},
+    )
+    assert hint.status_code == 200, hint.text
+    assert hint.json()["assistance"] == "HINT"
+    assert hint.json()["independent"] is False
+    assert private_answer not in hint.text
+
+    attempted = test_client.post(
+        f"{UI}/exercises/{exercise['id']}/attempts",
+        headers=auth(),
+        json={
+            "request_id": "question-engine-attempt-0001",
+            "answer": (
+                "I would apply the bounded neighbourhood rule, "
+                "but my conclusion is incomplete."
+            ),
+        },
+    )
+    assert attempted.status_code == 200, attempted.text
+    assert attempted.json()["assistance"] == "HINT"
+    assert attempted.json()["independent"] is False
+    assert attempted.json()["feedback"]
+
+    restored = test_client.get(f"{UI}/exercises/{exercise['id']}", headers=auth())
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["hint_count"] == 1
+    assert restored.json()["latest_hint"]["id"] == hint.json()["id"]
+    assert restored.json()["latest_attempt"]["id"] == attempted.json()["id"]
+    conversation_id = ui_database.one(
+        "SELECT conversation FROM cmui_messages WHERE exercise=?", (exercise["id"],)
+    )["conversation"]
+    history = test_client.get(f"{UI}/conversations/{conversation_id}", headers=auth())
+    assert history.status_code == 200, history.text
+    historical = next(
+        item["exercise_state"]
+        for item in history.json()["messages"]
+        if item.get("exercise") == exercise["id"]
+    )
+    assert historical["latest_attempt"]["id"] == attempted.json()["id"]
+
     with test_client.app.state.database.connect() as connection:
         provenance = connection.execute(
             "SELECT workspace_id,publication_status FROM question_engine_provenance "
@@ -232,6 +274,40 @@ def test_mounted_do_one_question_uses_ready_revision_and_keeps_answer_private(
     )
     assert revealed.status_code == 200, revealed.text
     assert revealed.json()["steps"] == stored_steps
+
+    assisted_after_reveal = test_client.post(
+        f"{UI}/exercises/{exercise['id']}/attempts",
+        headers=auth(),
+        json={
+            "request_id": "question-engine-attempt-0002",
+            "answer": "This response was written after the worked answer was shown.",
+        },
+    )
+    assert assisted_after_reveal.status_code == 200, assisted_after_reveal.text
+    assert assisted_after_reveal.json()["assistance"] == "ANSWER_REVEALED"
+    assert assisted_after_reveal.json()["independent"] is False
+
+    repeated = test_client.post(
+        f"{UI}/courses/{course_id}/exercises",
+        headers=auth(),
+        json={
+            "pair_id": pair["id"],
+            "node": node_id,
+            "request_id": "question-engine-http-0002",
+        },
+    )
+    assert repeated.status_code == 202, repeated.text
+    repeated_run = wait_terminal(test_client, repeated.json()["id"])
+    assert repeated_run["status"] == "completed", repeated_run
+    with test_client.app.state.database.connect() as connection:
+        families = connection.execute(
+            "SELECT question.family_id FROM question_engine_provenance AS provenance "
+            "JOIN assessment_question_revisions AS question "
+            "ON question.id=provenance.question_revision_id "
+            "WHERE provenance.workspace_id=? ORDER BY question.rowid",
+            (provenance["workspace_id"],),
+        ).fetchall()
+    assert len({item["family_id"] for item in families}) == 2
 
 
 def test_mounted_do_one_question_fails_closed_when_semantic_review_is_unavailable(

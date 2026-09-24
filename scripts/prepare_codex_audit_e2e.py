@@ -25,10 +25,13 @@ sys.path.insert(0, str(ROOT / "services" / "rag-api"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from app.auth import TestAuthVerifier
-from app.cm_update.db import Database as UiDatabase, now
+from app.cm_update.db import Database as UiDatabase
+from app.cm_update.db import now
 from app.cm_update.social import set_verified
 from app.config import Settings
 from app.db import Database
+from app.jev.gateway import FakeTransport
+from app.jev.models import JevAnswer, JevResult
 from app.main import create_app
 from app.models import CourseCreate
 from app.rag.embeddings import DeterministicEmbeddingProvider
@@ -67,19 +70,29 @@ def prepare(target: Path) -> None:
     with db.connect() as connection:
         connection.execute("UPDATE courses SET display_type='campus',requires_student_verification=1 WHERE id IN ('cs3481','ge2324')")
     seed_assessment_fixture(db, VERIFIED)
-    seed_tree_fixture(db, VERIFIED)
     # Seed official content while the synthetic course is draft; the normal
     # published-content trigger must remain enabled throughout this fixture.
     with db.connect() as connection:
         connection.execute("UPDATE courses SET publication_status='private' WHERE id='cs3481'")
     accepted = ingestion.queue_document(
         course_id="cs3481", filename="Synthetic_Clustering.txt", media_type="text/plain",
-        content=("Synthetic local browser fixture. DBSCAN core points have at least MinPts neighbours within eps. "
-                 "K-means alternates nearest-centroid assignments and mean updates. "
-                 "Question: classify a point with five neighbours when MinPts=4.").encode(),
+        content=(b"Synthetic local browser fixture. DBSCAN core points have at least MinPts neighbours within eps. "
+                 b"K-means alternates nearest-centroid assignments and mean updates. "
+                 b"Question: classify a point with five neighbours when MinPts=4."),
         is_admin=True,
     )
     ingestion.process_document(accepted.document.id, accepted.job.id)
+    with db.connect() as connection:
+        evidence_ids = [
+            str(row["id"])
+            for row in connection.execute(
+                "SELECT id FROM chunks WHERE document_id=? ORDER BY ordinal",
+                (accepted.document.id,),
+            ).fetchall()
+        ]
+    if not evidence_ids:
+        raise RuntimeError("Synthetic browser source produced no immutable evidence chunks")
+    seed_tree_fixture(db, VERIFIED, evidence_ids=evidence_ids)
     with db.connect() as connection:
         connection.execute("UPDATE courses SET publication_status='published' WHERE id='cs3481'")
     ui = UiDatabase(target / "ui-extension" / "ui.sqlite3")
@@ -122,7 +135,29 @@ def create_test_app():
     settings = settings_at(target)
     if not (target / "fixture.json").is_file():
         raise RuntimeError("Synthetic seed receipt missing")
-    return create_app(settings=settings, auth_verifier=AuditVerifier())
+    application = create_app(settings=settings, auth_verifier=AuditVerifier())
+
+    # The real Question Engine will not publish when semantic review is absent:
+    # its deterministic hard gates can pass, but ambiguity and independent-answer
+    # agreement remain UNKNOWN.  Browser verification therefore installs an
+    # explicitly labelled, local-only Jev transport.  It exercises the same
+    # receipts and publication gates without a credential, network call or fee.
+    verdicts = {
+        "exercise.prototype.v1": "worked_application",
+        "question.ambiguity.v1": "CLEAR",
+        "question.answer_agreement.v1": "AGREE",
+    }
+
+    def semantic_fixture(call):
+        key = next(iter(call.questions))
+        if key not in verdicts:
+            raise ValueError(f"Browser semantic fixture does not support {key!r}")
+        return JevResult(answers={key: JevAnswer(choice=verdicts[key])})
+
+    gateway = application.state.jev_service.gateway
+    gateway.transport = FakeTransport(semantic_fixture, model_version="browser-fixture-v1")
+    gateway.modes.update({key: "on" for key in verdicts})
+    return application
 
 
 if __name__ == "__main__":

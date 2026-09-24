@@ -2,7 +2,7 @@ import { BRAND } from "../brand";
 import { RichText } from './richtext.jsx';
 import { DirectoryPicker } from './DirectoryPicker.jsx';
 import React from 'react';
-import { request, send, remove, download, key, streamEvents, listPairs, getPair, createPair, renamePair, deletePair, bindPair, createExercise, revealExercise, createExplanation, getExplanation, postExplanationMessage, cancelExplanation, searchPeople, listShares, getShare, createShare, joinShare, getAssessment, startAssessment, getAssessmentSession, submitAssessment, abandonAssessment, saveAssessmentDraft, loadAssessmentDraft, cancelPreparation, resumePreparation, createAssessmentExplanation, submitFeedback } from './api.js';
+import { request, send, remove, download, key, streamEvents, listPairs, getPair, createPair, renamePair, deletePair, bindPair, createExercise, revealExercise, requestExerciseHint, submitPracticeAttempt, createExplanation, getExplanation, postExplanationMessage, cancelExplanation, searchPeople, listShares, getShare, createShare, joinShare, getAssessment, startAssessment, getAssessmentSession, submitAssessment, abandonAssessment, saveAssessmentDraft, loadAssessmentDraft, cancelPreparation, resumePreparation, createAssessmentExplanation, submitFeedback } from './api.js';
 import { dateKey, zonedParts, wallTimeToISO, formatBytes, formatTime, goto } from './utils.js';
 import { citationVerdict } from './citationSupport.js';
 import { referenceVerificationNote } from './referenceVerification.js';
@@ -349,7 +349,7 @@ class FeedbackForm extends React.Component {
     render() { const { category, text, includeBody, busy, error } = this.state; return <form onSubmit={e => this.submit(e)}><p className="helper-note">报告一个具体问题，帮助我们改进。默认只发送报告标识符与你选择的类别。</p><div className="field"><label>问题类型（可选）</label><select value={category} onChange={e => this.setState({ category: e.target.value })}><option value="">（由系统自动判断）</option>{FEEDBACK_CATEGORIES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></div><label className="check-line"><input type="checkbox" checked={includeBody} onChange={e => this.setState({ includeBody: e.target.checked })}/>附上我的说明，以及当前题目与答案正文</label><div className="field"><label>补充说明（需要勾选上面的选项）</label><textarea value={text} maxLength="2000" disabled={!includeBody} placeholder={includeBody ? '描述你遇到的问题…' : '勾选上面的选项后即可填写'} onChange={e => this.setState({ text: e.target.value })}/></div><p className="helper-note">未勾选时，只发送报告标识符（消息、运行、课程、模型、模板与应用版本）和所选类别，不包含任何正文。</p>{error && <p className="error-text">{error}</p>}<button className="btn primary" style={{ marginTop: 16 }} disabled={busy}>{busy ? '正在提交…' : '提交报告'}</button></form>; }
 }
 export class Learn extends React.Component {
-    state = { attachments:{teach:[],problem:[]}, uploading:{teach:false,problem:false}, nodes: [], expanded: false, hover: null, ratio: .5, fullscreen: false, mobile: 'teach', conv: { teach: null, problem: null }, messages: { teach: [], problem: [] }, inputs: { teach: '', problem: '' }, run: { teach: null, problem: null }, partial: { teach: '', problem: '' }, status: { teach: '', problem: '' }, activeNode: null, error: '', busy: { teach: false, problem: false }, thinking: { teach: false }, strength: { teach: 'medium', problem: 'medium' }, exercises: {}, explanations: {}, windows: {}, pair: null, assessment: null, assessPicker: null };
+    state = { attachments:{teach:[],problem:[]}, uploading:{teach:false,problem:false}, nodes: [], expanded: false, hover: null, ratio: .5, fullscreen: false, mobile: 'teach', conv: { teach: null, problem: null }, messages: { teach: [], problem: [] }, inputs: { teach: '', problem: '' }, run: { teach: null, problem: null }, partial: { teach: '', problem: '' }, status: { teach: '', problem: '' }, activeNode: null, error: '', busy: { teach: false, problem: false }, thinking: { teach: false }, strength: { teach: 'medium', problem: 'medium' }, exercises: {}, practiceAnswers: {}, practiceBusy: {}, explanations: {}, windows: {}, pair: null, assessment: null, assessPicker: null };
     controllers = {};
     explanationControllers = {};
     follow = {teach:true,problem:true};
@@ -721,9 +721,9 @@ export class Learn extends React.Component {
     }
     async stop(lane) { const rid = this.state.run[lane]; if (rid)
         await send('/runs/' + rid + '/cancel', {}); }
-    async doExercise() { const lane = 'problem'; if (this.state.busy.problem)
+    async doExercise(explicitNode = null) { const lane = 'problem'; if (this.state.busy.problem)
         return; this.follow.problem = true; this.setLane('busy', lane, true); this.setLane('partial', lane, ''); this.setLane('status', lane, '正在出题…'); try {
-        const run = await createExercise(this.props.course.id, null, this.state.pair?.id || this.state.pair);
+        const run = await createExercise(this.props.course.id, explicitNode, this.state.pair?.id || this.state.pair);
         this.setLane('run', lane, run.id);
         await this.watchExercise(run.id);
     }
@@ -768,14 +768,43 @@ export class Learn extends React.Component {
             }
         }
     }
-    async revealSteps(exerciseId) { try {
+    mergeExercise(exerciseId, base, patch) {
+        this.setState(s => ({ exercises: { ...s.exercises, [exerciseId]: { ...(base || {}), ...(s.exercises[exerciseId] || {}), ...patch } } }));
+    }
+    setPracticeBusy(exerciseId, value) {
+        this.setState(s => ({ practiceBusy: { ...s.practiceBusy, [exerciseId]: value } }));
+    }
+    async requestPracticeHint(exerciseId, base) { if (this.state.practiceBusy[exerciseId]) return;
+        this.setPracticeBusy(exerciseId, true); try {
+            const hint = await requestExerciseHint(exerciseId);
+            this.mergeExercise(exerciseId, base, { latest_hint: hint, hint_count: Number(base?.hint_count || 0) + 1 });
+        } catch (e) { this.props.toast(e.message); } finally { this.setPracticeBusy(exerciseId, false); }
+    }
+    async submitPracticeAnswer(exerciseId, base) { if (this.state.practiceBusy[exerciseId]) return;
+        const answer = (this.state.practiceAnswers[exerciseId] || '').trim();
+        if (!answer) { this.props.toast('请先写下你的作答'); return; }
+        this.setPracticeBusy(exerciseId, true); try {
+            const attempt = await submitPracticeAttempt(exerciseId, answer);
+            this.mergeExercise(exerciseId, base, { latest_attempt: attempt });
+        } catch (e) { this.props.toast(e.message); } finally { this.setPracticeBusy(exerciseId, false); }
+    }
+    async revealSteps(exerciseId, base = null) { try {
         const revealed = await revealExercise(exerciseId);
-        this.setState(s => ({ exercises: { ...s.exercises, [exerciseId]: { ...(s.exercises[exerciseId] || {}), revealed: true, steps: revealed.steps } } }));
+        this.mergeExercise(exerciseId, base, { revealed: true, steps: revealed.steps });
     }
     catch (e) {
         this.props.toast(e.message);
     } }
-    renderExercise(m) { const ex = this.state.exercises[m.exercise] || m.exercise_state; const revealed = !!ex?.revealed; return <div className="exercise-actions">{!revealed ? <button className="show-answer-link" onClick={() => this.revealSteps(m.exercise)}>显示答案</button> : <div className="exercise-steps">{(ex.steps || []).map(s => <div className="exercise-step" key={s.step_id}><div className="step-title">{s.ordinal}. {s.title}</div><div className="step-text">{s.text}</div><button className="step-explain-link" onClick={() => this.openExplanation(m.exercise, s, s.ordinal)}>详解</button></div>)}</div>}</div>; }
+    renderExercise(m) {
+        const ex = this.state.exercises[m.exercise] || m.exercise_state || {};
+        const revealed = !!ex.revealed, busy = !!this.state.practiceBusy[m.exercise];
+        const hint = ex.latest_hint, attempt = ex.latest_attempt;
+        return <div className="exercise-actions">
+            {hint && <div className="practice-hint" role="status"><strong>提示</strong><p>{hint.hint}</p><small>{hint.strategy}</small></div>}
+            {attempt && <div className={'practice-feedback verdict-' + String(attempt.verdict || '').toLowerCase()} role="status"><div className="practice-feedback-title"><strong>{attempt.verdict === 'CORRECT' ? '回答正确' : attempt.verdict === 'PARTIAL' ? '部分正确' : attempt.verdict === 'INCORRECT' ? '需要修正' : '需要复核'}</strong><span>{attempt.independent ? '独立作答' : attempt.assistance === 'ANSWER_REVEALED' ? '答案揭晓后作答' : '提示后作答'}</span></div><p>{attempt.feedback}</p>{attempt.strengths?.length > 0 && <p><b>做得好：</b>{attempt.strengths.join('；')}</p>}{attempt.gaps?.length > 0 && <p><b>还需补充：</b>{attempt.gaps.join('；')}</p>}<p><b>下一步：</b>{attempt.next_step}</p></div>}
+            {!revealed ? <div className="practice-response"><label htmlFor={'practice-answer-' + m.exercise}>写下你的解答</label><textarea id={'practice-answer-' + m.exercise} aria-label="练习答案" maxLength="6000" value={this.state.practiceAnswers[m.exercise] || ''} onChange={e => this.setState(s => ({ practiceAnswers: { ...s.practiceAnswers, [m.exercise]: e.target.value } }))} placeholder="先写思路、步骤或结论，再提交获得针对性反馈…"/><div className="practice-controls"><button type="button" className="btn practice-submit" disabled={busy || !(this.state.practiceAnswers[m.exercise] || '').trim()} onClick={() => this.submitPracticeAnswer(m.exercise, ex)}>提交作答</button><button type="button" className="btn" disabled={busy} onClick={() => this.requestPracticeHint(m.exercise, ex)}>给我提示</button><button type="button" className="show-answer-link" disabled={busy} onClick={() => this.revealSteps(m.exercise, ex)}>显示答案</button></div></div> : <><div className="exercise-steps">{(ex.steps || []).map(s => <div className="exercise-step" key={s.step_id}><div className="step-title">{s.ordinal}. {s.title}</div><div className="step-text">{s.text}</div><button className="step-explain-link" onClick={() => this.openExplanation(m.exercise, s, s.ordinal)}>详解</button></div>)}</div><button type="button" className="btn repractice-button" disabled={this.state.busy.problem} onClick={() => this.doExercise(ex.node || this.state.activeNode)}>再练同一目标</button></>}
+        </div>;
+    }
     openExplanation(exerciseId, step, ordinal) {
         const key = exerciseId + ':' + step.step_id;
         if (this.state.windows[key]) {

@@ -4,6 +4,36 @@ from typing import Any
 
 
 def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
+    if schema == "PracticeHintOutput":
+        return {
+            "schema_version": "practice-hint-output.v1",
+            "hint": (
+                "[FAKE TEST FIXTURE] First identify the bounded course rule and write down "
+                "the intermediate quantity it asks you to compare."
+            ),
+            "strategy": "Name the rule, then compute only its first checkable intermediate.",
+        }
+    if schema == "PracticeFeedbackOutput":
+        rubric = context["rubric"]
+        return {
+            "schema_version": "practice-feedback-output.v1",
+            "verdict": "PARTIAL",
+            "feedback": (
+                "[FAKE TEST FIXTURE] The response attempts the requested concept but should "
+                "state the bounded rule and connect its intermediate result to the conclusion."
+            ),
+            "strengths": ["It provides a relevant learner-authored response."],
+            "gaps": ["The rule-to-conclusion link is not explicit."],
+            "next_step": "Write the governing rule, intermediate result, and conclusion in order.",
+            "criteria": [
+                {
+                    "criterion_id": item["criterion_id"],
+                    "met": False,
+                    "feedback": "State how the cited rule supports the conclusion.",
+                }
+                for item in rubric
+            ],
+        }
     if schema == "BlindSolveOutput":
         return {
             "schema_version": "blind-solve-output.v1",

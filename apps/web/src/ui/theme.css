@@ -94,6 +94,26 @@
   border-color: var(--line);
 }
 
+:root[data-theme='dark'] .practice-response,
+:root[data-theme='dark'] .practice-hint,
+:root[data-theme='dark'] .practice-feedback,
+:root[data-theme='dark'] .exercise-step {
+  background: #202b35;
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+:root[data-theme='dark'] .practice-response textarea {
+  background: #17212a;
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+:root[data-theme='dark'] .exercise-step .step-title,
+:root[data-theme='dark'] .exercise-step .step-text {
+  color: var(--ink);
+}
+
 :root[data-theme='dark'] .btn:hover,
 :root[data-theme='dark'] .icon-btn:hover,
 :root[data-theme='dark'] tbody tr:hover,

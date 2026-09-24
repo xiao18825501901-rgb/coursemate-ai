@@ -50,9 +50,15 @@ def _insert_node(connection: sqlite3.Connection, node_id: str, title: str, major
     )
 
 
-def seed_tree_fixture(db: Database, owner: str) -> dict:
+def seed_tree_fixture(
+    db: Database,
+    owner: str,
+    *,
+    evidence_ids: list[str] | None = None,
+) -> dict:
     """Seed the tree and return {root, learning, learned, workspace_id}."""
 
+    cited_evidence = list(evidence_ids or [])
     workspace = join_course(db, "cs3481", owner, 10)
     workspace_id = workspace["id"]
     with db.connect() as connection:
@@ -76,14 +82,14 @@ def seed_tree_fixture(db: Database, owner: str) -> dict:
                 "requirement": "REQUIRED",
                 "objective": "Explain the synthetic clustering concepts",
                 "acceptance": "State both concepts",
-                "evidence_ids": [],
+                "evidence_ids": cited_evidence,
             },
             {
                 "item_id": "clustering-metrics",
                 "requirement": "REQUIRED",
                 "objective": "Explain the synthetic clustering metrics",
                 "acceptance": "State one metric",
-                "evidence_ids": [],
+                "evidence_ids": cited_evidence,
             },
         ]
         learned_items = [
@@ -92,7 +98,7 @@ def seed_tree_fixture(db: Database, owner: str) -> dict:
                 "requirement": "REQUIRED",
                 "objective": "Explain the synthetic K-means algorithm",
                 "acceptance": "State the update rule",
-                "evidence_ids": [],
+                "evidence_ids": cited_evidence,
             }
         ]
         for node_id, items in (

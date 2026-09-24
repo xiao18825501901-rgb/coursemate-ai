@@ -147,6 +147,13 @@ class ExerciseCreate(Input):
     node: str|None=None
     request_id: str=Field(min_length=8,max_length=100)
 
+class PracticeHintCreate(Input):
+    request_id: str=Field(min_length=8,max_length=100)
+
+class PracticeAttemptCreate(Input):
+    answer: str=Field(min_length=1,max_length=6000)
+    request_id: str=Field(min_length=8,max_length=100)
+
 class ExplanationCreate(Input):
     request_id: str=Field(min_length=8,max_length=100)
 
