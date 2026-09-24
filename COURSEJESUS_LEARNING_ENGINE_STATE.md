@@ -6,25 +6,30 @@ what was fixed, what is measured, and what is deliberately not done yet. Read it
 (the frozen batch) and `MINIMAL_OWNER_ACTION_CARD.md` (what only the owner can decide).
 
 Working tree: `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY`, branch
-`fix/codex-dsh-audit-20260919`, base `93d502c`, nothing deployed, no production system contacted.
+`fix/codex-dsh-audit-20260919`, current local HEAD `1df8dbc`, nothing deployed, no production
+system contacted during this continuation.
 
 ## Codex continuation update — 2026-09-25
 
-Current application HEAD is `1d3d7a4f2a45e27001203ef4101606ea3ff1edec`. Question Engine
-Stages 1–7 now exist locally. Stage 7 reuses the existing Assessment question, rubric and
-reference-solution tables and adds only migration 036's immutable provenance table. A revision can
-be READY only when its current owner/workspace evidence, author and blind input identities, and
-both exact durable Jev receipt inputs still match. READY is recorded as `AI_REVIEWED`, not as a
-deterministic, human or institutional correctness proof; model-reviewed MCQ/numeric answers do not
-enter the deterministic grader. Revoked evidence removes a revision from future pools without
-mutating frozen sessions or its audit record.
+Current application HEAD is `1df8dbc29aa4f71c3954cb367d41ef320aecccbd`. Question Engine
+Stages 1–7, the real single-question practice journey and the five complementary assessment slots
+now exist locally. P1 landed at `0fc77fc190ed3f5ac89111ba918469341204139b`: 做一题 now preserves
+attempt, hint, feedback, reveal and different-family re-practice state through the existing Pair and
+exercise APIs. P2 landed at the current HEAD: five server-owned intents run through the same
+evidence-bound author, blind-solve, hard-gate, exact-Jev-receipt and READY pipeline before the
+existing Assessment service freezes those exact revisions in `10/15/20/25/30` order.
 
-Exact-commit local evidence: 51 Question/Jev/provider/persistence tests passed; 33
-migration/rollback/Assessment tests passed with one dependency warning; Ruff and diff checks
-passed. Strict mypy still exposes four inherited errors in `course_access.py`/`workspaces.py` and
-three inherited `assessments.py` `no-any-return` errors; no Stage 7 file diagnostic was added. No
-live model, production, DNS, hosting or identity-system call was made. The next slice is the real
-`做一题` integration and browser-visible single-node journey.
+Migration 038 adds immutable preparation-slot bindings and widens the existing model-call ledger
+roles so each of the five author and five blind-solver calls is separately reserved and recorded.
+Resume reuses only exact current READY slots; missing or invalidated semantic receipts fail closed.
+READY remains `AI_REVIEWED`, not deterministic, human or institutional correctness proof.
+
+Exact-commit local evidence for P2: 54 related backend assessment, Question Engine,
+migration/rollback tests passed with one dependency warning; the isolated real-Chrome audit suite
+passed 15/15, including an empty-pool five-question journey. Focused Ruff, byte compilation and
+diff checks passed. Strict mypy retains the already-recorded imported legacy debt; no claim is made
+that the old UI adapter is globally typed. No live model, production, DNS, hosting or identity-system
+call was made. The next implementation slice is P3 question-quality specialization.
 
 ## 1. What this round changed
 
@@ -56,31 +61,29 @@ live model, production, DNS, hosting or identity-system call was made. The next 
 
 ## 3. What the learning path really is today (measured)
 
-* **做一题**: `POST /courses/{cid}/exercises` → `exercise_create` (`app/cm_update/app.py:2298`) →
-  `generate_exercise_run` (`:2214`) → DeepSeek provider (`provider.py:362`); `exercise.v2` is
-  validated and the private answer is hidden from the client projection. There is **no validation
-  model call and no blind solve** on this path.
-* **Five-question assessment**: `MARK_SCHEME = (10, 15, 20, 25, 30)` (`assessments.py:34`), questions
-  frozen when the session starts (`:268-393`), grade snapshot written at `:1813-1841`. The pool
-  admits `validation_status='VALIDATED'` with any `verification_method` except `MODEL_ONLY`
-  (`:167-168`), so an `AI_REVIEWED` candidate is usable by design — and `AI_REVIEWED` is explicitly
-  not human review.
-* **Learning objectives** are free text (`teaching_items.objective`); nothing binds a node to an
-  observable objective yet, and the only machine check is an acceptance-sentence heuristic in a
-  reviewer that defaults to off.
-* **Jev**: all 19 definitions are `shadow` in the committed configuration. In these paths the
-  decisions that are consumed at all are criterion review, pedagogy, coverage, prerequisites,
-  template match, corpus quality, extraction, intent and context; key facts and final scores are
-  **not** decided by Jev (the answer text is persisted verbatim and the score path is Jev-free,
-  with a Jev signal only able to force `needs_review`).
+* **做一题**: the existing create endpoint now resolves the active bound node and routes generated
+  practice through the Question Engine. Public projections keep the answer private until reveal;
+  attempt, hint, specific feedback and re-practice are persisted and browser-recoverable. Supplied
+  user problems keep their existing independent explanation-window path.
+* **Five-question assessment**: `MARK_SCHEME = (10, 15, 20, 25, 30)` remains authoritative. An
+  empty eligible pool creates five complementary pre-generation slots, persists each exact READY
+  revision, and immutably binds it to the preparation job. Session start freezes those exact five;
+  grading and learning progress remain in their pre-existing systems.
+* **Learning objectives** remain authored text, but Question Engine generation now resolves the
+  exact current REQUIRED `teaching_items` row and binds its item id, node spec hash and immutable
+  evidence versions into the blueprint and provenance.
+* **Jev**: the current catalog has 21 definitions, including the two Choice-only question gates
+  (`question.ambiguity.v1` and `question.answer_agreement.v1`). The committed default remains
+  `shadow`; a READY question requires exact durable `on`-mode receipts for both gates. Jev still
+  cannot decide permissions, publication, grades, `LEARNED` or a combined quality score.
 
 ## 4. What is next, in the order the plan fixes
 
 | Step | Work | Why it is this order |
 |---|---|---|
-| P1 | One real node end-to-end: objective → evidence pack → single-question blueprint → author call → **blind solve** → deterministic + semantic validation → READY → 做一题 shows it | Stages 1–7 through scoped READY persistence have landed. The remaining P1 work is to route the existing 做一题 entry through the READY revision while preserving attempt, hint/reveal, independent detail, history recovery and re-practice behavior. |
-| P2 | Five complementary slots through the existing `AssessmentService`; assistance state; feedback and a substantive variant ("再练同类"); independent explanation windows | Reuses the frozen-session machinery that already exists |
-| P3 | MCQ distractors with recorded misconceptions; rule-violation questions from real course rules; per-module Jev quality gates | Needs the validated-item pipeline from P1 |
+| P1 | ~~One real node end-to-end through 做一题, including attempt, hint/reveal, feedback, history recovery and different-family re-practice~~ | **Completed at `0fc77fc`**; included in the current 15/15 browser suite |
+| P2 | ~~Five complementary slots through the existing `AssessmentService`~~ | **Completed at `1df8dbc`**; exact prepared revisions freeze in slot order and all ten provider stages use the existing reservation ledger |
+| P3 | MCQ distractors with recorded misconceptions; rule-violation questions from real course rules; per-module Jev quality gates | **Current next slice**; needs representative live-model/human quality evidence later, but local contract work can continue |
 | P4 | Migration/rollback rehearsal, same-SHA regression, real image/text journeys, immutable release | Needs P1–P3 stable |
 
 The campus pause (§1) is independent of all of it and is already in force.
