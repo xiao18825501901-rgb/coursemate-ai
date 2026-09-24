@@ -630,12 +630,81 @@ wired, and the reason the earlier decision was wrong is part of the record.
 > reason, and a request for ≤450 (which covers the still-unrun 93-decision component ablation). No
 > further live run starts without that decision.
 
-> **The gate on `adb54b7`, the revision that includes the client fix.** Five browser suites this time,
-> because product UI code changed.
+> **Added 2026-09-24 (round 93) — the intermittent pane condition is explained, and it was two
+> defects.**
+>
+> Round 92 recorded it and explicitly did not explain it. It is explained now, and the way it was
+> found is part of the record: **the round-92 instrumentation was unsound.** It attached the console
+> listener inside one journey, the condition then appeared in a *different* journey, and the
+> conclusion "neither suspect path fired" was therefore a statement about the wrong test. Attaching
+> the listener in `test.beforeEach` and logging the guarded branches themselves gave, in one run:
+>
+> ```
+> watch:start 10   watch:rendered 5   watch:catch 0   watch:skip 1
+> watch:skip teach e8a1b85b conv=1ed8887b cid=50b7d9b1 unmounted=false
+> ```
+>
+> | | |
+> |---|---|
+> | What it means | the run `e8a1b85b` was created in conversation `50b7d9b1`; by the time its stream ended the pane's lane held `1ed8887b`, so the render guard abandoned it |
+> | Why the conversations differ | `learnNode` (the node click) binds the lane in two steps — `/nodes/{id}/open`, then `restorePair` — and `ask()` read `state.conv[lane]` while the first was still in flight. The run went to the conversation the pane was *showing*; the binding then switched the pane to the pair's own conversation |
+> | What the learner saw | their question, no answer, and a send button disabled for good, because the guard that renders is also the only path that clears `busy`. The answer existed the whole time, in the conversation the run reports |
+>
+> **Three fixes, all in `apps/web/src/ui/pages.jsx`:**
+>
+> 1. `ask()` waits for an in-flight binding before choosing a conversation. Published as
+>    `pendingBinding` for the whole node click — including the `/nodes/{id}/open` await, which the
+>    first attempt at this fix missed and which the next run proved was the window that mattered —
+>    and as `pendingRestore` for a history selection.
+> 2. An orphaned watcher (`recoverOrphanedAnswer`) says where the answer went and releases the
+>    composer, instead of ending in silence. Guarded on controller identity so a superseded watcher
+>    cannot clear a newer one's busy state.
+> 3. The round-92 abort fix stays: aborting a superseded stream clears `busy` when nothing re-watched
+>    the lane.
+>
+> **Evidence the condition is gone rather than hidden:** the alias journey is steady at **~14 s**
+> across three consecutive full-suite runs (it was 30 s+ on every run where the reload fallback
+> fired, ~13 s when it did not), and three consecutive full-suite runs are green — 11 passed /
+> 5 skipped each, exit 0 — with no fallback triggered.
+>
+> **One assertion moved rather than being weakened.** The unsupported-citation journey used to assert
+> the warning marker in the pane's DOM. It now reads the cards from the run's own conversation — the
+> same route the pane renders from — because the pane's conversation identity is exactly what this
+> round disturbed. The marker *rendering* is still asserted where it is deterministic: the
+> `citationVerdict` unit tests (`apps/web/src/ui/citationSupport.test.ts`) and the alias journey's
+> chip assertion. What the journey keeps hard is what module D is about: every card still flagged,
+> none dropped on the way to the client.
+>
+> Not claimed: the two-step binding is still two steps, and a *third* interleaving (a 15-second
+> `load()` timer restoring a pair while a run streams) has not been exercised deliberately — it is
+> narrowed, not proved impossible.
+
+> **The gate on `897cc15` (round 93), the revision with the pane fixes.** Product UI code changed, so
+> five browser suites again.
 >
 > | Gate | Result |
 > |---|---|
-> | Backend full regression | **1721 passed / 2 skipped / 0 failed** in 2070.48 s (34:30), exit 0 — `full_run_adb54b7.log`. The +1 over `35024fb` is this round's fixture-shape test. Same two environmental skips |
+> | Backend full regression | **1721 passed / 2 skipped / 0 failed** in 2111.51 s (35:11), exit 0 — `full_run_897cc15.log`; same two environmental skips |
+> | Web app | **107 tests passed** (23 files), `tsc -b` exit 0, production build + PAT scan exit 0 (`no token field, notice present`) |
+> | Browser `ui-refresh` | **23 passed**, exit 0 |
+> | Browser `coursemate` | **4 passed**, exit 0 |
+> | Browser `v3-learning` | **3 passed**, exit 0 |
+> | Browser `jev-structured` | **11 passed / 5 skipped / 0 failed**, exit 0 — and **green three times in a row** before the commit, the repetition being the point for a fix aimed at an intermittent condition |
+> | Browser `codex-audit` | **14 passed**, exit 0 |
+> | Agent service | **92 tests passed** (12 files), `tsc --noEmit` exit 0, build exit 0 |
+>
+> 60 browser journeys across the five suites, all green on this revision. Unchanged and not claimed:
+> no definition is promoted in the committed configuration, the component ablation is still NOT_RUN
+> (93 decisions, awaiting the budget decision in `MINIMAL_OWNER_ACTION_CARD.md` §1b), and §15
+> (production) has not begun.
+
+>
+> **The gate on `adb54b7` (round 92), the revision that first included a client fix.** Five browser
+> suites, because product UI code changed.
+>
+> | Gate | Result |
+> |---|---|
+> | Backend full regression | **1721 passed / 2 skipped / 0 failed** in 2070.48 s (34:30), exit 0 — `full_run_adb54b7.log`. The +1 over `35024fb` is the fixture-shape test added that round. Same two environmental skips |
 > | Web app | **107 tests passed** (23 files), `tsc -b` exit 0, production build + PAT scan exit 0 (`no token field, notice present`) |
 > | Browser `ui-refresh` | **23 passed**, exit 0 |
 > | Browser `coursemate` | **4 passed**, exit 0 |
