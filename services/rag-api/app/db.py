@@ -31,9 +31,10 @@ V3_MIGRATIONS = (
     "033_canvas_local_bridge.sql",
     "034_canvas_oauth_states.sql",
     "035_canvas_task_credential.sql",
+    "036_question_engine_provenance.sql",
 )
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 35
+LATEST_V3_SCHEMA_VERSION = 36
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (

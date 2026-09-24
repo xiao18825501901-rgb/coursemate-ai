@@ -45,6 +45,42 @@ class ProviderCallFailure(Exception):
         self.run = run
 
 
+def _structured_input_payload(
+    schema: type[BaseModel],
+    *,
+    context: dict[str, Any],
+    images: list[ProviderImage] | None = None,
+) -> str:
+    safe_images = images or []
+    return json.dumps(
+        {
+            "authorized_context": context,
+            "authorized_images": [
+                {
+                    "source_version_id": item.source_version_id,
+                    "media_type": item.media_type,
+                    "sha256": item.sha256,
+                    "byte_size": len(item.content),
+                }
+                for item in safe_images
+            ],
+            "required_output_schema": schema.model_json_schema(),
+        },
+        ensure_ascii=False,
+    )
+
+
+def structured_input_hash(
+    schema: type[BaseModel],
+    *,
+    context: dict[str, Any],
+    images: list[ProviderImage] | None = None,
+) -> str:
+    """Return the exact authorized-input identity recorded by ``generate``."""
+    payload = _structured_input_payload(schema, context=context, images=images)
+    return sha256(payload.encode()).hexdigest()
+
+
 class LearningProvider:
     """Bounded Responses adapter. No provider fallback, automatic retry or external search tools."""
 
@@ -98,21 +134,10 @@ class LearningProvider:
     ) -> tuple[Output, dict[str, Any]]:
         settings = self.settings
         safe_images = images or []
-        serialized = json.dumps(
-            {
-                "authorized_context": context,
-                "authorized_images": [
-                    {
-                        "source_version_id": item.source_version_id,
-                        "media_type": item.media_type,
-                        "sha256": item.sha256,
-                        "byte_size": len(item.content),
-                    }
-                    for item in safe_images
-                ],
-                "required_output_schema": schema.model_json_schema(),
-            },
-            ensure_ascii=False,
+        serialized = _structured_input_payload(
+            schema,
+            context=context,
+            images=safe_images,
         )
         started_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         started = perf_counter()

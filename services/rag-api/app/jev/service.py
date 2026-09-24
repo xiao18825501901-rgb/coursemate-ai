@@ -35,6 +35,7 @@ from typing import Any
 from app.jev.catalog import DecisionDefinition
 from app.jev.gateway import DecisionRequest, JevGateway
 from app.jev.models import CacheScope, owner_scope_hash
+from app.jev.models import input_hash as compute_input_hash
 
 # Retrieval re-rank candidate cap (the owner's bound: at most 12-16 authorized
 # fused candidates; more is never sent to Jev).
@@ -311,6 +312,36 @@ class SemanticDecisionService:
             fit=True,
         )
         return retained, prov
+
+    def bounded_choice_input_hash(
+        self,
+        definition_key: str,
+        *,
+        fields: dict[str, Any],
+        candidate_ids: Sequence[str],
+        candidate_labels: dict[str, str] | None = None,
+    ) -> str | None:
+        """Rebuild a choice input identity without making or recording a decision.
+
+        Persistence gates use this to prove that a durable receipt was created for the
+        exact current state.  An input that no longer fits the definition's bound has no
+        valid receipted identity and therefore cannot promote a business record.
+        """
+        try:
+            state, _ = self.bound_state(
+                definition_key,
+                fields,
+                must_keep=_MUST_KEEP.get(definition_key, ()),
+                candidate_count=len(candidate_ids),
+            )
+        except InputBudgetExceeded:
+            return None
+        labels = candidate_labels or {}
+        criteria = {str(candidate): labels.get(str(candidate), "") for candidate in candidate_ids}
+        return compute_input_hash(
+            definition_key,
+            {"state": state, "criteria": criteria, "instructions": None},
+        )
 
     # ---------------------------------------------------------------- primitives
 

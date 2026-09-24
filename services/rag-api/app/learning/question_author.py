@@ -75,6 +75,27 @@ class QuestionAuthorOutput(Contract):
         return self
 
 
+def _question_revision_identity(
+    *,
+    blueprint_hash: str,
+    evidence_pack_hash: str,
+    output: QuestionAuthorOutput,
+) -> str:
+    revision_payload = {
+        "blueprint_hash": blueprint_hash,
+        "evidence_pack_hash": evidence_pack_hash,
+        "author_output": output.model_dump(mode="json"),
+    }
+    return hashlib.sha256(
+        json.dumps(
+            revision_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+
+
 class PublicAuthoredQuestion(Contract):
     schema_version: Literal["exercise.v2"] = "exercise.v2"
     question_text: Text
@@ -142,6 +163,24 @@ class AuthoredQuestionCandidate(Contract):
     public_question: PublicAuthoredQuestion
     private_solution: PrivateCandidateSolution = Field(repr=False)
     provider_run: AuthorProviderRun
+
+    def revision_identity(self) -> str:
+        """Recompute the immutable revision from the split public/private candidate."""
+        if self.public_question.source_refs != self.private_solution.source_refs:
+            raise ValueError("public and private candidate source references do not match")
+        output = QuestionAuthorOutput(
+            question_text=self.public_question.question_text,
+            options=self.public_question.options,
+            candidate_answer=self.private_solution.candidate_answer,
+            correct_option_index=self.private_solution.correct_option_index,
+            solution_steps=self.private_solution.solution_steps,
+            source_refs=self.public_question.source_refs,
+        )
+        return _question_revision_identity(
+            blueprint_hash=self.blueprint_hash,
+            evidence_pack_hash=self.evidence_pack_hash,
+            output=output,
+        )
 
     def public_payload(self) -> dict[str, object]:
         """The only candidate representation allowed across the public exercise boundary."""
@@ -280,21 +319,15 @@ def author_question(
     _assert_output_scope(output, blueprint=blueprint, evidence=evidence)
     blueprint_hash = blueprint.identity()
     evidence_hash = evidence.identity()
-    revision_payload = {
-        "blueprint_hash": blueprint_hash,
-        "evidence_pack_hash": evidence_hash,
-        "author_output": output.model_dump(mode="json"),
-    }
-    question_revision = hashlib.sha256(
-        json.dumps(
-            revision_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        ).encode()
-    ).hexdigest()
     return AuthoredQuestionCandidate(
         blueprint_id=blueprint.blueprint_id,
         blueprint_hash=blueprint_hash,
         evidence_pack_hash=evidence_hash,
-        question_revision=question_revision,
+        question_revision=_question_revision_identity(
+            blueprint_hash=blueprint_hash,
+            evidence_pack_hash=evidence_hash,
+            output=output,
+        ),
         course_id=blueprint.course_id,
         node_id=blueprint.node_id,
         objective_id=blueprint.objective_id,

@@ -159,6 +159,7 @@ ADDITIVE_TABLES: tuple[str, ...] = (
     "jev_decision_receipts",
     "entity_relations",
     "feedback_reports",
+    "question_engine_provenance",
 )
 
 

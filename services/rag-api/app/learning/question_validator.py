@@ -9,7 +9,7 @@ can only keep a candidate under review, never upgrade it to VALIDATED.
 from __future__ import annotations
 
 import re
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
@@ -171,6 +171,35 @@ def _semantic_signal(dimension: SemanticDimension, result: DecisionResult) -> Se
     )
 
 
+def question_semantic_input_fields(
+    *,
+    candidate: AuthoredQuestionCandidate,
+    blueprint: QuestionBlueprint,
+    evidence: QuestionEvidencePack,
+    blind_receipt: BlindSolveReceipt,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return the exact state fields used by the two receipted semantic calls."""
+    allowed_rules = [
+        {"evidence_id": fragment.evidence_id, "content": fragment.content}
+        for fragment in evidence.fragments
+    ]
+    return (
+        {
+            "question_text": candidate.public_question.question_text,
+            "question_type": blueprint.question_type,
+            "expected_answer_form": blueprint.expected_answer_form,
+            "blueprint_conditions": blueprint.conditions,
+            "allowed_rules": allowed_rules,
+        },
+        {
+            "question_text": candidate.public_question.question_text,
+            "author_candidate_answer": candidate.private_solution.model_dump(mode="json"),
+            "blind_solution": blind_receipt.output,
+            "blueprint_conditions": blueprint.conditions,
+        },
+    )
+
+
 def collect_question_semantic_signals(
     service: SemanticDecisionService | None,
     *,
@@ -195,25 +224,20 @@ def collect_question_semantic_signals(
         )
     assert service is not None  # narrowed above; no-service returned fallback signals
 
-    allowed_rules = [
-        {"evidence_id": fragment.evidence_id, "content": fragment.content}
-        for fragment in evidence.fragments
-    ]
+    ambiguity_fields, agreement_fields = question_semantic_input_fields(
+        candidate=candidate,
+        blueprint=blueprint,
+        evidence=evidence,
+        blind_receipt=blind_receipt,
+    )
     ambiguity = callsites.review_question_ambiguity(
         service,
-        question_text=candidate.public_question.question_text,
-        question_type=blueprint.question_type,
-        expected_answer_form=blueprint.expected_answer_form,
-        blueprint_conditions=blueprint.conditions,
-        allowed_rules=allowed_rules,
+        **ambiguity_fields,
         scope=scope,
     )
     agreement = callsites.review_question_answer_agreement(
         service,
-        question_text=candidate.public_question.question_text,
-        author_candidate_answer=candidate.private_solution.model_dump(mode="json"),
-        blind_solution=blind_receipt.output,
-        blueprint_conditions=blueprint.conditions,
+        **agreement_fields,
         scope=scope,
     )
     return QuestionSemanticSignals(

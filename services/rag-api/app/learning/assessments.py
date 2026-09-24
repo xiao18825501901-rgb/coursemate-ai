@@ -119,14 +119,26 @@ class AssessmentService:
     @staticmethod
     def _is_deterministic(question: dict[str, Any]) -> bool:
         """A question grades deterministically only when its frozen answer key is a
-        finite standard: MCQ/NUMERIC always, and SHORT_TEXT only for an explicit
-        enumeration (``accepted`` list). Concept/definition short answers without a
-        provable enumeration fall through to the semantic rubric grader."""
+        finite trusted standard. ``AI_REVIEWED`` and ``MODEL_ONLY`` answers are model
+        opinions, not deterministic correctness proofs, even for MCQ/NUMERIC shapes.
+        Concept/definition short answers without a provable enumeration fall through
+        to the semantic rubric grader."""
+        if question.get("verification_method") in {"AI_REVIEWED", "MODEL_ONLY"}:
+            return False
         question_type = question["question_type"]
-        if question_type in {"MCQ_SINGLE", "NUMERIC"}:
-            return True
+        answer = question.get("answer_key") or question.get("answer") or {}
+        if question_type == "MCQ_SINGLE":
+            correct = answer.get("correct_option")
+            options = question.get("options") or []
+            return bool(options) and correct is not None and str(correct).strip() != ""
+        if question_type == "NUMERIC":
+            value = answer.get("value")
+            return (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(float(value))
+            )
         if question_type == "SHORT_TEXT":
-            answer = question.get("answer_key") or question.get("answer") or {}
             accepted = answer.get("accepted")
             return isinstance(accepted, list) and bool(accepted)
         return False
@@ -196,13 +208,82 @@ class AssessmentService:
         return [
             row
             for row in candidates
-            if self._rubric(
+            if self._question_engine_revision_is_current(connection, str(row["id"]))
+            and self._rubric(
                 connection,
                 row["id"],
                 node["id"],
                 int(node["spec_version"]),
             )
         ]
+
+    @staticmethod
+    def _question_engine_revision_is_current(
+        connection: sqlite3.Connection,
+        question_revision_id: str,
+    ) -> bool:
+        """Keep legacy questions unchanged; fail closed for a revoked Engine source.
+
+        The provenance row is immutable, so the original READY claim remains auditable.  Pool
+        eligibility is the current projection: every cited chunk must still resolve to the exact
+        document version frozen in the blueprint, and a solely-revoked material-evidence binding
+        removes the revision from future blueprints without mutating past sessions.
+        """
+        provenance = connection.execute(
+            "SELECT publication_status,node_id,evidence_ids_json,blueprint_json "
+            "FROM question_engine_provenance WHERE question_revision_id=?",
+            (question_revision_id,),
+        ).fetchone()
+        if provenance is None:
+            return True
+        if str(provenance["publication_status"]) != "READY":
+            return False
+        try:
+            evidence_ids = json.loads(str(provenance["evidence_ids_json"]))
+            blueprint = json.loads(str(provenance["blueprint_json"]))
+            source_scope = blueprint["source_scope"]
+        except (KeyError, TypeError, ValueError):
+            return False
+        if (
+            not isinstance(evidence_ids, list)
+            or not evidence_ids
+            or not isinstance(source_scope, list)
+            or len(evidence_ids) != len(source_scope)
+        ):
+            return False
+        for evidence_id, expected in zip(evidence_ids, source_scope, strict=True):
+            if not isinstance(evidence_id, str) or not isinstance(expected, dict):
+                return False
+            expected_version = expected.get("version")
+            if not isinstance(expected_version, int) or isinstance(expected_version, bool):
+                return False
+            row = connection.execute(
+                "SELECT version.id AS version_id,version.document_id,version.version,"
+                "version.sha256,chunk.locator_type,chunk.locator_value "
+                "FROM chunks AS chunk JOIN chunk_source_versions AS source "
+                "ON source.chunk_id=chunk.id JOIN document_versions AS version "
+                "ON version.id=source.document_version_id WHERE chunk.id=?",
+                (evidence_id,),
+            ).fetchone()
+            if row is None or (
+                str(row["document_id"]) != str(expected.get("document_id"))
+                or int(row["version"]) != expected_version
+                or str(row["sha256"]) != str(expected.get("content_hash"))
+                or f"{row['locator_type']}:{row['locator_value']}"
+                != str(expected.get("locator"))
+            ):
+                return False
+            statuses = {
+                str(status["status"])
+                for status in connection.execute(
+                    "SELECT status FROM material_evidence WHERE node_id=? AND chunk_id=? "
+                    "AND document_version_id=?",
+                    (provenance["node_id"], evidence_id, row["version_id"]),
+                ).fetchall()
+            }
+            if "REVOKED" in statuses and "ACTIVE" not in statuses:
+                return False
+        return True
 
     @staticmethod
     def _select_questions(candidates: list[sqlite3.Row]) -> list[sqlite3.Row]:
