@@ -6,7 +6,8 @@ from typing import Any
 
 import pytest
 
-from app.learning.provider import ProviderCallFailure
+from app.config import Settings
+from app.learning.provider import LearningProvider, ProviderCallFailure
 from app.learning.question_author import (
     QUESTION_AUTHOR_PROMPT_VERSION,
     AuthorGenerationError,
@@ -256,3 +257,23 @@ def test_non_deepseek_live_provider_is_rejected_before_any_paid_call() -> None:
     assert refusal.value.code == "AUTHOR_PROVIDER_BLOCKED"
     assert provider.calls == []
 
+
+def test_real_learning_provider_offline_contract_uses_labelled_fixture(tmp_path: Any) -> None:
+    settings = Settings(
+        database_path=tmp_path / "rag.sqlite3",
+        upload_dir=tmp_path / "uploads",
+        app_env="test",
+        rag_provider_mode="deterministic",
+        ui_web_dir=tmp_path / "no-web-build",
+    )
+
+    candidate = author_question(
+        LearningProvider(settings),
+        blueprint=blueprint(),
+        evidence=evidence_pack(),
+    )
+
+    assert candidate.provider_run.model == "FAKE_TEST_ONLY"
+    assert candidate.provider_run.status == "COMPLETED"
+    assert "FAKE TEST FIXTURE" in candidate.public_question.question_text
+    assert "FAKE TEST FIXTURE" in candidate.private_solution.candidate_answer

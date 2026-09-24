@@ -4,6 +4,34 @@ from typing import Any
 
 
 def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
+    if schema == "QuestionAuthorOutput":
+        blueprint = context["blueprint"]
+        evidence_ids = context["evidence_pack"]["evidence_ids"]
+        source_id = evidence_ids[0]
+        is_mcq = blueprint["question_type"] == "MCQ_SINGLE"
+        return {
+            "schema_version": "question-author-output.v1",
+            "question_text": (
+                "[FAKE TEST FIXTURE] Apply the bounded course rule to the supplied "
+                "synthetic example and report the result."
+            ),
+            "options": ["Synthetic option A", "Synthetic option B"] if is_mcq else [],
+            "candidate_answer": "[FAKE TEST FIXTURE] Synthetic candidate answer.",
+            "correct_option_index": 1 if is_mcq else None,
+            "solution_steps": [
+                {
+                    "ordinal": 1,
+                    "operation": "Apply the cited bounded rule",
+                    "result": "[FAKE TEST FIXTURE] Synthetic result",
+                    "explanation": (
+                        "[FAKE TEST FIXTURE] This is a labelled contract fixture, not a live "
+                        "model-quality result."
+                    ),
+                    "source_refs": [source_id],
+                }
+            ],
+            "source_refs": [source_id],
+        }
     if schema == "AssessmentGradeProposal":
         return {
             "schema_version": "v3.2",
@@ -290,10 +318,16 @@ def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
                     "difficulty": 3,
                     "prompt": "Explain why addition combines counts.",
                     "options": [],
-                    "answer": {"reference_answer": "Addition combines the sizes of disjoint groups."},
+                    "answer": {
+                        "reference_answer": "Addition combines the sizes of disjoint groups."
+                    },
                     "reference_answer": "Addition combines the sizes of disjoint groups.",
                     "reference_steps": [
-                        _step("Explain", "Disjoint groups combine", "Addition sums disjoint counts.")
+                        _step(
+                            "Explain",
+                            "Disjoint groups combine",
+                            "Addition sums disjoint counts.",
+                        )
                     ],
                     "criteria": [
                         {
