@@ -19,6 +19,7 @@ process and without a browser:
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -111,6 +112,31 @@ def test_the_threshold_page_has_two_sections_so_the_two_fragments_are_distinct_p
     # Both fragments answer the same *question* ("decision threshold") under
     # different tasks, which is what makes the pair comparable at all.
     assert page.count("decision threshold") >= 2
+
+
+def test_the_locator_page_exposes_the_question_number_the_journey_names(
+    fixture: dict[str, str],
+) -> None:
+    """An exact-locator journey needs a locator that resolves, not a plausible one.
+
+    `app/rag/structure.py` reads an explicit `Question N` line and a following `(b)`
+    line, and `parse_query_reference` turns the same wording in the learner's message
+    into a filter on chunk metadata. The journey asks for `Question 3(b)`, so the page
+    must state exactly that — a page whose numbering drifted would leave the journey
+    asserting on a fallback hybrid ranking that happens to contain the file.
+    """
+    seeder = _seeder()
+    page = fixture[seeder.LOCATOR_PAGE]
+    assert re.search(r"(?im)^\s*question\s+3\s*$", page), page
+    assert re.search(r"(?im)^\s*\(b\)\s+\S", page), page
+    assert re.search(r"(?im)^\s*question\s+4\s*$", page), page
+
+    from app.tutor.references import parse_query_reference
+
+    reference = parse_query_reference(f"{seeder.LOCATOR_PAGE} Question 3(b) 说明了什么")
+    assert reference.document == seeder.LOCATOR_PAGE
+    assert reference.question_number == "3"
+    assert reference.question_part == "b"
 
 
 def test_a_figure_no_page_states_is_decided_in_code_and_one_that_a_page_states_is_not(

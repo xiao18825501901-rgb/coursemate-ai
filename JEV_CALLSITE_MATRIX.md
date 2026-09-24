@@ -92,6 +92,27 @@ Cost of the live structured run, from its own receipt store rather than an estim
 all `outcome=ok`, all carrying a `model_version`** — see the round-90 block of the execution state for
 the per-definition breakdown and the observed 0.68–1.35 s latency.
 
+### Round 92 — the exact locator under a *live* rerank
+
+`retrieval.support.v1` is the promotion §14 lists first, and the property that promotion most risks is
+the one §16 names: an exact question number must not be replaced by a semantic ranking. Offline that
+was already asserted against a hostile rerank
+(`test_rerank_exact_target_keeps_slot_under_hostile_rerank`); the end-to-end half did not exist,
+because the fixture corpus had no chunk carrying question metadata at all (a probe over the local
+corpus found **0** such chunks), so a journey could only have asserted the parser's output.
+
+| | |
+|---|---|
+| Fixture added | `e2e_locator_questions.txt` — explicit `Question 3` / `(b)` structure, ingested through the product's own pipeline so the structured parser really produces `question_number=3`, `question_part=b` |
+| Journey (credential-free) | "a named question number is used as a hard filter and is not replaced by ranking": the named document occupies the **first** citation slot, and the card carries `jev_reference` with `questioned: true`, `question_number: 3`, `question_part: b`, `dropped: []` |
+| Journey (live) | "a promoted ranking decision still cannot displace an exact question number": the same two assertions with `retrieval.support.v1=on` and a live credential — **passed**, so a model that is really reordering the candidates kept the exact target in slot 0 |
+| Cost | **47 decisions** for the narrow run (9 `retrieval.support.v1` in mode `on`, 38 shadow decisions the same two teach runs make) |
+| Artefacts | `work/current-change/browser_jev_locator_promoted_round92.log`, `count_jev_receipts.py` over that run's database |
+
+This is what moves §16's third verification from PARTIAL to PASS, and it is also the first live
+evidence for the *first* promotion candidate rather than for one of the advisory-only definitions.
+
+
 
 ## Verified against the tree (revision `a0e7587`, measured)
 

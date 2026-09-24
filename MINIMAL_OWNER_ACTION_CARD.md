@@ -87,9 +87,18 @@ before the first call; only the numbers changed.
 | DeepSeek per call, 10 canary roles | min **$0.0000642**, mean **$0.0007991**, max **$0.0038862** (the `EXERCISE_V2` role) |
 | DeepSeek, 10 roles total | 8,728 input + 4,477 output tokens → **$0.0079908** |
 | DeepSeek, ablation baseline | **43** calls (not 162: memoising the baseline removed 119 repeat calls) at 267 in / 7 out tokens per call |
-| Jev live decisions made so far in this work | **268** calls: 99 (31 case sweep + 53 ablation + 15 probes) plus **169 in one structured browser run on 2026-09-24**, every one `outcome=ok` and every one carrying a `model_version` |
+| Jev live decisions made so far in this work | **315**: 99 (31 case sweep + 53 A–E ablation + 15 probes) + **169** (the structured browser run, round 90) + **47** (the promoted exact-locator run, round 92 — 9 `retrieval.support.v1` in mode `on` and 38 shadow decisions the same runs make). Every one `outcome=ok` and every one carrying a `model_version` |
 | Jev token usage | **not reported by the transport** — it returns a request id and a model, not usage |
-| Jev decision latency | **0.68–1.35 s** observed across those 169 decisions (an observation, not a percentile) |
+| Jev decision latency | **0.65–1.36 s** observed across those decisions (an observation, not a percentile) |
+
+**I went over the ceiling stated here, and it is recorded rather than absorbed.** That ceiling was
+≤300 decisions; the total is **315**. The overspend is the round-92 locator run: I estimated 10–20
+decisions for it and it cost 47, because a promoted definition does not replace the rest of the
+pipeline — every teach run also makes its shadow-mode decisions for the other definitions, and my
+estimate counted only the promoted one. The run closed a §16 item that had been marked PARTIAL
+("an exact question number is never replaced by a semantic ranking", now asserted end-to-end against a
+**live** rerank), which is why it was spent rather than deferred. No further live run has been started
+since, and none will be without the decision below.
 
 **One production setting this measurement changes.** The tool-intent guard (`module F`) defaults to a
 **1500 ms** budget, and the live decision measured 1.35 s — so on the first attempt at the
@@ -104,7 +113,7 @@ belongs in the release checklist next to the Jev env values.
 
 | Item | Planned calls | Worst case reserved | Hard ceiling | Measured basis |
 |---|---|---|---|---|
-| Jev live acceptance | ≤ 180 decisions | +50% for timeouts | **≤ 300 decisions** | 268 decisions already made, all answered; 1–3 decisions per operation |
+| Jev live acceptance | ≤ 180 decisions | +50% for timeouts | **≤ 300 decisions** | **315 already made**, all answered; 1–3 decisions per operation |
 | Jev live **component ablation** (§10's six modules) | **93 decisions** | — | included above | **counted, not estimated**: `work/current-change/count_component_ablation_calls.py`, 58 of them `M-CITATION` and 7 for each of the other five; 0 DeepSeek calls |
 | DeepSeek live acceptance (teaching, image problem, exercise, five-question grading, feedback) | ≤ 120 calls | 3× operations, every call at the measured **maximum** | **≤ 200 calls** | measured max $0.0038862/call |
 | Embeddings | ≤ 500 chunks | — | ≤ 500 chunks | unchanged; the deterministic provider is used unless a journey re-indexes |
@@ -114,10 +123,10 @@ belongs in the release checklist next to the Jev env values.
 is local-and-ready: the harness runs, the six arms read the right populations, and the command is
 `services\rag-api\.venv\Scripts\python.exe scripts\run_jev_semantic_ablation.py --arm all-components
 --transport live --allow-billable --out <fresh path>` — 93 Jev decisions, no DeepSeek. It is **not
-run** because 268 + 93 = 361 crosses the ≤300 ceiling I stated here, and I will not quietly spend past
-a number I gave you. Either raise the ceiling to **≤ 400** (which the measured $0.70 DeepSeek worst
-case does not touch, since this run spends no DeepSeek call) or tell me to skip it; until then it
-stays recorded as NOT_RUN rather than folded into a PASS.
+run**: 315 + 93 = **408**, which crosses the ≤300 ceiling stated above (and I have already gone over
+that ceiling once, see the note in the table). The request is therefore **≤ 450 decisions** in total,
+which covers the ablation with 42 to spare; the alternative is to skip the ablation and say so in the
+final report. Until that decision arrives it stays recorded as NOT_RUN.
 
 **USD.** DeepSeek: the worst case above is **$0.70** (180 calls × the measured maximum $0.0038862), so
 a cap of **USD 3** leaves more than 4× headroom and is what I am asking for. Jev: **I cannot state a

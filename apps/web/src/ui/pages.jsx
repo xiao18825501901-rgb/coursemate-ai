@@ -551,6 +551,17 @@ export class Learn extends React.Component {
                 this.setLane('status', lane, '连接中断。历史仍在服务器，可打开历史恢复，不会自动再次调用模型。');
                 this.setLane('busy', lane, false);
             }
+            else if (this.controllers[lane] === controller) {
+                // A superseded watcher must not leave the composer disabled. `restore`
+                // and `restorePair` abort the lane's stream before re-establishing
+                // state; when the abort has no successor (nothing re-watched this lane)
+                // the busy flag was never cleared, so the learner saw their question,
+                // no answer, and a send button that stayed disabled for good. The run
+                // itself completes on the server and its answer is in the history.
+                // Guarded on the controller identity so an abort that WAS superseded
+                // cannot clear the new watcher's busy state.
+                this.setLane('busy', lane, false);
+            }
         }
     }
     async attach(lane,e){

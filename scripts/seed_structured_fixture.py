@@ -60,6 +60,19 @@ ALPHA_ONE_SIDED_PAGE = "e2e_alpha_one_sided.txt"
 # chunks of the same document* — which is what module C's deterministic narrowing
 # reports as a version/task difference, in code and with no model call.
 THRESHOLD_SECTIONS_PAGE = "e2e_threshold_sections.md"
+# A page whose questions are explicitly numbered, so `parse_query_reference` can name
+# one and the structured search can filter on it (`app/rag/structure.py` reads
+# "Question N" and a following "(b)"). This is the exact locator the "a question
+# number is never replaced by a semantic ranking" journey leans on: without content
+# that really carries question metadata, that journey could only assert the parser's
+# output, never the retrieval that depends on it.
+LOCATOR_PAGE = "e2e_locator_questions.txt"
+# One document, two sections, one quantity with two values. Markdown is deliberate:
+# the loader gives each heading its own section and locator
+# (`app/rag/loaders.py::_load_markdown`), so the two fragments land in *different
+# chunks of the same document* — which is what module C's deterministic narrowing
+# reports as a version/task difference, in code and with no model call.
+THRESHOLD_SECTIONS_PAGE = "e2e_threshold_sections.md"
 
 # Every figure below is written with a unit the deterministic layer-2 check reads
 # (`app/jev/citation_audit.py::_NUMBER`: percent/%/percentage points/km/… — a bare
@@ -126,6 +139,17 @@ DOCUMENTS: tuple[tuple[str, str], ...] = (
             "# Decision threshold for the multivariate case\n\n"
             "In the multivariate case the decision threshold used by the worked example of\n"
             "this section is 8.2%.\n"
+        ),
+    ),
+    (
+        LOCATOR_PAGE,
+        (
+            "Practice questions for this course\n\n"
+            "Question 3\n\n"
+            "(a) State the two parameters that a density-based method needs.\n\n"
+            "(b) Explain what changes when the minimum number of points is increased.\n\n"
+            "Question 4\n\n"
+            "(a) Define the neighbourhood radius.\n"
         ),
     ),
 )
