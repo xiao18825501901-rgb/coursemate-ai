@@ -11,11 +11,11 @@ otherwise.
 
 | Fact | Value | Where it comes from |
 |---|---|---|
-| Latest V3 schema version | **37** | `LATEST_V3_SCHEMA_VERSION` in `app/db.py` |
+| Latest V3 schema version | **38** | `LATEST_V3_SCHEMA_VERSION` in `app/db.py` |
 | Latest V2 schema version | 10 | `LATEST_V2_SCHEMA_VERSION` |
-| Registered V3 migrations | **27** (`011_learning_workspaces.sql` … `037_practice_question_interactions.sql`) | the explicit `V3_MIGRATIONS` tuple |
-| Migration files on disk | 31 | `services/rag-api/migrations/*.sql` |
-| Migrations added by the CourseJesus work | `029` through `037`; the newest is `037_practice_question_interactions.sql` | migration files |
+| Registered V3 migrations | **28** (`011_learning_workspaces.sql` … `038_assessment_question_slots.sql`) | the explicit `V3_MIGRATIONS` tuple |
+| Migration files on disk | 32 | `services/rag-api/migrations/*.sql` |
+| Migrations added by the CourseJesus work | `029` through `038`; the newest is `038_assessment_question_slots.sql` | migration files |
 | Production release / schema | `4ef5064`, schema **25** | read-only production observation recorded in `COURSEJESUS_EXECUTION_STATE.md` |
 
 Two rules this repository already follows, and which the numbers above depend on:
@@ -38,9 +38,10 @@ Two rules this repository already follows, and which the numbers above depend on
 | `035_question_blueprints.sql` | Question Engine blueprint/slot structures | immutable target-selection inputs for generated questions |
 | `036_question_engine_provenance.sql` | `question_engine_provenance` | binds existing question/rubric/reference rows to exact evidence and validation receipts |
 | `037_practice_question_interactions.sql` | operation ledger, hint events, practice attempts | owner-scoped diagnostic practice evidence; never grades, coverage, or `LEARNED` |
+| `038_assessment_question_slots.sql` | `assessment_preparation_questions`; rebuilds the two existing model-call ledgers without losing rows | immutable mapping from five complementary preparation intents to exact READY revisions; adds the two Question Engine call roles and permits separately identified repeated roles within one operation; creates no parallel assessment or grade state |
 
-These migrations are additive: they do not drop or rewrite an existing column. Migrations 036 and
-037 deliberately reference existing Question/Workspace rows so ownership and lifecycle constraints
+These migrations are additive: they do not drop or rewrite an existing column. Migrations 036
+through 038 deliberately reference existing Question/Workspace rows so ownership and lifecycle constraints
 remain enforceable. That additive shape is what makes the rollback process in §4 possible, subject
 to verification against the exact release candidate.
 
@@ -55,7 +56,7 @@ to verification against the exact release candidate.
 3. **Apply during the bounded window.** `ops/production_switch_four_changes.sh` stops the two
    services, switches the release symlink, starts them, and verifies health; it refuses to proceed if
    either service was unhealthy to begin with.
-4. **Verify afterwards.** Schema version equals 37, the tables above exist, and the course,
+4. **Verify afterwards.** Schema version equals 38, the tables above exist, and the course,
    document, node, assessment and user identifiers from before the migration are unchanged.
 
 ## 4. Rolling back

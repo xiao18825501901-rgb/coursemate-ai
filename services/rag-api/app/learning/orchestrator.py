@@ -18,7 +18,6 @@ from app.learning.compiler import (
     TEMPLATE_VERSION,
     assessment_template,
     compile_unit,
-    preparation_template,
     problem_template,
     template,
     validate_plan,
@@ -34,7 +33,6 @@ from app.learning.models import (
     AssessmentExplanationInput,
     AssessmentExplanationOutput,
     AssessmentGradeProposal,
-    AssessmentPreparationOutput,
     AssessmentPreparationStartInput,
     AssessmentReferenceSolutionOutput,
     AssessmentStartInput,
@@ -57,6 +55,10 @@ from app.learning.models import (
 from app.learning.plans import TeachingPlanRepository
 from app.learning.problems import ProblemIndexScope, ProblemRepository
 from app.learning.provider import LearningProvider, ProviderCallFailure, ProviderImage
+from app.learning.question_runtime import (
+    QuestionEngineRuntime,
+    QuestionEngineRuntimeError,
+)
 from app.learning.workspaces import document_version_for, original_path, workspace_for
 from app.rag.retrieval import HybridRetriever
 from app.repositories.chunks import RetrievalAccess
@@ -92,6 +94,12 @@ class LearningOrchestrator:
         self.plans = TeachingPlanRepository(database)
         self.problems = ProblemRepository(database)
         self.assessments = AssessmentService(database, jev)
+        self.question_engine = QuestionEngineRuntime(
+            database=database,
+            provider=self.provider,
+            semantic_decisions=jev,
+            metered_generate=self.generate,
+        )
 
     def problem_index(
         self,
@@ -275,59 +283,68 @@ class LearningOrchestrator:
             job = self.assessments.ensure_preparation_job(db, workspace, node)
             self.assessments.mark_preparation_job(db, job["id"], "PREPARING")
 
-        def prepare(workspace: sqlite3.Row) -> tuple[str, str | None, Any, list[dict[str, Any]]]:
+        def prepare(workspace: sqlite3.Row) -> tuple[str, str | None, list[dict[str, Any]]]:
             with self.db.connect() as db:
                 self.assessments.mark_preparation_job(db, job["id"], "PREPARING")
-            evidence = self.evidence(workspace, str(node["title"]))
-            instructions, template_version = preparation_template()
+
+            def cancelled() -> bool:
+                with self.db.connect() as db:
+                    row = db.execute(
+                        "SELECT status FROM assessment_preparation_jobs WHERE id=?",
+                        (job["id"],),
+                    ).fetchone()
+                return row is None or str(row["status"]) == "CANCELLED"
+
             try:
-                output, _run = self.generate(
-                    workspace_id,
-                    request.operation_id,
-                    AssessmentPreparationOutput,
-                    instructions=instructions,
-                    context={
-                        "node_id": node["id"],
-                        "spec_version": node["spec_version"],
-                        "course_id": workspace["course_id"],
-                        "evidence": [
-                            {key: value for key, value in item.items() if key != "content"}
-                            for item in evidence
-                        ],
-                    },
-                    role="preparation",
-                    template_version=template_version,
-                    schema_version="v3.2",
+                questions = self.question_engine.generate_assessment_set(
+                    owner_user_id=str(workspace["owner_user_id"]),
+                    workspace_id=str(workspace["id"]),
+                    course_id=str(workspace["course_id"]),
+                    private_course_id=str(workspace["private_course_id"]),
+                    node_id=str(node["id"]),
+                    preparation_key=str(job["id"]),
+                    operation_id=request.operation_id,
+                    should_cancel=cancelled,
                 )
-            except Exception as error:
-                code = (
-                    error.code
-                    if isinstance(error, ApiError)
-                    else "CANDIDATE_INVALID"
-                    if isinstance(error, ValueError)
-                    else "MODEL_UNAVAILABLE"
-                )
-                return ("BLOCKED", code, None, [])
-            return ("OK", None, output, evidence)
+            except QuestionEngineRuntimeError as error:
+                return ("BLOCKED", error.code, [])
+            return ("OK", None, questions)
 
         def save(
             db: sqlite3.Connection,
             workspace: sqlite3.Row,
-            prepared: tuple[str, str | None, Any, list[dict[str, Any]]],
+            prepared: tuple[str, str | None, list[dict[str, Any]]],
         ) -> dict[str, Any]:
-            status, code, output, evidence = prepared
+            status, code, questions = prepared
             if status == "BLOCKED":
                 self.assessments.mark_preparation_job(
                     db,
                     job["id"],
                     "BLOCKED",
                     error_code=code,
-                    error_message="Pool preparation could not call the provider; no question was created.",
+                    error_message=(
+                        "Question Engine preparation did not reach five READY slots; "
+                        "completed slots remain reusable."
+                    ),
                 )
             else:
-                evidence_ids = [item["id"] for item in evidence]
-                self.assessments.store_candidates(db, workspace, node, output, evidence_ids)
-                self.assessments.mark_preparation_job(db, job["id"], "READY")
+                eligible = self.assessments.distinct_families(db, workspace, node)
+                generated_families = {str(item["family_id"]) for item in questions}
+                if len(questions) != 5 or not generated_families.issubset(eligible):
+                    self.assessments.mark_preparation_job(
+                        db,
+                        job["id"],
+                        "BLOCKED",
+                        channel="AI_REVIEWED",
+                        error_code="ASSESSMENT_POOL_NOT_READY",
+                        error_message=(
+                            "Five current Question Engine revisions were not available to freeze."
+                        ),
+                    )
+                else:
+                    self.assessments.mark_preparation_job(
+                        db, job["id"], "READY", channel="AI_REVIEWED"
+                    )
             row = db.execute(
                 "SELECT * FROM assessment_preparation_jobs WHERE id=?", (job["id"],)
             ).fetchone()

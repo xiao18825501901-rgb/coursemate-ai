@@ -157,7 +157,51 @@ class AssessmentService:
         workspace: sqlite3.Row,
         node: sqlite3.Row,
     ) -> list[sqlite3.Row]:
-        return self._select_questions(self._eligible_pool(connection, workspace, node))
+        eligible = self._eligible_pool(connection, workspace, node)
+        prepared = self._prepared_question_set(connection, workspace, node, eligible)
+        return prepared if prepared is not None else self._select_questions(eligible)
+
+    @staticmethod
+    def _prepared_question_set(
+        connection: sqlite3.Connection,
+        workspace: sqlite3.Row,
+        node: sqlite3.Row,
+        eligible: list[sqlite3.Row],
+    ) -> list[sqlite3.Row] | None:
+        job = connection.execute(
+            "SELECT id FROM assessment_preparation_jobs WHERE workspace_id=? AND node_id=? "
+            "AND spec_version=? AND status='READY' ORDER BY completed_at DESC,id DESC LIMIT 1",
+            (workspace["id"], node["id"], int(node["spec_version"])),
+        ).fetchone()
+        if job is None:
+            return None
+        bindings = connection.execute(
+            "SELECT ordinal,marks,question_revision_id FROM assessment_preparation_questions "
+            "WHERE preparation_job_id=? ORDER BY ordinal",
+            (job["id"],),
+        ).fetchall()
+        if not bindings:
+            # Jobs completed before migration 038 retain their original pool
+            # selection semantics; no historical row is relabelled as a slot.
+            return None
+        if (
+            [int(row["ordinal"]) for row in bindings] != [1, 2, 3, 4, 5]
+            or [int(row["marks"]) for row in bindings] != list(MARK_SCHEME)
+        ):
+            raise ApiError(
+                409,
+                "ASSESSMENT_PREPARED_SET_INVALID",
+                "The prepared five-slot question set is incomplete or inconsistent.",
+            )
+        by_id = {str(row["id"]): row for row in eligible}
+        selected = [by_id.get(str(binding["question_revision_id"])) for binding in bindings]
+        if any(question is None for question in selected):
+            raise ApiError(
+                409,
+                "ASSESSMENT_PREPARED_SET_STALE",
+                "One prepared question is no longer eligible for a new assessment.",
+            )
+        return [cast(sqlite3.Row, question) for question in selected]
 
     def _eligible_pool(
         self,

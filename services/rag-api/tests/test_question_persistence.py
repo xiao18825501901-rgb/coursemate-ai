@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
 from app.config import Settings
 from app.db import LATEST_V3_SCHEMA_VERSION, Database
 from app.jev.catalog import load_catalog
@@ -219,9 +220,15 @@ def test_fresh_schema_includes_additive_question_engine_provenance(tmp_path: Pat
             row["name"]
             for row in connection.execute("PRAGMA table_info(question_engine_provenance)")
         }
+        slot_columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(assessment_preparation_questions)"
+            )
+        }
 
-    assert LATEST_V3_SCHEMA_VERSION == 37
-    assert versions == list(range(1, 38))
+    assert LATEST_V3_SCHEMA_VERSION == 38
+    assert versions == list(range(1, 39))
     assert {
         "question_revision_id",
         "workspace_id",
@@ -234,6 +241,7 @@ def test_fresh_schema_includes_additive_question_engine_provenance(tmp_path: Pat
         "validation_report_json",
         "publication_status",
     } <= columns
+    assert {"preparation_job_id", "ordinal", "slot_key", "question_revision_id"} <= slot_columns
 
 
 def test_validated_candidate_is_ready_private_and_idempotent(tmp_path: Path) -> None:

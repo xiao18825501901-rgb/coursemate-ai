@@ -10,17 +10,18 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
-from app.errors import ApiError
-from app.learning.models import AssessmentAnswer, AssessmentSubmitInput
-from test_learning_journey import setup_workspace
-from test_learning_workspace import client_at
 from test_assessment_runtime import (
     current_revision,
     seed_assessment_pool,
     start_assessment,
     submit_assessment,
 )
+from test_learning_journey import setup_workspace
+from test_learning_workspace import client_at
+from test_question_runtime import decisions
+
+from app.errors import ApiError
+from app.learning.models import AssessmentAnswer, AssessmentSubmitInput
 
 
 def _node_projection(client: Any, workspace_id: str, node_id: str) -> dict[str, Any]:
@@ -28,11 +29,61 @@ def _node_projection(client: Any, workspace_id: str, node_id: str) -> dict[str, 
     return next(item for item in knowledge["registry"] if item["id"] == node_id)
 
 
+def enable_question_engine_assessment(
+    client: Any, workspace: dict[str, Any], node: dict[str, Any]
+) -> None:
+    """Give this isolated node real cited evidence and labelled semantic fixtures."""
+
+    base = f"/api/learning/workspaces/{workspace['id']}"
+    uploaded = client.post(
+        base + "/documents",
+        files={
+            "file": (
+                "addition-evidence.txt",
+                b"Addition combines the counts of disjoint groups into one total.",
+                "text/plain",
+            )
+        },
+    )
+    assert uploaded.status_code == 202, uploaded.text
+    with client.app.state.database.connect() as db:
+        chunk = db.execute(
+            "SELECT id FROM chunks WHERE course_id=? ORDER BY ordinal LIMIT 1",
+            (workspace["private_course_id"],),
+        ).fetchone()
+    assert chunk is not None
+    spec = client.post(
+        base + f"/nodes/{node['id']}/specs",
+        json={
+            "operation_id": "assessment-evidence-spec",
+            "revision": current_revision(client, workspace["id"]),
+            "change_reason": "Bind the assessment objective to immutable test evidence",
+            "items": [
+                {
+                    "item_id": "principle",
+                    "requirement": "REQUIRED",
+                    "objective": "Explain addition",
+                    "acceptance": "Explain combining counts with an example",
+                    "evidence_ids": [chunk["id"]],
+                }
+            ],
+        },
+    )
+    assert spec.status_code == 200, spec.text
+
+    semantic = decisions(client.app.state.database)
+    learning = client.app.state.learning
+    learning.jev = semantic
+    learning.assessments.jev = semantic
+    learning.question_engine.semantic_decisions = semantic
+
+
 def test_pool_preparation_idempotent_and_marks_verification_channels(
     tmp_path: Path,
 ) -> None:
     with client_at(tmp_path) as client:
         workspace, node = setup_workspace(client)
+        enable_question_engine_assessment(client, workspace, node)
         base = f"/api/learning/workspaces/{workspace['id']}"
 
         first = client.post(
@@ -53,17 +104,34 @@ def test_pool_preparation_idempotent_and_marks_verification_channels(
                 "SELECT family_id,question_type,verification_method,validation_status "
                 "FROM assessment_question_revisions ORDER BY rowid"
             ).fetchall()
+            reservations = db.execute(
+                "SELECT role,status FROM learning_model_call_reservations "
+                "ORDER BY created_at,id"
+            ).fetchall()
+            runs = db.execute(
+                "SELECT role,status FROM learning_model_run_evidence "
+                "ORDER BY started_at,id"
+            ).fetchall()
         # Idempotent per owner/node/spec: exactly one preparation job exists.
         assert len(jobs) == 1
         assert jobs[0]["status"] == "READY"
-        methods = {row["question_type"]: row["verification_method"] for row in questions}
-        assert methods["EXPLANATION"] == "AI_REVIEWED"
-        assert all(
-            row["verification_method"] == "DETERMINISTIC"
-            for row in questions
-            if row["question_type"] != "EXPLANATION"
-        )
+        assert {row["question_type"] for row in questions} == {
+            "MCQ_SINGLE",
+            "SHORT_TEXT",
+            "EXPLANATION",
+        }
+        assert all(row["verification_method"] == "AI_REVIEWED" for row in questions)
         assert all(row["validation_status"] == "VALIDATED" for row in questions)
+        reservation_roles = [row["role"] for row in reservations]
+        assert len(reservation_roles) == 10
+        assert reservation_roles.count("QUESTION_AUTHOR") == 5
+        assert reservation_roles.count("QUESTION_BLIND_SOLVER") == 5
+        assert all(row["status"] == "COMPLETED" for row in reservations)
+        run_roles = [row["role"] for row in runs]
+        assert len(run_roles) == 10
+        assert run_roles.count("QUESTION_AUTHOR") == 5
+        assert run_roles.count("QUESTION_BLIND_SOLVER") == 5
+        assert all(row["status"] == "COMPLETED" for row in runs)
 
         # The prepared pool is now sufficient: a real session starts.
         session = client.post(
@@ -314,6 +382,7 @@ def test_assessment_display_renders_raw_score_without_school_grade() -> None:
 def test_pool_preparation_cancel_and_resume(tmp_path: Path) -> None:
     with client_at(tmp_path) as client:
         workspace, node = setup_workspace(client)
+        enable_question_engine_assessment(client, workspace, node)
         base = f"/api/learning/workspaces/{workspace['id']}"
         orch = client.app.state.learning
         with client.app.state.database.connect() as db:

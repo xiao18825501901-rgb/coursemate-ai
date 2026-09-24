@@ -25,7 +25,12 @@ from pydantic import Field
 from app.db import Database
 from app.errors import ApiError
 from app.jev import callsites
+from app.jev.models import owner_scope_hash
 from app.jev.service import SemanticDecisionService
+from app.learning.assessment_question_slots import (
+    AssessmentQuestionSlot,
+    default_assessment_question_slots,
+)
 from app.learning.blind_solve import BlindSolveError, run_blind_solve
 from app.learning.models import Contract, Identifier, Text
 from app.learning.practice_feedback import (
@@ -63,6 +68,35 @@ from app.learning.workspaces import workspace_for
 
 GENERATION_VERSION: Final = "exercise.v2+question-engine.v1"
 GENERATION_POLICY_VERSION: Final = "question-generation-policy-v1"
+ASSESSMENT_GENERATION_POLICY_VERSION: Final = "assessment-question-slot-policy-v1"
+
+
+class _MeteredProviderProxy:
+    """Forward provider identity while routing calls through the V3 usage ledger."""
+
+    def __init__(
+        self,
+        provider: Any,
+        generate: Callable[..., tuple[Any, dict[str, Any]]],
+        *,
+        workspace_id: str,
+        operation_id: str,
+    ) -> None:
+        self._provider = provider
+        self._generate = generate
+        self._workspace_id = workspace_id
+        self._operation_id = operation_id
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._provider, name)
+
+    def generate(self, schema: Any, **kwargs: Any) -> tuple[Any, dict[str, Any]]:
+        return self._generate(
+            self._workspace_id,
+            self._operation_id,
+            schema,
+            **kwargs,
+        )
 
 
 class QuestionEngineRuntimeError(RuntimeError):
@@ -196,10 +230,27 @@ class QuestionEngineRuntime:
         database: Database,
         provider: Any,
         semantic_decisions: SemanticDecisionService | None,
+        metered_generate: Callable[..., tuple[Any, dict[str, Any]]] | None = None,
     ) -> None:
         self.database = database
         self.provider = provider
         self.semantic_decisions = semantic_decisions
+        self.metered_generate = metered_generate
+
+    def _provider_for_operation(
+        self,
+        *,
+        workspace_id: str,
+        operation_id: str | None,
+    ) -> Any:
+        if operation_id is None or self.metered_generate is None:
+            return self.provider
+        return _MeteredProviderProxy(
+            self.provider,
+            self.metered_generate,
+            workspace_id=workspace_id,
+            operation_id=operation_id,
+        )
 
     def _recent_exposures(self, workspace_id: str, node_id: str) -> list[str]:
         with self.database.connect() as connection:
@@ -702,6 +753,454 @@ class QuestionEngineRuntime:
         )
 
     @staticmethod
+    def _assessment_blueprint(
+        *,
+        course_id: str,
+        objective: TeachingObjective,
+        evidence: QuestionEvidencePack,
+        slot: AssessmentQuestionSlot,
+        preparation_key: str,
+    ) -> QuestionBlueprint:
+        operation_hash = _hash(
+            course_id,
+            objective.node_id,
+            objective.spec_version,
+            objective.item_id,
+            preparation_key,
+            slot.model_dump(mode="json"),
+        )
+        return QuestionBlueprint(
+            blueprint_id=f"assessment_{operation_hash[:32]}",
+            course_id=course_id,
+            node_id=objective.node_id,
+            spec_version=objective.spec_version,
+            spec_content_hash=objective.spec_content_hash,
+            objective_id=objective.item_id,
+            objective_text=objective.objective,
+            source_scope=evidence.source_scope(),
+            bloom_target=slot.bloom_target,
+            target_difficulty=slot.target_difficulty,
+            difficulty_features=slot.difficulty_features,
+            question_type=slot.question_type,
+            expected_answer_form=slot.expected_answer_form,
+            marks=slot.marks,
+            scoring_criteria=[objective.acceptance, slot.scoring_focus],
+            assumptions=[],
+            conditions=[],
+            unit_conventions=[],
+            misconception_targets=[slot.misconception_target],
+            question_family_id=f"assessment_family_{operation_hash[:24]}",
+            variant_seed=int(operation_hash[:8], 16),
+            visibility_policy="OWNER_ONLY",
+            answer_policy="HIDDEN_UNTIL_REVEAL",
+            prompt_versions={"question_author": QUESTION_AUTHOR_PROMPT_VERSION},
+            generation_policy_version=ASSESSMENT_GENERATION_POLICY_VERSION,
+        )
+
+    def _execute_pipeline(
+        self,
+        *,
+        owner_user_id: str,
+        workspace_id: str,
+        course_id: str,
+        node_id: str,
+        objective: TeachingObjective,
+        evidence: QuestionEvidencePack,
+        blueprint: QuestionBlueprint,
+        should_cancel: Callable[[], bool] | None,
+        model_operation_id: str | None = None,
+    ) -> tuple[Any, Any, Any, Any]:
+        """Run author, blind solve, validation and READY persistence for one blueprint."""
+
+        self._check_cancelled(should_cancel)
+        provider = self._provider_for_operation(
+            workspace_id=workspace_id,
+            operation_id=model_operation_id,
+        )
+        candidate = author_question(
+            provider,
+            blueprint=blueprint,
+            evidence=evidence,
+        )
+        self._check_cancelled(should_cancel)
+        blind = run_blind_solve(
+            provider,
+            candidate=candidate,
+            evidence=evidence,
+        )
+        self._check_cancelled(should_cancel)
+        scope = (
+            self.semantic_decisions.scope(
+                owner_user_id=owner_user_id,
+                authorization_scope="question_validation",
+                course_id=course_id,
+                workspace_id=workspace_id,
+                node_id=node_id,
+                spec_version=objective.spec_version,
+                question_hash=candidate.question_revision,
+            )
+            if self.semantic_decisions is not None
+            else SemanticDecisionService.scope(
+                owner_user_id=owner_user_id,
+                authorization_scope="question_validation",
+                course_id=course_id,
+                workspace_id=workspace_id,
+                node_id=node_id,
+                spec_version=objective.spec_version,
+                question_hash=candidate.question_revision,
+            )
+        )
+        signals = collect_question_semantic_signals(
+            self.semantic_decisions,
+            candidate=candidate,
+            blueprint=blueprint,
+            evidence=evidence,
+            blind_receipt=blind,
+            scope=scope,
+        )
+        self._check_cancelled(should_cancel)
+        report = validate_question_candidate(
+            candidate=candidate,
+            blueprint=blueprint,
+            evidence=evidence,
+            blind_receipt=blind,
+            semantic_signals=signals,
+        )
+        if self.semantic_decisions is None:
+            raise QuestionEngineRuntimeError(
+                "QUESTION_REVIEW_UNAVAILABLE",
+                "Question semantic review is unavailable; no exercise was published.",
+            )
+        self._check_cancelled(should_cancel)
+        persisted = persist_question_candidate(
+            database=self.database,
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            blueprint=blueprint,
+            evidence=evidence,
+            candidate=candidate,
+            blind_receipt=blind,
+            validation_report=report,
+            semantic_decisions=self.semantic_decisions,
+        )
+        if persisted.status != "READY" or persisted.verification_method != "AI_REVIEWED":
+            raise QuestionEngineRuntimeError(
+                "QUESTION_NOT_READY",
+                "The question did not pass all current validation gates and was not published.",
+            )
+        return persisted, candidate, blind, report
+
+    def _existing_assessment_slot(
+        self,
+        *,
+        owner_user_id: str,
+        workspace_id: str,
+        blueprint: QuestionBlueprint,
+        evidence: QuestionEvidencePack,
+    ) -> tuple[str, list[dict[str, Any]]] | None:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                "SELECT provenance.question_revision_id,provenance.question_revision_hash,"
+                "provenance.blueprint_hash,"
+                "provenance.evidence_pack_hash,provenance.publication_status,"
+                "provenance.author_run_json,provenance.blind_run_json,"
+                "provenance.validation_report_json,"
+                "question.validation_status,question.verification_method "
+                "FROM question_engine_provenance AS provenance "
+                "JOIN assessment_question_revisions AS question "
+                "ON question.id=provenance.question_revision_id "
+                "WHERE provenance.workspace_id=? AND provenance.blueprint_id=?",
+                (workspace_id, blueprint.blueprint_id),
+            ).fetchall()
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise QuestionEngineRuntimeError(
+                "ASSESSMENT_SLOT_CONFLICT",
+                "The assessment slot is bound to more than one question revision.",
+            )
+        row = rows[0]
+        current = (
+            str(row["blueprint_hash"]) == blueprint.identity()
+            and str(row["evidence_pack_hash"]) == evidence.identity()
+            and str(row["publication_status"]) == "READY"
+            and str(row["validation_status"]) == "VALIDATED"
+            and str(row["verification_method"]) == "AI_REVIEWED"
+        )
+        if not current:
+            raise QuestionEngineRuntimeError(
+                "ASSESSMENT_SLOT_STALE",
+                "The saved assessment slot no longer matches its current verified inputs.",
+            )
+        try:
+            author_run = json.loads(str(row["author_run_json"]))
+            blind_run = json.loads(str(row["blind_run_json"]))
+            report = json.loads(str(row["validation_report_json"]))
+            signals = report["semantic_signals"]
+            if not isinstance(signals, list) or len(signals) != 2:
+                raise ValueError("semantic signals are incomplete")
+            dimensions = [signal["dimension"] for signal in signals]
+            receipts = [signal["receipt_id"] for signal in signals]
+        except (KeyError, TypeError, ValueError) as error:
+            raise QuestionEngineRuntimeError(
+                "ASSESSMENT_SLOT_RECEIPT_INVALID",
+                "The saved assessment slot receipts could not be verified.",
+            ) from error
+        expected_definitions = {
+            "AMBIGUITY": "question.ambiguity.v1",
+            "AUTHOR_BLIND_AGREEMENT": "question.answer_agreement.v1",
+        }
+        if (
+            set(dimensions) != set(expected_definitions)
+            or not all(isinstance(receipt, str) and receipt for receipt in receipts)
+            or len(set(receipts)) != 2
+        ):
+            raise QuestionEngineRuntimeError(
+                "ASSESSMENT_SLOT_RECEIPT_INVALID",
+                "The saved assessment slot receipts could not be verified.",
+            )
+        with self.database.connect() as connection:
+            receipt_rows = connection.execute(
+                "SELECT * FROM jev_decision_receipts WHERE id IN (?,?)",
+                receipts,
+            ).fetchall()
+        receipts_by_id = {str(receipt["id"]): receipt for receipt in receipt_rows}
+        expected_scope = owner_scope_hash(owner_user_id, "question_validation")
+        for signal in signals:
+            receipt = receipts_by_id.get(str(signal["receipt_id"]))
+            try:
+                output = json.loads(str(receipt["output_json"])) if receipt is not None else None
+                current_receipt = (
+                    receipt is not None
+                    and signal["used_jev"] is True
+                    and signal["path"] == "jev"
+                    and str(receipt["definition_key"])
+                    == expected_definitions[signal["dimension"]]
+                    and str(receipt["primitive"]) == "Choice"
+                    and str(receipt["mode"]) == "on"
+                    and str(receipt["caller_role"]) == "question_validator"
+                    and str(receipt["owner_scope_hash"]) == expected_scope
+                    and str(receipt["course_id"]) == blueprint.course_id
+                    and str(receipt["workspace_id"]) == workspace_id
+                    and str(receipt["node_id"]) == blueprint.node_id
+                    and str(receipt["spec_version"]) == str(blueprint.spec_version)
+                    and str(receipt["question_hash"]) == str(row["question_revision_hash"])
+                    and str(receipt["outcome"]) == "ok"
+                    and isinstance(output, dict)
+                    and output.get("choice") == signal["verdict"]
+                )
+            except (KeyError, TypeError, ValueError):
+                current_receipt = False
+            if not current_receipt:
+                raise QuestionEngineRuntimeError(
+                    "ASSESSMENT_SLOT_RECEIPT_INVALID",
+                    "The saved assessment slot receipts could not be verified.",
+                )
+        usage = [
+            _public_run(author_run),
+            _public_run(blind_run),
+            {"role": "QUESTION_VALIDATOR", "semantic_receipts": receipts},
+        ]
+        return str(row["question_revision_id"]), usage
+
+    def _record_assessment_slot(
+        self,
+        *,
+        preparation_key: str,
+        workspace_id: str,
+        slot: AssessmentQuestionSlot,
+        objective: TeachingObjective,
+        blueprint: QuestionBlueprint,
+        question_revision_id: str,
+    ) -> None:
+        values = (
+            preparation_key,
+            workspace_id,
+            slot.ordinal,
+            slot.slot_key,
+            slot.marks,
+            objective.item_id,
+            blueprint.blueprint_id,
+            question_revision_id,
+            blueprint.question_family_id,
+        )
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "INSERT OR IGNORE INTO assessment_preparation_questions("
+                "preparation_job_id,workspace_id,ordinal,slot_key,marks,objective_id,"
+                "blueprint_id,question_revision_id,family_id) VALUES(?,?,?,?,?,?,?,?,?)",
+                values,
+            )
+            row = connection.execute(
+                "SELECT preparation_job_id,workspace_id,ordinal,slot_key,marks,objective_id,"
+                "blueprint_id,question_revision_id,family_id "
+                "FROM assessment_preparation_questions "
+                "WHERE preparation_job_id=? AND ordinal=?",
+                (preparation_key, slot.ordinal),
+            ).fetchone()
+        if row is None or tuple(row) != values:
+            raise QuestionEngineRuntimeError(
+                "ASSESSMENT_SLOT_CONFLICT",
+                "The assessment preparation slot is already bound to different input.",
+            )
+
+    def generate_assessment_set(
+        self,
+        *,
+        owner_user_id: str,
+        workspace_id: str,
+        course_id: str,
+        private_course_id: str,
+        node_id: str,
+        preparation_key: str,
+        operation_id: str | None = None,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Prepare five complementary READY revisions for the existing AssessmentService."""
+
+        if not 8 <= len(preparation_key.strip()) <= 100:
+            raise QuestionEngineRuntimeError(
+                "ASSESSMENT_PREPARATION_KEY_REQUIRED",
+                "A stable assessment preparation key between 8 and 100 characters is required.",
+            )
+        if self.metered_generate is not None and operation_id is None:
+            raise QuestionEngineRuntimeError(
+                "QUESTION_METERING_REQUIRED",
+                "Integrated assessment generation requires a claimed metered operation.",
+            )
+        try:
+            self._check_cancelled(should_cancel)
+            workspace = workspace_for(self.database, workspace_id, owner_user_id)
+            if (
+                str(workspace["course_id"]) != course_id
+                or str(workspace["private_course_id"]) != private_course_id
+            ):
+                raise QuestionEngineRuntimeError(
+                    "QUESTION_WORKSPACE_MISMATCH",
+                    "The assessment request does not match the learner workspace.",
+                )
+            with self.database.connect() as connection:
+                version = connection.execute(
+                    "SELECT MAX(version) FROM teaching_specs WHERE node_id=?", (node_id,)
+                ).fetchone()[0]
+                item_rows = connection.execute(
+                    "SELECT item_id FROM teaching_items WHERE node_id=? AND spec_version=? "
+                    "AND requirement='REQUIRED' ORDER BY ordinal,item_id",
+                    (node_id, version),
+                ).fetchall()
+                objectives = [
+                    resolve_objective(
+                        connection,
+                        node_id=node_id,
+                        spec_version=int(version),
+                        item_id=str(row["item_id"]),
+                    )
+                    for row in item_rows
+                ]
+            if not objectives:
+                raise QuestionEngineRuntimeError(
+                    "NO_REQUIRED_ITEM",
+                    "The node has no REQUIRED teaching objective for an assessment.",
+                )
+
+            prepared: list[dict[str, Any]] = []
+            for slot in default_assessment_question_slots():
+                self._check_cancelled(should_cancel)
+                objective = objectives[(slot.ordinal - 1) % len(objectives)]
+                evidence = build_evidence_pack(
+                    self.database,
+                    objective=objective,
+                    access=EvidencePackAccess(
+                        owner_user_id=owner_user_id,
+                        course_id=course_id,
+                        private_course_id=private_course_id,
+                    ),
+                )
+                blueprint = self._assessment_blueprint(
+                    course_id=course_id,
+                    objective=objective,
+                    evidence=evidence,
+                    slot=slot,
+                    preparation_key=preparation_key,
+                )
+                existing = self._existing_assessment_slot(
+                    owner_user_id=owner_user_id,
+                    workspace_id=workspace_id,
+                    blueprint=blueprint,
+                    evidence=evidence,
+                )
+                if existing is None:
+                    persisted, candidate, blind, report = self._execute_pipeline(
+                        owner_user_id=owner_user_id,
+                        workspace_id=workspace_id,
+                        course_id=course_id,
+                        node_id=node_id,
+                        objective=objective,
+                        evidence=evidence,
+                        blueprint=blueprint,
+                        should_cancel=should_cancel,
+                        model_operation_id=operation_id,
+                    )
+                    question_revision_id = persisted.question_revision_id
+                    usage = [
+                        _public_run(candidate.provider_run),
+                        _public_run(blind.provider_run),
+                        {
+                            "role": "QUESTION_VALIDATOR",
+                            "semantic_receipts": [
+                                signal.receipt_id
+                                for signal in report.semantic_signals
+                                if signal.receipt_id is not None
+                            ],
+                        },
+                    ]
+                else:
+                    question_revision_id, usage = existing
+                self._record_assessment_slot(
+                    preparation_key=preparation_key,
+                    workspace_id=workspace_id,
+                    slot=slot,
+                    objective=objective,
+                    blueprint=blueprint,
+                    question_revision_id=question_revision_id,
+                )
+                prepared.append(
+                    {
+                        "slot_key": slot.slot_key,
+                        "ordinal": slot.ordinal,
+                        "marks": slot.marks,
+                        "blueprint_id": blueprint.blueprint_id,
+                        "family_id": blueprint.question_family_id,
+                        "question_revision_id": question_revision_id,
+                        "verification_status": "AI_REVIEWED",
+                        "usage": usage,
+                    }
+                )
+            return prepared
+        except QuestionEngineRuntimeError:
+            raise
+        except (
+            ObjectiveResolutionError,
+            EvidencePackError,
+            AuthorGenerationError,
+            BlindSolveError,
+            QuestionPersistenceError,
+        ) as error:
+            raise QuestionEngineRuntimeError(
+                getattr(error, "code", "QUESTION_ENGINE_FAILED"),
+                "The assessment set could not be prepared from verified course evidence.",
+            ) from error
+        except (ApiError, TypeError) as error:
+            code = error.code if isinstance(error, ApiError) else "NO_TEACHING_SPEC"
+            message = (
+                error.message
+                if isinstance(error, ApiError)
+                else "No Teaching Spec was found."
+            )
+            raise QuestionEngineRuntimeError(code, message) from error
+
+    @staticmethod
     def _steps(candidate: Any) -> list[ExerciseAnswerStep]:
         steps: list[ExerciseAnswerStep] = []
         for step in candidate.private_solution.solution_steps:
@@ -791,71 +1290,15 @@ class QuestionEngineRuntime:
                 prototype=prototype,
                 operation_id=operation_id,
             )
-            candidate = author_question(
-                self.provider,
-                blueprint=blueprint,
-                evidence=evidence,
-            )
-            self._check_cancelled(should_cancel)
-            blind = run_blind_solve(
-                self.provider,
-                candidate=candidate,
-                evidence=evidence,
-            )
-            self._check_cancelled(should_cancel)
-            scope = (
-                self.semantic_decisions.scope(
-                    owner_user_id=owner_user_id,
-                    authorization_scope="question_validation",
-                    course_id=course_id,
-                    workspace_id=workspace_id,
-                    node_id=node_id,
-                    spec_version=objective.spec_version,
-                    question_hash=candidate.question_revision,
-                )
-                if self.semantic_decisions is not None
-                else SemanticDecisionService.scope(
-                    owner_user_id=owner_user_id,
-                    authorization_scope="question_validation",
-                    course_id=course_id,
-                    workspace_id=workspace_id,
-                    node_id=node_id,
-                    spec_version=objective.spec_version,
-                    question_hash=candidate.question_revision,
-                )
-            )
-            signals = collect_question_semantic_signals(
-                self.semantic_decisions,
-                candidate=candidate,
-                blueprint=blueprint,
-                evidence=evidence,
-                blind_receipt=blind,
-                scope=scope,
-            )
-            self._check_cancelled(should_cancel)
-            report = validate_question_candidate(
-                candidate=candidate,
-                blueprint=blueprint,
-                evidence=evidence,
-                blind_receipt=blind,
-                semantic_signals=signals,
-            )
-            if self.semantic_decisions is None:
-                raise QuestionEngineRuntimeError(
-                    "QUESTION_REVIEW_UNAVAILABLE",
-                    "Question semantic review is unavailable; no exercise was published.",
-                )
-            self._check_cancelled(should_cancel)
-            persisted = persist_question_candidate(
-                database=self.database,
+            persisted, candidate, blind, report = self._execute_pipeline(
                 owner_user_id=owner_user_id,
                 workspace_id=workspace_id,
-                blueprint=blueprint,
+                course_id=course_id,
+                node_id=node_id,
+                objective=objective,
                 evidence=evidence,
-                candidate=candidate,
-                blind_receipt=blind,
-                validation_report=report,
-                semantic_decisions=self.semantic_decisions,
+                blueprint=blueprint,
+                should_cancel=should_cancel,
             )
         except QuestionEngineRuntimeError:
             raise
@@ -873,11 +1316,6 @@ class QuestionEngineRuntime:
         except ApiError as error:
             raise QuestionEngineRuntimeError(error.code, error.message) from error
 
-        if persisted.status != "READY" or persisted.verification_method != "AI_REVIEWED":
-            raise QuestionEngineRuntimeError(
-                "QUESTION_NOT_READY",
-                "The exercise did not pass all current validation gates and was not published.",
-            )
         usage = [
             _public_run(candidate.provider_run),
             _public_run(blind.provider_run),

@@ -69,7 +69,6 @@ def prepare(target: Path) -> None:
     ingestion.create_course(CourseCreate(id="ge2324", name="GE2324 Synthetic Campus Course"), is_admin=True)
     with db.connect() as connection:
         connection.execute("UPDATE courses SET display_type='campus',requires_student_verification=1 WHERE id IN ('cs3481','ge2324')")
-    seed_assessment_fixture(db, VERIFIED)
     # Seed official content while the synthetic course is draft; the normal
     # published-content trigger must remain enabled throughout this fixture.
     with db.connect() as connection:
@@ -92,6 +91,15 @@ def prepare(target: Path) -> None:
         ]
     if not evidence_ids:
         raise RuntimeError("Synthetic browser source produced no immutable evidence chunks")
+    # The audit browser fixture deliberately starts with an empty assessment
+    # pool.  This makes the shipped UI exercise the real five-slot Question
+    # Engine path instead of passing against five database-seeded questions.
+    seed_assessment_fixture(
+        db,
+        VERIFIED,
+        evidence_ids=evidence_ids,
+        seed_questions=False,
+    )
     seed_tree_fixture(db, VERIFIED, evidence_ids=evidence_ids)
     with db.connect() as connection:
         connection.execute("UPDATE courses SET publication_status='published' WHERE id='cs3481'")

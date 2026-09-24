@@ -7,14 +7,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/rag-api"))
 
-from app.config import Settings  # noqa: E402 - repository-local service bootstrap
-from app.db import Database  # noqa: E402 - repository-local service bootstrap
-from app.learning.workspaces import join_course  # noqa: E402 - repository-local service bootstrap
+from app.config import Settings
+from app.db import Database
+from app.learning.workspaces import (
+    join_course,
+)
 
 OWNER = "v3-e2e-owner"
 
 
-def seed_assessment_fixture(db: Database, owner: str = OWNER) -> str:
+def seed_assessment_fixture(
+    db: Database,
+    owner: str = OWNER,
+    *,
+    evidence_ids: list[str] | None = None,
+    seed_questions: bool = True,
+) -> str:
     fixture_key = hashlib.sha256(owner.encode()).hexdigest()[:12]
     assessment_node = f"e2e-assessment-node-{fixture_key}"
     join_course(db, "cs3481", owner, 10)
@@ -23,7 +31,7 @@ def seed_assessment_fixture(db: Database, owner: str = OWNER) -> str:
         "requirement": "REQUIRED",
         "objective": "Explain the synthetic assessment concept",
         "acceptance": "Answer one bounded synthetic check",
-        "evidence_ids": [],
+        "evidence_ids": list(evidence_ids or []),
     }
     content = json.dumps([item], ensure_ascii=False, sort_keys=True)
     with db.connect() as connection:
@@ -46,7 +54,9 @@ def seed_assessment_fixture(db: Database, owner: str = OWNER) -> str:
             ("EXTERNAL_INSPIRED", owner, "HUMAN_REVIEWED"),
             ("OFFICIAL", None, "OFFICIAL"),
         ]
-        for ordinal, (source, question_owner, verification) in enumerate(sources, start=1):
+        for ordinal, (source, question_owner, verification) in enumerate(
+            sources if seed_questions else (), start=1
+        ):
             question_id = f"e2e-question-{fixture_key}-{ordinal}"
             prompt = f"Synthetic assessment question {ordinal}: type correct."
             answer = {"accepted": ["correct"], "case_sensitive": False}

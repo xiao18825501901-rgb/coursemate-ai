@@ -141,6 +141,40 @@ test("Question Engine practice journey persists feedback and keeps answers priva
   await page.screenshot({path:info.outputPath("practice-reveal-repractice.png"),fullPage:true});
 });
 
+test("empty assessment pool generates and freezes five complementary Question Engine slots",async({page},info)=>{
+  await page.goto("/app#/course/cs3481/learn");
+  await expect(page.locator("button.knowledge-strip")).toBeVisible();
+  await page.locator("button.knowledge-strip").click();
+  const node=page.locator(".tree-node-new").filter({hasText:"Assessment Addition"});
+  await expect(node).toBeVisible();
+  await node.hover();
+  await node.locator(".node-popover").getByRole("button",{name:/测评结果/}).click();
+
+  const workspace=page.locator('.assessment-overlay[aria-label="五题测评工作区"]');
+  await expect(workspace).toBeVisible();
+  const frozen=page.waitForResponse(async response=>{
+    if(response.request().method()!=="POST"||!response.url().endsWith("/assessment/session")||!response.ok()) return false;
+    const body=await response.json();
+    return typeof body.id==="string"&&Array.isArray(body.questions);
+  },{timeout:90_000});
+  await workspace.getByRole("button",{name:/开始测评/}).click();
+  const session=await (await frozen).json();
+
+  expect(session.questions).toHaveLength(5);
+  expect(session.questions.map((question:any)=>question.marks)).toEqual([10,15,20,25,30]);
+  expect(session.questions.map((question:any)=>question.question_type)).toEqual([
+    "MCQ_SINGLE","SHORT_TEXT","EXPLANATION","EXPLANATION","EXPLANATION",
+  ]);
+  for(const question of session.questions) {
+    expect(question).not.toHaveProperty("answer_key");
+    expect(question).not.toHaveProperty("reference_solution");
+  }
+  await expect(workspace.locator(".assessment-question")).toHaveCount(5);
+  await expect(workspace.locator(".assessment-question").nth(0)).toContainText("MCQ_SINGLE · 10 分");
+  await expect(workspace.locator(".assessment-question").nth(4)).toContainText("EXPLANATION · 30 分");
+  await page.screenshot({path:info.outputPath("five-question-slots.png"),fullPage:true});
+});
+
 test("supplied problem exposes steps and opens explanation",async({page,request},info)=>{
   await learn(page,request);
   const pairId=await newPair(page,"problem");

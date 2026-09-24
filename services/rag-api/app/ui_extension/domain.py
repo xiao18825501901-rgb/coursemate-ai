@@ -59,10 +59,7 @@ from app.learning.models import (
 from app.learning.orchestrator import LearningOrchestrator
 from app.learning.previews import IMAGE_MEDIA_TYPES
 from app.learning.problems import ProblemRepository
-from app.learning.question_runtime import (
-    QuestionEngineRuntime,
-    QuestionEngineRuntimeError,
-)
+from app.learning.question_runtime import QuestionEngineRuntimeError
 from app.learning.retrieval_orchestrator import (
     ScopedCandidates,
     budget_text,
@@ -220,15 +217,7 @@ class V3DomainAdapter:
         # Non-authoritative semantic-decision layer. None (the default) disables
         # Jev entirely; the deterministic path is byte-identical to before.
         self.jev = jev
-        self.question_engine = (
-            QuestionEngineRuntime(
-                database=database,
-                provider=learning.provider,
-                semantic_decisions=jev,
-            )
-            if learning is not None
-            else None
-        )
+        self.question_engine = learning.question_engine if learning is not None else None
         # Course-scope entity resolution over already-authorized fused candidates.
         # Query expansion is deterministic (never reaches Jev); relation resolution
         # goes through the shared gateway and is returned, never applied.

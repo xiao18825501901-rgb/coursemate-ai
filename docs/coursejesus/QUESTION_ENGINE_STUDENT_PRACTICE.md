@@ -119,7 +119,8 @@ release runbook; never drop the tables ad hoc from the live database.
 ## Remaining acceptance work
 
 - Live DeepSeek quality and billing evidence for hint and feedback.
-- The five-complementary-slot assessment generation flow and its unified five-answer journey.
+- Live DeepSeek and human-quality review for the five complementary assessment slots; the local
+  empty-pool generation and existing unified five-answer browser surface are now implemented and
+  verified separately in `QUESTION_ENGINE_FIVE_SLOT_ASSESSMENT.md`.
 - Final candidate regression/build after the next slice.
 - Authorised production backup, migration, deployment, one real sign-in, and real student journey.
-
