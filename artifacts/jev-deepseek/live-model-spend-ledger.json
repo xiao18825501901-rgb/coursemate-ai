@@ -1,0 +1,192 @@
+{
+  "artifact_version": "live-model-spend-ledger-v1",
+  "generated_at": "2026-09-24T12:34:24Z",
+  "generated_by": "work/current-change/live_spend_ledger.py",
+  "scope": "every evidence file under work/current-change that records live provider traffic for the DeepSeek/Jev work; offline, fake-transport and placeholder-baseline runs are excluded, and unrecorded live runs are listed separately rather than estimated",
+  "price_basis": {
+    "input_price_per_million": 0.3,
+    "output_price_per_million": 1.2,
+    "currency": "USD",
+    "source": "deepseek-live-evidence-r81.json (OWNER_SUPPLIED_AT_RUN_TIME)"
+  },
+  "sources": [
+    {
+      "file": "deepseek-live-evidence-r81.json",
+      "kind": "deepseek_canary",
+      "transport": "live",
+      "status_field": "FAILED_PROVIDER_CALL",
+      "calls": 2,
+      "input_tokens": 55,
+      "output_tokens": 100,
+      "cost_recorded": 0.0001365,
+      "models": [
+        "None",
+        "deepseek-flash"
+      ],
+      "roles": [
+        "KNOWLEDGE_QA",
+        "PLAN"
+      ],
+      "cost_estimated_at_owner_prices": null,
+      "cost_basis": "RECORDED_in_evidence"
+    },
+    {
+      "file": "deepseek-live-evidence-r81b.json",
+      "kind": "deepseek_canary",
+      "transport": "live",
+      "status_field": "FAILED_PROVIDER_CALL",
+      "calls": 2,
+      "input_tokens": 55,
+      "output_tokens": 40,
+      "cost_recorded": 6.45e-05,
+      "models": [
+        "None",
+        "deepseek-flash"
+      ],
+      "roles": [
+        "KNOWLEDGE_QA",
+        "PLAN"
+      ],
+      "cost_estimated_at_owner_prices": null,
+      "cost_basis": "RECORDED_in_evidence"
+    },
+    {
+      "file": "deepseek-live-evidence-r81c.json",
+      "kind": "deepseek_canary",
+      "transport": "live",
+      "status_field": "FAILED_PROVIDER_CALL",
+      "calls": 2,
+      "input_tokens": 55,
+      "output_tokens": 120,
+      "cost_recorded": 0.0001605,
+      "models": [
+        "None",
+        "deepseek-flash"
+      ],
+      "roles": [
+        "KNOWLEDGE_QA",
+        "PLAN"
+      ],
+      "cost_estimated_at_owner_prices": null,
+      "cost_basis": "RECORDED_in_evidence"
+    },
+    {
+      "file": "deepseek-live-evidence-r81d.json",
+      "kind": "deepseek_canary",
+      "transport": "live",
+      "status_field": "FAILED_PROVIDER_CALL",
+      "calls": 5,
+      "input_tokens": 691,
+      "output_tokens": 626,
+      "cost_recorded": 0.0009585,
+      "models": [
+        "None",
+        "deepseek-flash"
+      ],
+      "roles": [
+        "CLASSIFICATION",
+        "EXERCISE_V2",
+        "KNOWLEDGE_QA",
+        "PLAN",
+        "WORK"
+      ],
+      "cost_estimated_at_owner_prices": null,
+      "cost_basis": "RECORDED_in_evidence"
+    },
+    {
+      "file": "deepseek-live-evidence-r81e.json",
+      "kind": "deepseek_canary",
+      "transport": "live",
+      "status_field": "LIVE_CALLS_COMPLETED_MANUAL_REVIEW_REQUIRED",
+      "calls": 10,
+      "input_tokens": 8728,
+      "output_tokens": 4477,
+      "cost_recorded": 0.0079908,
+      "models": [
+        "deepseek-flash"
+      ],
+      "roles": [
+        "ASSESSMENT_REFERENCE",
+        "CLASSIFICATION",
+        "COVERAGE_REVIEW",
+        "EXERCISE_V2",
+        "EXPLANATION",
+        "IMAGE_UNDERSTANDING",
+        "KNOWLEDGE_QA",
+        "PLAN",
+        "PROBLEM",
+        "WORK"
+      ],
+      "cost_estimated_at_owner_prices": null,
+      "cost_basis": "RECORDED_in_evidence"
+    },
+    {
+      "file": "jev-ablation-live-baseline.json",
+      "kind": "jev_ablation_live",
+      "transport": "live",
+      "baseline_provider": "deepseek",
+      "baseline_model": "deepseek-flash",
+      "baseline_calls_field": 162,
+      "calls": 162,
+      "input_tokens": 42601,
+      "output_tokens": 1196,
+      "cost_recorded": null,
+      "answered_once_per_sample": null,
+      "verdict": "INTERPRETABLE",
+      "cost_estimated_at_owner_prices": 0.0142155,
+      "cost_basis": "ESTIMATED_from_recorded_tokens_at_owner_prices"
+    },
+    {
+      "file": "jev-ablation-live-baseline2.json",
+      "kind": "jev_ablation_live",
+      "transport": "live",
+      "baseline_provider": "deepseek",
+      "baseline_model": "deepseek-flash",
+      "baseline_calls_field": 43,
+      "calls": 43,
+      "input_tokens": 11468,
+      "output_tokens": 322,
+      "cost_recorded": null,
+      "answered_once_per_sample": true,
+      "verdict": "INTERPRETABLE",
+      "cost_estimated_at_owner_prices": 0.0038268,
+      "cost_basis": "ESTIMATED_from_recorded_tokens_at_owner_prices"
+    },
+    {
+      "file": "jev-ablation-live-baseline3.json",
+      "kind": "jev_ablation_live",
+      "transport": "live",
+      "baseline_provider": "deepseek",
+      "baseline_model": "deepseek-flash",
+      "baseline_calls_field": 43,
+      "calls": 43,
+      "input_tokens": 11468,
+      "output_tokens": 317,
+      "cost_recorded": null,
+      "answered_once_per_sample": true,
+      "verdict": "INTERPRETABLE",
+      "cost_estimated_at_owner_prices": 0.0038208,
+      "cost_basis": "ESTIMATED_from_recorded_tokens_at_owner_prices"
+    }
+  ],
+  "unrecorded_live_runs": [
+    {
+      "file": "jev-ablation-live-abcde.json",
+      "transport": "live",
+      "call_records": 0,
+      "note": "run declared live transport but records no per-call token fields; no spend figure can be derived from it"
+    }
+  ],
+  "totals": {
+    "provider_calls": 269,
+    "input_tokens": 75121,
+    "output_tokens": 7198,
+    "cost_recorded": 0.0093108,
+    "cost_estimated_at_owner_prices": 0.0218631,
+    "cost_total": 0.0311739
+  },
+  "excluded_older_qwen_runs": [
+    "work\\current-change\\head-worktree\\artifacts\\four-changes\\production-live-ui-qwen-canary-result.json",
+    "work\\current-change\\release-b05fd294\\artifacts\\four-changes\\production-live-ui-qwen-canary-result.json"
+  ]
+}

@@ -23,9 +23,14 @@ Honesty contract (enforced in code, not prose — same semantics as the JeV harn
   any family whose non-Jev baseline is a placeholder (abstention or a default
   constant) rather than the shipped deterministic path.
 * The only truly interpretable verdict is ``INTERPRETABLE`` for a live run on a
-  ``LABELLED_DATASET`` with real baselines injected — and no such run has happened in
-  this environment (no Jev service, no DeepSeek key), so the report states
-  ``NOT_RUN`` and no quality claim is made anywhere.
+  ``LABELLED_DATASET`` with real baselines injected. **That run has since happened** (rounds 91–92:
+  248 live DeepSeek baseline calls over three runs, 53 live Jev decisions on the calibration split),
+  and it is **unfavourable** — citation support improves while ``criterion_error`` and
+  ``key_fact_retention`` regress, over 1–8 cases per metric. What this function still refuses is an
+  improvement claim from a fake transport, an unlabelled dataset, or a placeholder baseline; the
+  live-component arms (``--arm all-components``) remain ``NOT_RUN`` pending the budget decision in
+  ``MINIMAL_OWNER_ACTION_CARD.md`` §1b. Reports: ``JEV_CALIBRATION_AND_ABLATION_REPORT.md`` §9,
+  ``DEEPSEEK_LIVE_ACCEPTANCE.md`` §4.
 * ``confidence`` is distribution concentration (see
   ``app.evaluation.jev_calibration``): it is never mapped to ``p_correct`` here.
 

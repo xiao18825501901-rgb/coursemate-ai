@@ -5,6 +5,17 @@
 > live gate is blocked on owner-provided credentials (`MINIMAL_OWNER_ACTION_CARD.md`).
 > The local evidence is complete and was produced on one frozen revision; the release
 > has not started, so no production claim is made anywhere in this document.
+>
+> **Partly stale, 2026-09-24 (round 96).** This report was written on revision `169bd57` and its
+> measurement tables have not been re-taken since. Named exactly, so nothing here is read as current:
+> the revision, the `1293 passed` backend number, the 46 browser journeys, the 73 web tests, RAG
+> **schema 30** and the **310**-sample dataset in §2 are all superseded (current: backend **1722
+> passed / 2 skipped**, 60 browser journey slots across six suites, **107** web tests, RAG **schema 35**,
+> datasets **345 + 54** — `DSH_JEV_DEEPSEEK_EXECUTION_STATE.md`). In §6 the rows for
+> `JEV_LIVE_VALIDATION`, `DEEPSEEK_LIVE_VALIDATION`, calibration/ablation and the five module component
+> metrics are no longer true and are corrected there; the *production* rows below are still `NOT_RUN`
+> and still owner-gated. The production report that will carry current numbers is the one written after
+> the deployment.
 
 ---
 
@@ -95,18 +106,22 @@ the citation/evidence/conflict machinery deterministic where it can be and seman
 where a real signal exists; the high-impact reference-solution gate in place; and the
 browser journeys green against the real services in real Chrome.
 
-## 6. What is NOT verified (every one of these is `NOT_RUN`)
+## 6. What is NOT verified
 
-| Item | Why |
-|---|---|
-| `JEV_LIVE_VALIDATION` | no TypeSafe credential in this environment |
-| `DEEPSEEK_LIVE_VALIDATION` | no DeepSeek key in this environment |
-| `CALIBRATION` / `ABLATION` results | require the live runs above; the offline harness is tagged `NON_INTERPRETABLE_PLUMBING_ONLY` and refuses a quality verdict |
-| Five module component metrics | the frozen 310-sample dataset contains **no** labelled samples for `extraction.field_grounded.v1`, `entity.relation.v1`, `evidence.consistency.v1`, `teaching.capability.v1`, `tool.intent.v1`; their arms report `INSUFFICIENT_SAMPLES` and emit no number. Adding samples would change the frozen dataset hash and split manifest, which this project preserves deliberately |
-| Any promotion out of `shadow` | depends on the calibration gate; nothing was promoted and no threshold was invented |
-| `PRODUCTION_DEPLOYMENT` | not started — requires the release window and the owner's go-ahead |
-| `PRODUCTION_ACCEPTANCE` | not started — requires one real sign-in and the release |
-| Post-release monitoring / backup | not started |
+**Corrected 2026-09-24 (round 96).** The heading read *"every one of these is `NOT_RUN`"*, and rows
+113–116 below were written before any live call had been made. Four have since moved; the production
+rows have not. Status per row, with the evidence:
+
+| Item | State now | Why / evidence |
+|---|---|---|
+| `JEV_LIVE_VALIDATION` | **RUN · `PARTIAL`** | the live TypeSafe gateway returned typed answers for Choice and Noul; `Score` is refused **by design** because the service returns a continuous 0–4 value rather than the catalogue's level keys (`docs/coursejesus/MODEL_SECRET_IMPORT_AND_LIVE_RESULTS.md` §6). 315 live Jev decisions have been made in total, every one `outcome=ok` |
+| `DEEPSEEK_LIVE_VALIDATION` | **`LIVE_CALLS_COMPLETED_MANUAL_REVIEW_REQUIRED`** | ten production roles, all `completed` on `deepseek-flash`, USD 0.0079908 against a recorded USD 0.0620016 ceiling. Human quality review **outstanding**; streaming and tool replay **not run live** (`DEEPSEEK_LIVE_ACCEPTANCE.md` §2) |
+| `CALIBRATION` / `ABLATION` results | **RUN, and unfavourable** | the live A–E ablation with a live DeepSeek baseline returned `INTERPRETABLE`: citation support 0.667 → 0.833 and unsupported-claim rate 0.667 → 0.500 improve, `criterion_error` 0.000 → 0.333 and `key_fact_retention` 1.000 → 0.000 regress, over 1–8 cases per metric. The offline harness is still tagged `NON_INTERPRETABLE_PLUMBING_ONLY` and still refuses a quality verdict on its own |
+| Five module component metrics | **measurable now; the live component run is `NOT_RUN`** | round 95 extended the datasets (345 + 54 samples) so the four uncovered definitions gained labelled samples; `--arm all-components` reports all six arms `MEASURED` offline. The **live** component ablation is 93 Jev decisions / 0 DeepSeek calls and is pending the budget decision (`MINIMAL_OWNER_ACTION_CARD.md` §1b). The earlier claim that these definitions have *no* labelled samples is superseded |
+| Any promotion out of `shadow` | **unchanged: none promoted, no threshold invented** | the mechanism (`JEV_DEFINITION_MODES`) exists; the measurements do not support promoting any definition yet |
+| `PRODUCTION_DEPLOYMENT` | **`NOT_RUN`** | not started — requires the release window and the owner's go-ahead |
+| `PRODUCTION_ACCEPTANCE` | **`NOT_RUN`** | not started — requires one real sign-in and the release. `health=200`, a fake transport, a shadow receipt and a button that appears remain non-evidence |
+| Post-release monitoring / backup | **`NOT_RUN`** | not started |
 
 ## 7. Release plan (ordered; every step has a rollback)
 

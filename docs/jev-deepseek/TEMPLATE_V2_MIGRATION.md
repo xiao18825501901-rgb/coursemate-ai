@@ -94,5 +94,7 @@ Result: `tests/test_codex_template_integrity.py` **22 passed** (was 17 failed / 
 
 * Visual/render validation of the V2 documents: **NOT_RUN** (the manifest states
   `visual_render_validation_performed_this_turn=false`).
-* Live-model quality comparison of V1 vs V2 templates: **NOT_RUN** (no DeepSeek credentials or
-  budget; would also require the A/B harness).
+* Live-model quality comparison of V1 vs V2 templates: **NOT_RUN**. The original reason given here —
+  "no DeepSeek credentials or budget" — no longer applies (the credential is in the local protected
+  store and ten live roles have been exercised); what is still missing is the A/B comparison itself,
+  which nobody has run. The status is unchanged, the reason is corrected.

@@ -140,8 +140,30 @@ non-inferiority against that baseline, never against an abstaining stub.
 | Immutable release + backend/frontend deployment | **NOT_RUN** | same authorization (plus Netlify scope) |
 | Real signed-in browser journeys (multi-user, private isolation, learning, five-question flow) | **NOT_RUN** | a real login; the earlier round recorded Cloudflare/Clerk blocking and no captcha bypass is attempted |
 | Post-release backup + monitoring verification | **NOT_RUN** | follows the deployment authorization |
-| DeepSeek live canary (text, structured, vision, tool replay) | **NOT_RUN** | `DEEPSEEK_API_KEY` + bounded budget |
-| Jev live canary + calibration | **NOT_RUN** | TypeSafe access + bounded budget |
+| DeepSeek live canary (text, structured, vision, tool replay) | **PARTIAL — split, see the note below** | was a single `NOT_RUN` row; the calls have since been made for text, structured output and vision, tool replay has not |
+
+> **Corrected 2026-09-24 (round 96).** The row above read "**NOT_RUN** — `DEEPSEEK_API_KEY` + bounded
+> budget", and the row below read "**NOT_RUN** — TypeSafe access + bounded budget". Both were accurate
+> when written. Current state, evidence-backed, per item:
+>
+> * DeepSeek **text, structured output and vision**: `LIVE_CALLS_COMPLETED_MANUAL_REVIEW_REQUIRED` —
+>   ten production roles exercised against the real provider, all `completed` on `deepseek-flash`,
+>   USD 0.0079908 against a recorded ceiling of USD 0.0620016
+>   (`work/current-change/deepseek-live-evidence-r81e.json`). The vision item proves the request path
+>   with a synthetic 1×1 PNG, not the quality of understanding course images, and the structured item
+>   produced a full `exercise.v2` payload.
+> * DeepSeek **streaming**: `NOT_RUN` — the canary is non-streaming by construction.
+> * DeepSeek **tool replay**: `NOT_RUN` — no tool role exists in the canary plan.
+> * DeepSeek **human quality review**: outstanding (`manual_review_status: REQUIRED`).
+> * **Jev live validation**: run — `JEV_LIVE = PARTIAL`, Choice and Noul verified against the real
+>   gateway and `Score` refused by design because the service returns a continuous 0–4 value rather
+>   than the catalogue's five level keys (`docs/coursejesus/MODEL_SECRET_IMPORT_AND_LIVE_RESULTS.md` §6).
+> * **Jev calibration / A–E ablation**: the live A–E ablation has run with a live DeepSeek baseline and
+>   returns `INTERPRETABLE`, **unfavourable** on two metrics over 1–8 cases each; the component
+>   ablation (93 decisions, 0 DeepSeek calls) is **NOT_RUN** pending the budget decision in
+>   `MINIMAL_OWNER_ACTION_CARD.md` §1b. Nothing has been promoted out of `shadow`.
+> * Production deployment rows (138–142) are **unchanged**: still `NOT_RUN`, still owner-gated.
+
 
 `health=200`, a fake provider, a local screenshot or an SDK success are **not** treated as
 acceptance evidence anywhere in this report.

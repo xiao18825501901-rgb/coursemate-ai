@@ -80,13 +80,16 @@ before the first call; only the numbers changed.
 
 **What the live runs actually cost** (`work/current-change/deepseek-live-evidence-r81e.json`,
 `jev-ablation-live-baseline3.json`, `jev-live-cases.json`; computed by
-`work/current-change/compute-live-budget.py`):
+`work/current-change/compute-live-budget.py`, which now takes the totals from
+`work/current-change/live_spend_ledger.py` → `artifacts/jev-deepseek/live-model-spend-ledger.json`):
 
 | Measured fact | Value |
 |---|---|
 | DeepSeek per call, 10 canary roles | min **$0.0000642**, mean **$0.0007991**, max **$0.0038862** (the `EXERCISE_V2` role) |
-| DeepSeek, 10 roles total | 8,728 input + 4,477 output tokens → **$0.0079908** |
-| DeepSeek, ablation baseline | **43** calls (not 162: memoising the baseline removed 119 repeat calls) at 267 in / 7 out tokens per call |
+| DeepSeek, the 10-role canary run | 8,728 input + 4,477 output tokens → **$0.0079908** (recorded per call by the artifact) |
+| DeepSeek, the five canary runs together | 21 calls, 9,584 in + 5,363 out → **$0.0093108** recorded |
+| DeepSeek, the live ablation baselines | **248** calls: the memoised run costs **43** calls (memoising removed 119 repeat calls) but the earlier unmemoised run's **162** calls were made and billed too, plus a second 43-call run — 65,537 in + 1,835 out → **$0.0218631** at your prices (tokens are recorded; the cost is computed, and labelled as computed) |
+| **DeepSeek total for this work** | **269 calls, 75,121 input + 7,198 output tokens → $0.0311739** ($0.0093108 recorded + $0.0218631 computed). One further run declares live transport and records no per-call tokens, so it is listed as unrecorded rather than priced |
 | Jev live decisions made so far in this work | **315**: 99 (31 case sweep + 53 A–E ablation + 15 probes) + **169** (the structured browser run, round 90) + **47** (the promoted exact-locator run, round 92 — 9 `retrieval.support.v1` in mode `on` and 38 shadow decisions the same runs make). Every one `outcome=ok` and every one carrying a `model_version` |
 | Jev token usage | **not reported by the transport** — it returns a request id and a model, not usage |
 | Jev decision latency | **0.65–1.36 s** observed across those decisions (an observation, not a percentile) |
@@ -141,11 +144,13 @@ requested above: the live ablation (93) **plus** a fit over the new calibration 
 the same decision: **≤ 500 decisions** would cover the ablation and the first promotion's calibration
 end to end, with no DeepSeek call in either.
 
-**USD.** DeepSeek: the worst case above is **$0.70** (180 calls × the measured maximum $0.0038862), so
-a cap of **USD 3** leaves more than 4× headroom and is what I am asking for. Jev: **I cannot state a
-USD figure honestly** — the transport reports no token usage and no TypeSafe price list is available
-to this environment, so any number from me would be invented. The call count is ≤ 300; please apply
-your plan's rate and set that figure. **Combined cap requested: USD 3 + your Jev figure.**
+**USD.** DeepSeek: **spent to date $0.0311739** across 269 live calls (the table above says exactly how
+that splits between recorded cost and cost computed from recorded tokens); the worst case for the
+remaining work is **$0.70** (180 calls × the measured maximum $0.0038862), so a cap of **USD 3** leaves
+more than 4× headroom and is what I am asking for. Jev: **I cannot state a USD figure honestly** — the
+transport reports no token usage and no TypeSafe price list is available to this environment, so any
+number from me would be invented. The call count is ≤ 300; please apply your plan's rate and set that
+figure. **Combined cap requested: USD 3 + your Jev figure.**
 
 Two things that have not changed: unspent remainder is returned in the final report rather than
 reused, and I do not start a paid run without the ceilings in hand.

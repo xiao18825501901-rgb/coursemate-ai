@@ -66,7 +66,17 @@ per role and there is no fallback branch.
 |---|---|
 | `tests/test_deepseek_contract.py` + `tests/test_deepseek_provider_roles.py` (+ the pack/template suites) | 53 passed |
 | Qwen-egress host spy across roles in the official configuration | covered by the role tests (see provider matrix) |
-| Any live DeepSeek call, image understanding, structured output, tool replay, pricing | **NOT_RUN** — needs `DEEPSEEK_API_KEY` + approved budget (see `MINIMAL_OWNER_ACTION_CARD.md`) |
+| Any live DeepSeek call | **RUN** — ten production roles against `https://api.deepseek.com`, all `completed` on `deepseek-flash`, USD 0.0079908 against a USD 0.0620016 recorded ceiling |
+| Image understanding (live) | **RUN for the request path** — the role completed with a `detail`-attached image; the image is a synthetic 1×1 PNG, so this is not evidence about real course images |
+| Structured output (live) | **RUN** — a full `exercise.v2` payload was produced and recorded |
+| Tool replay (live) | **NOT_RUN** — no tool role exists in the canary plan |
+| Pricing (live) | **RUN** — owner-supplied prices applied, per-call cost recorded; total live spend across the canary and the ablation baselines is reconstructed in `artifacts/jev-deepseek/live-model-spend-ledger.json` (USD 0.0311739 over 269 calls) |
+
+> **Corrected 2026-09-24 (round 96).** This row was one line — *"Any live DeepSeek call, image
+> understanding, structured output, tool replay, pricing | **NOT_RUN** — needs `DEEPSEEK_API_KEY` +
+> approved budget"* — which had become wrong for four of its five items while staying right for one.
+> The user-facing status and the per-item verdicts are in `DEEPSEEK_LIVE_ACCEPTANCE.md` §2.
+
 
 ### A6. DeepSeek canary (preflight + optional live step)
 
@@ -86,9 +96,19 @@ migrated production role exactly once, mirroring the Qwen canary's bounded philo
 * The monetary ceiling is computed only from explicit prices via the existing
   `calculate_cost_ceiling`; without prices the preflight reports the input-token ceiling and
   refuses to invent a monetary figure.
-* **Live validation status: NOT_RUN** — there are no DeepSeek credentials or approved budget in
-  this environment, so no live call, image understanding, structured output or pricing result is
-  claimed here.
+* **Cost authorisation is two-mode, and neither mode spends silently.** `--cost-policy capped` is the
+  default and refuses to run without `--max-cost`; `--cost-policy owner_authorized_unlimited_for_this_workflow`
+  is the owner's explicit per-workflow grant, is never the default, and still records the conservative
+  ceiling alongside real per-call usage. The live runs used the latter, so their artifacts carry
+  `approved_max_cost: null` **and** a recorded ceiling and real cost.
+* **Live validation status (updated 2026-09-24, round 96): `LIVE_CALLS_COMPLETED_MANUAL_REVIEW_REQUIRED`.**
+  This bullet read *"`NOT_RUN` — there are no DeepSeek credentials or approved budget in this environment,
+  so no live call, image understanding, structured output or pricing result is claimed here."* The
+  credential was later imported into a local protected store and used: ten production roles completed
+  against the real provider on `deepseek-flash`, structured output and vision both ran, and pricing was
+  applied from owner-supplied prices. Still **not** run live: streaming (the canary pins `stream=False`)
+  and tool replay (no tool role in the plan), and the ten answers await a human verdict. Per-item
+  verdicts and the remaining blockers: `DEEPSEEK_LIVE_ACCEPTANCE.md` §2 and §5.
 
 ---
 

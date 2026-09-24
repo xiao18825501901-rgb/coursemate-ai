@@ -3,6 +3,13 @@
 Next-version CourseMate implementation and release report, written on top of the **existing
 production source line** (no rebuild, no reverted feature, no regenerated course tree).
 
+> **Dated snapshot, 2026-09-24 (round 96).** This report describes the revision its §1 table names
+> (`bdb1aa7` on top of `b05fd294`, RAG schema 28) and is kept as the record of that round. Three of its
+> `NOT_RUN` items have since moved: live DeepSeek validation (now ten roles completed against the real
+> provider, human review outstanding — `DEEPSEEK_LIVE_ACCEPTANCE.md`), live TypeSafe Jev (now run and
+> `PARTIAL` — Choice/Noul verified, `Score` refused by design), and the A/B/C/D→A–E ablation (now run
+> live, verdict `INTERPRETABLE` and unfavourable). The production release is still `NOT_RUN`.
+
 ## 0. Verdict first
 
 **Delivered locally:** every part of the 13 requirements that can be executed without a
