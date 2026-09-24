@@ -390,6 +390,22 @@ export class Learn extends React.Component {
     catch (e) {
         this.setState({ error: e.message });
     } }
+    diag() { /* diagnostics removed after the round-93 investigation */ }
+    recoverOrphanedAnswer(lane, cid, controller) {
+        // The pane moved to another conversation while this run was streaming, so the
+        // answer is in `cid`'s history rather than on screen. This path used to do
+        // nothing at all: no status, no busy clear — the learner was left with their
+        // question, no answer, and a send button disabled for good (measured in round
+        // 93: `watch:skip conv=1ed8887b cid=50b7d9b1`, a node binding landing mid-run).
+        // The run is not lost and the answer is not fabricated: say where it went, and
+        // release the composer. Guarded on the controller identity so a superseded
+        // watcher cannot clear a newer one's busy state.
+        if (this.controllers[lane] !== controller)
+            return;
+        this.setLane('busy', lane, false);
+        this.setLane('run', lane, null);
+        this.setLane('status', lane, '这次回答写进了另一段对话；打开知识历史可以找回。');
+    }
     setLane(field, lane, value, callback) { if (this.unmounted)
         return; this.setState(s => ({ [field]: { ...s[field], [lane]: value } }), callback); }
     setStrength(lane, strength) {
@@ -412,9 +428,18 @@ export class Learn extends React.Component {
     catch (e) {
         this.props.toast(e.message);
     } }
-    async restorePair(id) { const revision = this.pairRevision = (this.pairRevision || 0) + 1; for (const lane of ['teach', 'problem'])
-        this.controllers[lane]?.abort(); try {
-        const pair = await getPair(id);
+    restorePair(id) {
+        // A thin wrapper so `ask()` can wait for a binding that is still in flight: the
+        // body below is unchanged, but its promise is published as `pendingRestore` for
+        // as long as it is unsettled.
+        const task = this._restorePair(id);
+        this.pendingRestore = task;
+        const clear = () => { if (this.pendingRestore === task) this.pendingRestore = null; };
+        task.then(clear, clear);
+        return task;
+    }
+    async _restorePair(id) { const revision = this.pairRevision = (this.pairRevision || 0) + 1; for (const lane of ['teach', 'problem'])
+        this.controllers[lane]?.abort(); try {        const pair = await getPair(id);
         if (this.unmounted || revision !== this.pairRevision) return;
         for (const lane of ['teach', 'problem']) {
             const data = pair[lane];
@@ -476,6 +501,20 @@ export class Learn extends React.Component {
     }
     async ask(lane, text = null) {
         const value = text || this.state.inputs[lane];
+        // A node binding in flight (`learnNode` -> `restorePair`) moves this lane to the
+        // pair's own conversation and bumps `pairRevision`. Starting a run before it lands
+        // was measurable in round 93: the run went to the conversation the pane was
+        // showing, the binding then switched the pane, and the answer belonged to a
+        // conversation the learner was no longer looking at. Wait for the binding instead
+        // of racing it — this is the same ordering the product intends, since the click
+        // and the send are one user action apart. `pendingBinding` covers the whole node
+        // click; `pendingRestore` covers a history selection.
+        const binding = this.pendingBinding || this.pendingRestore;
+        if (binding) {
+            try { await binding; } catch (e) { /* a failed binding leaves the pane as it was */ }
+            if (this.unmounted)
+                return;
+        }
         const revision=this.pairRevision || 0;
         const frozen={node_id:lane==='teach'?this.state.activeNode:null,
             attachment_ids:this.state.attachments[lane].map(f=>f.id),
@@ -545,6 +584,7 @@ export class Learn extends React.Component {
                 this.setLane('busy', lane, false);
                 this.setLane('run', lane, null);
             }
+            else this.recoverOrphanedAnswer(lane, cid, controller);
         }
         catch (e) {
             if (e.name !== 'AbortError') {
@@ -712,6 +752,17 @@ export class Learn extends React.Component {
         window.addEventListener('mousemove',this.onMove);window.addEventListener('mouseup',this.onUp);window.addEventListener('touchmove',this.onMove,{passive:false});window.addEventListener('touchend',this.onUp);window.addEventListener('touchcancel',this.onUp);
     }
     async learnNode(node) {
+        // Published as `pendingBinding` for its whole duration, not just from
+        // `restorePair` onwards: the first await below is the request that decides which
+        // conversation this lane is about to be bound to, and a send that starts during
+        // it lands in the conversation the pane happened to be showing (round 93).
+        const task = this._learnNode(node);
+        this.pendingBinding = task;
+        const clear = () => { if (this.pendingBinding === task) this.pendingBinding = null; };
+        task.then(clear, clear);
+        return task;
+    }
+    async _learnNode(node) {
         try {
         const opened = await send(`/courses/${this.props.course.id}/nodes/${node.id}/open`, {});
             this.setState({ activeNode: node.id, expanded: false, hover: null, mobile: 'teach' });
