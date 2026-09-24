@@ -15,7 +15,10 @@ product feature and is recorded separately from any API-level reasoning flags.
 """
 import json
 from pathlib import Path
-from typing import AsyncIterator
+from typing import TYPE_CHECKING, AsyncIterator
+
+if TYPE_CHECKING:  # only the string annotations of `_cite_sources` need these
+    from collections.abc import Mapping, Sequence
 import httpx
 from app.evaluation.deepseek_contract import (
     CHAT_COMPLETIONS_PATH,
@@ -592,6 +595,52 @@ class DisabledProvider:
     async def classify_course(self,*args,**kwargs):
         raise ProviderError('MODEL_NOT_CONFIGURED')
 
+def _cite_sources(
+    answer: str, text: str, sources: "Sequence[Mapping[str, object]]", lane: str
+) -> str:
+    """Append the source markers a real model emits, so the citation path is reachable.
+
+    `generate_run` turns `[S1]` markers in the model's own output into citation cards
+    and then audits each card (module D: `audit_answer_citations`). The live DeepSeek
+    provider writes those markers, which is why the production path has an audit at
+    all — but the labelled `test` double did not, so **every** browser acceptance run
+    saw an empty `citations` array and the whole citation layer was unreachable in
+    local acceptance. That was a gap in the double, not in the product.
+
+    The sentence added here is deliberately shaped like a real answer: it names the
+    question it is answering and points at the material it used. Two properties make
+    it useful rather than decorative:
+
+    * one marker per offered source (bounded by `generate_run`'s own `max_cards`), so
+      a card exists for each source the learner was actually shown;
+    * the learner's own words are quoted verbatim, so the audit's layer-2 check
+      ("a figure the claim asserts that the cited source never states") can be driven
+      from a browser journey through the question alone.
+
+    The `problem` lane is left byte-identical on purpose: its output is parsed into
+    numbered steps by `answer_steps_parse`, and a trailing paragraph is not a step.
+    """
+    if lane == 'problem' or not sources:
+        return answer
+    markers = ' '.join(
+        f"[{source['id']}]" for source in sources[:6]
+        if isinstance(source, dict) and source.get('id')
+    )
+    if not markers:
+        return answer
+    # The quoted question keeps its words but loses its own sentence punctuation:
+    # `_claim_for_citation` splits the answer on `。！？!?;；` and keeps the piece
+    # that carries the marker, so a question mark inside the quote would cut the
+    # claim in half and the audit would judge a fragment nobody wrote.
+    asked = ' '.join(str(text or '').split())
+    for mark in '。！？!?;；':
+        asked = asked.replace(mark, ' ')
+    asked = ' '.join(asked.split())[:160]
+    if not asked:
+        return answer
+    return f"{answer}\n\n针对「{asked}」，课程材料中的相关依据见 {markers}。"
+
+
 class TestProvider:
     """Deterministic, clearly-labelled generator for local and browser
     acceptance tests. Selected only by `provider_mode='test'`, which the
@@ -617,6 +666,7 @@ class TestProvider:
             answer=f"这是测试教学。{sentences}"
         else:
             answer='从定义出发：核心点是邻域内样本数不少于 MinPts 的点。'
+        answer=_cite_sources(answer,text,sources,lane)
         yield {'kind':'delta','text':answer}
         yield {'kind':'usage','stage':'answer','value':{'output_tokens':24}}
 

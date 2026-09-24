@@ -178,6 +178,7 @@ def audit_answer_citations(
     course_id,
     database,
     resolver=None,
+    evidence_database=None,
     max_cards=6,
 ):
     """Bind each cited source to the claim that cites it, then audit it (module D).
@@ -194,6 +195,16 @@ def audit_answer_citations(
     byte-identical to before this audit existed. An audit failure can never lose an
     answer that has already been generated — the cards are returned un-annotated
     with the failure recorded on them.
+
+    ``database`` is the caller's own store (the UI extension's `ui.sqlite3`);
+    ``evidence_database`` is the *authorized document store* the citations point
+    into. They are different files, and layer 1 can only read the latter:
+    pointed at the UI store, every card failed with an `OperationalError`
+    (`no such table: document_versions`) which the handler below recorded and
+    swallowed, so no citation verdict ever reached a learner. The separate
+    parameter keeps that distinction explicit instead of implicit in one name.
+    The resolver is also built lazily, so a layer-2 verdict (which needs no store
+    at all) is still produced when no evidence store is available.
     """
     if jev is None or not citations:
         return citations
@@ -207,10 +218,6 @@ def audit_answer_citations(
     from app.jev.citation_evidence import DocumentEvidenceResolver
 
     try:
-        if resolver is None:
-            resolver = DocumentEvidenceResolver(
-                database, owner_user_id=owner_user_id, course_id=course_id
-            )
         scope = jev.scope(
             owner_user_id=owner_user_id, authorization_scope="citation", course_id=course_id
         )
@@ -219,16 +226,27 @@ def audit_answer_citations(
             for source in sources
             if isinstance(source, dict) and source.get("id")
         }
-        for card in citations[: max(0, int(max_cards))]:
-            source_id = str(card.get("id") or "")
-            claim = _claim_for_citation(output, source_id)
-            card["audit_claim"] = claim
-            missing = missing_claim_numbers(claim, texts.get(source_id, ""))
-            if missing:
-                card["support"] = NOT_ADDRESSED_IN_AVAILABLE_EVIDENCE
-                card["audit_layer"] = "quote"
-                card["audit_missing_numbers"] = list(missing)
-                continue
+    except Exception as exc:  # the answer is already generated; never lose it
+        for card in citations:
+            card["audit_error"] = type(exc).__name__
+        return citations
+
+    store = evidence_database if evidence_database is not None else database
+    for card in citations[: max(0, int(max_cards))]:
+        source_id = str(card.get("id") or "")
+        claim = _claim_for_citation(output, source_id)
+        card["audit_claim"] = claim
+        missing = missing_claim_numbers(claim, texts.get(source_id, ""))
+        if missing:
+            card["support"] = NOT_ADDRESSED_IN_AVAILABLE_EVIDENCE
+            card["audit_layer"] = "quote"
+            card["audit_missing_numbers"] = list(missing)
+            continue
+        try:
+            if resolver is None:
+                resolver = DocumentEvidenceResolver(
+                    store, owner_user_id=owner_user_id, course_id=course_id
+                )
             result = audit_citation(
                 jev,
                 CitationRequest(
@@ -240,13 +258,17 @@ def audit_answer_citations(
                 resolver=resolver,
                 scope=scope,
             )
-            card["support"] = result.label
-            card["audit_layer"] = result.layer
-            if result.reject_reason:
-                card["audit_reject_reason"] = result.reject_reason
-    except Exception as exc:  # the answer is already generated; never lose it
-        for card in citations:
+        except Exception as exc:
+            # One card's failure must not erase the verdicts the other cards
+            # already earned: an earlier version recorded the failure on every
+            # card and abandoned the loop, which is how a store mix-up could hide
+            # a real layer-2 finding.
             card["audit_error"] = type(exc).__name__
+            continue
+        card["support"] = result.label
+        card["audit_layer"] = result.layer
+        if result.reject_reason:
+            card["audit_reject_reason"] = result.reject_reason
     return citations
 
 
@@ -1342,7 +1364,8 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             # card is dropped or reordered, and with no semantic layer the list is
             # returned exactly as built above.
             citations=audit_answer_citations(citations,output,sources=sources,jev=jev,
-                owner_user_id=user['id'],course_id=conv['course'],database=db)
+                owner_user_id=user['id'],course_id=conv['course'],database=db,
+                evidence_database=getattr(domain,'database',None))
             message_id=uid('message_')
             with db.connect(True) as c:
                 # The final write is a conditional transition: if a cancel won the

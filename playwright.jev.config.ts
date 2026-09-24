@@ -44,6 +44,15 @@ execFileSync(
   ],
   { stdio: "inherit" },
 );
+execFileSync(
+  pythonExecutable,
+  [
+    path.join(repositoryRoot, "scripts", "seed_structured_fixture.py"),
+    path.join(e2eData, "rag.sqlite3"),
+    e2eUserId,
+  ],
+  { stdio: "inherit" },
+);
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -84,8 +93,14 @@ export default defineConfig({
         WEB_ORIGIN: "http://127.0.0.1:5273",
         RAG_DATABASE_PATH: path.join(e2eData, "rag.sqlite3"),
         RAG_UPLOAD_DIR: path.join(e2eData, "uploads"),
+        // The internal token the agent's tool-intent gate presents. Empty by
+        // default, which leaves the endpoint answering 503 — the fail-closed
+        // shape the "intent cannot be established" journey relies on.
+        JEV_TOOL_INTENT_TOKEN: process.env.JEV_TOOL_INTENT_TOKEN ?? "",
         // Deliberately NO TypeSafe/Jev credential: this suite doubles as the
         // "Jev is unavailable" acceptance, which is the real production state.
+        // A promotion run passes TYPESAFE_API_KEY and JEV_DEFINITION_MODES in the
+        // environment instead of editing this file.
       },
       url: "http://127.0.0.1:8100/health",
       reuseExistingServer: false,
@@ -110,6 +125,23 @@ export default defineConfig({
         AUTH_TEST_USER_ID: e2eUserId,
         AGENT_PORT: "8101",
         WEB_ORIGIN: "http://127.0.0.1:5273",
+        // The side-effecting tool boundary (module F). `off` by default, so the
+        // committed shape puts no gate in front of a write; the journeys that prove
+        // the guard skip with that reason unless the environment turns it on, and
+        // the agent refuses to start with a mode other than `off` without a URL and
+        // a token, so the three are passed through together.
+        JEV_TOOL_INTENT_MODE: process.env.JEV_TOOL_INTENT_MODE ?? "off",
+        JEV_TOOL_INTENT_URL: process.env.JEV_TOOL_INTENT_URL ?? "",
+        JEV_TOOL_INTENT_TOKEN: process.env.JEV_TOOL_INTENT_TOKEN ?? "",
+        // The guard's own budget, in milliseconds (the agent bounds it to 100–10 000).
+        // Passed through because the measured live decision takes 0.68–1.35 s against
+        // a 1.5 s default: leaving it unset would measure the timeout, not the verdict.
+        // `|| "1500"` and not `?? "1500"`: an *empty* value is rejected by the agent
+        // ("Expected an integer between 100 and 10000") and it refuses to start, which
+        // is how a passthrough of "" took the whole suite down while every service
+        // looked healthy. (PowerShell deletes an env var assigned "", so checking this
+        // by hand in the shell does not reproduce it — the config really does pass "".)
+        JEV_TOOL_INTENT_TIMEOUT_MS: process.env.JEV_TOOL_INTENT_TIMEOUT_MS || "1500",
       },
       url: "http://127.0.0.1:8101/health",
       reuseExistingServer: false,

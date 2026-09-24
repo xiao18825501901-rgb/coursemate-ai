@@ -25,6 +25,7 @@ from app.jev.citation_audit import (
     NOT_ADDRESSED_IN_AVAILABLE_EVIDENCE,
     REJECTED,
     SUPPORTED,
+    ResolvedEvidence,
     StaticEvidenceResolver,
 )
 from app.jev.gateway import FakeTransport, JevGateway
@@ -252,3 +253,94 @@ def test_cards_beyond_the_budget_are_left_unannotated(tmp_path) -> None:
     assert len(asserted) == 6
     assert [item["id"] for item in untouched] == ["S7", "S8"]
     assert len(calls) == 6  # the per-answer model budget is enforced
+
+
+def test_layer_one_reads_the_authorized_store_not_the_caller_store(
+    tmp_path, monkeypatch
+) -> None:
+    """The caller's own database is not the store the citations live in.
+
+    On the teaching path the caller passes the UI extension's `ui.sqlite3`
+    (`cm_update.app.create_app`), which has no `document_versions` table at all.
+    Layer 1 was built over that file, so **every** card raised
+    `OperationalError: no such table: document_versions`, the handler recorded the
+    failure and the learner never saw a single citation verdict — while the code
+    looked correctly wired from every angle a unit test usually checks. The store
+    is therefore an explicit parameter, and this pins which one is used.
+    """
+
+    caller_database = make_jev_database(tmp_path)
+    evidence_store = object()  # stands in for the authorized document store
+    built_with: list[object] = []
+    class SpyResolver:
+        def __init__(self, database, **_kwargs):  # noqa: ANN001
+            built_with.append(database)
+
+        def resolve(self, *, document_id, version, location):  # noqa: ANN001, ANN201
+            return ResolvedEvidence(
+                status="ok",
+                document_id=document_id,
+                version="1",
+                location=location,
+                text="the pass rate is 88%",
+                span_id="chunk-1",
+            )
+
+    monkeypatch.setattr(
+        "app.jev.citation_evidence.DocumentEvidenceResolver", SpyResolver
+    )
+
+    def responder(call):
+        return JevResult(answers={SUPPORT_KEY: JevAnswer(noul=0.9)})
+
+    service = make_service(caller_database, responder, modes={SUPPORT_KEY: "on"})
+    result = audit_answer_citations(
+        [card("S1")],
+        OUTPUT,
+        sources=[source("S1", "the pass rate is 88%")],
+        jev=service,
+        owner_user_id="user-a",
+        course_id="cs3481",
+        database=caller_database,
+        evidence_database=evidence_store,
+    )
+    assert built_with == [evidence_store]
+    assert result[0]["support"] == SUPPORTED
+    assert "audit_error" not in result[0]
+
+
+def test_one_cards_failure_does_not_erase_another_cards_verdict(tmp_path) -> None:
+    """A layer-2 verdict is decided in code and must survive a neighbour's failure.
+
+    The handler used to record the failure on every card and abandon the loop, so a
+    single unavailable store hid the *deterministic* findings for every later card —
+    which is exactly how the wrong-store defect above stayed invisible.
+    """
+
+    database = make_jev_database(tmp_path)
+
+    class ExplodingResolver:
+        def resolve(self, *, document_id, version, location):  # noqa: ANN001, ANN201
+            raise RuntimeError("store unavailable")
+
+    def responder(call):
+        return JevResult(answers={SUPPORT_KEY: JevAnswer(noul=0.9)})
+
+    service = make_service(database, responder, modes={SUPPORT_KEY: "on"})
+    output = "The pass rate is 88% [S1].\nA different claim states 42% [S2]."
+    result = audit_answer_citations(
+        [card("S1"), card("S2", page=2)],
+        output,
+        sources=[source("S1", "the pass rate is 88%"), source("S2", "unrelated evidence")],
+        jev=service,
+        owner_user_id="user-a",
+        course_id="cs3481",
+        database=database,
+        resolver=ExplodingResolver(),
+    )
+
+    assert result[0]["audit_error"] == "RuntimeError"
+    assert "support" not in result[0]  # no verdict was invented for the card that failed
+    assert result[1]["support"] == NOT_ADDRESSED_IN_AVAILABLE_EVIDENCE
+    assert result[1]["audit_layer"] == "quote"
+    assert result[1]["audit_missing_numbers"] == ["42%"]
