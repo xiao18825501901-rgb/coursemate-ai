@@ -79,4 +79,20 @@ The campus pause (§1) is independent of all of it and is already in force.
 
 ## 6. Gate results for this revision
 
-*(filled in below once the round's gates finish — see the dated block at the end of this file)*
+**Revision `c039dd6`** (round-98 work committed; tree clean, nothing pushed). Every number below was
+measured on this tree:
+
+| Gate | Result |
+|---|---|
+| Backend full regression | **1729 passed / 2 skipped / 0 failed** in 1878.50 s (31:18), exit 0 — `work/current-change/full_run_round98.log`. The +7 over the round-95 baseline are the new campus-growth tests; the same two environmental skips (symlink privilege, POSIX permission bits) |
+| Web unit tests | **113 passed** (24 files) via `npm run test --workspace @coursemate/web` — 107 before, +6 for the answer-visibility tests. **Do not run `vitest` from `apps/web` with the root binary**: that invocation reported 33 false failures on this same tree (kept here so the next round does not chase them) |
+| Web type-check | `tsc -b` exit 0 |
+| Browser `jev-structured` | **12 passed / 5 skipped / 0 failed** (2.6 m) — the +1 is `the first answer is visible without a reload, and the composer comes back`, which passed in 14.3 s. The suite's own report: **0 journeys needed a page reload** |
+| Browser `ui-refresh` / `coursemate` | **23 passed** / **4 passed**, both exit 0 |
+| Agent service | **92 passed** (12 files), `tsc --noEmit` exit 0 |
+| Production build + PAT scan | exit 0 — `7 built files, no token field, notice present` |
+| ruff | **0 findings added**: the new files pass clean, and the 13 findings my own edits introduced were fixed (import sorting, unused `noqa`, line length) rather than left; the legacy `cm_update/app.py` debt is unchanged and counted separately |
+| Campus closure probe | scan CLI exit 3, ingest CLI exit 3, no inventory and no database written, source directory back to its 202 files |
+
+Not claimed: nothing is deployed, no production system was contacted, no live model call was made
+this round, and the 1,715 withheld campus files are still waiting on the owner's rights decision.
