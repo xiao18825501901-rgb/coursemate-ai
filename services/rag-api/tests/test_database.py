@@ -346,6 +346,59 @@ def test_v3_readiness_requires_latest_v3_migration(tmp_path: Path) -> None:
     assert database.is_ready() is False
 
 
+def test_v3_restart_preserves_repeated_question_engine_model_roles(tmp_path: Path) -> None:
+    """Migration 038 supersedes 027's one-reservation-per-role constraint."""
+    settings = Settings(
+        database_path=tmp_path / "rag.sqlite3",
+        upload_dir=tmp_path / "uploads",
+        app_env="test",
+        v3_enabled=True,
+    )
+    database = Database(settings)
+    database.initialize()
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO courses(id,name,owner_user_id,course_type,visibility,"
+            "publication_status) VALUES('course-main','Main',NULL,'official','public',"
+            "'published')"
+        )
+        connection.execute(
+            "INSERT INTO courses(id,name,owner_user_id,course_type,visibility,"
+            "publication_status) VALUES('course-private','Private','owner','user','private',"
+            "'private')"
+        )
+        connection.execute(
+            "INSERT INTO learning_workspaces(id,owner_user_id,course_id,private_course_id) "
+            "VALUES('workspace','owner','course-main','course-private')"
+        )
+        connection.execute(
+            "INSERT INTO learning_operations(workspace_id,id,request_hash,kind,status) "
+            "VALUES('workspace','operation','hash','ASSESSMENT_PREPARATION','COMPLETED')"
+        )
+        for ordinal in (1, 2):
+            connection.execute(
+                "INSERT INTO learning_model_call_reservations("
+                "id,workspace_id,operation_id,owner_user_id,course_id,role,"
+                "reserved_output_tokens,status,finished_at) "
+                "VALUES(?, 'workspace','operation','owner','course-main','QUESTION_AUTHOR',"
+                "100,'COMPLETED','2026-09-25T00:00:00Z')",
+                (f"reservation-{ordinal}",),
+            )
+
+    database.initialize()
+
+    with database.connect() as connection:
+        reservations = connection.execute(
+            "SELECT id,role FROM learning_model_call_reservations ORDER BY id"
+        ).fetchall()
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    assert [tuple(row) for row in reservations] == [
+        ("reservation-1", "QUESTION_AUTHOR"),
+        ("reservation-2", "QUESTION_AUTHOR"),
+    ]
+
+
 def test_deployment_path_environment_aliases_are_honored(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

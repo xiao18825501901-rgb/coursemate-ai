@@ -35,6 +35,14 @@ V3_MIGRATIONS = (
     "037_practice_question_interactions.sql",
     "038_assessment_question_slots.sql",
 )
+# Migration 038 widens both model-call ledgers after 027. Replaying 027 on an
+# already-038 database would temporarily narrow the role enum and restore the
+# obsolete one-reservation-per-role constraint before 038 can rebuild it. Keep
+# the immutable historical SQL files unchanged and skip only that superseded
+# rebuild after the superseding migration has committed its ledger row.
+V3_REPLAY_SUPERSEDED_BY = {
+    "027_assessment_preparation_reference.sql": 38,
+}
 LATEST_V2_SCHEMA_VERSION = 10
 LATEST_V3_SCHEMA_VERSION = 38
 
@@ -473,12 +481,25 @@ class Database:
 
         if self.v3_enabled:
             with self.connect() as connection:
+                applied_versions = {
+                    int(row[0])
+                    for row in connection.execute(
+                        "SELECT version FROM schema_migrations"
+                    ).fetchall()
+                }
                 for name in V3_MIGRATIONS:
+                    superseding_version = V3_REPLAY_SUPERSEDED_BY.get(name)
+                    if (
+                        superseding_version is not None
+                        and superseding_version in applied_versions
+                    ):
+                        continue
                     connection.executescript(
                         (Path(__file__).parent.parent / "migrations" / name).read_text(
                             encoding="utf-8"
                         )
                     )
+                    applied_versions.add(int(name.split("_", 1)[0]))
                 # Migration 023 is a conditional ALTER: SQLite cannot ADD COLUMN
                 # IF NOT EXISTS, so the column and its partial index are applied
                 # here under a table_info guard (ledger entry lives in the SQL file).

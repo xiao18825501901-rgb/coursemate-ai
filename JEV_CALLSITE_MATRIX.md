@@ -6,12 +6,12 @@ Three tables, because the system now has three kinds of definition:
 2. **the seven structured-enhancement modules** (A-F plus P2 feedback) — table 2,
    each of which either reaches a real business path or is explicitly marked
    `MODULE_ONLY` with the reason;
-3. **the two Question Engine validation signals** — table 3. They are separately receipted
+3. **the four Question Engine validation signals** — table 3. They are separately receipted
    Choice signals and can only keep a candidate under review or allow the deterministic validator
-   to proceed; neither returns marks, grades, correctness probability or a combined quality score.
+   to proceed; none returns marks, grades, correctness probability or a combined quality score.
 
-The current catalog contains 21 definitions. **All 21 definitions are `shadow` by default.** The
-two Question Engine rows have offline `FakeTransport` contract evidence only; they are not included
+The current catalog contains 23 definitions. **All 23 definitions are `shadow` by default.** The
+four Question Engine rows have offline `FakeTransport` contract evidence only; they are not included
 in the historical 19-definition live run below and have no live-quality claim.
 
 ## Table 3 — Question Engine validation signals (added after the historical live run)
@@ -20,6 +20,8 @@ in the historical 19-definition live run below and have no live-quality claim.
 |---|---|---|---|---|---|---|---|
 | `question.ambiguity.v1` | `question_validator.py::collect_question_semantic_signals` → `callsites.review_question_ambiguity` | public question, type/form, blueprint conditions, objective-scoped evidence rules | Choice `CLEAR/AMBIGUOUS/UNDER_SPECIFIED/CONTRADICTORY/UNCERTAIN` | one ambiguity dimension in `QuestionValidationReport`; only a receipted `CLEAR` can satisfy it | `UNCERTAIN`, candidate stays `NEEDS_REVIEW` | `test_typesafe_jev_signals_are_receipted_separate_and_feed_the_validator`, `test_shadow_or_absent_typesafe_signals_stay_uncertain_and_never_ready` | NOT_RUN |
 | `question.answer_agreement.v1` | `question_validator.py::collect_question_semantic_signals` → `callsites.review_question_answer_agreement` | public question, private author candidate, isolated blind solution, blueprint conditions | Choice `AGREE/DISAGREE/AMBIGUOUS/UNCERTAIN` | one consistency dimension; not proof of correctness and never a mark | `UNCERTAIN`, candidate stays `NEEDS_REVIEW` | same two tests | NOT_RUN |
+| `question.mcq_distractor_quality.v1` | `question_validator.py::collect_question_semantic_signals` → `callsites.review_mcq_distractor_quality` | public question/options, private correct index and wrong-option mappings, server-owned misconception targets, objective-scoped evidence rules | Choice `ACCEPTABLE/WEAK/AMBIGUOUS/UNCERTAIN` | one MCQ-only quality dimension; only a durable receipted `ACCEPTABLE` may accompany the deterministic source/shape gates into `VALIDATED` | `UNCERTAIN`, candidate stays `NEEDS_REVIEW` | `test_mcq_distractor_mapping_is_a_validator_hard_gate`, `test_resume_refuses_a_saved_slot_after_its_semantic_receipt_is_removed` | NOT_RUN |
+| `question.rule_violation_quality.v1` | `question_validator.py::collect_question_semantic_signals` → `callsites.review_rule_violation_quality` | public question, private exact-evidence-bound rule analysis, objective-scoped evidence rules | Choice `SUPPORTED/UNSUPPORTED/AMBIGUOUS/UNCERTAIN` | one rule-question-only quality dimension; never creates a rule or overrides the exact-quote hard gate | `UNCERTAIN`, candidate stays `NEEDS_REVIEW` | `test_rule_violation_evidence_binding_is_a_validator_hard_gate`, `test_rule_quality_shadow_signal_cannot_publish_a_question` | NOT_RUN |
 
 ## Live evidence — measured 2026-09-24, and it supersedes the `NOT_RUN` column below
 
