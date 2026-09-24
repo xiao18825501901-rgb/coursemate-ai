@@ -451,15 +451,15 @@ wired, and the reason the earlier decision was wrong is part of the record.
 > `stdout: "ignore", stderr: "ignore"`, which is why the first failure was undiagnosable from the
 > run); read it with `DEBUG=pw:webserver`.
 
-> **Added 2026-09-24 (round 85) — the local gate, on one frozen revision.** The revision is
-> `8556440` (code identical to `HEAD fed0e54`: `git diff 8556440 HEAD -- services scripts` is empty,
-> the only later change being `MINIMAL_OWNER_ACTION_CARD.md`, which no test reads). Every number
-> below comes from a run on that code, and none is inherited from an earlier revision.
+> **Added 2026-09-24 (round 85–86) — the local gate, on one frozen revision.** The revision is
+> **`bb04101`** (the `8556440` run below it was superseded by two later code changes and re-run
+> rather than reused — a gate must not span revisions). Every number below comes from a run on the
+> code as committed, and none is inherited from an earlier revision.
 >
 > | Gate | Result |
 > |---|---|
-> | Backend full regression | **1701 passed / 2 skipped / 0 failed**, 1992.48 s (33:12), exit 0 — `work/current-change/full_run_8556440.log`. The two skips are environmental: creating a symlink needs a privilege this account lacks, and POSIX permission bits are not the Windows mechanism |
-> | Browser journeys | **29 passed, 0 failed**: `ui-refresh` 23 (`browser_ui_round85.log`), `jev-structured` 6 (`browser_jev_round85.log`), both exit 0 |
+> | Backend full regression | **1701 passed / 2 skipped / 0 failed**, 2017.45 s (33:37), exit 0 — `work/current-change/full_run_bb04101.log`. (`work/current-change/full_run_8556440.log` reports the same totals in 1992.48 s for the earlier revision; the two revisions differ by the per-case serialisation and one test, and both totals are reported as measured rather than reconciled by assumption.) The two skips are environmental: creating a symlink needs a privilege this account lacks, and POSIX permission bits are not the Windows mechanism |
+> | Browser journeys | **29 passed, 0 failed**: `ui-refresh` 23 (`browser_ui_round85.log`), `jev-structured` 6 (`browser_jev_round85.log`), both exit 0, and `jev-structured` 6 again with a credential present in the shell environment (`browser_jev_live_round86b.log`) — see the round-86 note above for what that second run does **not** prove |
 > | Web app | **107 tests passed** (23 files), `tsc -b` exit 0, production build + PAT scan exit 0 (`no token field, notice present`) |
 > | Agent service | **92 tests passed** (12 files), `tsc --noEmit` exit 0, build exit 0 |
 > | mypy | **0 errors in `app/jev/` and `app/evaluation/`**; the 11 reported while type-checking those two directories are all in transitively-imported files (`app/course_access.py`, `app/learning/workspaces.py`, …), unchanged by this work |
@@ -467,10 +467,9 @@ wired, and the reason the earlier decision was wrong is part of the record.
 >
 > Two invocation traps worth recording, because both produced a false result first: `vitest run
 > --root apps/web` from the repository root reports **33 failures** (the config's `setupFiles`
-> resolve differently), while running it from `apps/web` reports **107 passed** — the test suite is
-> not the thing that differs, the invocation is. And a full gate must not be started before the last
-> code change: two earlier gates in these rounds were discarded mid-run for exactly that reason
-> rather than reported.
+> resolve differently), while running it from `apps/web` reports **107 passed**; and the browser
+> suite needs the **E2E-shaped** build, so the §12 production build must not be left in `apps/web/dist`
+> before a browser run (round 86 above).
 >
 > **What this gate does not cover**, so it is not read as more than it is: the Jev layer is still
 > `shadow` in every arm of it (the live quality comparison is a separate run, §9 of
