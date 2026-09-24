@@ -3,8 +3,28 @@
 How the Jev layer and the six structured-enhancement modules are measured, and what may and may not
 be concluded from each kind of run.
 
-**Current state: `ABLATION = NOT_RUN`.** No TypeSafe credential and no DeepSeek key exist in this
-environment, so no live and no labelled run has happened. Nothing below is a quality claim.
+**Current state: `ABLATION = RAN LIVE, and the quality gate does not pass`.** The sentence that used to
+stand here said "no TypeSafe credential and no DeepSeek key exist in this environment, so no live and
+no labelled run has happened" — true when written, false since round 84. What is now measured, on the
+47-sample calibration split with a live DeepSeek baseline asked once per sample:
+
+| | result |
+|---|---|
+| Verdict | **`INTERPRETABLE`** (the harness's own rule; the placeholder-baseline block is satisfied) |
+| Jev better | citation support 0.667 → 0.833; unsupported-claim rate 0.667 → 0.500 |
+| Jev worse | `criterion_error` 0.000 → 0.333 (one case of three); `key_fact_retention` 1.000 → 0.000 (one case of two) |
+| Tie | `intent_accuracy` 0.667 on both sides, and every other metric with a population |
+| Populations | 1–8 cases per metric; `retrieval.support.v1` has **0** on this split, so the task's first promotion candidate has no live number yet |
+| Cost effect | a Jev-answered question removes its DeepSeek call: −9/−17/−27 across arms C/D/E |
+| Promotion | **none.** Everything stays `shadow`; the mechanism now exists (`JEV_DEFINITION_MODES`, `JEV_BACKEND_ARCHITECTURE_FINAL.md` §3) and must not be used until this gate passes for that definition |
+
+Two methodology traps this round produced, recorded because each changes what a number means: the arms
+were each re-asking the baseline, so they were not a controlled difference until `memoise_predictor`
+asked each sample once (before that, a definition **no arm arms** differed between arms); and an
+`intent_accuracy` "regression" in one summary was produced by subtracting a number from one run from a
+number from another — **two runs must never be subtracted**, and the per-case record now exists so
+that class of mistake is visible rather than plausible. Full detail:
+`JEV_CALIBRATION_AND_ABLATION_REPORT.md` §9.
 
 ---
 
