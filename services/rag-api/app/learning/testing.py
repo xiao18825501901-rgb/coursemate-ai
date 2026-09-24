@@ -58,7 +58,7 @@ def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
         source_id = evidence_ids[0]
         is_mcq = blueprint["question_type"] == "MCQ_SINGLE"
         return {
-            "schema_version": "question-author-output.v1",
+            "schema_version": "question-author-output.v2",
             "question_text": (
                 "[FAKE TEST FIXTURE] Apply the bounded course rule to the supplied "
                 "synthetic example and report the result."
@@ -66,6 +66,21 @@ def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
             "options": ["Synthetic option A", "Synthetic option B"] if is_mcq else [],
             "candidate_answer": "[FAKE TEST FIXTURE] Synthetic candidate answer.",
             "correct_option_index": 1 if is_mcq else None,
+            "distractor_rationales": (
+                [
+                    {
+                        "option_index": 0,
+                        "misconception": blueprint["misconception_targets"][0],
+                        "explanation": (
+                            "[FAKE TEST FIXTURE] This distractor represents the exact "
+                            "server-authorized misconception target."
+                        ),
+                        "source_refs": [source_id],
+                    }
+                ]
+                if is_mcq and blueprint["misconception_targets"]
+                else []
+            ),
             "solution_steps": [
                 {
                     "ordinal": 1,

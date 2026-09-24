@@ -10,8 +10,10 @@ from app.config import Settings
 from app.learning.provider import LearningProvider, ProviderCallFailure
 from app.learning.question_author import (
     QUESTION_AUTHOR_PROMPT_VERSION,
+    QUESTION_AUTHOR_SCHEMA_VERSION,
     AuthorGenerationError,
     AuthorSolutionStep,
+    DistractorRationale,
     QuestionAuthorOutput,
     author_question,
 )
@@ -108,6 +110,50 @@ def author_output(**overrides: Any) -> QuestionAuthorOutput:
     return QuestionAuthorOutput(**values)
 
 
+def mcq_blueprint() -> QuestionBlueprint:
+    return blueprint(
+        question_type="MCQ_SINGLE",
+        expected_answer_form="SINGLE_CHOICE",
+        marks=10,
+        misconception_targets=[
+            "Counts only the neighbouring points and omits the point itself.",
+            "Treats epsilon as a required number of neighbours.",
+        ],
+    )
+
+
+def mcq_output(**overrides: Any) -> QuestionAuthorOutput:
+    values: dict[str, Any] = {
+        "question_text": (
+            "Given A(0,0), B(1,0), and C(4,0), which count applies to A when "
+            "epsilon=1.5 and the point itself is included?"
+        ),
+        "options": ["One", "Two", "Three"],
+        "candidate_answer": "Two",
+        "correct_option_index": 1,
+        "distractor_rationales": [
+            DistractorRationale(
+                option_index=0,
+                misconception=(
+                    "Counts only the neighbouring points and omits the point itself."
+                ),
+                explanation="This option omits A from its own epsilon neighbourhood.",
+                source_refs=["chunk-course"],
+            ),
+            DistractorRationale(
+                option_index=2,
+                misconception="Treats epsilon as a required number of neighbours.",
+                explanation="This option confuses the distance radius with a count threshold.",
+                source_refs=["chunk-course"],
+            ),
+        ],
+        "solution_steps": author_output().solution_steps,
+        "source_refs": ["chunk-course"],
+    }
+    values.update(overrides)
+    return QuestionAuthorOutput(**values)
+
+
 def completed_run() -> dict[str, Any]:
     return {
         "model": "FAKE_TEST_ONLY",
@@ -116,7 +162,7 @@ def completed_run() -> dict[str, Any]:
         "region": "LOCAL_TEST",
         "role": "QUESTION_AUTHOR",
         "template_version": QUESTION_AUTHOR_PROMPT_VERSION,
-        "schema_version": "question-author-output.v1",
+        "schema_version": QUESTION_AUTHOR_SCHEMA_VERSION,
         "input_hash": "d" * 64,
         "started_at": "2026-09-25T00:00:00Z",
         "finished_at": "2026-09-25T00:00:00Z",
@@ -185,6 +231,26 @@ def test_mismatched_blueprint_or_prompt_version_refuses_before_provider_call() -
     assert provider.calls == []
 
 
+def test_new_author_call_refuses_a_historical_v1_provider_receipt() -> None:
+    class HistoricalReceiptProvider(SpyProvider):
+        def generate(
+            self, schema: type, **kwargs: Any
+        ) -> tuple[QuestionAuthorOutput, dict[str, Any]]:
+            output, run = super().generate(schema, **kwargs)
+            run.update(
+                template_version="question-author.v1",
+                schema_version="question-author-output.v1",
+            )
+            return output, run
+
+    with pytest.raises(AuthorGenerationError) as refusal:
+        author_question(
+            HistoricalReceiptProvider(), blueprint=blueprint(), evidence=evidence_pack()
+        )
+
+    assert refusal.value.code == "AUTHOR_OUTPUT_INVALID"
+
+
 def test_author_cannot_cite_or_answer_outside_the_evidence_pack() -> None:
     for output in (
         author_output(source_refs=["chunk-not-authorized"]),
@@ -225,6 +291,69 @@ def test_question_shape_matches_blueprint_without_deferring_basic_contract_error
             blueprint=mcq,
             evidence=evidence_pack(),
         )
+    assert refusal.value.code == "AUTHOR_OUTPUT_INVALID"
+
+
+def test_mcq_records_every_distractor_against_a_blueprint_misconception_privately() -> None:
+    candidate = author_question(
+        SpyProvider(mcq_output()),
+        blueprint=mcq_blueprint(),
+        evidence=evidence_pack(),
+    )
+
+    assert [item.option_index for item in candidate.private_solution.distractor_rationales] == [
+        0,
+        2,
+    ]
+    assert all(
+        item.misconception in mcq_blueprint().misconception_targets
+        for item in candidate.private_solution.distractor_rationales
+    )
+    public = str(candidate.public_payload())
+    assert "distractor_rationales" not in public
+    assert "omits the point itself" not in public
+
+
+@pytest.mark.parametrize(
+    "rationales",
+    [
+        [],
+        [
+            DistractorRationale(
+                option_index=0,
+                misconception=(
+                    "Counts only the neighbouring points and omits the point itself."
+                ),
+                explanation="This option omits the point itself.",
+                source_refs=["chunk-course"],
+            )
+        ],
+        [
+            DistractorRationale(
+                option_index=0,
+                misconception="An invented misconception outside the server blueprint.",
+                explanation="This text is not one of the authorized misconception targets.",
+                source_refs=["chunk-course"],
+            ),
+            DistractorRationale(
+                option_index=2,
+                misconception="Treats epsilon as a required number of neighbours.",
+                explanation="This option confuses radius and neighbour count.",
+                source_refs=["chunk-course"],
+            ),
+        ],
+    ],
+)
+def test_mcq_refuses_missing_partial_or_invented_distractor_mappings(
+    rationales: list[DistractorRationale],
+) -> None:
+    with pytest.raises(AuthorGenerationError) as refusal:
+        author_question(
+            SpyProvider(mcq_output(distractor_rationales=rationales)),
+            blueprint=mcq_blueprint(),
+            evidence=evidence_pack(),
+        )
+
     assert refusal.value.code == "AUTHOR_OUTPUT_INVALID"
 
 

@@ -19,7 +19,7 @@ from app.jev.service import SemanticDecisionService
 from app.learning.assessments import AssessmentService
 from app.learning.blind_solve import run_blind_solve
 from app.learning.provider import LearningProvider
-from app.learning.question_author import author_question
+from app.learning.question_author import QUESTION_AUTHOR_PROMPT_VERSION, author_question
 from app.learning.question_blueprint import QuestionBlueprint, resolve_objective
 from app.learning.question_evidence import EvidencePackAccess, build_evidence_pack
 from app.learning.question_persistence import (
@@ -136,7 +136,7 @@ def pipeline(tmp_path: Path) -> dict[str, Any]:
         marks=15,
         scoring_criteria=["邻域计数正确", "核心点结论正确"],
         question_family_id="family-density",
-        prompt_versions={"question_author": "question-author.v1"},
+        prompt_versions={"question_author": QUESTION_AUTHOR_PROMPT_VERSION},
         generation_policy_version="question-generation-policy-v1",
     )
     provider = LearningProvider(config)

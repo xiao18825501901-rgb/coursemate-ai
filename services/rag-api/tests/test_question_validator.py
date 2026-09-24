@@ -268,6 +268,7 @@ def test_mcq_single_correct_is_rechecked_as_a_hard_gate() -> None:
         question_type="MCQ_SINGLE",
         expected_answer_form="SINGLE_CHOICE",
         marks=10,
+        misconception_targets=["Assumes every bounded point is a core point."],
     )
     mcq = candidate(
         blueprint_hash=mcq_blueprint.identity(),
@@ -284,6 +285,14 @@ def test_mcq_single_correct_is_rechecked_as_a_hard_gate() -> None:
         private_solution={
             "candidate_answer": "zero",
             "correct_option_index": 4,
+            "distractor_rationales": [
+                {
+                    "option_index": 1,
+                    "misconception": "Assumes every bounded point is a core point.",
+                    "explanation": "The evidence requires the MinPts threshold.",
+                    "source_refs": ["chunk-course"],
+                }
+            ],
             "solution_steps": [
                 {
                     "ordinal": 1,
@@ -301,6 +310,68 @@ def test_mcq_single_correct_is_rechecked_as_a_hard_gate() -> None:
 
     assert report.status == "REJECTED"
     assert gate_status(report, "QUESTION_SHAPE") == "FAIL"
+
+
+def test_mcq_distractor_mapping_is_a_validator_hard_gate() -> None:
+    mcq_blueprint = blueprint(
+        question_type="MCQ_SINGLE",
+        expected_answer_form="SINGLE_CHOICE",
+        marks=10,
+        misconception_targets=["Assumes every bounded point is a core point."],
+    )
+    private_solution = {
+        "candidate_answer": "zero",
+        "correct_option_index": 0,
+        "distractor_rationales": [
+            {
+                "option_index": 1,
+                "misconception": "Assumes every bounded point is a core point.",
+                "explanation": "The evidence requires the MinPts threshold.",
+                "source_refs": ["chunk-course"],
+            }
+        ],
+        "solution_steps": [
+            {
+                "ordinal": 1,
+                "operation": "Count neighbourhoods",
+                "result": "zero",
+                "explanation": "No bounded neighbourhood reaches the required three points.",
+                "source_refs": ["chunk-course"],
+            }
+        ],
+        "source_refs": ["chunk-course"],
+    }
+    mcq = candidate(
+        blueprint_hash=mcq_blueprint.identity(),
+        question_type="MCQ_SINGLE",
+        marks=10,
+        public_question={
+            "question_text": (
+                "For epsilon=1.5 and MinPts=3, which option gives the number of core points?"
+            ),
+            "options": ["zero", "one"],
+            "source_refs": ["chunk-course"],
+            "answer_policy": "HIDDEN_UNTIL_REVEAL",
+        },
+        private_solution=private_solution,
+    )
+
+    accepted = validate(candidate=mcq, blueprint=mcq_blueprint)
+    missing_mapping = validate(
+        candidate=mcq.model_copy(
+            update={
+                "private_solution": mcq.private_solution.model_copy(
+                    update={"distractor_rationales": []}
+                )
+            }
+        ),
+        blueprint=mcq_blueprint,
+    )
+
+    assert accepted.status == "VALIDATED"
+    assert gate_status(accepted, "QUESTION_SHAPE") == "PASS"
+    assert missing_mapping.status == "REJECTED"
+    assert gate_status(missing_mapping, "QUESTION_SHAPE") == "FAIL"
 
 
 def jev_service(tmp_path: Any, *, mode: str = "on") -> tuple[SemanticDecisionService, Any]:

@@ -148,6 +148,12 @@ def test_five_slots_run_the_question_engine_then_freeze_one_assessment(
             "SELECT COUNT(*) FROM question_engine_provenance WHERE workspace_id=? ",
             (WORKSPACE,),
         ).fetchone()[0]
+        mcq_private_answer = json.loads(
+            connection.execute(
+                "SELECT answer_json FROM assessment_question_revisions WHERE id=?",
+                (first[0]["question_revision_id"],),
+            ).fetchone()["answer_json"]
+        )
 
     assert provenance_count == 5
     assert session["status"] == "IN_PROGRESS"
@@ -162,6 +168,20 @@ def test_five_slots_run_the_question_engine_then_freeze_one_assessment(
     assert [question["marks"] for question in session["questions"]] == [10, 15, 20, 25, 30]
     assert all("answer_key" not in question for question in session["questions"])
     assert all("reference_solution" not in question for question in session["questions"])
+    assert mcq_private_answer["distractor_rationales"] == [
+        {
+            "option_index": 0,
+            "misconception": default_assessment_question_slots()[0].misconception_target,
+            "explanation": (
+                "[FAKE TEST FIXTURE] This distractor represents the exact "
+                "server-authorized misconception target."
+            ),
+            "source_refs": ["chunk-course"],
+        }
+    ]
+    assert all(
+        "distractor_rationales" not in question for question in session["questions"]
+    )
 
 
 def test_resume_reuses_completed_slots_after_a_bounded_provider_failure(tmp_path: Any) -> None:

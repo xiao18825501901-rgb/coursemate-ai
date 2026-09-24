@@ -130,6 +130,11 @@ def _source_scope_matches(
     used.update(
         ref for step in candidate.private_solution.solution_steps for ref in step.source_refs
     )
+    used.update(
+        ref
+        for distractor in candidate.private_solution.distractor_rationales
+        for ref in distractor.source_refs
+    )
     return bool(used) and used.issubset(allowed)
 
 
@@ -144,8 +149,25 @@ def _question_shape_matches(
     options = candidate.public_question.options
     correct = candidate.private_solution.correct_option_index
     if blueprint.question_type == "MCQ_SINGLE":
-        return len(options) >= 2 and correct is not None and 0 <= correct < len(options)
-    return not options and correct is None
+        mappings = candidate.private_solution.distractor_rationales
+        expected = set(range(len(options))) - ({correct} if correct is not None else set())
+        actual = [item.option_index for item in mappings]
+        return (
+            len(options) >= 2
+            and correct is not None
+            and 0 <= correct < len(options)
+            and len(actual) == len(set(actual))
+            and set(actual) == expected
+            and bool(blueprint.misconception_targets)
+            and all(
+                item.misconception in blueprint.misconception_targets for item in mappings
+            )
+        )
+    return (
+        not options
+        and correct is None
+        and not candidate.private_solution.distractor_rationales
+    )
 
 
 def _fallback_signal(dimension: SemanticDimension, *, reason: str) -> SemanticSignal:

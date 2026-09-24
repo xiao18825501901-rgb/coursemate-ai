@@ -168,6 +168,7 @@ test("empty assessment pool generates and freezes five complementary Question En
   for(const question of session.questions) {
     expect(question).not.toHaveProperty("answer_key");
     expect(question).not.toHaveProperty("reference_solution");
+    expect(question).not.toHaveProperty("distractor_rationales");
   }
   await expect(workspace.locator(".assessment-question")).toHaveCount(5);
   await expect(workspace.locator(".assessment-question").nth(0)).toContainText("MCQ_SINGLE · 10 分");

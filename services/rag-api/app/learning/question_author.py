@@ -21,9 +21,9 @@ from app.learning.provider import ProviderCallFailure
 from app.learning.question_blueprint import Hex64, QuestionBlueprint
 from app.learning.question_evidence import QuestionEvidencePack
 
-QUESTION_AUTHOR_PROMPT_VERSION: Final = "question-author.v1"
-QUESTION_AUTHOR_SCHEMA_VERSION: Final = "question-author-output.v1"
-PROMPT_PATH: Final = Path(__file__).with_name("prompts") / "question_author_v1.md"
+QUESTION_AUTHOR_PROMPT_VERSION: Final = "question-author.v2"
+QUESTION_AUTHOR_SCHEMA_VERSION: Final = "question-author-output.v2"
+PROMPT_PATH: Final = Path(__file__).with_name("prompts") / "question_author_v2.md"
 
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 
@@ -53,14 +53,24 @@ class AuthorSolutionStep(Contract):
     source_refs: list[Identifier] = Field(min_length=1, max_length=20)
 
 
+class DistractorRationale(Contract):
+    """Private, evidence-bound explanation of why one MCQ option is wrong."""
+
+    option_index: int = Field(ge=0, le=9)
+    misconception: Text
+    explanation: Text
+    source_refs: list[Identifier] = Field(min_length=1, max_length=20)
+
+
 class QuestionAuthorOutput(Contract):
     """The model-authored fields; everything authoritative remains in the blueprint."""
 
-    schema_version: Literal["question-author-output.v1"] = QUESTION_AUTHOR_SCHEMA_VERSION
+    schema_version: Literal["question-author-output.v2"] = QUESTION_AUTHOR_SCHEMA_VERSION
     question_text: Text
     options: list[ShortText] = Field(default_factory=list, max_length=10)
     candidate_answer: Text = Field(repr=False)
     correct_option_index: int | None = Field(default=None, ge=0, le=9)
+    distractor_rationales: list[DistractorRationale] = Field(default_factory=list, max_length=9)
     solution_steps: list[AuthorSolutionStep] = Field(min_length=1, max_length=12, repr=False)
     source_refs: list[Identifier] = Field(min_length=1, max_length=20)
 
@@ -108,6 +118,7 @@ class PrivateCandidateSolution(Contract):
     schema_version: Literal["question-private-solution.v1"] = "question-private-solution.v1"
     candidate_answer: Text = Field(repr=False)
     correct_option_index: int | None = Field(default=None, ge=0, le=9)
+    distractor_rationales: list[DistractorRationale] = Field(default_factory=list, max_length=9)
     solution_steps: list[AuthorSolutionStep] = Field(min_length=1, max_length=12, repr=False)
     source_refs: list[Identifier] = Field(min_length=1, max_length=20)
 
@@ -118,8 +129,8 @@ class AuthorProviderRun(Contract):
     protocol: ShortText
     region: ShortText
     role: Literal["QUESTION_AUTHOR"]
-    template_version: Literal["question-author.v1"]
-    schema_version: Literal["question-author-output.v1"]
+    template_version: Literal["question-author.v1", "question-author.v2"]
+    schema_version: Literal["question-author-output.v1", "question-author-output.v2"]
     input_hash: Hex64
     started_at: ShortText
     finished_at: ShortText
@@ -173,6 +184,7 @@ class AuthoredQuestionCandidate(Contract):
             options=self.public_question.options,
             candidate_answer=self.private_solution.candidate_answer,
             correct_option_index=self.private_solution.correct_option_index,
+            distractor_rationales=self.private_solution.distractor_rationales,
             solution_steps=self.private_solution.solution_steps,
             source_refs=self.public_question.source_refs,
         )
@@ -235,21 +247,35 @@ def _assert_output_scope(
     allowed = set(evidence.evidence_ids)
     used = set(output.source_refs)
     used.update(ref for step in output.solution_steps for ref in step.source_refs)
+    used.update(ref for item in output.distractor_rationales for ref in item.source_refs)
     if not used.issubset(allowed):
         raise AuthorGenerationError(
             "AUTHOR_OUTPUT_OUT_OF_SCOPE",
             "The author output cites evidence outside the objective-scoped pack.",
         )
     if blueprint.question_type == "MCQ_SINGLE":
+        correct = output.correct_option_index
+        expected_distractors = (
+            set(range(len(output.options))) - {correct} if correct is not None else set()
+        )
+        actual_distractors = [item.option_index for item in output.distractor_rationales]
         if (
             len(output.options) < 2
-            or output.correct_option_index is None
-            or output.correct_option_index >= len(output.options)
+            or correct is None
+            or correct >= len(output.options)
+            or len(set(actual_distractors)) != len(actual_distractors)
+            or set(actual_distractors) != expected_distractors
+            or not blueprint.misconception_targets
+            or any(
+                item.misconception not in blueprint.misconception_targets
+                for item in output.distractor_rationales
+            )
         ):
             raise AuthorGenerationError(
-                "AUTHOR_OUTPUT_INVALID", "The authored MCQ does not have one valid answer index."
+                "AUTHOR_OUTPUT_INVALID",
+                "The authored MCQ does not bind every distractor to an authorized misconception.",
             )
-    elif output.options or output.correct_option_index is not None:
+    elif output.options or output.correct_option_index is not None or output.distractor_rationales:
         raise AuthorGenerationError(
             "AUTHOR_OUTPUT_INVALID",
             "Only a single-choice blueprint may return options or a correct-option index.",
@@ -309,6 +335,11 @@ def author_question(
         )
         output = QuestionAuthorOutput.model_validate(raw_output)
         run = AuthorProviderRun.model_validate(raw_run)
+        if (
+            run.template_version != QUESTION_AUTHOR_PROMPT_VERSION
+            or run.schema_version != QUESTION_AUTHOR_SCHEMA_VERSION
+        ):
+            raise ValueError("question author run version does not match the request")
     except ProviderCallFailure as failure:
         raise _failure_from_provider(failure) from failure
     except (OSError, ValueError) as error:
@@ -342,6 +373,7 @@ def author_question(
         private_solution=PrivateCandidateSolution(
             candidate_answer=output.candidate_answer,
             correct_option_index=output.correct_option_index,
+            distractor_rationales=output.distractor_rationales,
             solution_steps=output.solution_steps,
             source_refs=output.source_refs,
         ),
