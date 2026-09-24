@@ -16,6 +16,14 @@ the decision that matters must be taken on the test split once thresholds are fr
 Thresholds remain untuned (`thresholds = UNSET_UNTIL_CALIBRATED_ON_LABELLED_DATA`).
 The test split (67 samples) has **not** been run.
 
+**The local gate behind these numbers** ran on one frozen revision, `8556440` (code identical to
+`HEAD`): backend **1701 passed / 2 skipped / 0 failed** in 33:12 (exit 0,
+`work/current-change/full_run_8556440.log`), browser **29 journeys passed** (`ui-refresh` 23,
+`jev-structured` 6), web **107 tests** with `tsc -b` and the production build + PAT scan at exit 0,
+agent **92 tests** with typecheck and build at exit 0, and **0** mypy errors in `app/jev/` +
+`app/evaluation/`. The gate covers correctness, not quality: every definition is `shadow` inside it,
+and the quality statement is the live comparison in §9.
+
 ---
 
 ## 1. What is real today
