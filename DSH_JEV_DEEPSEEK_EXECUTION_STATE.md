@@ -1156,3 +1156,10 @@ call site is still not evidence of quality.
 4. Only with explicit production authorization: back up the three databases, run migrations
    026–028 on an isolated restore first, then deploy an immutable release and execute the real
    browser acceptance.
+5. **Before this file, read the earlier notes with the later ones — several sections are dated
+   records, not current state.** The current-shape reading order is: this file's newest round block
+   (rounds 83–96), `COURSEJESUS_EXECUTION_STATE.md`, `docs/recovery/CURRENT_BLOCKER_LEDGER.md`, then
+   `DEEPSEEK_LIVE_ACCEPTANCE.md` §2 for the per-item live verdicts and
+   `docs/jev-structured/PROMOTION_DECISION_PROTOCOL.md` for what a promotion has to clear. Live
+   spend, if a later round needs it, is reconstructed by `work/current-change/live_spend_ledger.py`
+   (written to `artifacts/jev-deepseek/live-model-spend-ledger.json`), not read from any prose total.

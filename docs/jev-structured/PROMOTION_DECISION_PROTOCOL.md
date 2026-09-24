@@ -29,7 +29,7 @@ decision is executed rather than negotiated.
 |---|---|---|---|
 | 1 | Population arithmetic — "can this definition be fitted and evaluated at all?" | `split_coverage`, `unfittable_definitions`, `unevaluated_definitions` (`app/evaluation/jev_semantic_ablation.py`) | per-definition train/calibration/test counts, zeros included |
 | 2 | Arm measurement on the **calibration split**, live transport, real baseline | `scripts/run_jev_semantic_ablation.py --arm all --transport live --allow-billable --deepseek-baseline --out <fresh path>` (A–E) and the same with `--arm all-components` | `transport_used`, per-arm `metric_denominators`, per-case rows, `deepseek_call_delta_from_A` |
-| 3 | Threshold fit on the calibration split only | `scripts/calibrate_jev.py --predictions <file> --split <manifest> --predictions-provenance <statement>` | `fitted_on_split: "calibration"` (hardcoded), `predictions_sha256`, `predictions_provenance`, `dataset_content_hash` |
+| 3 | Threshold fit on the calibration split only | `scripts/calibrate_jev.py --predictions <file> --dataset <frozen dataset> --split <manifest> --out <fresh path> --predictions-provenance "<what produced these predictions>"` | `fitted_on_split: "calibration"` (hardcoded), `predictions_sha256`, `predictions_provenance`, `dataset_content_hash` |
 | 4 | **One** look at the test split, with thresholds frozen | the same arm command against the test split | the artifact hash of the frozen thresholds it was run with |
 | 5 | Promotion, if earned | `JEV_DEFINITION_MODES=<key>=on` | the receipt rows the promoted definition now writes (`mode=on`) |
 
