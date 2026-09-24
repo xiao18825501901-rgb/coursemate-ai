@@ -71,30 +71,49 @@ version of this card is **withdrawn** — no Laya resource was ever created
 | Also confirm | the model alias to pin (`deepseek-flash` per the verified contract) |
 | Budget | the cumulative test/annotation cap for this round — see the consolidated ceiling below. I will preflight the exact call plan and refuse to exceed it |
 
-## 1b. Consolidated live-gate budget (one ask, not one per call)
+## 1b. Consolidated live-gate budget (one ask, not one per call) — **re-measured 2026-09-24**
 
-Everything is bounded and printed before the first call. Definitions: the 12 case ids + the 7
-structured ids = **19 definitions**; the labelled dataset has **310 samples** (train 196 / calibration
-47 / test 67), so nothing here needs a fresh annotation pass.
+The version of this section that stood here was written from estimates before any live call. It is
+replaced with measurements, because the live runs have now happened and the real per-call cost is
+three orders of magnitude smaller than the estimate assumed. Everything is still bounded and printed
+before the first call; only the numbers changed.
 
-| Item | Planned calls | Token estimate | Worst case reserved | Hard ceiling |
+**What the live runs actually cost** (`work/current-change/deepseek-live-evidence-r81e.json`,
+`jev-ablation-live-baseline3.json`, `jev-live-cases.json`; computed by
+`work/current-change/compute-live-budget.py`):
+
+| Measured fact | Value |
+|---|---|
+| DeepSeek per call, 10 canary roles | min **$0.0000642**, mean **$0.0007991**, max **$0.0038862** (the `EXERCISE_V2` role) |
+| DeepSeek, 10 roles total | 8,728 input + 4,477 output tokens → **$0.0079908** |
+| DeepSeek, ablation baseline | **43** calls (not 162: memoising the baseline removed 119 repeat calls) at 267 in / 7 out tokens per call |
+| Jev live decisions made so far in this work | **99** calls (31 case sweep + 53 ablation + 15 probes), every one answered |
+| Jev token usage | **not reported by the transport** — it returns a request id and a model, not usage |
+
+**The request, scaled to §16's production journeys** (4 course shapes × 15 steps = 60 operations):
+
+| Item | Planned calls | Worst case reserved | Hard ceiling | Measured basis |
 |---|---|---|---|---|
-| Jev canary + calibration (calibration split 47 × ≤2 decisions, retries counted) | ≤ 200 | ≤ 0.6M | +50% for timeouts/failures | **≤ 400 decisions / 1.0M tokens** |
-| Jev A/B/C/D/E ablation + module ablation (test split 67, 5 arms + 6 module arms, ≤2 decisions per sample) | ≤ 900 | ≤ 2.5M | +50% | **≤ 1,100 decisions / 3.5M tokens** |
-| **Jev total** | **≤ 1,100** | **≤ 3.1M** | — | **≤ 1,500 decisions / 5.0M tokens** |
-| DeepSeek canary (10 roles: text, structured, vision, tool replay, plan→work, classification, exercise, problem, explanation, assessment reference, grading feedback) | 10 | ≤ 60k | 2× | ≤ 20 calls |
-| DeepSeek live acceptance (real teaching journeys incl. image problems, exercise, five-question grading + feedback) | ≤ 120 | ≤ 1.2M | +50% | ≤ 180 calls / 1.8M tokens |
-| **DeepSeek total** | **≤ 130** | **≤ 1.3M** | — | **≤ 200 calls / 2.0M tokens** |
-| Embeddings (only if the acceptance re-indexes a document; the deterministic local provider is used otherwise) | ≤ 300 chunks | ≤ 0.1M | — | ≤ 500 chunks |
+| Jev live acceptance | ≤ 180 decisions | +50% for timeouts | **≤ 300 decisions** | 99 decisions already made, all answered; 1–3 decisions per operation |
+| DeepSeek live acceptance (teaching, image problem, exercise, five-question grading, feedback) | ≤ 120 calls | 3× operations, every call at the measured **maximum** | **≤ 200 calls** | measured max $0.0038862/call |
+| Embeddings | ≤ 500 chunks | — | ≤ 500 chunks | unchanged; the deterministic provider is used unless a journey re-indexes |
+| **Total** | **≤ 300 paid model calls** | — | **≤ 500 calls** | the estimate this replaces was ≤ 1,700 |
 
-**Total hard ceiling: ≤ 1,700 paid model calls and ≤ 7.0M tokens.** The USD ceilings stay **yours to
-set** — I will apply your published price list to the printed plan and will not start without a number.
-Proposed, and easy to lower: Jev **USD 15**, DeepSeek **USD 10**, embeddings **USD 2** → **USD 27**
-combined, with any unspent remainder returned in the final report rather than reused.
+**USD.** DeepSeek: the worst case above is **$0.70** (180 calls × the measured maximum $0.0038862), so
+a cap of **USD 3** leaves more than 4× headroom and is what I am asking for. Jev: **I cannot state a
+USD figure honestly** — the transport reports no token usage and no TypeSafe price list is available
+to this environment, so any number from me would be invented. The call count is ≤ 300; please apply
+your plan's rate and set that figure. **Combined cap requested: USD 3 + your Jev figure.**
 
-Still yours to confirm for this batch: region/retention constraints for the course fragments Jev sees
-(item 1 above), and which definitions may leave `shadow` (my default: `retrieval.support.v1` plus one of
-context/intent/pedagogy; coverage and assessment stay advisory, never authoritative).
+Two things that have not changed: unspent remainder is returned in the final report rather than
+reused, and I do not start a paid run without the ceilings in hand.
+
+**Also still yours in this item, unchanged:** region/retention constraints for the course fragments
+Jev sees, and which definitions may leave `shadow`. On the second: my earlier default was
+`retrieval.support.v1` plus one of context/intent/pedagogy, and **the measurements do not support
+promoting any of them yet** — citation support improves and `criterion_error` / `key_fact_retention`
+worsen, on populations of one to eight samples (§9 of `JEV_CALIBRATION_AND_ABLATION_REPORT.md`). The
+mechanism now exists (`JEV_DEFINITION_MODES`); the evidence for using it does not.
 
 Production today still answers with **Qwen/Model Studio** (`V3_MODEL=qwen3.8-max`,
 `AGENT_MODEL_NAME=qwen3.8-max`, `OPENAI_CHAT_MODEL=qwen3.7-plus`), so this key is what switches the
