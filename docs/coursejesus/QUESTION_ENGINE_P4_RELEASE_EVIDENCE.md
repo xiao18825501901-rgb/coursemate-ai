@@ -1,7 +1,9 @@
 # Question Engine P4 local release evidence
 
-Date: 2026-09-25  
-Branch: `fix/codex-dsh-audit-20260919`  
+Date: 2026-09-25
+
+Branch: `fix/codex-dsh-audit-20260919`
+
 Application revision: `df8694b0b4d97347f1c75baaca70c7e725e94a6e`
 
 ## Verdict
