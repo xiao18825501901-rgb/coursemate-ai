@@ -25,7 +25,8 @@ from __future__ import annotations
 
 import json
 import os
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass, field, replace
 from time import perf_counter
 from typing import Any, Protocol, Sequence
@@ -46,6 +47,8 @@ from app.jev.models import (
     JevCall,
     JevQuestion,
     JevResult,
+)
+from app.jev.models import (
     input_hash as compute_input_hash,
 )
 
@@ -58,6 +61,12 @@ class GatewayBounds:
     max_batch_questions: int = 24
     timeout_seconds: float = 10.0
     max_concurrency: int = 4
+
+
+# The only runtime modes a definition may be in. `shadow` records the suggestion without using it,
+# `on` uses it, `off` does not even call. One source of truth, because the config validator and the
+# gateway must refuse the same misspellings.
+MODES: frozenset[str] = frozenset({"off", "shadow", "on"})
 
 
 @dataclass(frozen=True)
@@ -337,7 +346,7 @@ class JevGateway:
 
     def mode_for(self, definition_key: str) -> str:
         mode = self.modes.get(definition_key, self.default_mode)
-        if mode not in {"off", "shadow", "on"}:
+        if mode not in MODES:
             raise JevRequestError(f"Unknown Jev mode {mode!r} for {definition_key}")
         return mode
 

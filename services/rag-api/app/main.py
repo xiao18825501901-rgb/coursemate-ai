@@ -131,8 +131,17 @@ def create_app(
     # service). Shadow is the default runtime mode; with no TypeSafe credential the
     # live transport fails typed (JevNotConfiguredError) and every module stays in
     # shadow, so the deterministic result remains the user-visible one.
+    #
+    # `jev_definition_mode_map` is empty unless the deployment says otherwise, and it is validated
+    # against the catalogue when it is not (an unknown definition or mode refuses at startup). It is
+    # the mechanism a promotion needs; it must stay empty until the quality gate for a definition
+    # has passed — see the note on the setting in `config.py` and §9 of
+    # `JEV_CALIBRATION_AND_ABLATION_REPORT.md`.
     application.state.jev_service = SemanticDecisionService(
-        JevGateway(receipt_store=SqlReceiptStore(database))
+        JevGateway(
+            receipt_store=SqlReceiptStore(database),
+            modes=resolved_settings.jev_definition_mode_map,
+        )
     )
     if resolved_settings.v3_enabled:
         # The learning orchestrator gets the same shared service: pedagogy (call

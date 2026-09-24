@@ -121,6 +121,24 @@ class Settings(BaseSettings):
     canvas_local_bridge_enabled: bool = Field(
         default=True, validation_alias=AliasChoices("CANVAS_LOCAL_BRIDGE_ENABLED")
     )
+    # Per-definition Jev runtime modes, as `key=mode` pairs (`JEV_DEFINITION_MODES`).
+    #
+    # Without this the shipped service could only ever run the catalogue's default, which is
+    # `shadow` for every definition — so a definition could be measured but never promoted, and no
+    # deployment could demonstrate that a promotion changes behaviour. The setting makes promotion
+    # *possible*; it does not make it *allowed*, and both halves matter:
+    #
+    #   * the default is empty, so a deployment that does nothing behaves exactly as before (every
+    #     definition records its suggestion and none of them is used);
+    #   * it must stay empty until the quality gate in §14 of the task has passed for that
+    #     definition — the live comparison on the calibration split does not pass it today
+    #     (`JEV_CALIBRATION_AND_ABLATION_REPORT.md` §9), so promoting anything now would act on
+    #     numbers that do not support it;
+    #   * an unknown definition key or mode refuses at startup rather than being ignored, because a
+    #     silently dropped promotion looks exactly like a promotion that has no effect.
+    jev_definition_modes: str = Field(
+        default="", validation_alias=AliasChoices("JEV_DEFINITION_MODES")
+    )
     # The task-level transient credential: a personal access token pasted for one import task,
     # held in the service process, destroyed before indexing starts.
     #
@@ -153,6 +171,41 @@ class Settings(BaseSettings):
     @property
     def admin_user_id_set(self) -> frozenset[str]:
         return frozenset(item.strip() for item in self.admin_user_ids.split(",") if item.strip())
+
+    @property
+    def jev_definition_mode_map(self) -> dict[str, str]:
+        """The per-definition modes to hand `JevGateway`, validated against the catalogue.
+
+        Refuses rather than ignores: an unknown definition key is a typo that would silently leave
+        the definition in `shadow`, and an unknown mode is a misspelling of `on` — both look like
+        "the
+        promotion had no effect" once the deployment is running, which is the hardest kind of
+        mistake to notice from the outside.
+        """
+        raw = (self.jev_definition_modes or "").strip()
+        if not raw:
+            return {}
+        from app.jev.catalog import load_catalog  # local: config import stays cheap
+        from app.jev.gateway import MODES
+
+        known = set(load_catalog().definitions)
+        modes: dict[str, str] = {}
+        for pair in raw.split(","):
+            item = pair.strip()
+            if not item:
+                continue
+            key, separator, mode = item.partition("=")
+            key, mode = key.strip(), mode.strip().lower()
+            if not separator or not key or not mode:
+                raise ValueError(f"JEV_DEFINITION_MODES entries must be key=mode, got {item!r}")
+            if key not in known:
+                raise ValueError(f"JEV_DEFINITION_MODES names an unknown definition: {key!r}")
+            if mode not in MODES:
+                raise ValueError(
+                    f"JEV_DEFINITION_MODES mode {mode!r} for {key!r} is not one of {sorted(MODES)}"
+                )
+            modes[key] = mode
+        return modes
 
     @property
     def canvas_task_credential_user_set(self) -> frozenset[str]:
