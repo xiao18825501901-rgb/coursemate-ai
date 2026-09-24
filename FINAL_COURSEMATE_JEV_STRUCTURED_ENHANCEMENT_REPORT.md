@@ -9,10 +9,10 @@
 > body measured, what round 82 re-checked, and what is true now. The round-82 column is kept because it
 > shows the drift rather than hiding it.
 >
-> | Figure | Body (as measured then) | Round 82 | **Now (round 94)** |
+> | Figure | Body (as measured then) | Round 82 | **Now (round 96)** |
 > |---|---|---|---|
 > | V3 schema | 30 | 34 | **35** — 029 proposal-only relations, 030 durable feedback queue, 033 the local Canvas bridge, 034 the shared OAuth state store, 035 the task credential. `LATEST_V3_SCHEMA_VERSION = 35`, 29 migration files |
-> | Backend gate | 1293 passed on `169bd57` | 1614 passed / 3 skipped on `8d43dc6` | **1721 passed / 2 skipped / 0 failed**, 2111.51 s (35:11), exit 0 on `897cc15` (`work/current-change/full_run_897cc15.log`). The two skips are environmental: a symlink needs a privilege this account lacks, and POSIX permission bits are not the Windows mechanism |
+> | Backend gate | 1293 passed on `169bd57` | 1614 passed / 3 skipped on `8d43dc6` | **1722 passed / 2 skipped / 0 failed**, 1834.22 s (30:34), exit 0 on `44b5b90` (`work/current-change/full_run_44b5b90.log`); the round-95 gate on `9af3242` was the same 1722 in 1907.88 s. The two skips are environmental: a symlink needs a privilege this account lacks, and POSIX permission bits are not the Windows mechanism |
 > | Web unit tests | 73 (19 files) | 96 (22 files) | **107 (23 files)**, `tsc -b` exit 0, production build + PAT scan exit 0 (`no token field, notice present`) |
 > | Browser journeys | 46 across five suites, `ui-refresh` 19 | 49 spec slots; only two suites re-run | **60 journey slots across all five suites, all green on `897cc15`**: `ui-refresh` 23, `coursemate` 4, `v3-learning` 3, `jev-structured` 11 passed / 5 skipped (the five state their live precondition), `codex-audit` 14. The `jev-structured` suite was run **three times in a row** because a fix in it targeted an intermittent condition |
 > | Agent service | — | — | **92 tests (12 files)**, `tsc --noEmit` exit 0, build exit 0 |
@@ -28,6 +28,15 @@
 > `CANVAS_OAUTH_LIVE` remains `WAITING_INSTITUTION`; production deployment and acceptance remain
 > `BLOCKED` on the owner's approvals, one real login and the Jev USD figure. Nothing in this table
 > promotes a definition or claims a teaching-quality improvement.
+>
+> **Round 96 (2026-09-24) added one more thing worth knowing before reading the table:** the promotion
+> gate is now **pre-registered** in `docs/jev-structured/PROMOTION_DECISION_PROTOCOL.md` — decisive
+> metric per candidate, zero tolerance on the safety metrics, one look at the test split — and it
+> records that **no definition has the 20 labelled calibration samples its own floor requires**, so its
+> honest output on today's data is `INSUFFICIENT_EVIDENCE` rather than a promotion. The live DeepSeek
+> spend across the canary runs and the ablation baselines is **USD 0.0311739 over 269 calls**
+> (`artifacts/jev-deepseek/live-model-spend-ledger.json`), not the canary's own USD 0.0079908 that
+> earlier versions of several documents quoted as the total.
 >
 > **Four module-level defects were found and fixed after the body was written**, each of which had made
 > a wired module inert, and each is recorded in `DSH_JEV_DEEPSEEK_EXECUTION_STATE.md` with its

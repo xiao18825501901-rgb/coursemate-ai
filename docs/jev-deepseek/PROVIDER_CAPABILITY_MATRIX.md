@@ -30,8 +30,15 @@ Retired aliases `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` route to
 ## Evidence levels
 
 - **OFFLINE_CONTRACT** — read and pinned from the official reference pages above.
-- **LIVE_VERIFIED** — proven against the real API. *None yet: no credentials.*
-- **NOT_RUN** — requires a real DeepSeek credential / authorized budget.
+- **LIVE_VERIFIED (updated 2026-09-24, round 96)** — proven against the real API. The credential
+  arrived, and **ten roles are now live-verified** on `deepseek-flash` at `https://api.deepseek.com`
+  (8,728 input + 4,477 output tokens, USD 0.0079908, every `observed_model` matching the pinned alias):
+  `work/current-change/deepseek-live-evidence-r81e.json`, per-item verdicts in
+  `DEEPSEEK_LIVE_ACCEPTANCE.md` §2. What that does **not** cover: pedagogical quality (the artifact
+  says `manual_review_status: REQUIRED`), streaming (the canary pins `stream=False`), and tool replay
+  (no tool role in the plan).
+- **NOT_RUN** — still true for streaming, tool replay, and every production-host call; the original
+  reason given here ("no credentials") no longer applies, the statuses that remain do.
 
 ## Role → protocol → model (explicit, no fallback)
 

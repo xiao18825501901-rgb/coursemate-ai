@@ -399,6 +399,14 @@ this list is the live run and the budget; the *data* blocker is cleared.
    The remaining thin spot is population size (`entity_missed_alias` divides by 1), not missing labels.
 5. Only then may a definition leave `shadow` — and the promotion is per definition, with the
    non-inferiority evidence recorded here. Coverage and assessment stay advisory even when enabled.
+6. **Round 96: step 5's arithmetic is pre-registered** in
+   `docs/jev-structured/PROMOTION_DECISION_PROTOCOL.md` — decisive metric per candidate, the contrast
+   that measures it, a minimum denominator of 20 for a metric to be decisive, zero tolerance on the
+   safety metrics, one look at the test split, and four named outcomes. Its first honest reading is
+   already on the record: **no definition reaches that floor today** (the largest calibration count is
+   `retrieval.support.v1`'s 10; the live citation denominator was 6 and `key_fact_retention`'s was 2),
+   so the protocol returns `INSUFFICIENT_EVIDENCE` rather than a promotion. Raising the floor after
+   seeing a favourable number, or promoting on 2–6 cases, is what it exists to prevent.
 
 ## 8. The live A–E run, measured 2026-09-24 (calibration split only)
 

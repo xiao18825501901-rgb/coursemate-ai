@@ -60,16 +60,17 @@ version of this card is **withdrawn** — no Laya resource was ever created
 | Budget request | **One bounded batch, requested now, with the ceiling stated in advance** (see the consolidated plan below). Hard ceilings: **≤ 1,500 Jev decisions**, **≤ 5.0M input+output tokens**, and the USD ceiling you confirm. Failure/timeout attempts count toward it; there is no automatic retry |
 | Cost evidence I will produce before spending | the planned call count, per-definition input-token ceilings, the official price applied, and the combined ceiling (Jev + DeepSeek) — printed **before any call**, as `scripts/run_jev_ablation.py --allow-billable --max-cost …` requires |
 | Data scope confirmation | Jev receives only the fragments one legal decision needs (course fragment + candidates + criteria) after identity/course/file authorization filtering, and never a full `.env`, Clerk secret, DeepSeek key, other users' private data or unauthorized course text. Please confirm you accept sending course fragments to TypeSafe and whether region/retention restrictions apply |
-| One decision that is yours | the Jev arms/definitions that may leave `shadow` for `on`/`advisory`. My default: promote `retrieval.support.v1` plus **one** of context/intent/pedagogy once the calibration gate passes, and keep coverage/assessment advisory — never authoritative |
+| One decision that is yours | the Jev arms/definitions that may leave `shadow` for `on`/`advisory`. My default: promote `retrieval.support.v1` plus **one** of context/intent/pedagogy once the calibration gate passes, and keep coverage/assessment advisory — never authoritative. **The rule that will decide it is now pre-registered in `docs/jev-structured/PROMOTION_DECISION_PROTOCOL.md`** (written before the runs it judges): decisive metric per candidate, zero tolerance on the safety metrics, one look at the test split — and it already records that **no definition has the 20 calibration samples its own floor requires**, so today's honest answer from that protocol would be `INSUFFICIENT_EVIDENCE`, not a promotion |
 
-## 2. DeepSeek API key (blocks `DEEPSEEK_LIVE_VALIDATION`)
+## 2. DeepSeek API key — **you already supplied it; what remains is the production placement**
 
 | Item | Value |
 |---|---|
-| What | the API key for the current DeepSeek platform account |
-| Where | `/etc/coursemate/rag.env` and `/etc/coursemate/agent.env` on `47.114.34.175`, by you, in the protected env file — not in chat, Git or any report |
-| Also confirm | the model alias to pin (`deepseek-flash` per the verified contract) |
-| Budget | the cumulative test/annotation cap for this round — see the consolidated ceiling below. I will preflight the exact call plan and refuse to exceed it |
+| Status | **Supplied and in use locally.** The key you provided was parsed out of the Word document, installed into the protected local store `C:\Users\Hp\.coursemate\rag.env` (ACL one principal, never printed, never in Git), and it is what the ten live canary roles and the ablation baselines ran on — `docs/coursejesus/MODEL_SECRET_IMPORT_AND_LIVE_RESULTS.md` |
+| What is still needed | the **same key placed on the production host** at release time: `/etc/coursemate/rag.env` and `/etc/coursemate/agent.env` on `47.114.34.175`, by you, in the protected env file — not in chat, Git or any report. Production currently answers with Qwen, and this placement is what carries the switch |
+| Also confirm | the model alias to pin (`deepseek-flash` per the verified contract and the canary's `observed_model`) |
+| Budget | unchanged and still yours to set — see §1b; the measured spend so far is **USD 0.0311739** across 269 live calls (`artifacts/jev-deepseek/live-model-spend-ledger.json`) |
+| Review I cannot do for you | the ten live answers are recorded with `manual_review_status: REQUIRED`; "completed" means the provider answered within budget, not that the teaching output is good. Reading the archived `EXERCISE_V2` / `ASSESSMENT_REFERENCE` payloads and accepting or rejecting them is a human step |
 
 ## 1b. Consolidated live-gate budget (one ask, not one per call) — **re-measured 2026-09-24**
 
@@ -129,7 +130,10 @@ is local-and-ready: the harness runs, the six arms read the right populations, a
 run**: 315 + 93 = **408**, which crosses the ≤300 ceiling stated above (and I have already gone over
 that ceiling once, see the note in the table). The request is therefore **≤ 450 decisions** in total,
 which covers the ablation with 42 to spare; the alternative is to skip the ablation and say so in the
-final report. Until that decision arrives it stays recorded as NOT_RUN.
+final report. Until that decision arrives it stays recorded as NOT_RUN. **One operational detail for
+whoever runs it:** the CLI's live preflight refuses unless `DEEPSEEK_API_KEY` is *also* set in the
+environment, even though this run makes no DeepSeek call — so both keys must be present, and only the
+Jev decisions are billed.
 
 **The data blocker for §14 is cleared as of round 95; the budget is now the only one.** The promotion
 the task lists first is `retrieval.support.v1`, and until this round it could not be fitted at all: all

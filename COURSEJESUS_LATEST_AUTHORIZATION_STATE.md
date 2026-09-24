@@ -89,6 +89,16 @@ Git, never in the frontend. This round's necessary calls ran under
 anywhere. Live result: **10/10 roles completed**, USD 0.0079908 against a USD 0.0620016 ceiling.
 `docs/coursejesus/MODEL_SECRET_IMPORT_AND_LIVE_RESULTS.md`.
 
+**Round 96 — the figure above is the canary's own, not the total.** The live ablation baselines made
+**248 further live calls** (including the 162-call unmemoised run, which was billed even though the
+harness later memoised it), so the whole live DeepSeek spend is **USD 0.0311739 across 269 calls**
+(75,121 in + 7,198 out): USD 0.0093108 recorded per call by the five canary runs plus USD 0.0218631
+computed from the baselines' recorded tokens at the owner-supplied prices, labelled as computed.
+Reconstruct with `work/current-change/live_spend_ledger.py` →
+`artifacts/jev-deepseek/live-model-spend-ledger.json`. Status is now
+`LIVE_CALLS_COMPLETED_MANUAL_REVIEW_REQUIRED`: the provider integration is exercised, the ten answers
+await a human verdict, and streaming and tool replay have no live evidence (`DEEPSEEK_LIVE_ACCEPTANCE.md` §2).
+
 ### 1.6 Jev live validation — `JEV_LIVE_AND_EFFECT = PARTIAL`
 
 `typesafe-sdk==0.7.0` was installed and three real decisions were run through the real gateway:

@@ -92,6 +92,14 @@ influence behaviour only with an acceptable error rate; coverage and assessment 
 when enabled — the deterministic backend keeps the final word. A definition that does not clear the
 gate stays `shadow`, and the final report must say so rather than lower the bar.
 
+**The gate is now written out as arithmetic, before the runs it will judge:**
+`PROMOTION_DECISION_PROTOCOL.md` (pre-registered 2026-09-24, round 96) fixes the decisive metric per
+candidate definition, the contrast that measures it, the minimum population a metric must have to be
+decisive at all, the zero-tolerance safety metrics, the single look at the test split, and the
+`PROMOTE` / `HOLD` / `INSUFFICIENT_EVIDENCE` / `REJECT` outcomes. It also states the uncomfortable part
+now rather than later: **no definition has 20 labelled calibration samples today**, so executing it on
+the current data returns `INSUFFICIENT_EVIDENCE` for every definition, including the first candidate.
+
 ## 6. Reproducing a run
 
 ```

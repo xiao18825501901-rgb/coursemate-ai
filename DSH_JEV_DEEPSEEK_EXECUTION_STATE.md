@@ -16,11 +16,12 @@ re-initialising anything.
 | Schema after this round | RAG **28**, UI **13**, Agent **1** |
 
 > **Historical record (rounds 1–30).** The identities above are the round-30 snapshot, not the current
-> tree: HEAD is now `2fd532b`, the RAG schema is **30**, and rounds 31–42 are recorded in
-> `docs/recovery/CURRENT_BLOCKER_LEDGER.md` and `CHATGPT_REVIEW_CURRENT_STATUS_AND_BLOCKERS.md`, which
-> are the current authority (this file's stage sections describe the round they were written in). The
-> per-round sections resume at "Round 27" and end at "Round 30"; the resume instructions at the end
-> still apply.
+> tree. **Re-stated for round 96 (2026-09-24):** HEAD is `44b5b90` on this branch, the RAG schema is
+> **35**, and the current authority is the round block below (rounds 83–96) together with
+> `COURSEJESUS_EXECUTION_STATE.md`, `docs/recovery/CURRENT_BLOCKER_LEDGER.md` and
+> `CHATGPT_REVIEW_CURRENT_STATUS_AND_BLOCKERS.md`. (The earlier version of this note named HEAD
+> `2fd532b` and schema 30, which was true when rounds 31–42 were current.) This file's stage sections
+> describe the round they were written in; the per-round sections resume at "Round 27".
 
 ## Stage 0 — source reality and input validation · DONE
 
@@ -827,6 +828,99 @@ wired, and the reason the earlier decision was wrong is part of the record.
 > no definition is promoted in the committed configuration, the component ablation is still NOT_RUN
 > (93 decisions, awaiting the budget decision in `MINIMAL_OWNER_ACTION_CARD.md` §1b), and §15
 > (production) has not begun.
+
+> **Added 2026-09-24 (round 96) — three claims about whether live work had happened were false, the
+> spend figure understated the spend, and the promotion rule is now pre-registered before the runs it
+> will judge.**
+>
+> With the promotion path blocked on the owner's budget decision, this round went where the evidence
+> pointed: at the documents that state *whether live model work has happened*, and at the arithmetic of
+> the decision that is waiting. All of it is local, and no new live call was made.
+>
+> **1. `DEEPSEEK_LIVE_ACCEPTANCE.md` said `DEEPSEEK_LIVE_VALIDATION = NOT_RUN` and "No DeepSeek key
+> exists in this environment".** That was true when written (rounds 31–37) and false when read: 21 live
+> canary calls across five runs, 248 live ablation-baseline calls, and all ten production roles had
+> already been exercised against `https://api.deepseek.com`. The document's six-item "what the live run
+> must show" list is now an item-by-item verdict, and the verdicts are deliberately uneven:
+>
+> | # | Item | Verdict |
+> |---|---|---|
+> | 1 | observed model identity matches the pinned alias | **PROVEN** — ten calls, all `observed_model: deepseek-flash` |
+> | 2a | structured `exercise.v2` payload completes | **PROVEN** — full `structured_output` recorded (2,466 in / 2,622 out, 10,792 ms) |
+> | 2b | vision payload completes | **request path only** — a `detail`-attached image part, but the image is a synthetic 1×1 PNG, so it says nothing about understanding course images |
+> | 2c | text streaming completes | **NOT RUN** — both payload builders pin `stream=False` (`app/evaluation/deepseek_canary.py:406,421`) |
+> | 3 | the plan→work pair keeps the plan private | **NOT PROVEN LIVE** — `PLAN` and `WORK` are separate roles, but the canary asserts no relation between their outputs |
+> | 4 | tool replay behaves as the harness expects | **NOT RUN** — no tool role exists in the ten-call plan |
+> | 5 | the other roles answer on the pinned alias; a refusal is recorded, not retried | **PROVEN, including the failure path** — `r81`/`r81b`/`r81c` record `PLAN` as `failed` and `r81d` records `EXERCISE_V2` as `failed`, each with `status: FAILED_PROVIDER_CALL`, one call per role and no retry, the causes fixed in code rather than retried away |
+> | 6 | usage stays inside the ceiling | **PROVEN** — USD 0.0079908 actual against the recorded USD 0.0620016 ceiling |
+>
+> **2. The same file claimed the canary refuses to start without `--max-cost`.** It does not: the
+> default `--cost-policy capped` requires it, and the never-default
+> `--cost-policy owner_authorized_unlimited_for_this_workflow` — the grant the live runs actually used —
+> bypasses that requirement while still recording the conservative ceiling and the real per-call cost.
+> The distinction matters because the artifact records `approved_max_cost: null`, which without this
+> note reads like an uncapped run.
+>
+> **3. "Model spend: USD 0.0079908" was the canary's own total, presented as the cost of the live
+> work.** The ablation baselines made **248 further live calls**, including the 162-call unmemoised run
+> that was billed before the harness learned to memoise. The whole figure is now derived from the
+> evidence files by `work/current-change/live_spend_ledger.py` and written to
+> `artifacts/jev-deepseek/live-model-spend-ledger.json` (tracked, because `work/` is git-ignored):
+>
+> | | Calls | Input | Output | Cost |
+> |---|---|---|---|---|
+> | Canary runs (5, recorded per call) | 21 | 9,584 | 5,363 | **USD 0.0093108** |
+> | Ablation baselines (3, tokens recorded, cost computed) | 248 | 65,537 | 1,835 | **USD 0.0218631** |
+> | **Total** | **269** | **75,121** | **7,198** | **USD 0.0311739** |
+>
+> The ablation half is labelled an estimate because those artifacts record tokens and not cost; the
+> owner-supplied prices applied are the ones the canary evidence records (`OWNER_SUPPLIED_AT_RUN_TIME`,
+> 0.30 / 1.20 USD per million). One further run (`jev-ablation-live-abcde.json`) declares live
+> transport and records no per-call tokens: it is listed as unrecorded rather than given a number.
+> `compute-live-budget.py`, which the owner-facing card cites, had three stale numbers of its own — a
+> "162 answered calls" heading over a 43-call file, a canary-only DeepSeek total, and a Jev total of 99
+> from before rounds 90 and 92 — and now reads the ledger instead of restating it.
+>
+> **4. The promotion rule is pre-registered.** `docs/jev-structured/PROMOTION_DECISION_PROTOCOL.md`
+> fixes, *before* the runs it will judge: the decisive metric per candidate definition and the contrast
+> that measures it (B vs A, C vs B, D vs C, E vs D, plus the six module arms), a minimum published
+> denominator of **20** for a metric to be decisive at all, zero tolerance on the safety metrics
+> (`unsupported_claim_rate`, `tool_false_allow`, `entity_false_merge`, `extraction_false_acceptance`),
+> one look at the test split, and four named outcomes. Its first honest reading is already on the
+> record, because the population arithmetic is measurable today: the largest calibration count is
+> `retrieval.support.v1`'s **10**, the live citation denominator was **6**, `key_fact_retention`'s was
+> **2**, and `locator_accuracy`'s was **0** — so **no definition reaches the floor** and executing the
+> protocol on the current data returns `INSUFFICIENT_EVIDENCE` for every one of them, including the
+> task's first candidate. The cheap path to a real decision is more rule-derived labels (round 95's
+> method, at zero model cost), not more model calls; the protocol says so, and it also records that a
+> lower floor is an owner policy decision that must be dated *before* the live run rather than inferred
+> from a favourable number afterwards.
+>
+> **5. The one product-file change, and why this revision needed a gate.** The docstring of
+> `app/evaluation/jev_semantic_ablation.py` still said *"no such run has happened in this environment
+> (no Jev service, no DeepSeek key), so the report states `NOT_RUN` and no quality claim is made
+> anywhere"* — a false statement inside the module that computes the verdicts. It now records the live,
+> unfavourable result. Everything else this round is documentation: conflated `NOT_RUN` rows in
+> `DEEPSEEK_AND_JEV_RUNTIME_CONTRACTS.md`, `JEV_ABLATION_AND_PRODUCTION_ACCEPTANCE.md`, the production
+> report, the release report, the provider capability matrix and the source-baseline gap table are now
+> split per item; `docs/jev-deepseek/TEMPLATE_V2_MIGRATION.md` keeps its `NOT_RUN` but loses the stale
+> reason; and the blocker ledger's **B-02**/**B-03** rows carry the corrected claim, gap, causes and
+> spend instead of only a note saying they are superseded.
+>
+> **The gate on `44b5b90` (round 96).** One product file changed (a docstring) plus documentation, so
+> the full backend regression was re-run rather than inherited:
+>
+> | Gate | Result |
+> |---|---|
+> | Backend full regression | **1722 passed / 2 skipped / 0 failed** in 1834.22 s (30:34), exit 0 — `work/current-change/full_run_44b5b90.log`; the same two environmental skips (symlink privilege, POSIX permission bits) |
+> | ruff | **All checks passed** on the changed module (`app/evaluation/jev_semantic_ablation.py`) after two E501s introduced by the new docstring text were rewrapped rather than suppressed; `--isolated` ruff also passes on the ledger scripts |
+> | Ledger reproducibility | the ledger is regenerated by its script and differs from the committed copy **only** in `generated_at` (verified by diff) |
+> | Web / browser / agent | unchanged since `897cc15` (**107** web tests, **60** browser journey slots across five suites, **92** agent tests): no product code outside that docstring changed |
+>
+> Not claimed: no definition is promoted (still 19/19 `shadow`, pinned by
+> `tests/test_jev_catalog.py` and `test_jev_callsite_matrix.py`), no live call was made this round, no
+> threshold was invented, the ten canary answers still await a human verdict, and production remains
+> untouched and `NOT_RUN`.
 
 > **The gate on `e287a6c` (round 94).** Only a backend test file and documentation changed that
 > round, so the gate says exactly that rather than implying a full re-run:
