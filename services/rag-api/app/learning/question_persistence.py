@@ -2,7 +2,7 @@
 
 The existing Assessment question/rubric/reference tables remain the only question pool.  This
 module adds the missing provenance edge and promotes a revision to READY only when the candidate,
-current evidence, blind solve and two durable Jev receipts all describe the exact same revision.
+current evidence, blind solve and all applicable durable Jev receipts describe the same revision.
 Jev remains a signal: READY is labelled ``AI_REVIEWED``, never deterministic or institutional.
 """
 
@@ -34,6 +34,8 @@ from app.learning.question_validator import (
     QuestionSemanticSignals,
     QuestionValidationReport,
     question_semantic_input_fields,
+    question_specialized_semantic_input_fields,
+    required_specialized_semantic_dimension,
     validate_question_candidate,
 )
 from app.learning.workspaces import workspace_for
@@ -132,14 +134,21 @@ def _recomputed_report(
     supplied: QuestionValidationReport,
 ) -> QuestionValidationReport:
     signals = {signal.dimension: signal for signal in supplied.semantic_signals}
-    if set(signals) != {"AMBIGUITY", "AUTHOR_BLIND_AGREEMENT"}:
+    expected_dimensions = {"AMBIGUITY", "AUTHOR_BLIND_AGREEMENT"}
+    specialized_dimension = required_specialized_semantic_dimension(blueprint)
+    if specialized_dimension is not None:
+        expected_dimensions.add(specialized_dimension)
+    if len(signals) != len(supplied.semantic_signals) or set(signals) != expected_dimensions:
         raise QuestionPersistenceError(
             "QUESTION_VALIDATION_MISMATCH",
-            "The validation report does not contain both semantic dimensions.",
+            "The validation report does not contain the exact semantic dimensions.",
         )
     semantic = QuestionSemanticSignals(
         ambiguity=signals["AMBIGUITY"],
         answer_agreement=signals["AUTHOR_BLIND_AGREEMENT"],
+        specialized_quality=(
+            signals[specialized_dimension] if specialized_dimension is not None else None
+        ),
     )
     recomputed = validate_question_candidate(
         candidate=candidate,
@@ -231,6 +240,8 @@ def _durable_jev_receipts(
     definitions = {
         "AMBIGUITY": "question.ambiguity.v1",
         "AUTHOR_BLIND_AGREEMENT": "question.answer_agreement.v1",
+        "MCQ_DISTRACTOR_QUALITY": "question.mcq_distractor_quality.v1",
+        "RULE_VIOLATION_QUALITY": "question.rule_violation_quality.v1",
     }
     if expected_input_hashes is None:
         return False
@@ -438,12 +449,25 @@ def persist_question_candidate(
         fields=agreement_fields,
         candidate_ids=("AGREE", "DISAGREE", "AMBIGUOUS", "UNCERTAIN"),
     )
+    input_hashes = {
+        "AMBIGUITY": ambiguity_hash,
+        "AUTHOR_BLIND_AGREEMENT": agreement_hash,
+    }
+    specialized_fields = question_specialized_semantic_input_fields(
+        candidate=candidate,
+        blueprint=blueprint,
+        evidence=fresh_evidence,
+    )
+    if specialized_fields is not None:
+        dimension, definition_key, fields, candidates = specialized_fields
+        input_hashes[dimension] = semantic_decisions.bounded_choice_input_hash(
+            definition_key,
+            fields=fields,
+            candidate_ids=candidates,
+        )
     expected_input_hashes = (
-        {
-            "AMBIGUITY": ambiguity_hash,
-            "AUTHOR_BLIND_AGREEMENT": agreement_hash,
-        }
-        if ambiguity_hash is not None and agreement_hash is not None
+        {dimension: value for dimension, value in input_hashes.items() if value is not None}
+        if all(value is not None for value in input_hashes.values())
         else None
     )
     author_current = candidate.provider_run.input_hash == structured_input_hash(

@@ -154,6 +154,13 @@ def test_five_slots_run_the_question_engine_then_freeze_one_assessment(
                 (first[0]["question_revision_id"],),
             ).fetchone()["answer_json"]
         )
+        mcq_validation_report = json.loads(
+            connection.execute(
+                "SELECT validation_report_json FROM question_engine_provenance "
+                "WHERE question_revision_id=?",
+                (first[0]["question_revision_id"],),
+            ).fetchone()["validation_report_json"]
+        )
 
     assert provenance_count == 5
     assert session["status"] == "IN_PROGRESS"
@@ -179,6 +186,12 @@ def test_five_slots_run_the_question_engine_then_freeze_one_assessment(
             "source_refs": ["chunk-course"],
         }
     ]
+    assert [signal["dimension"] for signal in mcq_validation_report["semantic_signals"]] == [
+        "AMBIGUITY",
+        "AUTHOR_BLIND_AGREEMENT",
+        "MCQ_DISTRACTOR_QUALITY",
+    ]
+    assert mcq_validation_report["semantic_signals"][2]["verdict"] == "ACCEPTABLE"
     assert all(
         "distractor_rationales" not in question for question in session["questions"]
     )
@@ -251,8 +264,13 @@ def test_resume_reuses_completed_slots_after_a_bounded_provider_failure(tmp_path
     ]
 
 
+@pytest.mark.parametrize(
+    "dimension",
+    ["AMBIGUITY", "MCQ_DISTRACTOR_QUALITY"],
+)
 def test_resume_refuses_a_saved_slot_after_its_semantic_receipt_is_removed(
     tmp_path: Any,
+    dimension: str,
 ) -> None:
     database, config = database_with_objective(tmp_path)
     runtime = QuestionEngineRuntime(
@@ -278,13 +296,17 @@ def test_resume_refuses_a_saved_slot_after_its_semantic_receipt_is_removed(
     )
     with database.connect() as connection:
         provenance = connection.execute(
-            "SELECT validation_report_json FROM question_engine_provenance "
-            "WHERE workspace_id=? ORDER BY question_revision_id LIMIT 1",
-            (WORKSPACE,),
+            "SELECT provenance.validation_report_json "
+            "FROM assessment_preparation_questions AS slot "
+            "JOIN question_engine_provenance AS provenance "
+            "ON provenance.question_revision_id=slot.question_revision_id "
+            "WHERE slot.preparation_job_id=? AND slot.ordinal=1",
+            (preparation_key,),
         ).fetchone()
-        receipt_id = json.loads(provenance["validation_report_json"])["semantic_signals"][0][
-            "receipt_id"
-        ]
+        signals = json.loads(provenance["validation_report_json"])["semantic_signals"]
+        receipt_id = next(
+            signal["receipt_id"] for signal in signals if signal["dimension"] == dimension
+        )
         connection.execute("DELETE FROM jev_decision_receipts WHERE id=?", (receipt_id,))
 
     with pytest.raises(QuestionEngineRuntimeError) as raised:

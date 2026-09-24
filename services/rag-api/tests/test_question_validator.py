@@ -165,7 +165,20 @@ def signals(
     ambiguity: str = "CLEAR",
     agreement: str = "AGREE",
     used_jev: bool = True,
+    specialized_dimension: str | None = None,
+    specialized_verdict: str | None = None,
 ) -> QuestionSemanticSignals:
+    specialized = (
+        SemanticSignal(
+            dimension=specialized_dimension,
+            verdict=specialized_verdict,
+            used_jev=used_jev,
+            receipt_id="receipt-specialized" if used_jev else None,
+            path="jev" if used_jev else "fallback:shadow",
+        )
+        if specialized_dimension is not None and specialized_verdict is not None
+        else None
+    )
     return QuestionSemanticSignals(
         ambiguity=SemanticSignal(
             dimension="AMBIGUITY",
@@ -181,6 +194,7 @@ def signals(
             receipt_id="receipt-agreement" if used_jev else None,
             path="jev" if used_jev else "fallback:shadow",
         ),
+        specialized_quality=specialized,
     )
 
 
@@ -359,7 +373,23 @@ def test_mcq_distractor_mapping_is_a_validator_hard_gate() -> None:
         private_solution=private_solution,
     )
 
-    accepted = validate(candidate=mcq, blueprint=mcq_blueprint)
+    accepted = validate(
+        candidate=mcq,
+        blueprint=mcq_blueprint,
+        semantic_signals=signals(
+            specialized_dimension="MCQ_DISTRACTOR_QUALITY",
+            specialized_verdict="ACCEPTABLE",
+        ),
+    )
+    missing_quality_signal = validate(candidate=mcq, blueprint=mcq_blueprint)
+    weak_quality_signal = validate(
+        candidate=mcq,
+        blueprint=mcq_blueprint,
+        semantic_signals=signals(
+            specialized_dimension="MCQ_DISTRACTOR_QUALITY",
+            specialized_verdict="WEAK",
+        ),
+    )
     missing_mapping = validate(
         candidate=mcq.model_copy(
             update={
@@ -373,6 +403,8 @@ def test_mcq_distractor_mapping_is_a_validator_hard_gate() -> None:
 
     assert accepted.status == "VALIDATED"
     assert gate_status(accepted, "QUESTION_SHAPE") == "PASS"
+    assert missing_quality_signal.status == "NEEDS_REVIEW"
+    assert weak_quality_signal.status == "NEEDS_REVIEW"
     assert missing_mapping.status == "REJECTED"
     assert gate_status(missing_mapping, "QUESTION_SHAPE") == "FAIL"
 
@@ -424,7 +456,23 @@ def test_rule_violation_evidence_binding_is_a_validator_hard_gate() -> None:
         },
     )
 
-    accepted = validate(candidate=rule_candidate, blueprint=rule_blueprint)
+    accepted = validate(
+        candidate=rule_candidate,
+        blueprint=rule_blueprint,
+        semantic_signals=signals(
+            specialized_dimension="RULE_VIOLATION_QUALITY",
+            specialized_verdict="SUPPORTED",
+        ),
+    )
+    missing_quality_signal = validate(candidate=rule_candidate, blueprint=rule_blueprint)
+    unsupported_quality_signal = validate(
+        candidate=rule_candidate,
+        blueprint=rule_blueprint,
+        semantic_signals=signals(
+            specialized_dimension="RULE_VIOLATION_QUALITY",
+            specialized_verdict="UNSUPPORTED",
+        ),
+    )
     missing_analysis = validate(
         candidate=rule_candidate.model_copy(
             update={
@@ -454,6 +502,8 @@ def test_rule_violation_evidence_binding_is_a_validator_hard_gate() -> None:
 
     assert accepted.status == "VALIDATED"
     assert gate_status(accepted, "QUESTION_SHAPE") == "PASS"
+    assert missing_quality_signal.status == "NEEDS_REVIEW"
+    assert unsupported_quality_signal.status == "NEEDS_REVIEW"
     assert missing_analysis.status == "REJECTED"
     assert gate_status(missing_analysis, "QUESTION_SHAPE") == "FAIL"
     assert fabricated_quote.status == "REJECTED"

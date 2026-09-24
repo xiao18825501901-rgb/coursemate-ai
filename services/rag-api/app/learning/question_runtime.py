@@ -63,6 +63,7 @@ from app.learning.question_persistence import (
 )
 from app.learning.question_validator import (
     collect_question_semantic_signals,
+    required_specialized_semantic_dimension,
     validate_question_candidate,
 )
 from app.learning.workspaces import workspace_for
@@ -954,7 +955,20 @@ class QuestionEngineRuntime:
             blind_run = json.loads(str(row["blind_run_json"]))
             report = json.loads(str(row["validation_report_json"]))
             signals = report["semantic_signals"]
-            if not isinstance(signals, list) or len(signals) != 2:
+            expected_definitions = {
+                "AMBIGUITY": "question.ambiguity.v1",
+                "AUTHOR_BLIND_AGREEMENT": "question.answer_agreement.v1",
+            }
+            specialized_dimension = required_specialized_semantic_dimension(blueprint)
+            if specialized_dimension == "MCQ_DISTRACTOR_QUALITY":
+                expected_definitions[specialized_dimension] = (
+                    "question.mcq_distractor_quality.v1"
+                )
+            elif specialized_dimension == "RULE_VIOLATION_QUALITY":
+                expected_definitions[specialized_dimension] = (
+                    "question.rule_violation_quality.v1"
+                )
+            if not isinstance(signals, list) or len(signals) != len(expected_definitions):
                 raise ValueError("semantic signals are incomplete")
             dimensions = [signal["dimension"] for signal in signals]
             receipts = [signal["receipt_id"] for signal in signals]
@@ -963,14 +977,10 @@ class QuestionEngineRuntime:
                 "ASSESSMENT_SLOT_RECEIPT_INVALID",
                 "The saved assessment slot receipts could not be verified.",
             ) from error
-        expected_definitions = {
-            "AMBIGUITY": "question.ambiguity.v1",
-            "AUTHOR_BLIND_AGREEMENT": "question.answer_agreement.v1",
-        }
         if (
             set(dimensions) != set(expected_definitions)
             or not all(isinstance(receipt, str) and receipt for receipt in receipts)
-            or len(set(receipts)) != 2
+            or len(set(receipts)) != len(expected_definitions)
         ):
             raise QuestionEngineRuntimeError(
                 "ASSESSMENT_SLOT_RECEIPT_INVALID",
@@ -978,7 +988,9 @@ class QuestionEngineRuntime:
             )
         with self.database.connect() as connection:
             receipt_rows = connection.execute(
-                "SELECT * FROM jev_decision_receipts WHERE id IN (?,?)",
+                "SELECT * FROM jev_decision_receipts WHERE id IN ("
+                + ",".join("?" for _ in receipts)
+                + ")",
                 receipts,
             ).fetchall()
         receipts_by_id = {str(receipt["id"]): receipt for receipt in receipt_rows}

@@ -15,6 +15,8 @@ EXPECTED_KEYS = (
     "assessment.criterion_review.v1",
     "question.ambiguity.v1",
     "question.answer_agreement.v1",
+    "question.mcq_distractor_quality.v1",
+    "question.rule_violation_quality.v1",
     "template.match.v1",
     "exercise.prototype.v1",
     "graph.prerequisite.v1",
@@ -38,7 +40,7 @@ EXPECTED_KEYS = (
 def test_catalog_has_exactly_the_expected_definitions() -> None:
     catalog = load_catalog()
     assert catalog.keys() == EXPECTED_KEYS
-    assert len(catalog.definitions) == 21
+    assert len(catalog.definitions) == 23
 
 
 def test_catalog_primitive_split() -> None:
@@ -54,6 +56,8 @@ def test_catalog_primitive_split() -> None:
         "assessment.criterion_review.v1",
         "question.ambiguity.v1",
         "question.answer_agreement.v1",
+        "question.mcq_distractor_quality.v1",
+        "question.rule_violation_quality.v1",
         "template.match.v1",
         "exercise.prototype.v1",
         # the two structured-enhancement definitions are both Choice primitives

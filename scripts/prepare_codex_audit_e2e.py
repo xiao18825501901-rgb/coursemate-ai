@@ -154,6 +154,8 @@ def create_test_app():
         "exercise.prototype.v1": "worked_application",
         "question.ambiguity.v1": "CLEAR",
         "question.answer_agreement.v1": "AGREE",
+        "question.mcq_distractor_quality.v1": "ACCEPTABLE",
+        "question.rule_violation_quality.v1": "SUPPORTED",
     }
 
     def semantic_fixture(call):

@@ -298,6 +298,48 @@ def review_question_answer_agreement(
     )
 
 
+def review_mcq_distractor_quality(
+    service: SemanticDecisionService,
+    *,
+    question_text: str,
+    options: list[str],
+    correct_option_index: int | None,
+    distractor_rationales: list[dict[str, Any]],
+    misconception_targets: list[str],
+    allowed_rules: list[dict[str, str]],
+    scope: Any,
+) -> DecisionResult:
+    """Review private MCQ mappings as a signal, never as publication authority."""
+    return service.question_mcq_distractor_quality(
+        question_text=question_text,
+        options=options,
+        correct_option_index=correct_option_index,
+        distractor_rationales=distractor_rationales,
+        misconception_targets=misconception_targets,
+        allowed_rules=allowed_rules,
+        caller_role="question_validator",
+        cache_scope=scope,
+    )
+
+
+def review_rule_violation_quality(
+    service: SemanticDecisionService,
+    *,
+    question_text: str,
+    rule_violation_analysis: dict[str, Any] | None,
+    allowed_rules: list[dict[str, str]],
+    scope: Any,
+) -> DecisionResult:
+    """Review rule semantics as a signal; exact evidence binding remains deterministic."""
+    return service.question_rule_violation_quality(
+        question_text=question_text,
+        rule_violation_analysis=rule_violation_analysis,
+        allowed_rules=allowed_rules,
+        caller_role="question_validator",
+        cache_scope=scope,
+    )
+
+
 def match_template(
     service: SemanticDecisionService | None,
     templates: Sequence[TemplateOption],

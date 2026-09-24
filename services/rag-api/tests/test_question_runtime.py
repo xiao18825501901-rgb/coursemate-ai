@@ -45,6 +45,8 @@ def decisions(
             "exercise.prototype.v1": prototype_id,
             "question.ambiguity.v1": "CLEAR",
             "question.answer_agreement.v1": "AGREE",
+            "question.mcq_distractor_quality.v1": "ACCEPTABLE",
+            "question.rule_violation_quality.v1": "SUPPORTED",
         }[key]
         return JevResult(answers={key: JevAnswer(choice=verdict)})
 
@@ -56,6 +58,8 @@ def decisions(
                 "exercise.prototype.v1": "on",
                 "question.ambiguity.v1": "on",
                 "question.answer_agreement.v1": "on",
+                "question.mcq_distractor_quality.v1": "on",
+                "question.rule_violation_quality.v1": "on",
             },
             receipt_store=SqlReceiptStore(database),
         )
@@ -134,7 +138,8 @@ def test_runtime_rule_violation_prototype_persists_an_exact_course_rule(
     assert "rule_violation_analysis" not in result["public"]
     with database.connect() as connection:
         row = connection.execute(
-            "SELECT provenance.blueprint_json,question.answer_json "
+            "SELECT provenance.blueprint_json,provenance.validation_report_json,"
+            "question.answer_json "
             "FROM question_engine_provenance AS provenance "
             "JOIN assessment_question_revisions AS question "
             "ON question.id=provenance.question_revision_id "
@@ -142,6 +147,7 @@ def test_runtime_rule_violation_prototype_persists_an_exact_course_rule(
             (result["question_revision_id"],),
         ).fetchone()
     blueprint = json.loads(row["blueprint_json"])
+    validation_report = json.loads(row["validation_report_json"])
     answer = json.loads(row["answer_json"])
     analysis = answer["rule_violation_analysis"]
     assert blueprint["generation_policy_version"] == RULE_VIOLATION_POLICY_VERSION
@@ -150,6 +156,40 @@ def test_runtime_rule_violation_prototype_persists_an_exact_course_rule(
         "A core point has at least MinPts points in its epsilon neighbourhood."
     )
     assert analysis["proposed_statement"] in result["public"]["question_text"]
+    assert [signal["dimension"] for signal in validation_report["semantic_signals"]] == [
+        "AMBIGUITY",
+        "AUTHOR_BLIND_AGREEMENT",
+        "RULE_VIOLATION_QUALITY",
+    ]
+    assert validation_report["semantic_signals"][2]["verdict"] == "SUPPORTED"
+
+
+def test_rule_quality_shadow_signal_cannot_publish_a_question(tmp_path: Path) -> None:
+    database, config = database_with_objective(tmp_path)
+    semantic_decisions = decisions(database, prototype_id="rule_violation_analysis")
+    semantic_decisions.gateway.modes["question.rule_violation_quality.v1"] = "shadow"
+    runtime = QuestionEngineRuntime(
+        database=database,
+        provider=LearningProvider(config),
+        semantic_decisions=semantic_decisions,
+    )
+
+    with pytest.raises(QuestionEngineRuntimeError) as raised:
+        runtime.generate_one(
+            owner_user_id=OWNER,
+            workspace_id=WORKSPACE,
+            course_id=COURSE,
+            private_course_id=PRIVATE_COURSE,
+            node_id=NODE,
+            operation_id="rule-violation-shadow-quality",
+        )
+
+    assert raised.value.code == "QUESTION_NOT_READY"
+    with database.connect() as connection:
+        status = connection.execute(
+            "SELECT publication_status FROM question_engine_provenance"
+        ).fetchone()["publication_status"]
+    assert status == "NEEDS_REVIEW"
 
 
 def test_runtime_repractice_uses_a_new_family_without_changing_the_objective(

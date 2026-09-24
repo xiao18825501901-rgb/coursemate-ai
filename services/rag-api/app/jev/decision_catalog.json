@@ -287,6 +287,63 @@
       ]
     },
     {
+      "key": "question.mcq_distractor_quality.v1",
+      "primitive": "Choice",
+      "required_state": [
+        "question_text",
+        "options",
+        "correct_option_index",
+        "distractor_rationales",
+        "misconception_targets",
+        "allowed_rules"
+      ],
+      "criteria": {
+        "ACCEPTABLE": "Each incorrect option is plausible, distinct, and meaningfully represents its mapped recorded misconception",
+        "WEAK": "One or more distractors are implausible, trivial, duplicative, or poorly represent the mapped misconception",
+        "AMBIGUOUS": "The wording or options make more than one answer reasonably defensible",
+        "UNCERTAIN": "The supplied question, private mappings, and rules are insufficient to classify reliably"
+      },
+      "instructions": "Judge distractor quality only from the supplied authorized options, private mappings, recorded misconception targets and allowed course rules. This is a non-authoritative quality signal. Never change an option, invent a misconception, reveal the answer to a learner, assign marks or decide publication rights.",
+      "failure_policy": "UNCERTAIN; keep the candidate under review and never mark it READY.",
+      "cache_scope": [
+        "authorization_scope",
+        "course",
+        "workspace",
+        "material_revision",
+        "node_spec_version",
+        "question_definition_hash",
+        "input_hash",
+        "provider_model_version"
+      ]
+    },
+    {
+      "key": "question.rule_violation_quality.v1",
+      "primitive": "Choice",
+      "required_state": [
+        "question_text",
+        "rule_violation_analysis",
+        "allowed_rules"
+      ],
+      "criteria": {
+        "SUPPORTED": "The proposed statement meaningfully violates the exact cited rule and the supplied correction addresses that violation",
+        "UNSUPPORTED": "The proposed statement does not violate the cited rule or the correction is not supported by it",
+        "AMBIGUOUS": "The statement, cited rule, or correction permits materially different interpretations",
+        "UNCERTAIN": "The supplied analysis and rules are insufficient to classify reliably"
+      },
+      "instructions": "Judge only whether the private rule analysis semantically matches the exact supplied course rule. The deterministic boundary separately proves exact quotation and source scope. This is a non-authoritative quality signal: never invent a rule, rewrite the question, assign marks or decide publication rights.",
+      "failure_policy": "UNCERTAIN; keep the candidate under review and never mark it READY.",
+      "cache_scope": [
+        "authorization_scope",
+        "course",
+        "workspace",
+        "material_revision",
+        "node_spec_version",
+        "question_definition_hash",
+        "input_hash",
+        "provider_model_version"
+      ]
+    },
+    {
       "key": "template.match.v1",
       "primitive": "Choice",
       "required_state": [

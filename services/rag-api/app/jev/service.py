@@ -51,6 +51,8 @@ _STATE_BUDGETS: dict[str, int] = {
     "assessment.criterion_review.v1": 12_000,
     "question.ambiguity.v1": 14_000,
     "question.answer_agreement.v1": 14_000,
+    "question.mcq_distractor_quality.v1": 16_000,
+    "question.rule_violation_quality.v1": 16_000,
     "template.match.v1": 12_000,
     "corpus.quality.v1": 10_000,
     "context.keep_segment.v1": 8_000,
@@ -74,6 +76,17 @@ _MUST_KEEP: dict[str, tuple[str, ...]] = {
     ),
     "question.answer_agreement.v1": (
         "question_text", "author_candidate_answer", "blind_solution",
+    ),
+    "question.mcq_distractor_quality.v1": (
+        "question_text",
+        "options",
+        "correct_option_index",
+        "distractor_rationales",
+        "misconception_targets",
+        "allowed_rules",
+    ),
+    "question.rule_violation_quality.v1": (
+        "question_text", "rule_violation_analysis", "allowed_rules",
     ),
     "template.match.v1": (
         "course_title", "curriculum_samples", "materials_revision", "known_course_level",
@@ -868,6 +881,60 @@ class SemanticDecisionService:
                 "blueprint_conditions": blueprint_conditions,
             },
             candidate_ids=("AGREE", "DISAGREE", "AMBIGUOUS", "UNCERTAIN"),
+            candidate_labels=None,
+            caller_role=caller_role,
+            cache_scope=cache_scope,
+            deterministic="UNCERTAIN",
+        )
+
+    def question_mcq_distractor_quality(
+        self,
+        *,
+        question_text: str,
+        options: list[str],
+        correct_option_index: int | None,
+        distractor_rationales: list[dict[str, Any]],
+        misconception_targets: list[str],
+        allowed_rules: list[dict[str, str]],
+        caller_role: str,
+        cache_scope: CacheScope,
+    ) -> DecisionResult:
+        """MCQ distractor quality signal; deterministic structure remains authoritative."""
+        return self._choice_bounded(
+            "question.mcq_distractor_quality.v1",
+            fields={
+                "question_text": question_text,
+                "options": options,
+                "correct_option_index": correct_option_index,
+                "distractor_rationales": distractor_rationales,
+                "misconception_targets": misconception_targets,
+                "allowed_rules": allowed_rules,
+            },
+            candidate_ids=("ACCEPTABLE", "WEAK", "AMBIGUOUS", "UNCERTAIN"),
+            candidate_labels=None,
+            caller_role=caller_role,
+            cache_scope=cache_scope,
+            deterministic="UNCERTAIN",
+        )
+
+    def question_rule_violation_quality(
+        self,
+        *,
+        question_text: str,
+        rule_violation_analysis: dict[str, Any] | None,
+        allowed_rules: list[dict[str, str]],
+        caller_role: str,
+        cache_scope: CacheScope,
+    ) -> DecisionResult:
+        """Rule-violation semantic signal; exact quotation is a deterministic gate."""
+        return self._choice_bounded(
+            "question.rule_violation_quality.v1",
+            fields={
+                "question_text": question_text,
+                "rule_violation_analysis": rule_violation_analysis,
+                "allowed_rules": allowed_rules,
+            },
+            candidate_ids=("SUPPORTED", "UNSUPPORTED", "AMBIGUOUS", "UNCERTAIN"),
             candidate_labels=None,
             caller_role=caller_role,
             cache_scope=cache_scope,

@@ -1,9 +1,9 @@
 """Question Engine stage 6: hard validation gates plus non-authoritative semantic signals.
 
 No scalar quality score exists here.  Code proves identities, marks, conditions, source scope,
-question shape and the current blind-solve receipt.  TypeSafe Jev may provide two separately
-receipted semantic signals (ambiguity and author/blind agreement); a fallback or uncertain signal
-can only keep a candidate under review, never upgrade it to VALIDATED.
+question shape and the current blind-solve receipt.  TypeSafe Jev may provide two base signals plus
+one separately receipted module signal for MCQ distractors or rule-violation semantics. A fallback,
+missing or uncertain signal can only keep a candidate under review, never upgrade it to VALIDATED.
 """
 
 from __future__ import annotations
@@ -27,8 +27,17 @@ from app.learning.question_evidence import QuestionEvidencePack
 
 AmbiguityVerdict = Literal["CLEAR", "AMBIGUOUS", "UNDER_SPECIFIED", "CONTRADICTORY", "UNCERTAIN"]
 AgreementVerdict = Literal["AGREE", "DISAGREE", "AMBIGUOUS", "UNCERTAIN"]
-SemanticVerdict = AmbiguityVerdict | AgreementVerdict
-SemanticDimension = Literal["AMBIGUITY", "AUTHOR_BLIND_AGREEMENT"]
+McqDistractorVerdict = Literal["ACCEPTABLE", "WEAK", "AMBIGUOUS", "UNCERTAIN"]
+RuleViolationVerdict = Literal["SUPPORTED", "UNSUPPORTED", "AMBIGUOUS", "UNCERTAIN"]
+SemanticVerdict = (
+    AmbiguityVerdict | AgreementVerdict | McqDistractorVerdict | RuleViolationVerdict
+)
+SemanticDimension = Literal[
+    "AMBIGUITY",
+    "AUTHOR_BLIND_AGREEMENT",
+    "MCQ_DISTRACTOR_QUALITY",
+    "RULE_VIOLATION_QUALITY",
+]
 HardGateName = Literal[
     "INPUT_IDENTITY",
     "MARKS_MATCH",
@@ -48,11 +57,14 @@ class SemanticSignal(Contract):
 
     @model_validator(mode="after")
     def dimension_and_receipt_match(self) -> SemanticSignal:
-        allowed = (
-            {"CLEAR", "AMBIGUOUS", "UNDER_SPECIFIED", "CONTRADICTORY", "UNCERTAIN"}
-            if self.dimension == "AMBIGUITY"
-            else {"AGREE", "DISAGREE", "AMBIGUOUS", "UNCERTAIN"}
-        )
+        allowed = {
+            "AMBIGUITY": {
+                "CLEAR", "AMBIGUOUS", "UNDER_SPECIFIED", "CONTRADICTORY", "UNCERTAIN",
+            },
+            "AUTHOR_BLIND_AGREEMENT": {"AGREE", "DISAGREE", "AMBIGUOUS", "UNCERTAIN"},
+            "MCQ_DISTRACTOR_QUALITY": {"ACCEPTABLE", "WEAK", "AMBIGUOUS", "UNCERTAIN"},
+            "RULE_VIOLATION_QUALITY": {"SUPPORTED", "UNSUPPORTED", "AMBIGUOUS", "UNCERTAIN"},
+        }[self.dimension]
         if self.verdict not in allowed:
             raise ValueError("semantic verdict does not belong to its dimension")
         if self.used_jev and (self.receipt_id is None or self.path != "jev"):
@@ -65,6 +77,7 @@ class SemanticSignal(Contract):
 class QuestionSemanticSignals(Contract):
     ambiguity: SemanticSignal
     answer_agreement: SemanticSignal
+    specialized_quality: SemanticSignal | None = None
 
     @model_validator(mode="after")
     def dimensions_are_fixed(self) -> QuestionSemanticSignals:
@@ -72,10 +85,18 @@ class QuestionSemanticSignals(Contract):
             raise ValueError("the ambiguity slot requires an AMBIGUITY signal")
         if self.answer_agreement.dimension != "AUTHOR_BLIND_AGREEMENT":
             raise ValueError("the agreement slot requires an AUTHOR_BLIND_AGREEMENT signal")
+        if self.specialized_quality is not None and self.specialized_quality.dimension not in {
+            "MCQ_DISTRACTOR_QUALITY",
+            "RULE_VIOLATION_QUALITY",
+        }:
+            raise ValueError("the specialized slot requires a module-specific quality signal")
         return self
 
     def ordered(self) -> list[SemanticSignal]:
-        return [self.ambiguity, self.answer_agreement]
+        signals = [self.ambiguity, self.answer_agreement]
+        if self.specialized_quality is not None:
+            signals.append(self.specialized_quality)
+        return signals
 
 
 class HardGateResult(Contract):
@@ -89,7 +110,7 @@ class QuestionValidationReport(Contract):
     question_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     status: Literal["VALIDATED", "NEEDS_REVIEW", "REJECTED"]
     hard_gates: list[HardGateResult] = Field(min_length=6, max_length=6)
-    semantic_signals: list[SemanticSignal] = Field(min_length=2, max_length=2)
+    semantic_signals: list[SemanticSignal] = Field(min_length=2, max_length=3)
 
     @property
     def ready_eligible(self) -> bool:
@@ -244,6 +265,62 @@ def question_semantic_input_fields(
     )
 
 
+def required_specialized_semantic_dimension(
+    blueprint: QuestionBlueprint,
+) -> Literal["MCQ_DISTRACTOR_QUALITY", "RULE_VIOLATION_QUALITY"] | None:
+    if blueprint.question_type == "MCQ_SINGLE":
+        return "MCQ_DISTRACTOR_QUALITY"
+    if blueprint.generation_policy_version == RULE_VIOLATION_POLICY_VERSION:
+        return "RULE_VIOLATION_QUALITY"
+    return None
+
+
+def question_specialized_semantic_input_fields(
+    *,
+    candidate: AuthoredQuestionCandidate,
+    blueprint: QuestionBlueprint,
+    evidence: QuestionEvidencePack,
+) -> tuple[SemanticDimension, str, dict[str, Any], tuple[str, ...]] | None:
+    """Return the exact private state for the applicable module signal, if any."""
+    allowed_rules = [
+        {"evidence_id": fragment.evidence_id, "content": fragment.content}
+        for fragment in evidence.fragments
+    ]
+    dimension = required_specialized_semantic_dimension(blueprint)
+    if dimension == "MCQ_DISTRACTOR_QUALITY":
+        return (
+            dimension,
+            "question.mcq_distractor_quality.v1",
+            {
+                "question_text": candidate.public_question.question_text,
+                "options": candidate.public_question.options,
+                "correct_option_index": candidate.private_solution.correct_option_index,
+                "distractor_rationales": [
+                    item.model_dump(mode="json")
+                    for item in candidate.private_solution.distractor_rationales
+                ],
+                "misconception_targets": blueprint.misconception_targets,
+                "allowed_rules": allowed_rules,
+            },
+            ("ACCEPTABLE", "WEAK", "AMBIGUOUS", "UNCERTAIN"),
+        )
+    if dimension == "RULE_VIOLATION_QUALITY":
+        analysis = candidate.private_solution.rule_violation_analysis
+        return (
+            dimension,
+            "question.rule_violation_quality.v1",
+            {
+                "question_text": candidate.public_question.question_text,
+                "rule_violation_analysis": (
+                    analysis.model_dump(mode="json") if analysis is not None else None
+                ),
+                "allowed_rules": allowed_rules,
+            },
+            ("SUPPORTED", "UNSUPPORTED", "AMBIGUOUS", "UNCERTAIN"),
+        )
+    return None
+
+
 def collect_question_semantic_signals(
     service: SemanticDecisionService | None,
     *,
@@ -253,7 +330,8 @@ def collect_question_semantic_signals(
     blind_receipt: BlindSolveReceipt,
     scope: CacheScope,
 ) -> QuestionSemanticSignals:
-    """Collect two bounded TypeSafe signals; invalid prerequisites spend zero calls."""
+    """Collect bounded TypeSafe signals; invalid prerequisites spend zero calls."""
+    specialized_dimension = required_specialized_semantic_dimension(blueprint)
     reason: str | None = None
     if service is None:
         reason = "no_service"
@@ -265,6 +343,11 @@ def collect_question_semantic_signals(
         return QuestionSemanticSignals(
             ambiguity=_fallback_signal("AMBIGUITY", reason=reason),
             answer_agreement=_fallback_signal("AUTHOR_BLIND_AGREEMENT", reason=reason),
+            specialized_quality=(
+                _fallback_signal(specialized_dimension, reason=reason)
+                if specialized_dimension is not None
+                else None
+            ),
         )
     assert service is not None  # narrowed above; no-service returned fallback signals
 
@@ -284,9 +367,23 @@ def collect_question_semantic_signals(
         **agreement_fields,
         scope=scope,
     )
+    specialized: SemanticSignal | None = None
+    specialized_fields = question_specialized_semantic_input_fields(
+        candidate=candidate,
+        blueprint=blueprint,
+        evidence=evidence,
+    )
+    if specialized_fields is not None:
+        dimension, _, fields, _ = specialized_fields
+        if dimension == "MCQ_DISTRACTOR_QUALITY":
+            result = callsites.review_mcq_distractor_quality(service, **fields, scope=scope)
+        else:
+            result = callsites.review_rule_violation_quality(service, **fields, scope=scope)
+        specialized = _semantic_signal(dimension, result)
     return QuestionSemanticSignals(
         ambiguity=_semantic_signal("AMBIGUITY", ambiguity),
         answer_agreement=_semantic_signal("AUTHOR_BLIND_AGREEMENT", agreement),
+        specialized_quality=specialized,
     )
 
 
@@ -298,7 +395,7 @@ def validate_question_candidate(
     blind_receipt: BlindSolveReceipt,
     semantic_signals: QuestionSemanticSignals,
 ) -> QuestionValidationReport:
-    """Evaluate six independent hard gates and two independently reported semantic dimensions."""
+    """Evaluate six hard gates and the applicable independently receipted semantic dimensions."""
     identity = _input_identity_matches(candidate, blueprint, evidence)
     marks = candidate.marks == blueprint.marks
     sources = _source_scope_matches(candidate, evidence)
@@ -316,12 +413,29 @@ def validate_question_candidate(
     hard_failure = any(gate.status == "FAIL" for gate in hard_gates)
     ambiguity = semantic_signals.ambiguity
     agreement = semantic_signals.answer_agreement
-    semantic_pass = (
+    base_semantic_pass = (
         ambiguity.used_jev
         and ambiguity.verdict == "CLEAR"
         and agreement.used_jev
         and agreement.verdict == "AGREE"
     )
+    expected_specialized = required_specialized_semantic_dimension(blueprint)
+    specialized = semantic_signals.specialized_quality
+    specialized_pass = (
+        specialized is None
+        if expected_specialized is None
+        else (
+            specialized is not None
+            and specialized.dimension == expected_specialized
+            and specialized.used_jev
+            and specialized.verdict
+            == {
+                "MCQ_DISTRACTOR_QUALITY": "ACCEPTABLE",
+                "RULE_VIOLATION_QUALITY": "SUPPORTED",
+            }[expected_specialized]
+        )
+    )
+    semantic_pass = base_semantic_pass and specialized_pass
     status = "REJECTED" if hard_failure else "VALIDATED" if semantic_pass else "NEEDS_REVIEW"
     return QuestionValidationReport(
         question_revision=candidate.question_revision,
