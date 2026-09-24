@@ -42,6 +42,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
 
+from app.campus_growth import require_growth_open
 from app.errors import ApiError
 from app.learning.uploads import MEDIA_TYPES
 from app.services.ingestion import IngestionService
@@ -568,7 +569,11 @@ def ingest_course(
     duplicate is reused rather than re-ingested, and anything that cannot be parsed becomes
     `DOWNLOAD_ONLY` rather than an indexed document. The function never publishes anything: the
     material records keep their review status, and no `courses` row is touched here.
+
+    Growth is closed since the final batch was frozen (`app/campus_growth.py`), so this refuses
+    before it reads a single source file unless the operator has explicitly reopened the path.
     """
+    require_growth_open("ingest campus material from the local source roots")
     report = CourseIngestionReport(
         course_id=course_plan.course_id, target_course_id=target_course_id
     )

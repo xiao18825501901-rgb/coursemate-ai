@@ -30,8 +30,21 @@ import hashlib
 import json
 import pathlib
 import re
+import sys
 from collections.abc import Callable, Iterable, Iterator
 from typing import Any
+
+# The growth guard lives with the service code. This script is documented to run from the
+# repository root without PYTHONPATH, so make the service package importable here rather than
+# silently depending on the caller's environment.
+_SERVICE_ROOT = pathlib.Path(__file__).resolve().parents[1] / "services" / "rag-api"
+if str(_SERVICE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SERVICE_ROOT))
+
+from app.campus_growth import (
+    CampusCatalogGrowthPaused,
+    require_growth_open,
+)
 
 MANIFEST_NAME = "_download_manifest.csv"
 HASH_CHUNK = 1024 * 1024
@@ -410,6 +423,17 @@ def main() -> int:
     parser.add_argument("--summary", type=pathlib.Path, default=None)
     parser.add_argument("--no-hash", action="store_true", help="skip SHA-256 (size only)")
     arguments = parser.parse_args()
+
+    # Discovery is the first half of "growth" and is closed since the final batch was frozen
+    # (2026-09-24). The check sits before the first walk of a source root, so a paused run does
+    # not even stat the download directories. Pure helpers (`scan_root`, `classify`, `summarise`)
+    # stay callable: the test suite drives them against temporary roots, and reporting on the
+    # frozen inventory must remain possible.
+    try:
+        require_growth_open(f"scan {', '.join(str(r) for r in arguments.root)} for new campus material")
+    except CampusCatalogGrowthPaused as paused:
+        print(str(paused), file=sys.stderr)
+        return 3
 
     def log(message: str) -> None:
         print(message, flush=True)

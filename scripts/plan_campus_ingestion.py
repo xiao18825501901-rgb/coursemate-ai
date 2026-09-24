@@ -24,6 +24,12 @@ import pathlib
 import sys
 from typing import Any
 
+# Runnable from the repository root as the campus scripts document it: the service package has to
+# be importable from here, or the first `app.*` import is a ModuleNotFoundError.
+_SERVICE_ROOT = pathlib.Path(__file__).resolve().parents[1] / "services" / "rag-api"
+if str(_SERVICE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SERVICE_ROOT))
+
 from app.campus_ingestion import (
     BLOCKED,
     DOWNLOAD_ONLY,
@@ -31,7 +37,6 @@ from app.campus_ingestion import (
     first_course_with_material,
     load_inventory,
     plan,
-    review_list_rows,
 )
 
 CREDENTIAL_KEYS = ("usageRights", "licenseNote", "sourceNotice", "publicationBasis")

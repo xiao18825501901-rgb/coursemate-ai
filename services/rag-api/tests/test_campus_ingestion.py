@@ -50,6 +50,18 @@ CITYU = "https://canvas.cityu.edu.hk"
 _STACKS: list[ExitStack] = []
 
 
+@pytest.fixture(autouse=True)
+def _growth_open_for_these_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """This module exercises the growth path on purpose.
+
+    Local campus catalog growth is closed by default since the final batch was frozen
+    (`app/campus_growth.py`, `CAMPUS_FINAL_BATCH_CLOSURE.md`), so a test that ingests campus
+    material has to say so explicitly. The pause itself is pinned in
+    `tests/test_campus_growth_pause.py`.
+    """
+    monkeypatch.setenv("CMUI_CAMPUS_CATALOG_GROWTH", "open")
+
+
 def row(**overrides) -> InventoryRow:
     values = {
         "source_root": "D:\\Canvas",

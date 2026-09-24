@@ -34,6 +34,16 @@ import plan_campus_ingestion as planner  # noqa: E402
 CITYU = "https://canvas.cityu.edu.hk"
 CITYU_DG = "https://cityu-dg.instructure.com"
 COURSE_ID = "70579"
+
+
+@pytest.fixture(autouse=True)
+def _growth_open_for_these_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """This module drives the ingestion CLI on purpose, so it reopens the growth path.
+
+    The default is closed since the final campus batch was frozen (`app/campus_growth.py`); the
+    pause and its refusal codes are pinned in `tests/test_campus_growth_pause.py`.
+    """
+    monkeypatch.setenv("CMUI_CAMPUS_CATALOG_GROWTH", "open")
 MARKDOWN = b"# Access control\n\nA capability is a transferable right to a resource.\n"
 INVENTORY_FIELDS = (
     "source_root",

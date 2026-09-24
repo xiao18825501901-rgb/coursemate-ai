@@ -109,6 +109,17 @@ class IngestionService:
         course_type = "official" if is_admin else "user"
         if self.settings.v3_enabled and payload.id.startswith("ws-"):
             raise ApiError(422, "RESERVED_COURSE_ID", "This course ID namespace is reserved.")
+        if not is_admin and not owner_user_id:
+            # A private course without an owner is not a duplicate-ID problem, but the insert
+            # failed a NOT NULL and the handler below used to report it as `COURSE_EXISTS` — a
+            # false cause, and one the caller acts on: `ui_extension/domain.py` retries
+            # `COURSE_EXISTS` three times against fresh random ids, so a missing owner would have
+            # been retried and then surfaced as a duplicate that never existed. Say what is wrong.
+            raise ApiError(
+                422,
+                "COURSE_OWNER_REQUIRED",
+                "A private course needs its owner; pass owner_user_id.",
+            )
         if (
             publication_status is not None
             and not is_admin
@@ -198,7 +209,18 @@ class IngestionService:
                     "SELECT * FROM courses WHERE id = ?", (payload.id,)
                 ).fetchone()
         except sqlite3.IntegrityError as error:
-            raise ApiError(409, "COURSE_EXISTS", "A course with this ID already exists.") from error
+            # Only a UNIQUE violation means "this ID is taken". Every other integrity failure
+            # (a missing owner, a foreign key, a CHECK) is a different problem, and reporting it
+            # as `COURSE_EXISTS` both hides the cause and triggers the caller's collision retry.
+            if "UNIQUE" in str(error).upper():
+                raise ApiError(
+                    409, "COURSE_EXISTS", "A course with this ID already exists."
+                ) from error
+            raise ApiError(
+                422,
+                "COURSE_CREATE_FAILED",
+                f"The course could not be created: {error}",
+            ) from error
         if row is None:
             raise RuntimeError("Created course could not be loaded")
         return self._course(

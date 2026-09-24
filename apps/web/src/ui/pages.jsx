@@ -353,6 +353,10 @@ export class Learn extends React.Component {
     controllers = {};
     explanationControllers = {};
     follow = {teach:true,problem:true};
+    // One bounded reconnect per run and lane, counted here so "retry until it works" cannot
+    // become an unbounded loop during an outage. Reset when a run starts and when one is
+    // reconciled as finished.
+    streamRetries = {teach:0,problem:0};
     winZ = 0;
     winCount = 0;
     componentDidUpdate(prevProps,prevState){
@@ -391,20 +395,96 @@ export class Learn extends React.Component {
         this.setState({ error: e.message });
     } }
     diag() { /* diagnostics removed after the round-93 investigation */ }
+    async reconcile(lane, cid, rid, controller = null) {
+        // Bounded, model-free reconciliation of one run against the server's canonical record.
+        // This is the answer to "the server finished and the browser did not show it": a stream
+        // can be skipped, aborted or cut, but the assistant message is already committed on the
+        // server before the terminal event, so reading the conversation is enough to show it —
+        // with **no second model call and no page reload** (a reload may find history; it is not
+        // how the first answer is supposed to become visible).
+        //
+        // It is deliberately narrow, because the round-93 investigation measured what a loose
+        // version does:
+        //   * only the run's own conversation is read, and only while the pane still shows it,
+        //     so a late answer cannot overwrite a conversation the learner has moved to;
+        //   * it refuses when a newer run owns the lane (`this.state.run[lane]` is a different
+        //     id), so an old watcher cannot clear a new run's state;
+        //   * guarded on controller identity when one is supplied;
+        //   * idempotent — the message list is replaced wholesale from the server, so running it
+        //     twice renders exactly the same thing;
+        //   * the composer input, the attachments and the Pair binding are never touched.
+        // Returns true only when it actually reconciled the pane.
+        if (this.unmounted)
+            return false;
+        if (controller && this.controllers[lane] !== controller)
+            return false;
+        if (this.state.conv[lane] !== cid)
+            return false;
+        const current = this.state.run[lane];
+        if (current && rid && current !== rid)
+            return false;
+        let saved = null;
+        try {
+            saved = await request('/conversations/' + cid);
+        }
+        catch {
+            return false;
+        }
+        // Re-check after the await: everything above is a claim about a moment that has passed.
+        if (this.unmounted || this.state.conv[lane] !== cid)
+            return false;
+        if (controller && this.controllers[lane] !== controller)
+            return false;
+        const stillCurrent = this.state.run[lane];
+        if (stillCurrent && rid && stillCurrent !== rid)
+            return false;
+        this.setLane('messages', lane, saved.messages);
+        let run = null;
+        if (rid) {
+            try {
+                run = await request('/runs/' + rid);
+            }
+            catch {
+                run = null;
+            }
+        }
+        const terminal = ['completed', 'cancelled', 'failed'];
+        const finished = run ? terminal.includes(run.status) : !!saved.active_run && terminal.includes(saved.active_run.status);
+        if (finished) {
+            this.streamRetries[lane] = 0;
+            this.setLane('partial', lane, '');
+            this.setLane('busy', lane, false);
+            this.setLane('run', lane, null);
+            if (run && run.status === 'completed') {
+                const coverage = run.coverage;
+                const coverageLabel = coverage && coverage.status === 'submitted' ? (coverage.covered_items && JSON.parse(coverage.covered_items).length > 0 ? ' · 已计入覆盖' : ' · 覆盖待确认') : '';
+                this.setLane('status', lane, coverageLabel.trim());
+            }
+            else if (run && !this.state.status[lane]) {
+                this.setLane('status', lane, `${run.status} · ${run.error || ''}`);
+            }
+        }
+        else {
+            this.setLane('partial', lane, run ? run.partial_text : '');
+            this.setLane('status', lane, '正在输出中');
+        }
+        return true;
+    }
     recoverOrphanedAnswer(lane, cid, controller) {
-        // The pane moved to another conversation while this run was streaming, so the
-        // answer is in `cid`'s history rather than on screen. This path used to do
-        // nothing at all: no status, no busy clear — the learner was left with their
-        // question, no answer, and a send button disabled for good (measured in round
+        // The pane moved to another conversation while this run was streaming (or while the run
+        // was still being created), so the answer is in `cid`'s history rather than on screen.
+        // This path used to do nothing at all: no status, no busy clear — the learner was left
+        // with their question, no answer, and a send button disabled for good (measured in round
         // 93: `watch:skip conv=1ed8887b cid=50b7d9b1`, a node binding landing mid-run).
-        // The run is not lost and the answer is not fabricated: say where it went, and
-        // release the composer. Guarded on the controller identity so a superseded
-        // watcher cannot clear a newer one's busy state.
-        if (this.controllers[lane] !== controller)
+        // The run is not lost and the answer is not fabricated: say where it went — naming the
+        // control the learner actually has, which is the history dialog — and release the
+        // composer. Guarded on the controller identity so a superseded watcher cannot clear a
+        // newer one's busy state.
+        if (controller && this.controllers[lane] !== controller)
             return;
         this.setLane('busy', lane, false);
         this.setLane('run', lane, null);
-        this.setLane('status', lane, '这次回答写进了另一段对话；打开知识历史可以找回。');
+        this.setLane('status', lane, '这次回答写进了另一段对话；打开「历史对话」可以找回。');
     }
     setLane(field, lane, value, callback) { if (this.unmounted)
         return; this.setState(s => ({ [field]: { ...s[field], [lane]: value } }), callback); }
@@ -523,6 +603,7 @@ export class Learn extends React.Component {
         if (!value.trim() || this.state.busy[lane])
             return;
         this.follow[lane]=true;
+        this.streamRetries[lane]=0;
         this.setLane('busy', lane, true);
         this.setLane('partial', lane, '');
         this.setLane('status', lane, '正在思考中');
@@ -536,8 +617,28 @@ export class Learn extends React.Component {
             }
             const result = await send(`/conversations/${id}/runs`, { text: value, request_id: key(), ...frozen });
             const saved = await request('/conversations/' + id);
-            if(this.unmounted || revision!==(this.pairRevision || 0)) return;
-            this.setLane('messages', lane, saved.messages);
+            if (this.unmounted)
+                return;
+            // Two different moves invalidate this answer's place on screen, and they are checked
+            // separately because they are raised by different code paths: a Pair binding or a
+            // history selection bumps `pairRevision`, while `restore()` (a layout or history
+            // restore) switches `conv` **without** bumping it. Testing only the revision is what
+            // let a reply to one conversation be written over a pane that had already moved to
+            // another.
+            if (revision !== (this.pairRevision || 0) || this.state.conv[lane] !== id) {
+                // This used to `return` silently: the run kept going on the server, nothing
+                // watched it, and `busy` stayed true — the learner saw their question, no answer
+                // and a dead composer until a reload. Reconcile the run's own conversation first;
+                // if the pane is showing something else, say where the answer went.
+                this.setLane('run', lane, result.id);
+                const reconciled = await this.reconcile(lane, id, result.id);
+                if (reconciled)
+                    await this.watch(lane, result.id, id, false);
+                else
+                    this.recoverOrphanedAnswer(lane, id, null);
+                return;
+            }
+            this.setLane('messages', lane, Array.isArray(saved.messages) ? saved.messages : this.state.messages[lane]);
             this.setLane('inputs', lane, '');
             this.setLane('attachments',lane,[]);
             this.setLane('run', lane, result.id);
@@ -565,31 +666,30 @@ export class Learn extends React.Component {
             if (type === 'status')
                 this.setLane('status', lane, seenDelta ? '正在输出中' : (data.label || '正在思考中')); if (type === 'error')
                 this.setLane('status', lane, data.message || (data.code + ' · ' + data.message)); }, controller.signal);
-            if (this.state.conv[lane] === cid && !this.unmounted) {
-                const [saved, run] = await Promise.all([request('/conversations/' + cid), request('/runs/' + rid)]);
-                this.setLane('messages', lane, saved.messages);
-                this.setLane('partial', lane, run.status === 'completed' ? '' : run.partial_text);
-                if (run.status === 'completed') {
-                    const coverage = run.coverage;
-                    const coverageLabel = coverage && coverage.status === 'submitted' ? (coverage.covered_items && JSON.parse(coverage.covered_items).length > 0 ? ' · 已计入覆盖' : ' · 覆盖待确认') : '';
-                    // The completed run is the authoritative receipt. Keep its
-                    // result visible instead of clearing the user-facing proof
-                    // before the next render; it does not alter the coverage
-                    // ledger or conflate LEARNED with an assessment result.
-                    this.setLane('status', lane, coverageLabel.trim());
-                }
-                else if (!this.state.status[lane]) {
-                    this.setLane('status', lane, `${run.status} · ${run.error || ''}`);
-                }
-                this.setLane('busy', lane, false);
-                this.setLane('run', lane, null);
-            }
-            else this.recoverOrphanedAnswer(lane, cid, controller);
+            if (this.state.conv[lane] === cid && !this.unmounted)
+                await this.reconcile(lane, cid, rid, controller);
+            else
+                this.recoverOrphanedAnswer(lane, cid, controller);
         }
         catch (e) {
             if (e.name !== 'AbortError') {
-                this.setLane('status', lane, '连接中断。历史仍在服务器，可打开历史恢复，不会自动再次调用模型。');
-                this.setLane('busy', lane, false);
+                // The stream is gone; the run is not. The server commits the assistant message
+                // before it emits the terminal event, so one bounded re-read can still show it —
+                // with no second model call. One reconnect is attempted first, and the budget is
+                // per run (`streamRetries`), because "retry until it works" is how an outage turns
+                // into an unbounded loop.
+                const attempts = this.streamRetries[lane] || 0;
+                if (attempts < 1) {
+                    this.streamRetries[lane] = attempts + 1;
+                    this.setLane('status', lane, '连接中断，正在重新连接（不会重复调用模型）…');
+                    await this.watch(lane, rid, cid, true);
+                    return;
+                }
+                const reconciled = await this.reconcile(lane, cid, rid, controller);
+                if (!reconciled) {
+                    this.setLane('status', lane, '连接中断。回答仍保存在服务器，可打开「历史对话」恢复，不会自动再次调用模型。');
+                    this.setLane('busy', lane, false);
+                }
             }
             else if (this.controllers[lane] === controller) {
                 // A superseded watcher must not leave the composer disabled. `restore`
@@ -600,7 +700,11 @@ export class Learn extends React.Component {
                 // itself completes on the server and its answer is in the history.
                 // Guarded on the controller identity so an abort that WAS superseded
                 // cannot clear the new watcher's busy state.
-                this.setLane('busy', lane, false);
+                const reconciled = await this.reconcile(lane, cid, rid, controller);
+                if (!reconciled && this.controllers[lane] === controller) {
+                    this.setLane('busy', lane, false);
+                    this.setLane('run', lane, null);
+                }
             }
         }
     }

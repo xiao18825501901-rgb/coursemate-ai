@@ -2214,9 +2214,16 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
     async def generate_exercise_run(run_id,user,course_data,pair,node,node_title,sources,estimate_audit=None):
         full=''; usages=[estimate_audit] if estimate_audit else []
         # exercise.prototype.v1: choose among the authorized source/prototype
-        # candidates already retrieved for the current node (advisory). It never
-        # sees a hidden answer and never invents an official source; the
-        # deterministic fallback keeps the existing generation unchanged.
+        # candidates already retrieved for the current node. It never sees a hidden
+        # answer and never invents an official source.
+        #
+        # HONEST STATE (2026-09-24, round 98): the decision is **recorded but not
+        # consumed** — the return value is discarded and the generation below is
+        # unchanged, so this call has no effect on the exercise a learner receives.
+        # It is kept because the receipt is the evidence a reviewer needs, and it is
+        # labelled here so nobody reads the call site as a working feature. Wiring it
+        # belongs to the Question Engine work (P1: the prototype/blueprint object does
+        # not exist yet), and until then `JEV_EXERCISE_SELECTION` stays `shadow`.
         if jev is not None:
             callsites.select_exercise_prototype(
                 jev,

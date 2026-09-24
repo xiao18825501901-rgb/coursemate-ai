@@ -248,19 +248,18 @@ function lastAnswer(page: import("@playwright/test").Page) {
 }
 
 /**
- * Assert the learner can see something in the newest answer, taking the shell's own
- * documented recovery path if the live stream did not render it.
+ * Assert the learner can see something in the newest answer.
  *
- * The condition it was written for is no longer unexplained. Round 93 measured it:
- * `restorePair` (a node binding finishing) moved the pane to the pair's conversation
- * while a run was streaming in the conversation it had been started in, and the
- * render guard abandoned the answer silently — leaving the learner with their
- * question, no answer, and a disabled composer. Both halves are fixed in the shell now
- * (`ask()` waits for an in-flight binding; an orphaned watcher says where the answer
- * went and releases the composer), and this helper keeps the assertion honest rather
- * than racing the fix: if the answer is still not on screen after fifteen seconds, a
- * reload must show it, which also proves the citations survive a fresh page load.
+ * The condition this was written for is explained and fixed in the shell (`ask()` reconciles a run
+ * whose pane moved, and a cut stream reconciles once instead of telling the learner to reload).
+ * A reload is still kept as a last resort *for the journeys that measure something else* — but it
+ * is no longer silent: every recovery is counted and printed, because "the first answer needed a
+ * page reload" is a product defect, not a test technique, and a suite that hides the rate cannot
+ * report it. First-round visibility has its own strict journey, which never reloads:
+ * `the first answer is visible without a reload`.
  */
+const reloadRecoveries: string[] = [];
+
 async function expectInNewestAnswer(
   page: import("@playwright/test").Page,
   assertion: (scope: import("@playwright/test").Locator) => Promise<unknown>,
@@ -269,10 +268,20 @@ async function expectInNewestAnswer(
     await assertion(lastAnswer(page));
     return;
   } catch {
+    reloadRecoveries.push(test.info().title);
+    console.log(`[answer-visibility] reload recovery used by: ${test.info().title}`);
     await page.reload();
     await assertion(lastAnswer(page));
   }
 }
+
+test.afterAll(() => {
+  // Reported even when it is zero: the number is the point.
+  console.log(
+    `[answer-visibility] journeys that needed a page reload: ${reloadRecoveries.length}` +
+      (reloadRecoveries.length > 0 ? ` → ${reloadRecoveries.join(" | ")}` : ""),
+  );
+});
 
 /**
  * The stable shape of the knowledge tree: node identity, title, parent and position.
@@ -997,4 +1006,36 @@ test("an explicit, authorised write is not over-blocked once its intent is estab
   const result = (body.toolResults ?? [])[0];
   expect(result?.ok, JSON.stringify(body)).toBe(true);
   expect(result?.data?.id ?? "").not.toBe("");
+});
+
+test("the first answer is visible without a reload, and the composer comes back", async ({
+  page,
+  request,
+}) => {
+  // The one assertion the rest of the suite deliberately does not make. Every other journey here
+  // reads an answer through `expectInNewestAnswer`, which is allowed a page reload as a last
+  // resort — and a reload that finds the answer proves *history persists*, not that the learner
+  // saw their first answer. This journey never reloads: if the shell loses the answer, it fails,
+  // which is the correct outcome (the loss paths are fixed in `Learn.reconcile` and this is the
+  // regression test that keeps them fixed in a real browser).
+  test.skip(PROMOTED, PROMOTION_NOTE);
+  await bindNode(page);
+
+  const run = await askTeach(page, "请用一两句话说明这个节点的核心概念，并给出依据。");
+
+  // Bounded, in-page, with no reload and no second model call: poll the rendered bubble.
+  await expect(lastAnswer(page)).toBeVisible({ timeout: 60_000 });
+  await expect(lastAnswer(page)).not.toBeEmpty({ timeout: 60_000 });
+  await expect(page.locator(".learning-pane.pane-teach .generation-status")).not.toContainText(
+    "正在",
+    { timeout: 60_000 },
+  );
+
+  // The composer must be usable again: the loss path used to leave `busy` set for good, so the
+  // learner could not even ask a follow-up question.
+  await expect(sendButton(page)).toBeVisible({ timeout: 30_000 });
+
+  // And the server really did complete the run — the screen is showing an answer that exists.
+  const row = await waitTerminal(page, request, run.id);
+  expect(row.status).toBe("completed");
 });

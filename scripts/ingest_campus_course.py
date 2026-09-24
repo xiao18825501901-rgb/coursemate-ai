@@ -32,6 +32,17 @@ import pathlib
 import sys
 from typing import Any
 
+# The docstring's usage line runs this script from the repository root with no PYTHONPATH, so the
+# service package has to be importable from here. Without it the first `app.*` import raises an
+# ImportError, which would hide the growth-pause refusal behind an unrelated traceback.
+_SERVICE_ROOT = pathlib.Path(__file__).resolve().parents[1] / "services" / "rag-api"
+if str(_SERVICE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SERVICE_ROOT))
+
+from app.campus_growth import (
+    CampusCatalogGrowthPaused,
+    require_growth_open,
+)
 from app.campus_ingestion import (
     CampusMaterialRepository,
     InventoryRow,
@@ -99,6 +110,13 @@ def row_from_plan(
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    # Growth is closed since the final batch was frozen (2026-09-24): refuse before reading the
+    # plan, the source files or the database, so a paused invocation cannot half-create a course.
+    try:
+        require_growth_open(f"ingest Canvas offering {args.course!r} from the local source roots")
+    except CampusCatalogGrowthPaused as paused:
+        print(str(paused), file=sys.stderr)
+        return 3
     if not args.plan.is_file():
         print(f"plan not found: {args.plan}", file=sys.stderr)
         return 2

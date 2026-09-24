@@ -963,9 +963,16 @@ class AssessmentService:
         """Deterministic verification level for a prepared candidate.
 
         MCQ/NUMERIC with a structurally valid answer, and SHORT_TEXT with a finite
-        accepted enumeration, enter the VALIDATED channel as DETERMINISTIC.
-        Concept/open questions with no provable external standard are marked
-        AI_REVIEWED (diagnostic) — never VALIDATED.
+        accepted enumeration, are verified as DETERMINISTIC. Concept/open questions
+        with no provable external standard are verified as AI_REVIEWED (diagnostic).
+
+        The two columns mean different things and must not be read as one
+        (migration 027): `verification_method` carries *how* the answer was
+        established — and `AI_REVIEWED` is explicitly **not** human or institutional
+        review — while `validation_status` records whether the row may be used at all.
+        An AI_REVIEWED candidate is stored as `VALIDATED` + `AI_REVIEWED` on purpose:
+        it is the diagnostic channel, and the pool still excludes `MODEL_ONLY`
+        self-assessment.
         """
         if question.question_type == "MCQ_SINGLE":
             correct = question.answer.get("correct_option")
