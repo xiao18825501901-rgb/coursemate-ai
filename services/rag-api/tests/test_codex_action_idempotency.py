@@ -5,11 +5,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from test_current_change_features import UI, auth, client, make_course, wait_terminal
+from test_current_change_features import UI, auth, client, prepare_exercise_course, wait_terminal
 
 
 def exercise_setup(client):
-    make_course(client)
+    prepare_exercise_course(client)
     pair = client.post(f'{UI}/pairs', headers=auth('token-a'), json={'course': 'cs3481'}).json()
     response = client.post(f'{UI}/courses/cs3481/exercises', headers=auth('token-a'), json={'pair_id': pair['id'], 'request_id': 'idempotency-exercise-setup'})
     assert response.status_code == 202, response.text

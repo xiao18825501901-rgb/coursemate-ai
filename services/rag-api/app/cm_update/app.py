@@ -38,6 +38,7 @@ from app.jev.capability_router import (
 )
 from app.jev.service import SemanticDecisionService, TemplateOption
 from app.learning.intent_commands import route_explicit_command
+from app.learning.question_runtime import GeneratedExercise
 
 from . import classification as classification_state
 from . import share_recovery, social, templates
@@ -2212,6 +2213,97 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         raise HTTPException(409,'请先准备课程知识树或选择有效知识点')
 
     async def generate_exercise_run(run_id,user,course_data,pair,node,node_title,sources,estimate_audit=None):
+        if domain is not None:
+            usages=[estimate_audit] if estimate_audit else []
+            try:
+                heartbeat(run_id)
+                db.execute("UPDATE cmui_runs SET status='generating',updated_at=? WHERE id=?",
+                           (now(),run_id))
+                event(run_id,'status',{'status':'generating','label':'正在按课程证据准备题目'})
+                raw=await domain.call(
+                    'knowledge.exercise.generate',
+                    user['id'],
+                    {
+                        'course':course_data['id'],
+                        'node':(node or {}).get('id') if isinstance(node,dict) else node,
+                        'operation_id':run_id,
+                        '_cancel_check':lambda: (
+                            (state:=db.one('SELECT status FROM cmui_runs WHERE id=?',(run_id,)))
+                            is None or state['status'] in TERMINAL
+                        ),
+                    },
+                    '',
+                )
+                generated=GeneratedExercise.model_validate(raw)
+                state=db.one('SELECT status FROM cmui_runs WHERE id=?',(run_id,))
+                if state and state['status'] in TERMINAL: raise asyncio.CancelledError()
+                usages.extend(generated.usage)
+                question_text=generated.public.question_text
+                steps=[step.model_dump(mode='json') for step in generated.private.steps]
+                references=[reference.model_dump(mode='json') for reference in generated.references]
+                exercise_id=uid('exercise_')
+                with db.connect(True) as c:
+                    claimed=c.execute(
+                        "UPDATE cmui_runs SET status='completed',usage=?,updated_at=? "
+                        "WHERE id=? AND status IN ('queued','planning','generating')",
+                        (json.dumps(usages,ensure_ascii=False),now(),run_id),
+                    ).rowcount
+                    if claimed!=1: raise asyncio.CancelledError()
+                    c.execute(
+                        'INSERT INTO cmui_exercises('
+                        'id,owner,course,pair,node,target_node,question,answer_steps,'
+                        'references_json,verification_status,generation_version,'
+                        'question_revision_id,run,created_at) '
+                        'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                        (
+                            exercise_id,user['id'],course_data['id'],pair['id'],
+                            (node or {}).get('id') if isinstance(node,dict) else node,
+                            node_title,question_text,json.dumps(steps,ensure_ascii=False),
+                            json.dumps(references,ensure_ascii=False),
+                            generated.verification_status,generated.generation_version,
+                            generated.question_revision_id,run_id,now(),
+                        ),
+                    )
+                    message_id=uid('message_')
+                    conv_id=pair['problem_conversation']
+                    if not conv_id:
+                        conv_id=social._lane_conversation(
+                            db,pair['id'],user['id'],course_data['id'],'problem',
+                            {'title':pair['title']},
+                        )
+                        c.execute('UPDATE cmui_pairs SET problem_conversation=? WHERE id=?',
+                                  (conv_id,pair['id']))
+                    c.execute(
+                        'INSERT INTO cmui_messages('
+                        'id,conversation,role,text,citations,run,created_at,provenance,exercise) '
+                        'VALUES (?,?,?,?,?,?,?,?,?)',
+                        (message_id,conv_id,'assistant',question_text,'[]',run_id,now(),
+                         'question-engine.v1',exercise_id),
+                    )
+                    c.execute('UPDATE cmui_pairs SET updated_at=? WHERE id=?',(now(),pair['id']))
+                    c.execute('UPDATE cmui_runs SET partial_text=? WHERE id=?',
+                              (question_text,run_id))
+                    c.execute(
+                        'INSERT INTO cmui_run_events(run,type,data) VALUES (?,?,?)',
+                        (run_id,'delta',json.dumps({'text':question_text},ensure_ascii=False)),
+                    )
+                event(run_id,'done',{
+                    'message_id':message_id,
+                    'exercise_id':exercise_id,
+                    'step_count':len(steps),
+                    'provider_mode':'question-engine',
+                    'question_revision_id':generated.question_revision_id,
+                })
+            except asyncio.CancelledError:
+                db.execute("UPDATE cmui_runs SET status='cancelled',error=CASE WHEN status IN ('queued','planning','generating') THEN 'CANCELLED' ELSE error END,updated_at=? WHERE id=? AND status NOT IN ('completed','failed')",(now(),run_id))
+                event(run_id,'error',{'code':'CANCELLED','message':'已停止'})
+            except Exception:
+                db.execute("UPDATE cmui_runs SET status='failed',error='QUESTION_ENGINE_FAILED',usage=?,updated_at=? WHERE id=? AND status NOT IN ('completed','cancelled')",(json.dumps(usages,ensure_ascii=False),now(),run_id))
+                event(run_id,'error',{'code':'QUESTION_ENGINE_FAILED','message':'题目未通过当前证据与验证门槛；不会展示未验证题目。'})
+            finally:
+                jobs.pop(run_id,None)
+            return
+
         full=''; usages=[estimate_audit] if estimate_audit else []
         # exercise.prototype.v1: choose among the authorized source/prototype
         # candidates already retrieved for the current node. It never sees a hidden
@@ -2306,8 +2398,12 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             if not receipt or receipt['payload_hash']!=digest: raise HTTPException(409,'重复请求 ID 的内容不同')
             return {'id':old['id'],'status':old['status'],'reused':True}
         rate(user,'model-runs',8)
-        if cfg.provider_mode=='disabled' and provider is None: raise HTTPException(503,'模型尚未配置')
-        if cfg.provider_mode in {'qwen','deepseek'} and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
+        if domain is not None:
+            if cfg.provider_mode!='test' and not cfg.allow_billable:
+                raise HTTPException(402,'尚未授权模型调用费用')
+        else:
+            if cfg.provider_mode=='disabled' and provider is None: raise HTTPException(503,'模型尚未配置')
+            if cfg.provider_mode in {'qwen','deepseek'} and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
         if data.pair_id:
             pair=db.one('SELECT * FROM cmui_pairs WHERE id=? AND owner=? AND course=?',(data.pair_id,user['id'],cid))
             if pair is None: raise HTTPException(404,'双栏会话不存在')
@@ -2323,11 +2419,16 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         node_title=('复习：' if node.get('review') else '')+node['title']
         sources=(await remote('context.retrieve',user,{'course':cid,'query':node_title or '课程知识点','history':[]},request)) if domain else context_for(db,user['id'],cid,node_title or '课程知识点',[])
         strength=problem_strength(user,cid)
-        budget, estimate = qwen_operation_budget(
-            'estimate_exercise', course_data, node,
-            {k:user[k] for k in ['language','timezone','bio']}, sources,
-            strength=strength,
-        )
+        if domain is not None:
+            budget, estimate = qwen_operation_budget(
+                'estimate_question_engine', strength=strength,
+            )
+        else:
+            budget, estimate = qwen_operation_budget(
+                'estimate_exercise', course_data, node,
+                {k:user[k] for k in ['language','timezone','bio']}, sources,
+                strength=strength,
+            )
         rid=uid('run_')
         conv_id=pair['problem_conversation']
         if not conv_id:

@@ -1,5 +1,5 @@
 import pytest
-from test_current_change_features import UI, auth, client, disable_local_identity, make_course, wait_terminal
+from test_current_change_features import UI, auth, client, disable_local_identity, make_course, seed_question_objective, wait_terminal
 
 
 def test_campus_restriction_covers_existing_histories_and_original_api(client):
@@ -41,6 +41,7 @@ def test_revoked_historical_owner_cannot_read_or_write_campus_content_paths(clie
                            ('msg_campus_denied_canary', legacy_id, 'assistant', canary))
         connection.execute('UPDATE conversations SET title=? WHERE id=?', (canary, legacy_id))
     assert canary in client.get(f'/api/conversations/{legacy_id}', headers=auth('token-a')).text
+    seed_question_objective(client, 'node-x', 'node x')
     pair = client.post(f'{UI}/pairs', headers=auth('token-a'), json={'course': 'cs3481'}).json()
     run = client.post(f'{UI}/courses/cs3481/exercises', headers=auth('token-a'), json={'pair_id': pair['id'], 'request_id': 'campus-exercise-setup'})
     assert run.status_code == 202, run.text

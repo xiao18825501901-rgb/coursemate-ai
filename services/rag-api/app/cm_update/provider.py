@@ -234,6 +234,39 @@ class QwenProvider:
             'max_output_tokens': self.cfg.answer_tokens,
         }])
 
+    def estimate_question_engine(self) -> OperationEstimate:
+        """Conservative preflight for author + isolated blind-solve calls.
+
+        The V3 structured provider refuses a serialized context above 60,000
+        characters.  Reserve that complete ceiling for each of the two calls,
+        plus the exact versioned instruction bodies.  This intentionally does
+        not price the older one-call UI exercise prompt: doing so would
+        underestimate the Question Engine operation that actually runs.
+        """
+
+        from app.learning.blind_solve import PROMPT_PATH as blind_prompt
+        from app.learning.question_author import PROMPT_PATH as author_prompt
+
+        bounded_context = "x" * 60_000
+        return self._estimate([
+            {
+                'name': 'question_author',
+                'messages': [
+                    {'role': 'system', 'content': author_prompt.read_text(encoding='utf-8')},
+                    {'role': 'user', 'content': bounded_context},
+                ],
+                'max_output_tokens': self.cfg.answer_tokens,
+            },
+            {
+                'name': 'question_blind_solver',
+                'messages': [
+                    {'role': 'system', 'content': blind_prompt.read_text(encoding='utf-8')},
+                    {'role': 'user', 'content': bounded_context},
+                ],
+                'max_output_tokens': self.cfg.answer_tokens,
+            },
+        ])
+
     def estimate_explanation(self, course, question_text, answer_context, step_text, profile, sources) -> OperationEstimate:
         return self._estimate([{
             'name': 'explanation',

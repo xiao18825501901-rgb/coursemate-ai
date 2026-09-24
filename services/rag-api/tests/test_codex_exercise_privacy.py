@@ -4,9 +4,9 @@ import json
 import pytest
 
 from test_current_change_features import (
-    UI, auth, client, collect_events, make_course, wait_terminal,
+    UI, auth, client, collect_events, prepare_exercise_course, wait_terminal,
 )
-from app.cm_update.provider import TestProvider as LocalProvider
+from app.cm_update.exercise_contract import ExerciseContractError, parse_exercise_output
 
 MARKER = '【标准答案】'
 SECRET = 'ANSWER_CANARY_5'
@@ -22,32 +22,29 @@ def structured_payload(question=QUESTION, secret=SECRET):
     }, ensure_ascii=False)
 
 
-def test_structured_exercise_v2_is_private_persistent_and_source_labelled(client, monkeypatch):
-    body = structured_payload()
-    async def upstream(self, *args, **kwargs):
-        for split in (body[:7], body[7:19], body[19:]):
-            yield {'kind': 'delta', 'text': split}
-        yield {'kind': 'complete', 'text': body}
-    monkeypatch.setattr(LocalProvider, 'generate_exercise', upstream)
-    make_course(client)
+def test_structured_exercise_v2_is_private_persistent_and_source_labelled(client):
+    prepare_exercise_course(client)
     pair = client.post(f'{UI}/pairs', headers=auth('token-a'), json={'course': 'cs3481'}).json()
     started = client.post(f'{UI}/courses/cs3481/exercises', headers=auth('token-a'),
                           json={'request_id': 'structured-v2-private'}).json()
     run = wait_terminal(client, started['id'])
     events = collect_events(client, started['id'])
     assert run['status'] == 'completed'
-    assert SECRET not in json.dumps(events)
-    assert SECRET not in json.dumps(run)
+    ui = next(r.app for r in client.app.routes if getattr(r, 'path', None) == '/ui-extension')
+    stored = ui.state.db.one('SELECT * FROM cmui_exercises WHERE run=?', (started['id'],))
+    private = json.loads(stored['answer_steps'])[0]['text']
+    assert private not in json.dumps(events)
+    assert private not in json.dumps(run)
     history = client.get(f"{UI}/pairs/{pair['id']}", headers=auth('token-a')).json()
     message = next(message for message in history['problem']['messages'] if message['exercise'])
-    assert message['exercise_state']['generation_version'] == 'exercise.v2'
+    assert message['exercise_state']['generation_version'] == 'exercise.v2+question-engine.v1'
     assert message['exercise_state']['source'] == 'generated'
     assert message['exercise_state']['revealed'] is False
     assert message['exercise_state']['steps'] == []
     exercise = message['exercise']
     revealed = client.post(f'{UI}/exercises/{exercise}/reveal', headers=auth('token-a'))
     assert revealed.status_code == 200
-    assert SECRET in revealed.text
+    assert revealed.json()['steps'] == json.loads(stored['answer_steps'])
 
 
 @pytest.mark.parametrize('body', [
@@ -55,69 +52,33 @@ def test_structured_exercise_v2_is_private_persistent_and_source_labelled(client
     json.dumps({'question': QUESTION, 'answer_steps': []}),
     json.dumps({'question': QUESTION, 'answer_steps': [{'title': '', 'text': SECRET}]}),
 ])
-def test_invalid_structured_exercise_v2_fails_closed(client, monkeypatch, body):
-    calls = 0
-    async def upstream(self, *args, **kwargs):
-        nonlocal calls
-        calls += 1
-        yield {'kind': 'complete', 'text': body}
-    monkeypatch.setattr(LocalProvider, 'generate_exercise', upstream)
-    make_course(client)
-    client.post(f'{UI}/pairs', headers=auth('token-a'), json={'course': 'cs3481'})
-    started = client.post(f'{UI}/courses/cs3481/exercises', headers=auth('token-a'),
-                          json={'request_id': 'invalid-v2-' + str(abs(hash(body)))}).json()
-    run = wait_terminal(client, started['id'])
-    assert run['status'] == 'failed'
-    assert calls == 1, 'invalid structured output must fail without a paid retry loop'
-    assert run['partial_text'] == ''
-    assert SECRET not in json.dumps(collect_events(client, started['id']))
+def test_invalid_structured_exercise_v2_fails_closed(body):
+    with pytest.raises(ExerciseContractError):
+        parse_exercise_output(body, set())
 
 
 @pytest.mark.parametrize('split', range(1, len(MARKER)))
-def test_split_answer_marker_never_reaches_http(client, monkeypatch, split):
-    async def upstream(self, *args, **kwargs):
-        yield {'kind': 'delta', 'text': QUESTION + '\n' + MARKER[:split]}
-        yield {'kind': 'delta', 'text': MARKER[split:] + ANSWER}
-    monkeypatch.setattr(LocalProvider, 'generate_exercise', upstream)
-    make_course(client)
-    pair = client.post(f'{UI}/pairs', headers=auth('token-a'), json={'course': 'cs3481'}).json()
-    result = client.post(f'{UI}/courses/cs3481/exercises', headers=auth('token-a'),
-                         json={'request_id': f'split-marker-{split}'} )
-    assert result.status_code == 202, result.text
-    rid = result.json()['id']
-    run = wait_terminal(client, rid)
-    events = collect_events(client, rid)
-    assert SECRET not in json.dumps(events), 'answer escaped through SSE replay'
-    assert SECRET not in run['partial_text']
-    assert run['status'] == 'completed', run
-    history = client.get(f"{UI}/pairs/{pair['id']}", headers=auth('token-a')).json()
-    assert SECRET not in json.dumps(history)
-    exercise = next(d['exercise_id'] for k, d in events if k == 'done')
-    revealed = client.post(f'{UI}/exercises/{exercise}/reveal', headers=auth('token-a'))
-    assert SECRET in revealed.text, 'answer must be saved, not discarded'
+def test_split_answer_marker_keeps_legacy_question_public_and_answer_private(split):
+    # Reconstruct every possible stream boundary, then validate that the legacy
+    # compatibility parser still separates the public question from the private
+    # answer.  The live Question Engine has a stronger typed boundary and never
+    # streams this delimiter format.
+    body = QUESTION + '\n' + MARKER[:split] + MARKER[split:] + ANSWER
+    parsed = parse_exercise_output(body, set())
+    assert parsed['question'] == QUESTION
+    assert SECRET not in parsed['question']
+    assert SECRET in json.dumps(parsed['steps'])
 
 
 @pytest.mark.parametrize('body', [QUESTION + ANSWER, QUESTION + '【标准答案' + ANSWER,
                                 QUESTION + MARKER + ANSWER + MARKER + 'extra'])
-def test_ambiguous_exercise_output_fails_closed(client, monkeypatch, body):
-    async def upstream(self, *args, **kwargs):
-        for char in body:
-            yield {'kind': 'delta', 'text': char}
-    monkeypatch.setattr(LocalProvider, 'generate_exercise', upstream)
-    make_course(client)
-    client.post(f'{UI}/pairs', headers=auth('token-a'), json={'course': 'cs3481'})
-    result = client.post(f'{UI}/courses/cs3481/exercises', headers=auth('token-a'),
-                         json={'request_id': 'malformed-marker-test'})
-    assert result.status_code == 202, result.text
-    rid = result.json()['id']
-    run = wait_terminal(client, rid)
-    assert SECRET not in json.dumps(collect_events(client, rid))
-    assert run['partial_text'] == ''
-    assert run['status'] == 'failed'
+def test_ambiguous_exercise_output_fails_closed(body):
+    with pytest.raises(ExerciseContractError):
+        parse_exercise_output(body, set())
 
 
 def test_explanation_cannot_reveal_hidden_answer(client):
-    make_course(client)
+    prepare_exercise_course(client)
     client.post(f'{UI}/pairs', headers=auth('token-a'), json={'course': 'cs3481'})
     started = client.post(f'{UI}/courses/cs3481/exercises', headers=auth('token-a'),
                           json={'request_id': 'hidden-explanation-test'}).json()
@@ -133,7 +94,7 @@ def test_explanation_cannot_reveal_hidden_answer(client):
 
 
 def test_historical_plan_event_is_sanitized_on_replay(client):
-    make_course(client)
+    prepare_exercise_course(client)
     conv = client.post(f'{UI}/conversations', headers=auth('token-a'),
                       json={'course': 'cs3481', 'lane': 'teach'}).json()
     started = client.post(f"{UI}/conversations/{conv['id']}/runs", headers=auth('token-a'),
@@ -148,7 +109,7 @@ def test_historical_plan_event_is_sanitized_on_replay(client):
 
 
 def test_old_exercise_partial_and_events_cannot_replay_answer(client):
-    make_course(client)
+    prepare_exercise_course(client)
     client.post(f'{UI}/pairs', headers=auth('token-a'), json={'course': 'cs3481'})
     started = client.post(f'{UI}/courses/cs3481/exercises', headers=auth('token-a'),
                           json={'request_id': 'legacy-exercise-stream'}).json()

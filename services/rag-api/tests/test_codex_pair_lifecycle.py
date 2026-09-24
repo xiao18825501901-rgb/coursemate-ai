@@ -7,7 +7,7 @@ from pathlib import Path
 
 from app.cm_update.db import Database, now
 
-from test_current_change_features import UI, auth, client, make_course, wait_terminal  # noqa: F401
+from test_current_change_features import UI, auth, client, make_course, seed_question_objective, wait_terminal  # noqa: F401
 
 
 def test_database_restart_keeps_existing_single_lane_bound_pair(tmp_path: Path):
@@ -124,6 +124,7 @@ def test_prebound_first_node_teaching_forces_thinking_once(client):
 
 def test_cancel_silent_explanation_persists_terminal_window_status(client, monkeypatch):
     make_course(client)
+    seed_question_objective(client, 'node-x', 'node x')
     pair = client.post(f'{UI}/pairs', headers=auth('token-a'), json={'course': 'cs3481'}).json()
     started = client.post(f'{UI}/courses/cs3481/exercises', headers=auth('token-a'),
                           json={'request_id': 'cancel-exercise-01', 'pair_id': pair['id']})

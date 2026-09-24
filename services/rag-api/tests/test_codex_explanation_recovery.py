@@ -3,11 +3,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from test_current_change_features import UI, auth, client, make_course, wait_terminal, FakeAuthVerifier, FakeEmbeddingProvider
+from test_current_change_features import UI, auth, client, prepare_exercise_course, wait_terminal, FakeAuthVerifier, FakeEmbeddingProvider
 
 
 def seed(client, run_status='generating', heartbeat='1', suffix='crashed'):
-    make_course(client)
+    prepare_exercise_course(client)
     pair = client.post(f'{UI}/pairs', headers=auth('token-a'), json={'course': 'cs3481'}).json()
     started = client.post(f'{UI}/courses/cs3481/exercises', headers=auth('token-a'), json={'pair_id': pair['id'], 'request_id': 'prepare-recovery-exercise'}).json()
     wait_terminal(client, started['id'])

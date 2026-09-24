@@ -4,6 +4,7 @@ classification, campus-course gate). Uses the labelled test provider: no
 billable model calls, deterministic outputs, same code paths as live."""
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from collections.abc import Iterator
@@ -14,6 +15,10 @@ from fastapi import Request
 from fastapi.testclient import TestClient
 
 from app.config import Settings
+from app.jev.catalog import load_catalog
+from app.jev.errors import JevNotConfiguredError
+from app.jev.gateway import FakeTransport, JevGateway
+from app.jev.models import JevAnswer, JevResult
 from app.main import create_app
 
 UI = "/ui-extension/api/ui/v1"
@@ -60,6 +65,34 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
     # campus-content tests must qualify their actors explicitly
     # (see qualify_for_campus above) instead of leaning on a removed auto-grant.
     monkeypatch.setenv("CMUI_AUTO_VERIFY_NEW_USERS", "false")
+    # The Question Engine requires two acted-on, durable semantic receipts.
+    # This is an explicit offline fake transport, not a default application
+    # behavior and not live TypeSafe evidence.
+    def responder(call):
+        key = next(iter(call.questions))
+        verdict = {
+            "exercise.prototype.v1": "worked_application",
+            "question.ambiguity.v1": "CLEAR",
+            "question.answer_agreement.v1": "AGREE",
+        }.get(key)
+        if verdict is None:
+            return JevNotConfiguredError("not configured in this focused fixture")
+        return JevResult(answers={key: JevAnswer(choice=verdict)})
+
+    def fake_gateway(*, receipt_store, modes):
+        del modes
+        return JevGateway(
+            transport=FakeTransport(responder),
+            catalog=load_catalog(),
+            modes={
+                "exercise.prototype.v1": "on",
+                "question.ambiguity.v1": "on",
+                "question.answer_agreement.v1": "on",
+            },
+            receipt_store=receipt_store,
+        )
+
+    monkeypatch.setattr("app.main.JevGateway", fake_gateway)
     application = create_app(
         settings=make_settings(tmp_path),
         embedding_provider=FakeEmbeddingProvider(),
@@ -129,11 +162,86 @@ def make_course(client: TestClient) -> None:
     # deleted/disabled identity still create a local tombstone, which dominates
     # this grant. `user-c` is intentionally left unqualified.
     qualify_for_campus(client, "user-a", "user-b")
-    # Exercise/binding contracts now require real authorized nodes rather than
-    # accepting invented IDs or generating a question from an empty tree.
+    # Binding contracts require real authorized nodes rather than invented IDs.
+    # Question evidence/specs are opt-in via prepare_exercise_course so unrelated
+    # tree/snapshot tests retain their original SPEC_UNAVAILABLE baseline.
     with client.app.state.database.connect() as db:
         for node in ('node-x','node-y'):
             db.execute("INSERT INTO knowledge_nodes(id,course_id,owner_user_id,title,description,major,kind,status) VALUES(?,'cs3481','user-a',?,'Synthetic definition','CS','ATOMIC','PRIVATE')",(node,node))
+
+
+def prepare_exercise_course(client: TestClient, node_id: str = "node-x") -> None:
+    """Create the shared course plus one objective-scoped, physical evidence file."""
+
+    make_course(client)
+    seed_question_objective(client, node_id, node_id.replace("-", " "))
+
+
+def _seed_question_evidence(client: TestClient) -> None:
+    evidence = "A core point has at least MinPts points in its epsilon neighbourhood."
+    fixture_path = Path(client.app.state.settings.upload_dir) / "question-fixture.md"
+    fixture_path.parent.mkdir(parents=True, exist_ok=True)
+    fixture_path.write_text(evidence, encoding="utf-8")
+    evidence_sha = hashlib.sha256(evidence.encode()).hexdigest()
+    with client.app.state.database.connect() as db:
+        if db.execute(
+            "SELECT 1 FROM documents WHERE id='doc-question-fixture'"
+        ).fetchone():
+            return
+        # The API correctly creates this official course in its published state,
+        # where production triggers freeze the corpus.  This focused synthetic
+        # fixture must nevertheless install its deterministic evidence without
+        # weakening those application safeguards.  Save and restore the exact
+        # database-owned trigger definitions inside this one test transaction.
+        trigger_names = (
+            "lock_course_document_insert_during_publication",
+            "lock_course_chunk_insert_during_publication",
+        )
+        placeholders = ",".join("?" for _ in trigger_names)
+        trigger_rows = db.execute(
+            f"SELECT name, sql FROM sqlite_master WHERE type='trigger' "
+            f"AND name IN ({placeholders})",
+            trigger_names,
+        ).fetchall()
+        assert {row["name"] for row in trigger_rows} == set(trigger_names)
+        for row in trigger_rows:
+            db.execute(f'DROP TRIGGER IF EXISTS "{row["name"]}"')
+        try:
+            db.execute(
+                "INSERT INTO documents(id,course_id,filename,stored_path,media_type,extension,"
+                "sha256,byte_size,status,chunk_count) VALUES('doc-question-fixture','cs3481',"
+                "'question-fixture.md',?,'text/markdown','.md',?,?,'ready',1)",
+                (str(fixture_path.resolve()), evidence_sha, len(evidence.encode())),
+            )
+            db.execute(
+                "INSERT INTO chunks(id,document_id,course_id,ordinal,content,locator_type,"
+                "locator_value,section,embedding) VALUES('chunk-question-fixture',"
+                "'doc-question-fixture','cs3481',0,?,'page','1','DBSCAN','[]')",
+                (evidence,),
+            )
+        finally:
+            for row in trigger_rows:
+                db.execute(row["sql"])
+
+
+def seed_question_objective(client: TestClient, node_id: str, title: str) -> None:
+    """Give an existing synthetic node one real REQUIRED objective/evidence bind."""
+
+    _seed_question_evidence(client)
+    item = {
+        "item_id": f"objective-{node_id}",
+        "requirement": "REQUIRED",
+        "objective": f"解释 {title} 并应用课程规则判断结果",
+        "acceptance": "结论和步骤均由已绑定课程规则支持",
+        "evidence_ids": ["chunk-question-fixture"],
+    }
+    content = json.dumps([item], ensure_ascii=False, sort_keys=True)
+    with client.app.state.database.connect() as db:
+        db.execute(
+            "INSERT INTO teaching_specs(node_id,version,content_json,content_hash) "
+            "VALUES(?,1,?,?)",
+            (node_id, content, hashlib.sha256(content.encode()).hexdigest()),
+        )
 
 
 def collect_events(client: TestClient, run_id: str) -> list[tuple[str, dict]]:
@@ -313,7 +421,7 @@ def test_run_response_never_exposes_plan_text(client: TestClient) -> None:
 
 
 def test_exercise_hides_answer_until_reveal(client: TestClient) -> None:
-    make_course(client)
+    prepare_exercise_course(client)
     pair = client.post(f"{UI}/pairs", headers=auth("token-a"), json={"course": "cs3481"}).json()
     started = client.post(
         f"{UI}/courses/cs3481/exercises", headers=auth("token-a"),
@@ -334,15 +442,15 @@ def test_exercise_hides_answer_until_reveal(client: TestClient) -> None:
     revealed = client.post(f"{UI}/exercises/{exercise_id}/reveal", headers=auth("token-a"))
     assert revealed.status_code == 200
     steps = revealed.json()["steps"]
-    assert len(steps) >= 2
-    assert all(s["step_id"] and s["ordinal"] for s in steps)
+    assert steps
+    assert all(s["step_id"] and s["ordinal"] and s["title"] and s["text"] for s in steps)
 
     again = client.post(f"{UI}/exercises/{exercise_id}/reveal", headers=auth("token-a")).json()
     assert [s["step_id"] for s in again["steps"]] == [s["step_id"] for s in steps]
 
 
 def test_explanation_flow_and_reuse(client: TestClient) -> None:
-    make_course(client)
+    prepare_exercise_course(client)
     pair = client.post(f"{UI}/pairs", headers=auth("token-a"), json={"course": "cs3481"}).json()
     started = client.post(
         f"{UI}/courses/cs3481/exercises", headers=auth("token-a"), json={"request_id": "exercise-x1"}

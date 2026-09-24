@@ -2,7 +2,7 @@ from test_current_change_features import UI, auth, client
 import json
 from app.cm_update.db import now
 from app.errors import ApiError
-from test_current_change_features import SUBJECTS, make_course
+from test_current_change_features import SUBJECTS, make_course, seed_question_objective
 from test_current_change_features import wait_terminal
 
 
@@ -239,12 +239,9 @@ def test_share_request_id_rejects_different_payload(client):
 
 def test_share_restores_exercise_answer_and_cached_explanation(client):
     make_course(client)
-    # A node without a teaching specification correctly stays SPEC_UNAVAILABLE.
-    # This case checks a usable copied contract starts without sender coverage.
-    with client.app.state.database.connect() as connection:
-        content=json.dumps([{'item_id':'snapshot-required','requirement':'REQUIRED',
-            'objective':'Explain the solution','acceptance':'Connect the steps','evidence_ids':[]}])
-        connection.execute('INSERT INTO teaching_specs VALUES(?,?,?,?)',('node-x',1,content,'a'*64))
+    # node-x is ready for generated practice; node-y deliberately remains
+    # SPEC_UNAVAILABLE so the imported snapshot preserves both states.
+    seed_question_objective(client, 'node-x', 'node x')
     pair=client.post(f'{UI}/pairs',headers=auth('token-a'),json={'course':'cs3481'}).json()
     assert client.post(f"{UI}/pairs/{pair['id']}/bind",headers=auth('token-a'),json={'node':'node-x'}).status_code==200
     started=client.post(f'{UI}/courses/cs3481/exercises',headers=auth('token-a'),

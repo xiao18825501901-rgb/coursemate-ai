@@ -1,19 +1,21 @@
-"""Cross-worker cancellation must close silent upstream generators, not just rows."""
+"""Cross-worker cancellation must stop publication, not just update run rows."""
 import asyncio
 import threading
+import time
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from test_current_change_features import UI, auth, client, make_course, wait_terminal, FakeAuthVerifier, FakeEmbeddingProvider  # noqa: F401
+from test_current_change_features import UI, auth, client, prepare_exercise_course, wait_terminal, FakeAuthVerifier, FakeEmbeddingProvider  # noqa: F401
 
 
 @pytest.mark.parametrize('stage', ['exercise', 'explanation', 'explanation-general-cancel'])
 def test_cross_worker_cancel_closes_silent_upstream(client, monkeypatch, stage):
-    make_course(client)
+    prepare_exercise_course(client)
     pair = client.post(f'{UI}/pairs', headers=auth('token-a'), json={'course': 'cs3481'}).json()
     entered = threading.Event(); closed = threading.Event()
+    release = threading.Event()
 
     async def silent(*args, **kwargs):
         try:
@@ -25,7 +27,18 @@ def test_cross_worker_cancel_closes_silent_upstream(client, monkeypatch, stage):
 
     provider = client.app.state.ui_extension_app.state.provider
     if stage == 'exercise':
-        monkeypatch.setattr(provider, 'generate_exercise', silent)
+        engine_provider = client.app.state.ui_extension_adapter.question_engine.provider
+        original_generate = engine_provider.generate
+
+        def blocked_generate(*args, **kwargs):
+            try:
+                entered.set()
+                assert release.wait(10), 'controlled provider was never released'
+                return original_generate(*args, **kwargs)
+            finally:
+                closed.set()
+
+        monkeypatch.setattr(engine_provider, 'generate', blocked_generate)
         response = client.post(f'{UI}/courses/cs3481/exercises', headers=auth('token-a'),
                                json={'pair_id': pair['id'], 'request_id': 'silent-crossworker-exercise'})
         assert response.status_code == 202, response.text
@@ -55,8 +68,23 @@ def test_cross_worker_cancel_closes_silent_upstream(client, monkeypatch, stage):
     with TestClient(sibling_app) as sibling:
         cancelled = sibling.post(cancel_path, headers=auth('token-a'))
         assert cancelled.status_code == 200, cancelled.text
+        if stage == 'exercise':
+            # A synchronous provider request is bounded by its SDK timeout. Once
+            # it returns, the Question Engine must observe the persisted cancel
+            # before the blind solve or any question publication.
+            release.set()
         assert closed.wait(4), 'terminal DB row alone is insufficient: silent upstream remained open'
         assert wait_terminal(client, run_id)['status'] == 'cancelled'
         if stage.startswith('explanation'):
             detail = client.get(f'{UI}/explanations/{explanation_id}', headers=auth('token-a')).json()
             assert detail['status'] == 'cancelled'
+        else:
+            time.sleep(0.1)
+            ui_db = client.app.state.ui_extension_app.state.db
+            assert ui_db.one(
+                'SELECT COUNT(*) AS n FROM cmui_exercises WHERE run=?', (run_id,)
+            )['n'] == 0
+            with client.app.state.database.connect() as main_db:
+                assert main_db.execute(
+                    'SELECT COUNT(*) FROM question_engine_provenance',
+                ).fetchone()[0] == 0

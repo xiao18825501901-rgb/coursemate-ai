@@ -59,6 +59,10 @@ from app.learning.models import (
 from app.learning.orchestrator import LearningOrchestrator
 from app.learning.previews import IMAGE_MEDIA_TYPES
 from app.learning.problems import ProblemRepository
+from app.learning.question_runtime import (
+    QuestionEngineRuntime,
+    QuestionEngineRuntimeError,
+)
 from app.learning.retrieval_orchestrator import (
     ScopedCandidates,
     budget_text,
@@ -216,6 +220,15 @@ class V3DomainAdapter:
         # Non-authoritative semantic-decision layer. None (the default) disables
         # Jev entirely; the deterministic path is byte-identical to before.
         self.jev = jev
+        self.question_engine = (
+            QuestionEngineRuntime(
+                database=database,
+                provider=learning.provider,
+                semantic_decisions=jev,
+            )
+            if learning is not None
+            else None
+        )
         # Course-scope entity resolution over already-authorized fused candidates.
         # Query expansion is deterministic (never reaches Jev); relation resolution
         # goes through the shared gateway and is returned, never applied.
@@ -1453,6 +1466,54 @@ class V3DomainAdapter:
                 }
         raise ApiError(404, "NODE_NOT_FOUND", "The knowledge node was not found.")
 
+    def _generate_exercise(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Run the owner-scoped Question Engine for the existing 做一题 worker.
+
+        This operation is internal to the mounted server.  Its private projection
+        never becomes an HTTP response here: ``cm_update`` stores it in the
+        private exercise row and exposes it only through the existing reveal
+        endpoint.
+        """
+
+        if self.question_engine is None:
+            raise ApiError(503, "QUESTION_ENGINE_DISABLED", "The Question Engine is disabled.")
+        course_id = str(payload["course"])
+        node_id = str(payload["node"])
+        operation_id = str(payload.get("operation_id") or "").strip()
+        cancel_check = payload.get("_cancel_check")
+        if cancel_check is not None and not callable(cancel_check):
+            raise ApiError(422, "INVALID_CANCEL_CHECK", "Invalid cancellation boundary.")
+        self._course_row(course_id, subject)
+        workspace = self._workspace_for_node(course_id, subject)
+        if self.learning is None:
+            raise ApiError(503, "V3_DISABLED", "The V3 learning engine is disabled.")
+        # Reuse the learning engine's canonical node authorization and atomic-node
+        # validation before authoring can spend money.
+        self.learning.node(workspace, node_id)
+        try:
+            return self.question_engine.generate_one(
+                owner_user_id=subject,
+                workspace_id=str(workspace["id"]),
+                course_id=course_id,
+                private_course_id=str(workspace["private_course_id"]),
+                node_id=node_id,
+                operation_id=operation_id,
+                should_cancel=cancel_check,
+            )
+        except QuestionEngineRuntimeError as error:
+            if error.code == "QUESTION_CANCELLED":
+                raise asyncio.CancelledError() from error
+            unavailable = {
+                "AUTHOR_PROVIDER_BLOCKED",
+                "AUTHOR_PROVIDER_FAILED",
+                "BLIND_SOLVER_PROVIDER_BLOCKED",
+                "BLIND_SOLVER_PROVIDER_FAILED",
+                "QUESTION_REVIEW_UNAVAILABLE",
+                "QUESTION_CANCELLATION_CHECK_FAILED",
+            }
+            status = 503 if error.code in unavailable else 409
+            raise ApiError(status, error.code, str(error)) from error
+
     # ----------------------------------------- V3 learning state (write paths)
 
     def _workspace_for_node(self, course_id: str, subject: str) -> sqlite3.Row:
@@ -1894,6 +1955,7 @@ class V3DomainAdapter:
             "attachments.prepare",
             "knowledge.tree",
             "knowledge.assessment",
+            "knowledge.exercise.generate",
             "knowledge.begin_learning",
             "knowledge.assessment.start",
             "knowledge.assessment.view",
@@ -1975,6 +2037,8 @@ class V3DomainAdapter:
             return self._knowledge_tree(subject, payload)
         if operation == "knowledge.assessment":
             return self._knowledge_assessment(subject, payload)
+        if operation == "knowledge.exercise.generate":
+            return await asyncio.to_thread(self._generate_exercise, subject, payload)
         if operation == "knowledge.begin_learning":
             return self._begin_learning(subject, payload)
         if operation == "knowledge.submit_delivery":
