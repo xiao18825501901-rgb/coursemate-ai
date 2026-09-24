@@ -679,8 +679,56 @@ wired, and the reason the earlier decision was wrong is part of the record.
 > `load()` timer restoring a pair while a run streams) has not been exercised deliberately — it is
 > narrowed, not proved impossible.
 
-> **The gate on `897cc15` (round 93), the revision with the pane fixes.** Product UI code changed, so
-> five browser suites again.
+> **Added 2026-09-24 (round 94) — the last §16 verification, and a report that had fallen three rounds
+> behind.**
+>
+> §16's tenth item ("private cache 不跨用户") was the only PARTIAL left, and the reason was the *shape*
+> of the evidence rather than its absence: the browser deployment injects a single identity, so the
+> property rested on a unit test that calls the scope function directly. That proves the function; it
+> does not prove the running service derives the scope from the authenticated caller rather than from
+> something a client could influence.
+>
+> `services/rag-api/tests/test_jev_cache_isolation_http.py` closes that gap the honest way — with two
+> authenticated subjects against the mounted product and the receipt store the cache is keyed on:
+>
+> | Assertion | What a leak would look like |
+> |---|---|
+> | every definition both subjects reach carries **two distinct `owner_scope_hash` values** | one shared hash — the same cached verdict answerable to both |
+> | at least one definition was reached by both (else the comparison is vacuous) | — |
+> | every decision is recorded with a **typed** outcome | a silent/untyped receipt |
+>
+> The first version of that third assertion demanded `outcome == "ok"` and failed: with no credential
+> the gateway records `not_configured` by design. **That was the test's error, not the product's**, and
+> it is recorded here because it is the same class of mistake this work keeps finding in its own
+> assertions.
+>
+> What the file deliberately does **not** contain is a second test for one subject's uploaded document
+> never reaching another's answer: in this shape the upload route takes a multipart `file` and the
+> campus content gate refuses it without a redeemed student verification, so such a test would either
+> skip or grant itself a qualification inside an isolation test. The content-level property is pinned
+> where it can be (shadow invariance, course access, and the two-student browser journey), and the file
+> says so rather than skipping quietly.
+>
+> **The second half of the round was documentation truth.** `FINAL_COURSEMATE_JEV_STRUCTURED_ENHANCEMENT_REPORT.md`
+> — a §18 deliverable a reviewer reads first — still opened §6 with "No live Jev or DeepSeek call was
+> made, so there is **no cost, latency or quality measurement** to report", and its header compared
+> round 35 against round 82. The header now carries a third column at round 94 (schema **35**, backend
+> **1721 passed / 0 failed**, web **107** tests, **60** browser journey slots, **315** live Jev
+> decisions, the 10-role DeepSeek canary, the live A–E ablation with its two unfavourable metrics, the
+> component ablation's pending budget, and **10/10** §16 verifications), the flatly-wrong sentences in
+> §6 and §7 are corrected **with pointers rather than overwritten**, and §8 — whose five items were all
+> done or superseded — is rewritten to the five things that actually remain.
+>
+> **The gate on `e287a6c` (round 94).** Only a backend test file and documentation changed this round,
+> so the gate says exactly that rather than implying a full re-run:
+>
+> | Gate | Result |
+> |---|---|
+> | Backend full regression | **1722 passed / 2 skipped / 0 failed** in 2133.57 s (35:33), exit 0 — `full_run_e287a6c.log`. The +1 over `897cc15` is the new isolation test. Same two environmental skips |
+> | Backend isolation test, repeated | `test_jev_cache_isolation_http.py` **passed three times in a row** (29.7 s, 17.3 s, 18.4 s) before the file was frozen — a two-subject HTTP test is exactly the kind that flakes if the fixture is wrong |
+> | ruff | **All checks passed** on the new file (two over-long lines fixed rather than suppressed) |
+> | Web / browser / agent | unchanged since `897cc15`, where they were all green (**107** web tests, **60** browser journey slots across five suites, **92** agent tests). This round touched no product code: the new file is a test, and the reports are prose |
+
 >
 > | Gate | Result |
 > |---|---|
@@ -698,7 +746,18 @@ wired, and the reason the earlier decision was wrong is part of the record.
 > (93 decisions, awaiting the budget decision in `MINIMAL_OWNER_ACTION_CARD.md` §1b), and §15
 > (production) has not begun.
 
+> **The gate on `897cc15` (round 93), the revision with the pane fixes.** Product UI code changed, so
+> five browser suites were run, not only the one that had been failing.
 >
+> | Gate | Result |
+> |---|---|
+> | Backend full regression | **1721 passed / 2 skipped / 0 failed** in 2111.51 s (35:11), exit 0 — `full_run_897cc15.log`; the same two environmental skips |
+> | Web app | **107 tests passed** (23 files), `tsc -b` exit 0, production build + PAT scan exit 0 (`no token field, notice present`) |
+> | Browser `ui-refresh` / `coursemate` / `v3-learning` | **23 / 4 / 3 passed**, all exit 0 |
+> | Browser `jev-structured` | **11 passed / 5 skipped / 0 failed**, exit 0 — and **green three times in a row** before the commit, the repetition being the point for a fix aimed at an intermittent condition |
+> | Browser `codex-audit` | **14 passed**, exit 0 |
+> | Agent service | **92 tests passed** (12 files), `tsc --noEmit` exit 0, build exit 0 |
+
 > **The gate on `adb54b7` (round 92), the revision that first included a client fix.** Five browser
 > suites, because product UI code changed.
 >
