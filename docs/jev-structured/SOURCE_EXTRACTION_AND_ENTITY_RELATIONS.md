@@ -461,5 +461,28 @@ Host wiring: one shared `SemanticDecisionService` is built in
    The DeepSeek-Vision path (`ProblemSolutionOutput.question_transcription` / `conditions`) likewise
    remains generated natural-language text with no field/value/unit schema.
 
+## Module B in the shipped product (added round 90)
+
+Modules A and B share the retrieval entry point, and until round 90 only A had a browser journey.
+Two now cover B, and both act on content built for them by
+`scripts/seed_structured_fixture.py`:
+
+| Journey | Fixture it needs | What it asserts |
+|---|---|---|
+| "a Chinese question reaches English material through an accepted alias" | one English-only page (`DBSCAN`, never `密度聚类`) plus a published concept whose accepted alias is `DBSCAN` | the page is among the run's citation cards; the run's `user_text` is the question verbatim; the chip is rendered in the teaching pane |
+| "one word in two senses is not merged into one concept, and the tree is untouched" | two pages using "kernel" in unrelated senses (SVM / operating system) | both pages are separate cards with different `document_id`, and the knowledge tree's node identity, title, parent and position are byte-identical before and after the run |
+
+The expansion itself is deterministic and costs **zero** Jev calls, which is why the first journey
+needs no credential; the second is run in both shapes (no credential, and live with a promoted
+definition) because its assertion is about what a *wrong* proposal may not do. What the journeys do
+not show is stated plainly: `entity_relations` rows are not exposed by any route, so the proposal
+store is verified by its own tests, not through the browser — no client can read it.
+
+The fixture revealed a constraint worth recording: the pages cannot go into the official `cs3481`
+corpus, because the product's own ingestion refuses it — `Course content is locked by publication
+review`. That is the guardrail working, and it is why the fixture material lives in the learner's own
+workspace corpus, where it is retrieved through the same authorized private scope the product uses.
+
+
 
 

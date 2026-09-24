@@ -256,3 +256,29 @@ default) no new environment variable is required and no call is made.
   points, but only the two flows this run endpoint implements are offered to the
   router; the remaining `handler` strings name their own endpoints and would need
   a real dispatch site before they could be selected.
+
+## Module F in the shipped product (added round 90)
+
+Module F had unit coverage (`intent-gate`, `executor-intent-gate`, `test_api_tool_intent.py`) but no
+end-to-end evidence that a *write* was refused. It now has two journeys, and they are deliberately
+run as two configurations of the same deployment because they make opposite claims about one guard:
+
+| Configuration | Journey | Assertion |
+|---|---|---|
+| `JEV_TOOL_INTENT_MODE=enforce`, `JEV_TOOL_INTENT_URL` intentionally unreachable, no credential | "a write whose intent check cannot answer is not executed" | the proposed `createTask` is refused with `CONFIRMATION_REQUIRED`; the guard's own record is `{path: "fallback:unavailable", verdict: "REQUIRE_CONFIRMATION", jevCalls: 0}`; and the task board is byte-identical before and after |
+| `enforce`, reachable endpoint, live credential, `tool.intent.v1=on`, raised timeout | "an explicit, authorised write is not over-blocked once its intent is established" | the same message creates the task (`ok: true`, a real task id) |
+
+The first journey is stated against an unreachable endpoint rather than the real one on purpose.
+Its first version pointed at the real endpoint and still got `fallback:unavailable` — not because
+the guard said no, but because the live decision took **1.35 s against the guard's 1.5 s default**.
+That would have made the journey pass or fail with the model's mood, so the configuration is now the
+claim, and the finding is recorded in `JEV_SECURITY_AND_FAILURE_MODES.md` §8a: fail-closed is
+correct, but an `enforce` deployment should raise `JEV_TOOL_INTENT_TIMEOUT_MS` (the explicit-write
+journey requires ≥5 s) or it will occasionally ask a learner to confirm what they already said
+unambiguously.
+
+Neither journey routes through the web shell: the agent's only tool surface is
+`POST /api/agent/chat`, whose body is `{message}` — a caller cannot name a tool or its arguments — so
+these are HTTP journeys against the real agent and the real RAG endpoint, not UI journeys. That is a
+property of the product, not a shortcut.
+

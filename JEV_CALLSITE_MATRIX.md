@@ -67,6 +67,32 @@ Notes that matter more than the raw counts:
    run. What changed is that the definitions are now known to answer correctly, which is the
    precondition for the advisory/on decision in §14 of the task.
 
+### Round 90 — the modules' live evidence, from a browser run rather than from a harness
+
+The table above is *definition-level*: it proves each definition answers correctly when asked
+directly. It does **not** prove a definition changes what a learner receives. Round 90 adds that
+second kind of evidence for four rows of table 2, through the shipped deployment:
+
+| Module | Live / end-to-end evidence | What it establishes |
+|---|---|---|
+| **B** `entity.relation.v1` | journey "a Chinese question reaches English material through an accepted alias": the question `密度聚类是什么？` returns a citation card for `e2e_density_clustering_en.txt`, a page that never contains the Chinese term; the run's `user_text` is the question verbatim | the deterministic half (accepted-alias expansion, zero Jev) changes what the learner can read, with the original query preserved |
+| **B** `entity.relation.v1` | journey "one word in two senses is not merged…": `kernel 是什么意思？` returns **two** cards with different `document_id`, and the knowledge tree's node identity/title/parent/position is identical before and after the run — in the live promoted shape as well as with no credential | the proposal-only boundary holds under a live model: a guess can be recorded, nothing is merged, renamed or reordered |
+| **C** `evidence.consistency.v1` | **live, `mode=on`**: the two-sided pair (`5%` and `20%` for the same two-sided test) is surfaced with `jev_conflict_with` on both cards and **both fragments kept** — 18 live decisions in mode `on`; and the deterministic half reports two chunks of one document as `VERSION_OR_TASK_DIFFERENCE` with distinct locators, unchanged by mode | a genuine contradiction reaches the learner as a conflict to be explained, never as a deletion; a difference of task is labelled as one |
+| **D** `source.supports_claim.v1` | journey "a figure no cited source states is flagged…": `材料里说默认显著性水平是 42% 吗？` flags **every** card `NOT_ADDRESSED_IN_AVAILABLE_EVIDENCE` at layer `quote` with `['42%']`, decided in code with **zero** model calls, while the control question about `5%` leaves the page that states 5% unflagged; the flagged cards are still delivered and rendered | the audit distinguishes "not supported" from "support", and an unsupported citation is annotated rather than removed |
+| **F** `tool.intent.v1` | **live, `mode=on`**: the explicit "add a cs3481 task due 2026-08-20" is executed; with the endpoint unreachable the same write is refused (`fallback:unavailable`, `REQUIRE_CONFIRMATION`, `jevCalls: 0`) and the task board is unchanged | the guard blocks an unverifiable write and does not over-block a verified one |
+
+Two defects had to be fixed before *any* of this could be observed, and both are recorded in
+`DSH_JEV_DEEPSEEK_EXECUTION_STATE.md` (round 90): until `d824a5b`, module D's layer 1 was built over
+the UI extension's own database (`no such table: document_versions` on every card, swallowed by the
+"never lose an answer" handler, so no verdict ever reached a reader), and the local `test` provider
+emitted no citation markers, so `citations` was empty in every browser run and the whole citation
+path was unreachable in acceptance. Neither was a missing helper: both were wired, and inert.
+
+Cost of the live structured run, from its own receipt store rather than an estimate: **169 decisions,
+all `outcome=ok`, all carrying a `model_version`** — see the round-90 block of the execution state for
+the per-definition breakdown and the observed 0.68–1.35 s latency.
+
+
 ## Verified against the tree (revision `a0e7587`, measured)
 
 The code, tests and catalog are byte-identical to `a0e7587`; this document is the only tracked file

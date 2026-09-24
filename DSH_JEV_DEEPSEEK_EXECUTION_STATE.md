@@ -420,6 +420,98 @@ wired, and the reason the earlier decision was wrong is part of the record.
 > Both are recorded in `docs/recovery/CURRENT_BLOCKER_LEDGER.md` B-27, and the publish path's local
 > half in B-35.
 
+> **Added 2026-09-24 (round 90) — the four journeys exist now, and building them found two defects
+> that had kept the modules from reaching anyone.** Revision **`d824a5b`**.
+>
+> Round 89 ended with "the fixtures do not exist yet". They do now
+> (`scripts/seed_structured_fixture.py`), and the journeys did not merely become possible: they
+> exposed two real defects, both of which looked like working code from every angle a unit test
+> usually checks.
+>
+> | Defect | How it looked | What it was | Effect on a learner |
+> |---|---|---|---|
+> | **Module D audited against the wrong database** | `audit_answer_citations` was called with `database=db`, which on the teaching path is the UI extension's own `ui.sqlite3`. The unit tests pass a **stub** resolver, or a test database that really has the tables, so nothing noticed | `DocumentEvidenceResolver` queries `document_versions` / `learning_workspaces` / chunks; the UI store has none of them. Every card raised `OperationalError: no such table: document_versions`, the `except` recorded it and returned the cards un-annotated — by design, "an audit failure can never lose an answer" | **No citation verdict ever reached a reader.** Layer 2 (the code-decided missing-figure check) also died, because the handler abandoned the loop on the first failure and took every later card's verdict with it. The UI's own `citationVerdict` renderer (`apps/web/src/ui/citationSupport.js`) could never fire |
+> | **The `test` provider emitted no citation markers** | `mentioned=set(re.findall(r'\[(S\d+)\]',output))` was always empty in the local acceptance shape, so `citations` was `[]` in every browser run | The live DeepSeek provider writes `[S1]` markers — that is why the audit exists — but the labelled double did not, so the entire citation path was unreachable in local acceptance | Nothing user-visible; it made the *acceptance* blind. Recorded in the spec's own header since round 25 as a limitation rather than fixed |
+>
+> Both are fixed in `d824a5b`: the store is an explicit `evidence_database` parameter passed from the
+> adapter, the resolver is built lazily (so a layer-2 verdict works with no store at all), the failure
+> handler is per-card, and the double writes one cited sentence per offered source quoting the
+> learner's own words — which is also what lets a journey drive the deterministic layer from the
+> question alone. The `problem` lane is untouched: its output is parsed into numbered steps.
+>
+> **The fixture** (`scripts/seed_structured_fixture.py`) ingests, through the product's own
+> `IngestionService`, an English-only page a Chinese question can only reach via an accepted alias
+> (`密度聚类` → `DBSCAN`), one word in two unrelated senses (`kernel`), the same quantity under
+> different assumptions (`5%` two-sided vs `10%` one-sided) and under the *same* assumption with
+> different values (`5%` vs `20%`, the contradiction pair), and a markdown page whose two headings put
+> two fragments in different chunks of one document. It goes into the learner's **own workspace
+> corpus**, because the product's ingestion *refused* the official course — `Course content is locked
+> by publication review` — which is the guardrail working, and is why the fixture is not shaped the way
+> round 89 first assumed.
+>
+> | Journey | Configuration | Result |
+> |---|---|---|
+> | A Chinese question reaches English material through an accepted alias | none needed | **passes**: the fixture page is a citation card, the learner's original query is `user_text` verbatim, and the chip is visible in the pane |
+> | One word in two senses is not merged, and the tree is untouched | none needed | **passes**: both pages are separate cards with different `document_id`, and the knowledge tree's node identity/title/parent/position is byte-identical before and after the run |
+> | Fragments from different tasks are reported as such, both kept | none needed | **passes**: two chunks of the one markdown document carry `VERSION_OR_TASK_DIFFERENCE` with distinct locators, and neither is dropped |
+> | A figure no cited source states is flagged, and the source is still shown | none needed | **passes**: every card is `NOT_ADDRESSED_IN_AVAILABLE_EVIDENCE` at layer `quote` with `['42%']`, the answer still renders all of them with the unverified marker, and the control question about `5%` leaves the page that *states* 5% unflagged |
+> | A genuine contradiction is surfaced with both kept | live key + `evidence.consistency.v1=on` | **passes** (29.1 s): at least two cards carry `jev_conflict_with` and both fragments survive |
+> | A write whose intent check cannot answer is not executed | `JEV_TOOL_INTENT_MODE=enforce` + deliberately unreachable endpoint | **passes**: `fallback:unavailable`, `REQUIRE_CONFIRMATION`, `jevCalls: 0`, and the task board is byte-identical before and after |
+> | An explicit authorised write is not over-blocked | enforce + live key + `tool.intent.v1=on` + raised timeout | **passes**: the task is created |
+>
+> **The live run's own receipt store is where its cost comes from** — not an estimate:
+> **169 decisions, every one `outcome=ok` and every one carrying a `model_version`** (so no fallback
+> answered any of them), across 14 definitions: `retrieval.support.v1` 42,
+> `source.supports_claim.v1` 31, `evidence.consistency.v1` **18 (mode `on`)**, `coverage.item_support.v1`
+> 14, `teaching.capability.v1` 14, `context.keep_segment.v1` 11, `source.select_span.v1` 10,
+> `entity.relation.v1` 9, `intent.next_action.v1` 7, `pedagogy.next_method.v1` 7,
+> `extraction.field_grounded.v1` 3, `feedback.category.v1` 1, `feedback.severity.v1` 1, `tool.intent.v1`
+> **1 (mode `on`)**. Observed decision latency **0.68–1.35 s**. This is inside the §16 ask (≤300
+> decisions) and it is the figure the owner's budget card should be read against.
+>
+> **One finding worth acting on, recorded rather than smoothed over:** the tool-intent guard's default
+> budget is **1.5 s** (`JEV_TOOL_INTENT_TIMEOUT_MS`, bounded 100–10 000) and the measured decision
+> takes **0.68–1.35 s**. On the first attempt at the explicit-write journey the guard gave up before
+> the answer arrived, the verdict became `fallback:unavailable`, and a perfectly legitimate write was
+> refused. Fail-closed is the right behaviour, but the margin is thin: a deployment that enforces this
+> gate should raise the budget (the journey now *requires* ≥5 s instead of racing the default), or the
+> gate will occasionally ask a learner to confirm something they already asked for unambiguously.
+>
+> **Four invocation traps, each of which cost a run and is now written down:** the agent refuses to
+> start when `JEV_TOOL_INTENT_TIMEOUT_MS` is an **empty string** (`?? ""` in a Playwright config sends
+> exactly that; the config now sends the agent's own default), and PowerShell *deletes* an env var
+> assigned `""`, so the same thing cannot be reproduced by hand in the shell — which is how a manual
+> check said "it starts fine" while the suite died on `Expected an integer between 100 and 10000`;
+> Playwright's webServer logs to stderr, so PowerShell reports a non-zero exit for a **passing** run
+> (`$LASTEXITCODE` must be captured explicitly); and a UI assertion on "the last `.citation-row` in the
+> pane" can match the *previous* answer while the new one is still appending, so the chip count passes
+> against a stale row and the verdict assertion on that row then fails — every UI assertion now anchors
+> on a string only the new answer contains.
+>
+> Also this round: `services/rag-api/tests/test_structured_e2e_fixture_shape.py` pins the properties
+> each journey depends on (the alias page never contains the Chinese term; the two kernel pages do not
+> mention each other's field; `42%` is in no page while `5%` is in exactly one; the markdown page has
+> two distinct headings) so a journey cannot quietly become a test of nothing.
+>
+> **The gate, run on the one frozen revision `d824a5b` that includes everything above.** Every number
+> is from a run against that tree; nothing here is carried over from an earlier revision.
+>
+> | Gate | Result |
+> |---|---|
+> | Backend full regression | **1717 passed / 2 skipped / 0 failed** in 2019.92 s (33:39), exit 0 — `work/current-change/full_run_d824a5b.log`. The **+7** over the `263c620` gate (1710) are exactly the tests this round added: 5 fixture-shape + 2 citation-audit. The two skips are the same environmental ones (a symlink needs a privilege this account lacks; POSIX permission bits are not the Windows mechanism) |
+> | Browser, shipped shape (no credential, nothing promoted, gate off) | `ui-refresh` **23 passed**, `coursemate` **4 passed**, `v3-learning` **3 passed**, `jev-structured` **10 passed / 4 skipped / 0 failed** — all exit 0. The four skips are the live-gated journeys, each naming its own precondition |
+> | Browser, live promoted shape | `jev-structured` **11 passed / 3 skipped / 0 failed**, exit 0 (the three skips are the no-credential journeys, which a promotion deliberately invalidates); plus the two tool-intent configurations run separately, **1 passed / 1 skipped** each, exit 0 both times |
+> | Web app | **107 tests passed** (23 files), `tsc -b` exit 0, production build + PAT scan exit 0 (`no token field, notice present`) |
+> | Agent service | **92 tests passed** (12 files), `tsc --noEmit` exit 0, build exit 0 |
+> | mypy | **0 errors added** in either changed module, measured in a worktree of HEAD with the same interpreter (`app/cm_update/app.py` 730 → 730, `provider.py` 56 → 56) |
+> | ruff | **0 findings added** in either changed module (597 → 597, 66 → 66); the new seeder carries only the five inert `noqa: E402` markers its two sibling seeders already carry, and the `F821` and `ISC004` findings it started with are fixed |
+>
+> **Not claimed:** the quality gate still does not pass and **nothing is promoted in the committed
+> configuration** — the promotions in the table above exist only for the measurement, and
+> `playwright.jev.config.ts` promotes nothing by default. §15 (production) has not begun: no
+> production system was contacted, no migration was run against a live database, and the release
+> sequence still waits on the owner's native approvals, one real login, and the Jev USD figure.
+
 > **Added 2026-09-24 (round 89) — the four browser journeys the task asks for, and exactly where each
 > one attaches.**
 >

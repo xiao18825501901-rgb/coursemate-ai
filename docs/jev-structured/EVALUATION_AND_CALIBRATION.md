@@ -103,3 +103,29 @@ services\rag-api\.venv\Scripts\python.exe scripts\calibrate_jev.py --help
 The offline run proves wiring only. Producing a real result additionally needs
 `TYPESAFE_API_KEY` (+ the pinned `typesafe-sdk`) and the DeepSeek key with an approved ceiling, as
 listed in `MINIMAL_OWNER_ACTION_CARD.md`.
+
+## 7. End-to-end journeys are a different kind of measurement, and now exist (round 90)
+
+Everything above measures a *definition*: does it answer correctly, and does using it change a
+metric. Neither question answers "does the product do anything with the answer". Round 90 added the
+second kind for modules B, C, D and F — browser journeys over the shipped deployment whose assertions
+are on what a learner's own client receives (citation cards, the knowledge tree, the task board):
+
+| Journey | Configuration | What it measured |
+|---|---|---|
+| alias retrieval; two senses not merged; a task difference labelled and both kept; an unsupported figure flagged in code with the source still shown; the Jev-unavailable shape | none needed | **5 passed**, and the live promoted runs repeat them |
+| genuine contradiction with both fragments kept | live key + `evidence.consistency.v1=on` | **passed**, 29.1 s |
+| explicit authorised write not over-blocked | live key + `tool.intent.v1=on` + enforce | **passed** |
+| write refused when the guard cannot answer | enforce + unreachable endpoint | **passed**, zero model calls |
+
+Cost of that live run, from its own receipt store: **169 decisions, all `outcome=ok`, all carrying a
+`model_version`**, latency 0.68–1.35 s. The number comes from `jev_decision_receipts`, not from an
+estimate.
+
+**What these journeys do not measure, stated so they are not read as more than they are:** they are
+not the A–E or component ablation, they do not touch the test split (still deliberately unrun), and
+they do not change any definition's mode in the committed configuration. Two module-level facts they
+did establish by failing first: module D's layer 1 was pointed at the wrong database, so no citation
+verdict had ever reached a reader; and the tool-intent guard's 1.5 s default sits barely above the
+measured decision latency, so an `enforce` deployment needs a larger budget.
+

@@ -224,3 +224,36 @@ deterministic (zero Jev calls when the quote is absent or unauthorized); `5%` vs
 reported as a contradiction; an unauthorized citation rejected; a prompt-injection
 marker not deleting a document; fallback behaviour when the transport fails; and
 no learning/grade writes.
+
+## In the shipped product (added round 90)
+
+Five browser journeys now cover this ground through the real three-service deployment, and writing
+them is what found that the module was **inert**: `audit_answer_citations` was handed the UI
+extension's own database (`ui.sqlite3`) as the evidence store, so layer 1 raised
+`OperationalError: no such table: document_versions` on **every** card, the `except` recorded and
+swallowed it ("an audit failure can never lose an answer"), and no verdict ever reached a reader.
+Nothing about the wiring looked wrong from the outside — the unit tests pass a stub resolver, or a
+test database that really has the tables — so the defect only became visible once something asserted
+on a card a learner actually receives.
+
+| Journey | Configuration | Assertion |
+|---|---|---|
+| a figure no cited source states is flagged in code, and the source is still shown | none needed | every card is `NOT_ADDRESSED_IN_AVAILABLE_EVIDENCE` at layer `quote` with `audit_missing_numbers == ['42%']` and **zero** model calls; all cards are still returned **and rendered**, with the pane's unverified marker (`citation-unverified`, aria-label `引用未能在原文中核实`) |
+| the same question about a figure a source *does* state | none needed | the page stating `5%` is **not** flagged — the check discriminates instead of condemning every citation |
+| fragments from different tasks are reported as such, and both are kept | none needed | two chunks of one markdown document carry `VERSION_OR_TASK_DIFFERENCE` with distinct locators, and neither is dropped |
+| a genuine contradiction is surfaced with both fragments kept, never one deleted | live key + `evidence.consistency.v1=on` | at least two cards carry `jev_conflict_with`, and both fragments survive |
+| with no TypeSafe credential every decision degrades and teaching still works | none needed | `used_jev: false`, `INSUFFICIENT_CONTEXT` on the cards, and a complete answer |
+
+The cards these journeys read are the client-visible ones — `GET /runs/{rid}` returns the retrieved
+sources with only their `text` stripped — so what is asserted is the same pair of fields the shell's
+`citationVerdict` renderer consumes.
+
+What is **not** claimed: the teaching pane renders `support` / `audit_reject_reason`, but no `jev_*`
+field reaches the browser anywhere in `apps/web` (a case-insensitive search for `jev` there has zero
+hits), and the conflict note module C produces is prompt text, which no route exposes.
+
+The enabling change was a gap in the *double*, not in the product: the labelled `test` provider now
+emits the `[S1]` markers a real model emits — one cited sentence per offered source, quoting the
+learner's own words. Before that, `citations` was `[]` in every browser run and this whole path was
+untestable through a browser at all.
+

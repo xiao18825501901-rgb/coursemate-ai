@@ -87,14 +87,24 @@ before the first call; only the numbers changed.
 | DeepSeek per call, 10 canary roles | min **$0.0000642**, mean **$0.0007991**, max **$0.0038862** (the `EXERCISE_V2` role) |
 | DeepSeek, 10 roles total | 8,728 input + 4,477 output tokens → **$0.0079908** |
 | DeepSeek, ablation baseline | **43** calls (not 162: memoising the baseline removed 119 repeat calls) at 267 in / 7 out tokens per call |
-| Jev live decisions made so far in this work | **99** calls (31 case sweep + 53 ablation + 15 probes), every one answered |
+| Jev live decisions made so far in this work | **268** calls: 99 (31 case sweep + 53 ablation + 15 probes) plus **169 in one structured browser run on 2026-09-24**, every one `outcome=ok` and every one carrying a `model_version` |
 | Jev token usage | **not reported by the transport** — it returns a request id and a model, not usage |
+| Jev decision latency | **0.68–1.35 s** observed across those 169 decisions (an observation, not a percentile) |
+
+**One production setting this measurement changes.** The tool-intent guard (`module F`) defaults to a
+**1500 ms** budget, and the live decision measured 1.35 s — so on the first attempt at the
+explicit-write acceptance journey the guard gave up before the answer arrived and a legitimate,
+explicit write was refused. Fail-closed is the correct behaviour; the margin is not. Any deployment
+that sets `JEV_TOOL_INTENT_MODE=enforce` should also set `JEV_TOOL_INTENT_TIMEOUT_MS` to at least
+**5000** (the agent bounds it to 100–10 000). This is an operator setting, not a code change, and it
+belongs in the release checklist next to the Jev env values.
+
 
 **The request, scaled to §16's production journeys** (4 course shapes × 15 steps = 60 operations):
 
 | Item | Planned calls | Worst case reserved | Hard ceiling | Measured basis |
 |---|---|---|---|---|
-| Jev live acceptance | ≤ 180 decisions | +50% for timeouts | **≤ 300 decisions** | 99 decisions already made, all answered; 1–3 decisions per operation |
+| Jev live acceptance | ≤ 180 decisions | +50% for timeouts | **≤ 300 decisions** | 268 decisions already made, all answered; 1–3 decisions per operation |
 | DeepSeek live acceptance (teaching, image problem, exercise, five-question grading, feedback) | ≤ 120 calls | 3× operations, every call at the measured **maximum** | **≤ 200 calls** | measured max $0.0038862/call |
 | Embeddings | ≤ 500 chunks | — | ≤ 500 chunks | unchanged; the deterministic provider is used unless a journey re-indexes |
 | **Total** | **≤ 300 paid model calls** | — | **≤ 500 calls** | the estimate this replaces was ≤ 1,700 |

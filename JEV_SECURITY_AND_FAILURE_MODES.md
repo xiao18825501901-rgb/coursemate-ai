@@ -151,7 +151,30 @@ evidence resolver of module D reads only already-authorized local rows.
 | The citation audit cannot leak or lose anything | `test_jev_citation_evidence.py` (cross-user and cross-course `unauthorized`), `test_citation_audit_binding.py` (byte-identical cards with no semantic layer; failure recorded, answer kept) |
 | The tool-intent endpoint fails closed | `test_api_tool_intent.py` (503 without a configured token, 401 on mismatch, bounded body) |
 | Keys never appear in artifacts | canary/ablation artifact assertions |
-| **Live** TypeSafe behaviour, retry/pricing reality, and real fallback rates | **`NOT_RUN`** — no credential; no live evidence is claimed |
+| **Live** TypeSafe behaviour, retry/pricing reality, and real fallback rates | Measured in rounds 83–90 and recorded in `JEV_CALLSITE_MATRIX.md`: 31 definition-level live cases over 19 definitions, and a structured browser run whose receipt store records **169 decisions, every one `outcome=ok` and every one carrying a `model_version`** (no fallback answered any of them). Bounded work in a disabled path may still be unmeasured — a *priced* per-definition cost table is not yet produced, and the 0.68–1.35 s latency spread is an observation, not a percentile |
 
-The live failure-rate numbers (timeout rate, queue/meltdown behaviour, per-definition cost) can only be
-produced once the credential and budget in `MINIMAL_OWNER_ACTION_CARD.md` exist.
+### 8a. The tool-intent guard's timeout is close to the model's own latency (measured, round 90)
+
+`JEV_TOOL_INTENT_TIMEOUT_MS` defaults to **1500 ms** and the agent bounds it to 100–10 000 ms. The
+live decision measured in round 90 took **681 ms once and 1352 ms on average across two calls** — so
+on the first attempt at the explicit-write journey the guard gave up before the answer arrived, the
+record became `{verdict: REQUIRE_CONFIRMATION, path: fallback:unavailable, jevCalls: 0}`, and a
+perfectly legitimate, explicit write was refused.
+
+Three things are worth stating separately:
+
+1. **The behaviour is correct.** An unavailable verdict must not be treated as ALLOW; fail-closed is
+   the whole point of this guard, and the journey "a write whose intent check cannot answer is not
+   executed" now asserts that path *deterministically* (an intentionally unreachable endpoint) rather
+   than racing the default timeout.
+2. **The margin is not.** A 1.5 s budget against a 0.68–1.35 s decision means an ordinary slow call
+   turns into "please confirm what you already said". A deployment that sets
+   `JEV_TOOL_INTENT_MODE=enforce` should raise the budget (the explicit-write journey requires ≥5 s
+   for exactly this reason), and this is recorded as an operational requirement rather than a tuning
+   nicety.
+3. **The empty string is not a valid value and the failure is loud.** The agent refuses to start with
+   `Expected an integer between 100 and 10000`, which is the right behaviour — but it is worth knowing
+   because a Playwright config's `?? ""` passes exactly that, and PowerShell *deletes* an env var
+   assigned `""`, so the same misconfiguration cannot be reproduced by hand in the shell. Both facts
+   cost a run in round 90 and are written into `playwright.jev.config.ts`.
+
