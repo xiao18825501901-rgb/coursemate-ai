@@ -40,7 +40,7 @@
    ]
   },
   "calibration": {
-   "count": 10,
+   "count": 13,
    "sample_ids": [
     "jevm-0001",
     "jevm-0002",
@@ -51,11 +51,14 @@
     "jevm-0027",
     "jevm-0029",
     "jevm-0037",
-    "jevm-0045"
+    "jevm-0045",
+    "jevm-0050",
+    "jevm-0051",
+    "jevm-0054"
    ]
   },
   "test": {
-   "count": 11,
+   "count": 13,
    "sample_ids": [
     "jevm-0009",
     "jevm-0010",
@@ -67,7 +70,9 @@
     "jevm-0035",
     "jevm-0036",
     "jevm-0039",
-    "jevm-0047"
+    "jevm-0047",
+    "jevm-0052",
+    "jevm-0053"
    ]
   }
  },
@@ -135,6 +140,15 @@
   "doc-cs3481-entity|node-ent-07|entity_relation": [
    "jevm-0021"
   ],
+  "doc-cs3481-entity|node-ent-10|entity_relation": [
+   "jevm-0050"
+  ],
+  "doc-cs3481-entity|node-ent-11|entity_relation": [
+   "jevm-0052"
+  ],
+  "doc-cs3481-entity|node-ent-13|entity_relation": [
+   "jevm-0051"
+  ],
   "doc-cs3481-extraction|node-extr-01|extraction": [
    "jevm-0001"
   ],
@@ -155,6 +169,12 @@
   ],
   "doc-cs3481-extraction|node-extr-07|extraction": [
    "jevm-0007"
+  ],
+  "doc-cs3481-extraction|node-extr-15|extraction": [
+   "jevm-0054"
+  ],
+  "doc-cs3481-extraction|node-extr-18|extraction": [
+   "jevm-0053"
   ],
   "doc-cs3481-feedback|node-fcat-01|feedback_category": [
    "jevm-0036"
@@ -220,6 +240,6 @@
    "jevm-0035"
   ]
  },
- "content_hash": "909945f15d0f6e8e5337b3310e68dfbb89509595c394a4a38a0d9442019df842",
+ "content_hash": "54f7b750c7463b5a64bf8a8f6219ba1dcc74c06ef8c4b9d237ca5e7b7691e730",
  "note": "Splits are assigned by (document_id, node_id, question_family) group, never by row: the same underlying question with different numbers shares one group and therefore one split. A fitted temperature is only valid against this exact content_hash."
 }

@@ -7,7 +7,7 @@
   ],
   "splits": {
     "train": {
-      "count": 196,
+      "count": 211,
       "sample_ids": [
         "jev-0001",
         "jev-0002",
@@ -204,11 +204,26 @@
         "jev-0306",
         "jev-0307",
         "jev-0308",
-        "jev-0310"
+        "jev-0310",
+        "jev-0326",
+        "jev-0327",
+        "jev-0328",
+        "jev-0329",
+        "jev-0330",
+        "jev-0331",
+        "jev-0332",
+        "jev-0333",
+        "jev-0334",
+        "jev-0335",
+        "jev-0336",
+        "jev-0337",
+        "jev-0338",
+        "jev-0339",
+        "jev-0340"
       ]
     },
     "calibration": {
-      "count": 47,
+      "count": 58,
       "sample_ids": [
         "jev-0073",
         "jev-0085",
@@ -256,11 +271,22 @@
         "jev-0288",
         "jev-0292",
         "jev-0294",
-        "jev-0309"
+        "jev-0309",
+        "jev-0311",
+        "jev-0312",
+        "jev-0313",
+        "jev-0314",
+        "jev-0315",
+        "jev-0316",
+        "jev-0317",
+        "jev-0318",
+        "jev-0319",
+        "jev-0320",
+        "jev-0345"
       ]
     },
     "test": {
-      "count": 67,
+      "count": 76,
       "sample_ids": [
         "jev-0011",
         "jev-0012",
@@ -328,7 +354,16 @@
         "jev-0289",
         "jev-0291",
         "jev-0296",
-        "jev-0299"
+        "jev-0299",
+        "jev-0321",
+        "jev-0322",
+        "jev-0323",
+        "jev-0324",
+        "jev-0325",
+        "jev-0341",
+        "jev-0342",
+        "jev-0343",
+        "jev-0344"
       ]
     }
   },
@@ -594,11 +629,25 @@
     "doc-cs3481-hypothesis|node-hypothesis-zh|citation": [
       "jev-0091"
     ],
+    "doc-cs3481-hypothesis|node-power|retrieval": [
+      "jev-0316",
+      "jev-0317",
+      "jev-0318",
+      "jev-0319",
+      "jev-0320"
+    ],
     "doc-cs3481-hypothesis|node-pvalue-def|citation": [
       "jev-0069"
     ],
     "doc-cs3481-hypothesis|node-pvalue-null|span_selection": [
       "jev-0104"
+    ],
+    "doc-cs3481-hypothesis|node-type-two-error|retrieval": [
+      "jev-0311",
+      "jev-0312",
+      "jev-0313",
+      "jev-0314",
+      "jev-0315"
     ],
     "doc-cs3481-kmeans|node-kmeans-centroid|span_selection": [
       "jev-0100"
@@ -618,6 +667,13 @@
     "doc-cs3481-naivebayes|node-nb-assumption|citation": [
       "jev-0086"
     ],
+    "doc-cs3481-regression|node-residual-plot|retrieval": [
+      "jev-0326",
+      "jev-0327",
+      "jev-0328",
+      "jev-0329",
+      "jev-0330"
+    ],
     "doc-cs3481-trees|node-bst-order|citation": [
       "jev-0063"
     ],
@@ -631,8 +687,22 @@
     "doc-cs3481-trees|node-bst-rotation|span_selection": [
       "jev-0101"
     ],
+    "doc-cs3481-trees|node-bst-search|retrieval": [
+      "jev-0321",
+      "jev-0322",
+      "jev-0323",
+      "jev-0324",
+      "jev-0325"
+    ],
     "doc-cs3481-trees|node-decision-split|citation": [
       "jev-0064"
+    ],
+    "doc-cs3481-trees|node-successor|retrieval": [
+      "jev-0331",
+      "jev-0332",
+      "jev-0333",
+      "jev-0334",
+      "jev-0335"
     ],
     "doc-disputed|node-d1|citation": [
       "jev-0308"
@@ -822,6 +892,10 @@
       "jev-0158",
       "jev-0163"
     ],
+    "doc-pedagogy|node-elbow-method|pedagogy": [
+      "jev-0341",
+      "jev-0342"
+    ],
     "doc-pedagogy|node-gougu|pedagogy": [
       "jev-0166",
       "jev-0170"
@@ -829,6 +903,9 @@
     "doc-pedagogy|node-hypothesis|pedagogy": [
       "jev-0176",
       "jev-0178"
+    ],
+    "doc-pedagogy|node-inertia|pedagogy": [
+      "jev-0345"
     ],
     "doc-pedagogy|node-juzhen|pedagogy": [
       "jev-0172",
@@ -845,6 +922,10 @@
     "doc-pedagogy|node-tiaojian|pedagogy": [
       "jev-0169",
       "jev-0181"
+    ],
+    "doc-pedagogy|node-variance-bias|pedagogy": [
+      "jev-0343",
+      "jev-0344"
     ],
     "doc-pedagogy|node-yiyuan|pedagogy": [
       "jev-0167",
@@ -966,6 +1047,13 @@
     "doc-trajectory|node-t9|trajectory": [
       "jev-0297"
     ],
+    "doc-zh-clustering|node-dbscan-zh|retrieval": [
+      "jev-0336",
+      "jev-0337",
+      "jev-0338",
+      "jev-0339",
+      "jev-0340"
+    ],
     "doc-zh-matrix|node-commutative|citation": [
       "jev-0082"
     ],
@@ -1062,6 +1150,6 @@
       "jev-0074"
     ]
   },
-  "content_hash": "2af0f40d1d1e89c6f7a8092cb846258f2b36b208c58f0211932344a32d33c10d",
+  "content_hash": "441264c2b3acd6509ae2b0bb3aefd32ef3915e4bf910f246f582a3fb45873ca9",
   "note": "Splits are assigned by (document_id, node_id, question_family) group, never by row: the same underlying question with different numbers shares one group and therefore one split. A fitted temperature is only valid against this exact content_hash."
 }

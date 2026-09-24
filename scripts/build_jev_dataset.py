@@ -332,6 +332,18 @@ def _build_retrieval(samples):
             ],
         },
     ]
+    return _append_retrieval_atoms(samples, atoms)
+
+
+def _append_retrieval_atoms(samples, atoms):
+    """Append one atom's five candidates, scoring each with the code-verified rule.
+
+    Factored out so content added *after* every other family (see
+    ``_build_split_coverage_atoms``) produces samples through exactly the same rule and the
+    same shape as the original ones. Sample ids continue from the current length, which is
+    why new content is appended last rather than inserted: a positional id scheme would
+    renumber every later sample, and the reports quote ids.
+    """
     for atom in atoms:
         scores = [
             _retrieval_rule_score(text, atom["topic"], atom["components"], atom["conditions"])
@@ -719,7 +731,6 @@ def _build_context(samples):
 
 
 def _build_pedagogy(samples):
-    criteria = _questions_by_key()["pedagogy.next_method.v1"]["criteria"]
     cases = [
         ("en", "node-dbscan", "Show me a complete worked example of DBSCAN on a small dataset", "WORKED_EXAMPLE", LABEL_TIER_SOURCE),
         ("en", "node-kmeans", "Trace the centroid updates step by step", "TRACE", LABEL_TIER_SOURCE),
@@ -746,6 +757,12 @@ def _build_pedagogy(samples):
         ("zh", "node-juzhen", "逐步演示矩阵乘法的计算过程", "TRACE", LABEL_TIER_SOURCE),
         ("zh", "node-tiaojian", "给我一个条件概率的完整例题", "WORKED_EXAMPLE", LABEL_TIER_SILVER),
     ]
+    return _append_pedagogy_cases(samples, cases)
+
+
+def _append_pedagogy_cases(samples, cases):
+    """Append pedagogy cases through the same shape and tiering as the original ones."""
+    criteria = _questions_by_key()["pedagogy.next_method.v1"]["criteria"]
     for language, node, request, method, tier in cases:
         evidence = (
             "SOURCE_REVIEWED: method selected from the learner request; source = catalog "
@@ -1202,6 +1219,149 @@ def _build_disputed(samples):
 # ----------------------------------------------------------------------------- assemble
 
 
+def _build_split_coverage_atoms(samples):
+    """Content added so the two priority definitions can actually be fitted and evaluated.
+
+    The split is assigned by ``sha256(document_id|node_id|question_family) % 5`` over
+    ``(train, train, train, calibration, test)``. That rule is untouched here — what it did
+    produce, by chance, was a dataset where two definitions the promotion work depends on
+    had no usable slot:
+
+    * ``retrieval.support.v1`` (the task's **first** promotion candidate): 10 groups landed
+      6 train / 4 test / **0 calibration**, so no threshold could be fitted for it;
+    * ``pedagogy.next_method.v1``: 11 groups landed 20 train / 4 calibration / **0 test**, so
+      nothing was held out to evaluate it on.
+
+    The keys below were chosen *by slot* on purpose — they are authored identifiers, and the
+    labels still come from each family's own deterministic rule (`_retrieval_rule_score` for
+    the retrieval atoms) or tiering, so nothing about the labels is selected. Without this,
+    §14's first priority cannot be executed at all; with it, the family gains two calibration
+    groups and one test group.
+
+    Appended last on purpose: `_sid` numbers by position, so inserting these earlier would
+    renumber every later sample and invalidate the ids quoted in the reports.
+    """
+    retrieval_atoms = [
+        {
+            "doc": "doc-cs3481-hypothesis", "node": "node-type-two-error", "language": "en",
+            "query": "What is a Type II error in hypothesis testing?",
+            "topic": ["type ii", "error", "hypothesis"],
+            "components": ["null hypothesis", "failing to reject"],
+            "conditions": ["power", "beta"],
+            "candidates": [
+                "Gradient descent updates parameters along the negative gradient.",
+                "This section discusses hypothesis testing error.",
+                "Failing to reject the null hypothesis happens when the evidence is weak.",
+                "Failing to reject a claim that is actually false lowers the power of a study.",
+                (
+                    "A type ii error is failing to reject the null hypothesis, and it "
+                    "reduces the power of a test."
+                ),
+            ],
+        },
+        {
+            "doc": "doc-cs3481-hypothesis", "node": "node-power", "language": "en",
+            "query": "How is the power of a test defined?",
+            "topic": ["power", "hypothesis", "test"],
+            "components": ["reject", "alternative"],
+            "conditions": ["probability", "type ii"],
+            "candidates": [
+                "An operating system kernel schedules processes and manages memory.",
+                "The power of a statistical test grows with the sample size.",
+                "We reject the null only when the evidence is strong enough.",
+                "We reject a claim that is actually false with a probability set by the effect size.",
+                "Power is the probability that we reject the null when the alternative holds.",
+            ],
+        },
+        {
+            "doc": "doc-cs3481-trees", "node": "node-bst-search", "language": "en",
+            "query": "How does the search operation of a binary search tree work?",
+            "topic": ["search", "binary search tree", "bst"],
+            "components": ["left subtree", "right subtree"],
+            "conditions": ["smaller", "greater"],
+            "candidates": [
+                "K-means alternates assignment and centroid updates.",
+                "The search operation of a binary search tree visits one node per level.",
+                "Search descends into the left subtree when the stored key is small.",
+                "A search that follows the smaller keys descends into the left subtree.",
+                (
+                    "Search compares the key with the node, taking the left subtree when "
+                    "it is smaller and the right subtree when it is greater."
+                ),
+            ],
+        },
+        {
+            "doc": "doc-cs3481-regression", "node": "node-residual-plot", "language": "en",
+            "query": "What should a residual plot look like for a well-fitted regression?",
+            "topic": ["residual", "plot", "regression"],
+            "components": ["residuals", "pattern"],
+            "conditions": ["random", "fitted"],
+            "candidates": [
+                "An operating system kernel schedules processes.",
+                "A residual plot is a standard diagnostic for a regression.",
+                "The residuals of the regression show a clear pattern.",
+                "The residuals plotted against the fitted values are informative.",
+                "Residuals against fitted values should show no pattern and look random.",
+            ],
+        },
+        {
+            "doc": "doc-cs3481-trees", "node": "node-successor", "language": "en",
+            "query": "How is the in-order successor of a node found?",
+            "topic": ["successor", "in-order", "tree"],
+            "components": ["right subtree", "leftmost"],
+            "conditions": ["ancestor", "parent"],
+            "candidates": [
+                "Newton's second law relates force and acceleration.",
+                "The in-order successor of a node depends on the tree structure.",
+                "The successor is the leftmost node of the right subtree.",
+                (
+                    "The successor is the leftmost node when the path turns, otherwise "
+                    "it is the first ancestor above it."
+                ),
+                (
+                    "The in-order successor is the leftmost node of the right subtree, "
+                    "or the first ancestor above it."
+                ),
+            ],
+        },
+        {
+            "doc": "doc-zh-clustering", "node": "node-dbscan-zh", "language": "zh",
+            "query": "DBSCAN 如何判断噪声点？",
+            "topic": ["dbscan", "噪声", "聚类"],
+            "components": ["核心点", "邻域"],
+            "conditions": ["不属于", "任何"],
+            "candidates": [
+                "牛顿第二定律说明力等于质量乘以加速度。",
+                "DBSCAN 是一种基于密度的聚类方法。",
+                "DBSCAN 用邻域半径和最小点数描述密度。",
+                "不属于任何邻域的点在 DBSCAN 中被单独处理。",
+                "DBSCAN 把不属于任何核心点邻域的点标记为噪声点。",
+            ],
+        },
+    ]
+    _append_retrieval_atoms(samples, retrieval_atoms)
+
+    pedagogy_cases = [
+        ("en", "node-elbow-method", "How do I choose k for K-means?", "DEFINITION", LABEL_TIER_SOURCE),
+        (
+            "en", "node-elbow-method", "Show me a worked example of the elbow method",
+            "WORKED_EXAMPLE", LABEL_TIER_SOURCE,
+        ),
+        (
+            "en", "node-variance-bias", "Explain the bias-variance tradeoff from scratch",
+            "DEFINITION", LABEL_TIER_SOURCE,
+        ),
+        (
+            "en", "node-variance-bias",
+            "Give a counterexample where a simpler model generalises better",
+            "COUNTEREXAMPLE", LABEL_TIER_SOURCE,
+        ),
+        ("zh", "node-inertia", "逐步演示惯性的计算过程", "TRACE", LABEL_TIER_SOURCE),
+    ]
+    _append_pedagogy_cases(samples, pedagogy_cases)
+    return samples
+
+
 def build_samples():
     samples: list[JevJudgment] = []
     _build_retrieval(samples)
@@ -1220,6 +1380,7 @@ def build_samples():
     _build_trajectory(samples)
     _build_image(samples)
     _build_disputed(samples)
+    _build_split_coverage_atoms(samples)
     return samples
 
 
@@ -1255,7 +1416,13 @@ def _dataset_payload(samples):
 
 def _write_json(path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    # `newline="\n"` and not the default: `Path.write_text` translates every `\n` to `\r\n` on
+    # Windows, so rebuilding the dataset rewrote all ~13,000 line endings of a file the
+    # repository keeps in LF. That turned a 35-sample addition into a whole-file diff — the
+    # content was right and the diff was unreadable, which is how a reviewer stops reading.
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n"
+    )
 
 
 def build() -> None:

@@ -344,7 +344,45 @@ recorded in that card rather than guessed at later.
 
 
 
+### 6.5 Round 95: the datasets grew so the promotion candidates can actually be fitted
+
+The split rule is `sha256(document_id|node_id|question_family) % 5` over
+`(train, train, train, calibration, test)`. Two definitions the promotion work depends on had, by
+accident of that hash, no usable slot — and the reader should note that this is a fact about *group
+keys*, not about sample counts:
+
+| Definition | Before | After |
+|---|---|---|
+| `retrieval.support.v1` (the task's **first** promotion candidate) | 36 train / **0 calibration** / 22 test | 51 / **10** / 27 |
+| `pedagogy.next_method.v1` | 20 / 4 / **0 test** | 20 / 5 / **4** |
+| `entity.relation.v1` (companion) | 5 / **0 calibration** / 2 | 5 / **2** / 3 |
+| `extraction.field_grounded.v1` (companion) | 4 / 3 / **0 test** | 4 / 4 / **1** |
+
+| Dataset | Samples | Split hash | Splits |
+|---|---|---|---|
+| `benchmarks/jev-judgments.dataset.json` | 310 → **345** | `2af0f40d…` → **`441264c2…`** | 196/47/67 → **211/58/76** |
+| `benchmarks/jev-module-judgments.dataset.json` | 49 → **54** | `909945f1…` → **`54f7b750…`** | 28/10/11 → **28/13/13** |
+
+Every added label is computed by its family's own rule (the retrieval atoms by
+`_retrieval_rule_score`, which the builder asserts scores exactly 0–4 per atom; the companion truth
+pairs by `_classify_pair`'s version and content-hash rules), the additions are appended so the
+existing ids still mean what they meant, and the two extraction additions are `SOURCE_REVIEWED`
+because grounding is a reading of a supplied region rather than a rule the product applies. **Every
+live number reported in §8 and §9 above was measured against the previous hashes** and refers to the
+310-sample set; nothing in those sections is re-attributed to the new one.
+
+What this does *not* do is promote anything: fitting the thresholds still needs a live run over the new
+58-sample calibration split, plus the component ablation's 93 decisions — the same budget decision as
+before, which is now the only blocker left for §14.
+
+
+
 ## 7. What is needed to produce a real result
+
+**Round-95 note before the list:** item 4 below is now partly out of date in the *favourable*
+direction — the companion definitions are measurable offline with better populations than the 7 they
+had (§6.5), and `retrieval.support.v1` finally has a calibration population at all. What remains from
+this list is the live run and the budget; the *data* blocker is cleared.
 
 1. `TYPESAFE_API_KEY` in the backend env (owner) **and** `typesafe-sdk==0.7.0` installed in the service
    venv — the key alone was not wired until round 38 (the adapter never read it) and the package is an

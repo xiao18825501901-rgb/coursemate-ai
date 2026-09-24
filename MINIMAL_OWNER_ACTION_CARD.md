@@ -128,6 +128,19 @@ that ceiling once, see the note in the table). The request is therefore **≤ 45
 which covers the ablation with 42 to spare; the alternative is to skip the ablation and say so in the
 final report. Until that decision arrives it stays recorded as NOT_RUN.
 
+**The data blocker for §14 is cleared as of round 95; the budget is now the only one.** The promotion
+the task lists first is `retrieval.support.v1`, and until this round it could not be fitted at all: all
+ten of its groups happened to hash outside the calibration slot, so it had 36 train and 22 test samples
+and **zero** calibration samples. The dataset now carries 345 samples (from 310) with a 58-sample
+calibration split (from 47), `retrieval.support.v1` has 10 calibration samples, and the three other
+definitions that had no usable slot (pedagogy, entity, extraction) are covered too. Every added label
+comes from its family's own deterministic rule, and the previous hashes are kept in the reports because
+the live results already measured refer to them. So what the promotion now needs is exactly what is
+requested above: the live ablation (93) **plus** a fit over the new calibration split — I estimate
+**≤ 60 further decisions** for the fit and the single test-split evaluation that follows it. Add it to
+the same decision: **≤ 500 decisions** would cover the ablation and the first promotion's calibration
+end to end, with no DeepSeek call in either.
+
 **USD.** DeepSeek: the worst case above is **$0.70** (180 calls × the measured maximum $0.0038862), so
 a cap of **USD 3** leaves more than 4× headroom and is what I am asking for. Jev: **I cannot state a
 USD figure honestly** — the transport reports no token usage and no TypeSafe price list is available

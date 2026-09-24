@@ -719,8 +719,65 @@ wired, and the reason the earlier decision was wrong is part of the record.
 > §6 and §7 are corrected **with pointers rather than overwritten**, and §8 — whose five items were all
 > done or superseded — is rewritten to the five things that actually remain.
 >
-> **The gate on `e287a6c` (round 94).** Only a backend test file and documentation changed this round,
-> so the gate says exactly that rather than implying a full re-run:
+> **Added 2026-09-24 (round 95) — the labelled data was the blocker for §14, and it is cleared.**
+>
+> With the ten §16 verifications closed, the only thing standing between this work and the promotion
+> the task asks for is **evidence**, and the evidence was blocked by two accidents of the split rule
+> rather than by any shortage of work. The rule is
+> `sha256(document_id|node_id|question_family) % 5` over `(train, train, train, calibration, test)`,
+> and it produced a dataset in which two definitions the promotion depends on had no usable slot:
+>
+> | Definition | Before | After | Why it mattered |
+> |---|---|---|---|
+> | `retrieval.support.v1` — the task's **first** promotion candidate | 36 train / **0 calibration** / 22 test | 51 / **10** / 27 | with no calibration sample not a single threshold could be fitted, so §14 could not be executed for it at all |
+> | `pedagogy.next_method.v1` | 20 train / 4 calibration / **0 test** | 20 / 5 / **4** | nothing was held out, so it could not be evaluated after fitting |
+> | `entity.relation.v1` (companion) | 5 train / **0 calibration** / 2 test | 5 / **2** / 3 | same as retrieval, for the module dataset |
+> | `extraction.field_grounded.v1` (companion) | 4 train / 3 calibration / **0 test** | 4 / 4 / **1** | nothing held out |
+>
+> **What was added, and how its labels are earned.** The primary dataset gained **six retrieval atoms**
+> (30 samples) and **five pedagogy cases**; the companion gained **five samples**. Every label comes
+> from the family's own deterministic rule — `_retrieval_rule_score` for the atoms (each atom's five
+> candidates must score exactly 0–4, which the builder asserts), the family's own tiering for the
+> pedagogy cases, and for the companion the two rules in
+> `app/jev/entity_resolution.py::_classify_pair` (equal `object_id` with a different
+> `material_revision` → `DOCUMENT_VERSION_RELATION`; byte-identical non-empty content →
+> `SAME_CONCEPT`). The two extraction additions are **`SOURCE_REVIEWED`**, not
+> `OBJECTIVE_VERIFIED`: grounding is a reading of a supplied region, and the companion file's own
+> discipline (asserted by `test_companion_dataset_labels_earn_their_tier`) requires an objective label
+> to name a rule the product applies, which this is not. The group keys were chosen **by slot** — they
+> are authored identifiers and the labels cannot be selected by them; the alternative was to leave the
+> first promotion candidate unfittable.
+>
+> | | Before | After |
+> |---|---|---|
+> | Primary dataset | 310 samples, split hash `2af0f40d…`, splits 196/47/67 | **345**, hash **`441264c2…`**, splits **211/58/76** |
+> | Companion dataset | 49 samples, hash `909945f1…`, splits 28/10/11 | **54**, hash **`54f7b750…`**, splits **28/13/13** |
+> | Definitions with no calibration split | 2 (`retrieval.support.v1`, `image_transcription.v1`) | **1** — `image_transcription.v1`, which is *not* a Jev definition (DeepSeek vision, outside the semantic layer) |
+> | Definitions with no test split | 3 | **1** — the same non-Jev one |
+>
+> **The additions are purely additive, and that was verified rather than assumed:** the first 310
+> samples are byte-identical to their committed versions and keep their ids (`jev-0001`…`jev-0310`),
+> because `_sid` numbers by position and the new content is appended last. Every sample id quoted in
+> earlier reports still means what it meant.
+>
+> Four tests pinned the old state and were **updated rather than weakened**: the two that used the real
+> gaps as their example of "the hash promises no coverage" now demonstrate it on a synthetic group
+> (the behaviour under test is unchanged, the real gap is gone), the frozen-dataset test now asserts
+> the committed file **equals what the generator writes** (stronger than a literal count: a hand edit
+> fails it too), and the calibration test reads its population from the manifest instead of a literal.
+> The previous hash and the reason it moved are kept in the test file and in this record, because every
+> live ablation result measured before this round refers to the 310-sample set.
+>
+> **What this does not change:** nothing is promoted. The fit itself still needs a live run over the
+> new 58-sample calibration split (and the component ablation its 93 decisions), which is the same
+> budget decision as before — so `MINIMAL_OWNER_ACTION_CARD.md` §1b now says that the *data* blocker is
+> cleared and the budget is the only one left.
+>
+> Offline verification after the change: all six component arms measure in one command
+> (`jev-component-round95.json`), with populations 9 (extract), 10 (entity), 7 (consistency),
+> 42/16 (citation), 7 (capability), 7 (tool), verdict still `NOT_INTERPRETABLE`; both datasets validate
+> (schema, tier invariants, split leakage, content hash); and 143 measurement tests pass.
+
 >
 > | Gate | Result |
 > |---|---|
@@ -745,6 +802,16 @@ wired, and the reason the earlier decision was wrong is part of the record.
 > no definition is promoted in the committed configuration, the component ablation is still NOT_RUN
 > (93 decisions, awaiting the budget decision in `MINIMAL_OWNER_ACTION_CARD.md` §1b), and §15
 > (production) has not begun.
+
+> **The gate on `e287a6c` (round 94).** Only a backend test file and documentation changed that
+> round, so the gate says exactly that rather than implying a full re-run:
+>
+> | Gate | Result |
+> |---|---|
+> | Backend full regression | **1722 passed / 2 skipped / 0 failed** in 2133.57 s (35:33), exit 0 — `full_run_e287a6c.log`. The +1 over `897cc15` is the new isolation test. Same two environmental skips |
+> | Backend isolation test, repeated | `test_jev_cache_isolation_http.py` **passed three times in a row** before the file was frozen |
+> | ruff | **All checks passed** on the new file |
+> | Web / browser / agent | unchanged since `897cc15`, where they were all green |
 
 > **The gate on `897cc15` (round 93), the revision with the pane fixes.** Product UI code changed, so
 > five browser suites were run, not only the one that had been failing.

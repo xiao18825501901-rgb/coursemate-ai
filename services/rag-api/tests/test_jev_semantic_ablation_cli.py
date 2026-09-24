@@ -171,8 +171,11 @@ def test_a_component_run_reads_both_datasets_and_says_which_metric_came_from_whi
     payload = json.loads(out.read_text(encoding="utf-8"))
     sources = {pathlib.Path(source["path"]).name: source for source in payload["dataset_sources"]}
     assert set(sources) == {"jev-judgments.dataset.json", "jev-module-judgments.dataset.json"}
-    assert sources["jev-judgments.dataset.json"]["samples"] == 310
-    assert sources["jev-module-judgments.dataset.json"]["samples"] == 49
+    # Counts as of round 95, when both datasets grew so the definitions the promotion gate
+    # depends on have a calibration population (`retrieval.support.v1` had none) and a test
+    # population (`pedagogy.next_method.v1`, `extraction.field_grounded.v1` had none either).
+    assert sources["jev-judgments.dataset.json"]["samples"] == 345
+    assert sources["jev-module-judgments.dataset.json"]["samples"] == 54
     # Each dataset is pinned by its own frozen split, which is the provenance a later
     # reader needs to tie a metric to the split a temperature was fitted against.
     assert all(source["split_content_hash"] for source in sources.values())

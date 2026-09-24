@@ -69,7 +69,7 @@ def build(dataset_path: Path, split_path: Path, *, force: bool) -> dict:
         return manifest
 
     split_path.write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
+        json.dumps(manifest, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n"
     )
     print(f"wrote {split_path}")
     return manifest

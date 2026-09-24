@@ -202,6 +202,39 @@ between "the scope function is correct" and "the service derives the scope from 
 two-user *browser* journey still cannot exist without a second injected identity, and that is stated
 rather than worked around.
 
+## 10. Where the labelled data now stands (round 95)
+
+The promotion gate needs, per definition, samples in the **calibration** split (to fit a threshold) and
+in the **test** split (to be evaluated once afterwards). The split is assigned by
+`sha256(document_id|node_id|question_family) % 5` over `(train, train, train, calibration, test)`, and
+that hash had, by accident, given four definitions no usable slot — including the task's **first**
+promotion candidate, which could not be fitted at all:
+
+| Definition | Before | After |
+|---|---|---|
+| `retrieval.support.v1` | 36 train / **0 calibration** / 22 test | 51 / **10** / 27 |
+| `pedagogy.next_method.v1` | 20 / 4 / **0 test** | 20 / 5 / **4** |
+| `entity.relation.v1` | 5 / **0 calibration** / 2 | 5 / **2** / 3 |
+| `extraction.field_grounded.v1` | 4 / 3 / **0 test** | 4 / 4 / **1** |
+
+| Dataset | Samples | Split hash | Splits |
+|---|---|---|---|
+| `jev-judgments.dataset.json` | 310 → **345** | `2af0f40d…` → **`441264c2…`** | 196/47/67 → **211/58/76** |
+| `jev-module-judgments.dataset.json` | 49 → **54** | `909945f1…` → **`54f7b750…`** | 28/10/11 → **28/13/13** |
+
+Every added label is computed by its family's own deterministic rule (the retrieval atoms by
+`_retrieval_rule_score`; the companion pairs by `_classify_pair`'s version and content-hash rules), the
+two extraction additions are `SOURCE_REVIEWED` because grounding is a reading of a supplied region
+rather than a rule the product applies, and the additions are **appended** — the first 310 samples and
+their ids are byte-identical, so every id quoted in earlier reports still means what it meant.
+
+**What this does not change:** nothing is promoted. Fitting the thresholds over the new 58-sample
+calibration split, and the component ablation's 93 decisions, are still unrun: both are the budget
+decision in `MINIMAL_OWNER_ACTION_CARD.md` §1b. The **test split is still unlooked-at** — no threshold
+has been tuned against it, and the new test samples have never had a model's prediction compared to
+their label.
+
+
 
 
 

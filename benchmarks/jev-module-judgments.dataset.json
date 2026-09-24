@@ -1993,6 +1993,246 @@
      "score_index": 1
     }
    }
+  },
+  {
+   "sample_id": "jevm-0050",
+   "definition_id": "entity.relation.v1",
+   "definition_version": "1.0.0-design",
+   "language": "en",
+   "option_count": 7,
+   "document_id": "doc-cs3481-entity",
+   "node_id": "node-ent-10",
+   "question_family": "entity_relation",
+   "label_tier": "OBJECTIVE_VERIFIED",
+   "label_evidence": "code-verified: entity_resolution _classify_pair rule 1 (left.object_id == right.object_id and left.material_revision != right.material_revision) -> DOCUMENT_VERSION_RELATION at services/rag-api/app/jev/entity_resolution.py:456-460.",
+   "state": {
+    "left": {
+     "kind": "evidence",
+     "label": "DBSCAN parameters worksheet",
+     "content": "A core point has at least minPts neighbours within radius eps.",
+     "source_version": "v2",
+     "object_id": "obj-worksheet-dbscan",
+     "material_revision": "r1"
+    },
+    "right": {
+     "kind": "evidence",
+     "label": "DBSCAN parameters worksheet (revised)",
+     "content": "A core point has at least minPts neighbours within radius eps.",
+     "source_version": "v3",
+     "object_id": "obj-worksheet-dbscan",
+     "material_revision": "r2"
+    },
+    "course_id": "cs3481",
+    "material_revision": "r1"
+   },
+   "questions": {
+    "q": {
+     "type": "choice",
+     "instructions": "Only propose a relation; never merge nodes, delete files or change a tree id. Byte-identical duplicates are resolved by hash in code, not by you. Text similarity is not proof of the same concept, and a relation is never transitive by assumption. Return UNCERTAIN rather than a confident wrong merge.",
+     "criteria": {
+      "SAME_CONCEPT": "Both labels denote the same concept in this course",
+      "ALIAS": "One label is an accepted alias of the other (for example a Chinese and an English term)",
+      "QUESTION_VARIANT": "The same question asked in a different form",
+      "DOCUMENT_VERSION_RELATION": "One material version supersedes or corrects the other",
+      "RELATED_NOT_SAME": "Related material that must not be treated as the same object",
+      "DIFFERENT": "Different concepts that merely look similar",
+      "UNCERTAIN": "Not enough evidence to relate them"
+     }
+    }
+   },
+   "label": {
+    "q": {
+     "choice": "DOCUMENT_VERSION_RELATION"
+    }
+   }
+  },
+  {
+   "sample_id": "jevm-0051",
+   "definition_id": "entity.relation.v1",
+   "definition_version": "1.0.0-design",
+   "language": "en",
+   "option_count": 7,
+   "document_id": "doc-cs3481-entity",
+   "node_id": "node-ent-13",
+   "question_family": "entity_relation",
+   "label_tier": "OBJECTIVE_VERIFIED",
+   "label_evidence": "code-verified: entity_resolution _classify_pair rule 2 (left.content and right.content are byte-identical and non-empty, so left.content_hash() == right.content_hash()) -> SAME_CONCEPT at services/rag-api/app/jev/entity_resolution.py:463-465.",
+   "state": {
+    "left": {
+     "kind": "evidence",
+     "label": "K-means centroid update",
+     "content": "The centroid is recomputed as the mean of the points assigned to its cluster.",
+     "source_version": "v1",
+     "object_id": "obj-kmeans-centroid-a"
+    },
+    "right": {
+     "kind": "evidence",
+     "label": "K-means centroid update (copy)",
+     "content": "The centroid is recomputed as the mean of the points assigned to its cluster.",
+     "source_version": "v1",
+     "object_id": "obj-kmeans-centroid-b"
+    },
+    "course_id": "cs3481",
+    "material_revision": "r1"
+   },
+   "questions": {
+    "q": {
+     "type": "choice",
+     "instructions": "Only propose a relation; never merge nodes, delete files or change a tree id. Byte-identical duplicates are resolved by hash in code, not by you. Text similarity is not proof of the same concept, and a relation is never transitive by assumption. Return UNCERTAIN rather than a confident wrong merge.",
+     "criteria": {
+      "SAME_CONCEPT": "Both labels denote the same concept in this course",
+      "ALIAS": "One label is an accepted alias of the other (for example a Chinese and an English term)",
+      "QUESTION_VARIANT": "The same question asked in a different form",
+      "DOCUMENT_VERSION_RELATION": "One material version supersedes or corrects the other",
+      "RELATED_NOT_SAME": "Related material that must not be treated as the same object",
+      "DIFFERENT": "Different concepts that merely look similar",
+      "UNCERTAIN": "Not enough evidence to relate them"
+     }
+    }
+   },
+   "label": {
+    "q": {
+     "choice": "SAME_CONCEPT"
+    }
+   }
+  },
+  {
+   "sample_id": "jevm-0052",
+   "definition_id": "entity.relation.v1",
+   "definition_version": "1.0.0-design",
+   "language": "en",
+   "option_count": 7,
+   "document_id": "doc-cs3481-entity",
+   "node_id": "node-ent-11",
+   "question_family": "entity_relation",
+   "label_tier": "OBJECTIVE_VERIFIED",
+   "label_evidence": "code-verified: entity_resolution _classify_pair rule 2 (byte-identical non-empty content) -> SAME_CONCEPT at services/rag-api/app/jev/entity_resolution.py:463-465, on a pair whose labels differ so the rule is what decides it rather than the label.",
+   "state": {
+    "left": {
+     "kind": "evidence",
+     "label": "条件概率定义",
+     "content": "条件概率定义为在事件 B 发生的条件下事件 A 发生的概率。",
+     "source_version": "v1",
+     "object_id": "obj-condprob-zh"
+    },
+    "right": {
+     "kind": "evidence",
+     "label": "Definition of conditional probability",
+     "content": "条件概率定义为在事件 B 发生的条件下事件 A 发生的概率。",
+     "source_version": "v1",
+     "object_id": "obj-condprob-en"
+    },
+    "course_id": "cs3481",
+    "material_revision": "r1"
+   },
+   "questions": {
+    "q": {
+     "type": "choice",
+     "instructions": "Only propose a relation; never merge nodes, delete files or change a tree id. Byte-identical duplicates are resolved by hash in code, not by you. Text similarity is not proof of the same concept, and a relation is never transitive by assumption. Return UNCERTAIN rather than a confident wrong merge.",
+     "criteria": {
+      "SAME_CONCEPT": "Both labels denote the same concept in this course",
+      "ALIAS": "One label is an accepted alias of the other (for example a Chinese and an English term)",
+      "QUESTION_VARIANT": "The same question asked in a different form",
+      "DOCUMENT_VERSION_RELATION": "One material version supersedes or corrects the other",
+      "RELATED_NOT_SAME": "Related material that must not be treated as the same object",
+      "DIFFERENT": "Different concepts that merely look similar",
+      "UNCERTAIN": "Not enough evidence to relate them"
+     }
+    }
+   },
+   "label": {
+    "q": {
+     "choice": "SAME_CONCEPT"
+    }
+   }
+  },
+  {
+   "sample_id": "jevm-0053",
+   "definition_id": "extraction.field_grounded.v1",
+   "definition_version": "1.0.0-design",
+   "language": "en",
+   "option_count": 6,
+   "document_id": "doc-cs3481-extraction",
+   "node_id": "node-extr-18",
+   "question_family": "extraction",
+   "label_tier": "SOURCE_REVIEWED",
+   "label_evidence": "SOURCE_REVIEWED: candidate_value '17' does not occur anywhere in the supplied text for Q3(b) (exact string search over the whole region), so no reading of that region can confirm the field; a reviewer comparing the region to the field would agree it is SOURCE_INSUFFICIENT rather than GROUNDED.",
+   "state": {
+    "question_id": "Q3",
+    "part_id": "b",
+    "field_name": "threshold",
+    "candidate_value": "17",
+    "unit": null,
+    "supplied_text": "Q3(b) Apply the classifier and report the accuracy of your model on the held-out split.",
+    "source_region": {
+     "document": "Synthetic CS3481 worksheet",
+     "page": 2,
+     "region": "Q3(b)"
+    }
+   },
+   "questions": {
+    "q": {
+     "type": "choice",
+     "instructions": "Judge only the supplied text and structure; you have not seen the original image. A model agreeing with its own transcription is not verification. Never repair a student answer into the correct answer — legibility only. Return UNCERTAIN when a decisive character, sign, unit or condition is unreadable.",
+     "criteria": {
+      "GROUNDED": "The value belongs to this question or its stated condition",
+      "WRONG_FIELD": "The value was taken from a neighbouring example or another field",
+      "NEGATION_LOST": "A negation present in the source was dropped from the value",
+      "CONSTRAINT_LOST": "A stated constraint or condition was dropped from the value",
+      "SOURCE_INSUFFICIENT": "The supplied source region cannot confirm this field",
+      "UNCERTAIN": "The evidence is not decisive; ask for review instead of guessing"
+     }
+    }
+   },
+   "label": {
+    "q": {
+     "choice": "SOURCE_INSUFFICIENT"
+    }
+   }
+  },
+  {
+   "sample_id": "jevm-0054",
+   "definition_id": "extraction.field_grounded.v1",
+   "definition_version": "1.0.0-design",
+   "language": "en",
+   "option_count": 6,
+   "document_id": "doc-cs3481-extraction",
+   "node_id": "node-extr-15",
+   "question_family": "extraction",
+   "label_tier": "SOURCE_REVIEWED",
+   "label_evidence": "SOURCE_REVIEWED: candidate_value '42' does not occur anywhere in the supplied text for Q3(b) (exact string search over the whole region), so the region cannot confirm the field; labelled SOURCE_INSUFFICIENT rather than GROUNDED.",
+   "state": {
+    "question_id": "Q3",
+    "part_id": "b",
+    "field_name": "threshold",
+    "candidate_value": "42",
+    "unit": null,
+    "supplied_text": "Q3(b) State the number of iterations your K-means implementation performed.",
+    "source_region": {
+     "document": "Synthetic CS3481 worksheet",
+     "page": 2,
+     "region": "Q3(b)"
+    }
+   },
+   "questions": {
+    "q": {
+     "type": "choice",
+     "instructions": "Judge only the supplied text and structure; you have not seen the original image. A model agreeing with its own transcription is not verification. Never repair a student answer into the correct answer — legibility only. Return UNCERTAIN when a decisive character, sign, unit or condition is unreadable.",
+     "criteria": {
+      "GROUNDED": "The value belongs to this question or its stated condition",
+      "WRONG_FIELD": "The value was taken from a neighbouring example or another field",
+      "NEGATION_LOST": "A negation present in the source was dropped from the value",
+      "CONSTRAINT_LOST": "A stated constraint or condition was dropped from the value",
+      "SOURCE_INSUFFICIENT": "The supplied source region cannot confirm this field",
+      "UNCERTAIN": "The evidence is not decisive; ask for review instead of guessing"
+     }
+    }
+   },
+   "label": {
+    "q": {
+     "choice": "SOURCE_INSUFFICIENT"
+    }
+   }
   }
  ],
  "label_tier_scope_note": "Tier semantics on this companion dataset, stated explicitly so the tier is not read more strongly than it is. OBJECTIVE_VERIFIED means a deterministic rule that already exists in the repository computes this exact label (each label_evidence names the rule and its file); it is a code-verified baseline, not human gold. SOURCE_REVIEWED means a reviewer read the case against the supplied evidence and recorded a reason: for extraction / evidence-consistency / entity-relation / capability samples that evidence is course material with a locator (a file, a question, a section or a step), while for tool.intent.v1 and feedback.* the state IS a user turn or a user report by construction, so there the reviewed source is the supplied user_message / tool arguments / report_text rather than course material. DISPUTED records both readings with the recorded one named. No SILVER_DEEPSEEK sample exists here because no model was called when authoring this file."
