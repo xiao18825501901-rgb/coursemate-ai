@@ -8,6 +8,24 @@ what was fixed, what is measured, and what is deliberately not done yet. Read it
 Working tree: `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY`, branch
 `fix/codex-dsh-audit-20260919`, base `93d502c`, nothing deployed, no production system contacted.
 
+## Codex continuation update — 2026-09-25
+
+Current application HEAD is `1d3d7a4f2a45e27001203ef4101606ea3ff1edec`. Question Engine
+Stages 1–7 now exist locally. Stage 7 reuses the existing Assessment question, rubric and
+reference-solution tables and adds only migration 036's immutable provenance table. A revision can
+be READY only when its current owner/workspace evidence, author and blind input identities, and
+both exact durable Jev receipt inputs still match. READY is recorded as `AI_REVIEWED`, not as a
+deterministic, human or institutional correctness proof; model-reviewed MCQ/numeric answers do not
+enter the deterministic grader. Revoked evidence removes a revision from future pools without
+mutating frozen sessions or its audit record.
+
+Exact-commit local evidence: 51 Question/Jev/provider/persistence tests passed; 33
+migration/rollback/Assessment tests passed with one dependency warning; Ruff and diff checks
+passed. Strict mypy still exposes four inherited errors in `course_access.py`/`workspaces.py` and
+three inherited `assessments.py` `no-any-return` errors; no Stage 7 file diagnostic was added. No
+live model, production, DNS, hosting or identity-system call was made. The next slice is the real
+`做一题` integration and browser-visible single-node journey.
+
 ## 1. What this round changed
 
 | Item | State | Evidence |
@@ -60,7 +78,7 @@ Working tree: `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY`, br
 
 | Step | Work | Why it is this order |
 |---|---|---|
-| P1 | One real node end-to-end: objective → evidence pack → single-question blueprint → author call → **blind solve** → deterministic + semantic validation → READY → 做一题 shows it | The blueprint and the blind solve do not exist yet, and everything else (five slots, variants, feedback) is assembled from them. **Landed so far:** the blind-solve isolation contract (`app/learning/blind_solve.py`, 9 tests) and the single-question blueprint contract with real-row target selection (`app/learning/question_blueprint.py`, 11 tests). The author call, the validator and the wiring into 做一题 are the remaining stages |
+| P1 | One real node end-to-end: objective → evidence pack → single-question blueprint → author call → **blind solve** → deterministic + semantic validation → READY → 做一题 shows it | Stages 1–7 through scoped READY persistence have landed. The remaining P1 work is to route the existing 做一题 entry through the READY revision while preserving attempt, hint/reveal, independent detail, history recovery and re-practice behavior. |
 | P2 | Five complementary slots through the existing `AssessmentService`; assistance state; feedback and a substantive variant ("再练同类"); independent explanation windows | Reuses the frozen-session machinery that already exists |
 | P3 | MCQ distractors with recorded misconceptions; rule-violation questions from real course rules; per-module Jev quality gates | Needs the validated-item pipeline from P1 |
 | P4 | Migration/rollback rehearsal, same-SHA regression, real image/text journeys, immutable release | Needs P1–P3 stable |
