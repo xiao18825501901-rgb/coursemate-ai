@@ -60,7 +60,7 @@ Working tree: `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY`, br
 
 | Step | Work | Why it is this order |
 |---|---|---|
-| P1 | One real node end-to-end: objective → evidence pack → single-question blueprint → author call → **blind solve** → deterministic + semantic validation → READY → 做一题 shows it | The blueprint and the blind solve do not exist yet, and everything else (five slots, variants, feedback) is assembled from them |
+| P1 | One real node end-to-end: objective → evidence pack → single-question blueprint → author call → **blind solve** → deterministic + semantic validation → READY → 做一题 shows it | The blueprint and the blind solve do not exist yet, and everything else (five slots, variants, feedback) is assembled from them. **Landed so far:** the blind-solve isolation contract (`app/learning/blind_solve.py`, 9 tests) and the single-question blueprint contract with real-row target selection (`app/learning/question_blueprint.py`, 11 tests). The author call, the validator and the wiring into 做一题 are the remaining stages |
 | P2 | Five complementary slots through the existing `AssessmentService`; assistance state; feedback and a substantive variant ("再练同类"); independent explanation windows | Reuses the frozen-session machinery that already exists |
 | P3 | MCQ distractors with recorded misconceptions; rule-violation questions from real course rules; per-module Jev quality gates | Needs the validated-item pipeline from P1 |
 | P4 | Migration/rollback rehearsal, same-SHA regression, real image/text journeys, immutable release | Needs P1–P3 stable |
