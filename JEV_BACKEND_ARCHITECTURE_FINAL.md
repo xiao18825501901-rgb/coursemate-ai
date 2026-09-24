@@ -71,6 +71,34 @@ receipt table's CHECK constraint permits exactly those three.
 Promotion is per definition, requires calibration evidence, and is never a global switch or a fixed
 `0.8` threshold.
 
+**How a promotion is made, and what that does not mean.** Until round 87 nothing could promote a
+definition in a running service: `JevGateway(modes=...)` was constructed by the evaluation harnesses
+and by nothing else, so every deployment ran the catalogue default and a promotion could not even be
+expressed. `JEV_DEFINITION_MODES` closes that gap — `key=mode` pairs, applied at startup by
+`create_app` and validated against the catalogue:
+
+| Setting | Effect |
+|---|---|
+| unset (default) | empty map: every definition runs the catalogue default (`shadow`), exactly as before |
+| `JEV_DEFINITION_MODES="retrieval.support.v1=on"` | that one definition is used; everything else stays in shadow |
+| an unknown definition key or mode | **the service refuses to start** |
+
+The refusal is the important row. An unknown key is a typo that leaves the definition in `shadow`,
+and an unknown mode is a misspelling of `on`; once the service is running, both are indistinguishable
+from "the promotion had no effect" — the hardest kind of mistake to see from the outside, and exactly
+the one somebody making a promotion is most likely to make. `MODES` in `gateway.py` is the single
+vocabulary that the config validator and `mode_for` both use, so the two cannot drift apart.
+
+What this does **not** mean, said plainly because the setting could be read as permission: the
+mechanism existing is not a licence to use it. **Every definition is still `shadow`**, and must stay
+so until §14's quality gate has passed for that definition. The live comparison on the calibration
+split does not support a promotion today — it improves citation support and worsens
+`criterion_error` and `key_fact_retention`, on populations of one to eight samples
+(`JEV_CALIBRATION_AND_ABLATION_REPORT.md` §9). The setting also makes the browser acceptance
+meaningful: the journey that would notice a live Jev asserts `used_jev === false`, which is false in
+shadow whether or not a credential exists, so a test deployment that promotes one definition is what
+turns that assertion into evidence.
+
 ## 4. The definitions
 
 The catalog (`app/jev/decision_catalog.json`) is the single list; ids and versions are stable. It holds
