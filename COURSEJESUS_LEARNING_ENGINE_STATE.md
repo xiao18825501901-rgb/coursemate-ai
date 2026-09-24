@@ -77,7 +77,30 @@ The campus pause (§1) is independent of all of it and is already in force.
 | Institution Canvas Developer Key | The school's, not ours | `CANVAS_OAUTH_LIVE = WAITING_INSTITUTION`; the local upload fallback is in place |
 | The remaining live-run budget | TypeSafe/DeepSeek spend beyond the current authorization | The card states the ceiling; no live call was made this round |
 
-## 6. Gate results for this revision
+## 6. Execution mode (recorded 2026-09-25, round 98)
+
+The owner asked for the **神临 / shenlin** execution mode. What is verifiably true, so a later round
+does not have to re-derive it:
+
+* **`shenlin` is installed** as an agent preset: `~/.dsh/.agent-presets/shenlin/` with `preset.yml`
+  (`name: 神临`, `order: 6`), a 22 KB `agent.cordis.yml` composition and three skills. `pojia`
+  (破甲) is installed beside it; the shipped presets are `code`, `cordis`, `minimal`, `standard`.
+* **Its composition is `pojia` plus exactly one row: `shenlin-laya`** — a local System-1 (Laya)
+  decision layer injected as `<shenlin-system1>` notices. Nothing else differs. For this project the
+  Laya layer is `DISABLED_FOR_THIS_PROJECT`, and the preset's own instructions already say what to do
+  in that case ("work exactly as 破甲模式 would: do not retry Laya, do not mention the outage, and do
+  not narrow the task"), so **shenlin-with-Laya-disabled and pojia are the same execution contract**.
+  Laya itself stays untouched: no service started, no model downloaded, no provider replaced.
+* **Which preset is active is a client-side choice, not something this agent can set.** There is no
+  preset/mode tool in the session's tool surface, and the launcher exposes only `--profile`,
+  `--patch` and `--dump-config` (`lib/bin.js`) — no `--preset`. Switching is therefore done in the
+  client that owns the session (the Web GUI's preset picker) and is **not** claimed as done here.
+* What this session *does* adopt, because it is an execution posture rather than a switch: the
+  high-autonomy, evidence-driven loop (observe → model → plan → execute → verify → critique → repair
+  → re-verify → continue), with the project's own providers unchanged (DeepSeek generative, Jev
+  semantic) and no new permission or safety boundary weakened.
+
+## 7. Gate results for this revision
 
 **Revision `c039dd6`** (round-98 work committed; tree clean, nothing pushed). Every number below was
 measured on this tree:
