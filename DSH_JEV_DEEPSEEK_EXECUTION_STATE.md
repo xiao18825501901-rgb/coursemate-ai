@@ -777,6 +777,31 @@ wired, and the reason the earlier decision was wrong is part of the record.
 > (`jev-component-round95.json`), with populations 9 (extract), 10 (entity), 7 (consistency),
 > 42/16 (citation), 7 (capability), 7 (tool), verdict still `NOT_INTERPRETABLE`; both datasets validate
 > (schema, tier invariants, split leakage, content hash); and 143 measurement tests pass.
+>
+> **The calibration path was exercised on the new split too, with synthetic predictions and no model
+> call** (`work/current-change/probe_calibration_round95.py` → `calibration-round95-synthetic.json`):
+> the real calibrator joins **58** calibration rows (was 47), computes `ece_before` 0.456, and records
+> `predictions_provenance` as the synthetic fixture it is — so the artifact cannot be mistaken for a
+> fitted result. What this proves is the *plumbing and the population*; the numbers in it mean nothing
+> and it is written under `work/`, never as a committed calibration.
+>
+> **A defect in the generator, found while committing rather than in the data.** `_write_json` used
+> `Path.write_text` without `newline="\n"`, so regenerating the dataset rewrote all 13,458 line endings
+> to CRLF and a 35-sample addition arrived as a ~17,000-line diff. The content was checked line by line
+> (the first 12,035 lines identical, the parsed structures of the first 310 samples equal) and the
+> writers in both `build_jev_dataset.py` and `build_jev_module_split.py` now pin the line ending; the
+> four data files are back to LF and the dataset diff is **1420 insertions / 0 deletions**. This is the
+> same trap round 90 hit with a one-off script, so it is now fixed in the code that will run again.
+>
+> **The gate on `9af3242` (round 95).** Only generators, data, tests and documentation changed, so the
+> gate says exactly that:
+>
+> | Gate | Result |
+> |---|---|
+> | Backend full regression | **1722 passed / 2 skipped / 0 failed** in 1907.88 s (31:47), exit 0 — `full_run_9af3242.log`; same two environmental skips |
+> | ruff | **0 findings added**: the five changed Python files report one pre-existing E501 (verified present at HEAD, same 101-character line) and nothing else |
+> | Data validation | both datasets **validate** (schema, label-tier invariants, split leakage, content hash) and two tests assert the committed files **equal what the generators write** |
+> | Web / browser / agent | unchanged since `897cc15` (**107** web tests, **60** browser journey slots, **92** agent tests): this round touched no product code |
 
 >
 > | Gate | Result |
