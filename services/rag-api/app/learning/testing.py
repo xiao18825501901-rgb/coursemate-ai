@@ -4,6 +4,24 @@ from typing import Any
 
 
 def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
+    if schema == "BlindSolveOutput":
+        return {
+            "schema_version": "blind-solve-output.v1",
+            "solvability": "SOLVABLE",
+            "conclusion": "[FAKE TEST FIXTURE] Synthetic independent conclusion.",
+            "steps": [
+                {
+                    "ordinal": 1,
+                    "operation": "Apply the supplied bounded rule",
+                    "result": "[FAKE TEST FIXTURE] Synthetic blind-solve result",
+                    "explanation": (
+                        "[FAKE TEST FIXTURE] This proves the provider contract only, not "
+                        "live model quality or mathematical correctness."
+                    ),
+                }
+            ],
+            "assumptions": ["Synthetic fixture, not a live independent solve"],
+        }
     if schema == "QuestionAuthorOutput":
         blueprint = context["blueprint"]
         evidence_ids = context["evidence_pack"]["evidence_ids"]
