@@ -10,12 +10,12 @@
 >
 > What the live validation changed, stated plainly: **the quality gate does not pass.** Against a real
 > DeepSeek baseline on the 47-sample calibration split, Jev improves citation support (0.667 → 0.833)
-> and the unsupported-claim rate (0.667 → 0.500), worsens `intent_accuracy` (1.000 → 0.667),
-> `criterion_error` (0.000 → 0.333) and `key_fact_retention` (1.000 → 0.000, one sample of two), and
-> ties elsewhere. So **every definition stays `shadow` and nothing is promoted**, including the
-> retrieval-rerank promotion §1 previously proposed as the default. The per-definition populations are
-> 2–7 samples, so the promotion decision belongs on the test split once thresholds are frozen
-> (`JEV_CALIBRATION_AND_ABLATION_REPORT.md` §9).
+> and the unsupported-claim rate (0.667 → 0.500), worsens `criterion_error` (0.000 → 0.333, one case
+> of three) and `key_fact_retention` (1.000 → 0.000, one case of two), **ties** on `intent_accuracy`
+> (0.667 both sides), and ties elsewhere. So **every definition stays `shadow` and nothing is
+> promoted**, including the retrieval-rerank promotion §1 previously proposed as the default. The
+> per-definition populations are 1–8 samples, so the promotion decision belongs on the test split
+> once thresholds are frozen (`JEV_CALIBRATION_AND_ABLATION_REPORT.md` §9).
 >
 > **What is still yours, in this order:**
 >

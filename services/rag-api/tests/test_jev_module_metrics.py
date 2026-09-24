@@ -286,7 +286,37 @@ def test_score_label_metric_uses_ordinal_distance() -> None:
     assert score_level_mae(results) == 0.5
 
 
-def test_the_definition_level_metrics_publish_their_denominator_too() -> None:
+def test_the_small_population_families_publish_their_cases_not_just_their_rate() -> None:
+    """A rate over 2–6 samples is only actionable next to the cases that moved it.
+
+    The live comparison put `intent_accuracy` at 4/6 for Jev against 6/6 for the DeepSeek baseline.
+    Two samples, and which two is the whole question — so the families whose populations are smallest
+    publish a per-case record (label, prediction, agreement) beside the rate.
+    """
+    # The frozen judgment dataset, not the companion one: the companion carries only the seven
+    # module definitions, and `intent`/`context` are case families from the frozen set.
+    dataset = load_jev_dataset(FROZEN)
+    run = run_jev_semantic_ablation(dataset, "M-TOOL", transport=FakeJevTransport())
+    per_case = run["per_case"]
+
+    for family in ("intent", "pedagogy", "span_selection", "exercise", "prerequisite"):
+        assert family in per_case, family
+        entries = per_case[family]
+        assert entries, family
+        for entry in entries:
+            assert set(entry) == {"case_id", "label", "predicted", "agrees"}, (family, entry)
+            # `agrees` must be derived, not asserted independently of the two values it compares.
+            assert entry["agrees"] == (entry["predicted"] == entry["label"]), entry
+
+    context_entries = per_case["context"]
+    assert context_entries
+    for entry in context_entries:
+        assert set(entry) == {"case_id", "segment_id", "label_keep", "predicted_keep", "agrees"}
+        assert entry["agrees"] == (entry["predicted_keep"] == entry["label_keep"]), entry
+
+    # And the per-case count for a family equals the denominator published for its rate.
+    assert len(per_case["intent"]) == run["metric_denominators"]["intent_accuracy"]
+    assert len(per_case["context"]) == run["metric_denominators"]["key_fact_retention"]
     """Not only the module metrics: every rate whose population can be tiny.
 
     On the calibration split `context.keep_segment.v1` has 2 labelled samples and

@@ -1701,6 +1701,14 @@ def run_jev_semantic_ablation(
             "criterion": [_criterion_asdict(r) for r in criterion_results],
             "trajectory": [_trajectory_asdict(r) for r in trajectory_results],
             "image": [_image_asdict(r) for r in image_results],
+            # The families whose rates are computed over a handful of samples, so a metric that
+            # moves can be read against the cases themselves rather than only its value.
+            "intent": [_choice_asdict(r) for r in intent_results],
+            "pedagogy": [_choice_asdict(r) for r in pedagogy_results],
+            "span_selection": [_choice_asdict(r) for r in span_results],
+            "exercise": [_choice_asdict(r) for r in exercise_results],
+            "prerequisite": [_choice_asdict(r) for r in prerequisite_results],
+            "context": [_key_fact_asdict(r) for r in context_results],
         },
     }
     if arm in COMPONENT_ARM_NAMES:
@@ -1818,6 +1826,34 @@ def _retrieval_asdict(result: RetrievalResult) -> dict[str, Any]:
         "returned_ids": list(result.returned_ids),
         "relevant_ids": sorted(result.relevant_ids),
         "k": result.k,
+    }
+
+
+def _choice_asdict(result: ChoiceResult) -> dict[str, Any]:
+    """One choice decision: what was labelled, what was predicted, and whether they agree.
+
+    Published for `intent`, `pedagogy`, `span_selection` and `exercise` so a metric that moves can
+    be traced to the *cases* that moved it. That is not a convenience: on the calibration split
+    `intent.next_action.v1` has six labelled samples, and the live comparison showed Jev scoring 4/6
+    against the baseline's 6/6 — a difference of two samples that cannot be explained, or fixed,
+    without seeing which two.
+    """
+    return {
+        "case_id": result.case_id,
+        "label": result.label_choice,
+        "predicted": result.predicted_choice,
+        "agrees": result.predicted_choice == result.label_choice,
+    }
+
+
+def _key_fact_asdict(result: KeyFactResult) -> dict[str, Any]:
+    """One context segment: whether the label says keep and whether Jev said keep."""
+    return {
+        "case_id": result.case_id,
+        "segment_id": result.segment_id,
+        "label_keep": result.label_keep,
+        "predicted_keep": result.predicted_keep,
+        "agrees": result.predicted_keep == result.label_keep,
     }
 
 

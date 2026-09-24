@@ -8,10 +8,12 @@ quality gate, so nothing is promoted.** The Jev half runs against the real servi
 half against live DeepSeek (§9): 53 Jev calls + 162 DeepSeek calls on the 47-sample calibration
 split, all answered, with the baseline asked **once per sample** so the arms differ only in the Jev
 side. Against that baseline Jev improves citation support (0.667 → 0.833) and the unsupported-claim
-rate (0.667 → 0.500), **worsens** `intent_accuracy` (1.000 → 0.667), `criterion_error` (0.000 →
-0.333) and `key_fact_retention` (1.000 → 0.000, one sample of two), and ties elsewhere. **Every
-definition therefore stays `shadow`**, and the per-definition populations are 2–7 samples (§9.1), so
-the decision that matters must be taken on the test split once thresholds are frozen.
+rate (0.667 → 0.500), **worsens** `criterion_error` (0.000 → 0.333, one case of three) and
+`key_fact_retention` (1.000 → 0.000, one case of two), **ties** on `intent_accuracy` (0.667 on both
+sides — an earlier version of this summary claimed a regression there, and that claim was produced by
+subtracting numbers from two different runs; §9 corrects it), and ties elsewhere. **Every definition
+therefore stays `shadow`**, and the per-definition populations are 1–8 samples (§9), so the decision
+that matters must be taken on the test split once thresholds are frozen.
 
 Thresholds remain untuned (`thresholds = UNSET_UNTIL_CALIBRATED_ON_LABELLED_DATA`).
 The test split (67 samples) has **not** been run.
@@ -350,46 +352,62 @@ shows `corpus_quality_mae` at 0.250 on both sides, and `span_selection_accuracy`
 so the "regression" reported for span selection in the first run was **baseline noise**, not Jev.
 
 **Verdict: `INTERPRETABLE`.** Controlled comparison, arm A (DeepSeek baseline) against arm E (all
-Jev on):
+Jev on), with the denominators taken from the run's own `case_counts` rather than from the dataset's
+definition counts (they differ — see the limits below):
 
 | metric | denominator | A — DeepSeek | E — all Jev | verdict |
 |---|---|---|---|---|
-| `citation_support_accuracy` | 7 | 0.667 | **0.833** | Jev better |
-| `unsupported_claim_rate` | 7 | 0.667 | **0.500** | Jev better |
-| `intent_accuracy` | 6 | **1.000** | 0.667 | **Jev worse** |
+| `citation_support_accuracy` | 6 | 0.667 | **0.833** | Jev better |
+| `unsupported_claim_rate` | 6 | 0.667 | **0.500** | Jev better |
 | `criterion_error` | 3 | **0.000** | 0.333 | **Jev worse** |
 | `key_fact_retention` | 2 | **1.000** | 0.000 | **Jev worse** |
-| `span_selection_accuracy`, `corpus_quality_mae`, `context_compaction`, `pedagogy_accuracy`, `prerequisite_accuracy`, `coverage_confusion`, `mainline_recovery_rate` | — | tie | tie | no change |
-| `locator_accuracy`, `classification_accuracy`, `image_answer_accuracy`, the six module metrics | 0 | 0.000 | 0.000 | nothing to measure on this split |
+| `intent_accuracy` | 3 | 0.667 | 0.667 | **tie** |
+| `pedagogy_accuracy` | 4 | 1.000 | 1.000 | tie |
+| `span_selection_accuracy` | 4 | 0.750 | 0.750 | tie |
+| `exercise_accuracy` | 4 | 0.500 | 0.500 | tie |
+| `mainline_recovery_rate` | 3 | 1.000 | 1.000 | tie |
+| `corpus_quality_mae` | 8 | 0.250 | 0.250 | tie (a definition no arm arms) |
+| `coverage_confusion`, `prerequisite_accuracy`, `context_compaction` | 5 / 1 / 2 | tie | tie | no change |
+| `locator_accuracy`, `classification_accuracy`, the six module metrics, feedback | 0–3 | 0.000 | 0.000 | nothing to measure on this split |
 
-**The denominators are the finding, not a footnote.** Every rate above except citation support is
-computed over **2–7 samples**, because that is all the calibration split holds per definition
-(`context.keep_segment.v1` 2, `assessment.criterion_review.v1` 3, `source.select_span.v1` 4,
-`coverage.item_support.v1` 5, `intent.next_action.v1` 6, `source.supports_claim.v1` 7) — and
-`retrieval.support.v1` has **0** calibration samples (all 22 are in the test split). So:
+**A correction to the previous version of this table, which reported an `intent_accuracy`
+regression.** It read 1.000 for arm A and 0.667 for arm E, and that comparison was invalid: the two
+numbers came from **different runs**, and the baseline answers one case differently between runs. In
+the run that produced the per-case data below, **every arm including the baseline scores 0.667** —
+Jev gets `jev-0126` right where the baseline got it wrong (`QUIZ_WAIT` against `OTHER`), and misses
+`jev-0130` where the baseline was right (`ANSWER_ONLY` against `ANSWER_AND_RESUME`). One each way on
+three samples is a tie, not a regression, and subtracting across runs is precisely the error the
+limits below warn about. The per-case record is what made this visible, which is why it is published
+now.
 
-* `intent_accuracy` 6/6 → 4/6 and `criterion_error` 0/3 → 1/3 are **one to two samples each**;
-* `key_fact_retention` 1.000 → 0.000 is **one sample out of two**;
-* `citation_support_accuracy` 0.667 → 0.833 is one sample out of six;
-* the one clear signal is the *direction* of citation support, and the one clear warning is intent.
+**The denominators are the finding, not a footnote.** Every rate above is computed over **1–8
+samples**, and one family has none:
 
-Because a rate without its population is unreadable, `metric_denominators` now publishes the
-denominator beside **every** definition-level rate, not only the module metrics, and a test asserts
-it agrees with the run's own case counts.
+* `prerequisite` 1, `context` 2, `criterion` 3, `intent` 3, `span_selection` 4, `pedagogy` 4,
+  `exercise` 4, `coverage` 5, `citation` 6, `corpus_quality` 8;
+* `retrieval.support.v1` — the definition the task lists as the *first* promotion priority — has
+  **0** cases here (its 22 samples are in the test split), so it has no live quality number at all;
+* `key_fact_retention` 1.000 → 0.000 is therefore **one sample out of two**, and the
+  `criterion_error` move is one of three.
+
+Because a rate without its population is unreadable, `metric_denominators` publishes the denominator
+beside **every** definition-level rate (not only the module metrics), `per_case` now publishes the
+individual cases for `intent`, `pedagogy`, `span_selection`, `exercise`, `prerequisite` and
+`context`, and tests assert both agree with the run's own counts.
 
 **Cost effect, measured:** turning Jev on *reduces* DeepSeek calls — `deepseek_call_delta_vs_A` is
 −9 (C), −17 (D), −27 (E). The Jev-answered questions no longer need a DeepSeek answer.
 
 **What this decides.** §14 of the task allows promotion only on a real quality gate, and this gate
 does not pass: **no definition is non-inferior across the board**, and the definitions whose arms own
-the regressions (`assessment.criterion_review.v1`, `coverage.item_support.v1`) are exactly the two
-the task says may only ever be advisory. So:
+the two remaining regressions (`assessment.criterion_review.v1`, `coverage.item_support.v1`) are
+exactly the two the task says may only ever be advisory. So:
 
 * **every definition stays `shadow`**; nothing is promoted by this round;
 * `source.supports_claim.v1` + `source.select_span.v1` (arm E) are the one place with a measurable
-  gain and are the best candidates for a targeted promotion *after* the regressions are understood;
-* `intent.next_action.v1` is the definition to look at first: it does not merely fail to improve, it
-  makes the outcome worse than the baseline on the samples that exist.
+  gain (citation support 0.667 → 0.833, unsupported-claim rate 0.667 → 0.500) and are the best
+  candidates for a targeted promotion after the two regressions are understood;
+* both remaining regressions are one sample, and the per-case record now exists to look at them.
 
 **Three honest limits of this comparison.**
 
@@ -399,11 +417,18 @@ the task says may only ever be advisory. So:
    as the *first* promotion priority — has **no calibration samples at all**. The test split has 22
    for it, and the honest next step is to use the test split for the promotion decision after the
    thresholds are frozen, not to read a 2-sample rate as evidence.
-2. **Cross-run comparability is limited.** The memo makes the arms comparable *within* a run, which
-   is what the comparison needs. Across runs the baseline's own numbers move (arm A's
-   `intent_accuracy` read 0.667 in the first run and 1.000 in the controlled one) because the
-   baseline is a language model answering at a different time. Two runs must therefore not be
-   subtracted from each other.
+2. **Cross-run comparability is limited, and this report broke that rule once.** The memo makes the
+   arms comparable *within* a run, which is what the comparison needs. Across runs the baseline's
+   own numbers move because it is a language model answering at a different time: arm A's
+   `intent_accuracy` read 0.667 in one run and 1.000 in another, and the difference is a single
+   unstable case (`jev-0126`). The previous version of the table above subtracted arm E's number in
+   one run from arm A's number in another and reported a regression that does not exist. Two runs
+   must not be subtracted from each other; every number in a comparison must come from the same run.
+3. **The metric populations are not the dataset's definition counts.** `intent_accuracy` uses 3 cases
+   while the calibration split holds 6 `intent.next_action.v1` samples, because the family split
+   scores some of them as `trajectory` (`mainline_recovery_rate`); citation uses 6 of 7. Read the
+   run's `case_counts`, not the dataset's, and note that `case_counts` and `metric_denominators` now
+   agree by construction.
 3. **The baseline is one model at one setting** (`deepseek-flash`, thinking disabled). A different
    DeepSeek setting is a different baseline and would have to be re-measured.
 
