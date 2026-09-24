@@ -584,6 +584,19 @@ wired, and the reason the earlier decision was wrong is part of the record.
 > unnoticed; and the fix was found by running a suite the task explicitly lists, not by reading code.
 > The full suite is re-run after the repair and its result is in the gate table below.
 
+> **The gate on this round's revisions (round 91).** Two code revisions, and the results are stated
+> per revision rather than merged:
+>
+> | Gate | Revision | Result |
+> |---|---|---|
+> | Backend full regression | **`35024fb`** | **1720 passed / 2 skipped / 0 failed** in 2050.89 s (34:10), exit 0 — `work/current-change/full_run_35024fb.log`. The +3 over `d824a5b`'s 1717 are this round's new CLI tests. Same two environmental skips (symlink privilege, POSIX permission bits) |
+> | Browser `codex-audit` (14 journeys, isolated venv/ports/run) | `fb84ae8` | **14 passed / 0 failed**, exit 0 — `browser_codex_audit_round91b.log`, after the campus-gate journey was repaired from its measured contract |
+> | Browser `ui-refresh` / `coursemate` / `v3-learning` / `jev-structured` | `d824a5b` (round 90) | unchanged and still valid for these: nothing after `d824a5b` touches product code they exercise. `35024fb` changes the ablation library and its CLI, neither of which is imported by the running service, and `fb84ae8` changes only `codex-audit.spec.ts` |
+> | ruff / mypy | `35024fb` | ruff "All checks passed" on the three changed files; mypy **0 errors** in the changed module |
+> | Component ablation, offline | `35024fb` | all six arms measure in one command, verdict `NOT_INTERPRETABLE` (fake transport) — `jev-component-union-round91b.json` |
+> | Component ablation, **live** | — | **NOT_RUN**: 93 decisions, which would cross the ≤300 ceiling (268 already spent). The command and the count are in `MINIMAL_OWNER_ACTION_CARD.md` §1b |
+
+
 > **Added 2026-09-24 (round 89) — the four browser journeys the task asks for, and exactly where each
 > one attaches.**
 >
