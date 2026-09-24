@@ -6,12 +6,12 @@ what was fixed, what is measured, and what is deliberately not done yet. Read it
 (the frozen batch) and `MINIMAL_OWNER_ACTION_CARD.md` (what only the owner can decide).
 
 Working tree: `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY`, branch
-`fix/codex-dsh-audit-20260919`, current local application HEAD `f00f3e3`, nothing deployed, no production
+`fix/codex-dsh-audit-20260919`, current local application HEAD `df8694b`, nothing deployed, no production
 system contacted during this continuation.
 
 ## Codex continuation update — 2026-09-25
 
-Current application HEAD is `f00f3e3eb012d2868930a3fb924b8ef0926fb940`. Question Engine
+Current application HEAD is `df8694b0b4d97347f1c75baaca70c7e725e94a6e`. Question Engine
 Stages 1–7, the real single-question practice journey, five complementary assessment slots and the
 local P3 specialization now exist. P1 landed at `0fc77fc190ed3f5ac89111ba918469341204139b`: 做一题 preserves
 attempt, hint, feedback, reveal and different-family re-practice state through the existing Pair and
@@ -36,7 +36,16 @@ migration/rollback tests passed with one dependency warning; the isolated real-C
 passed 15/15, including an empty-pool five-question journey. Focused Ruff, byte compilation and
 diff checks passed. Strict mypy retains the already-recorded imported legacy debt; no claim is made
 that the old UI adapter is globally typed. No live model, production, DNS, hosting or identity-system
-call was made. The next implementation phase is P4 same-SHA regression and migration/restore rehearsal.
+call was made.
+
+P4 is now locally complete. The first wide run correctly stopped on 11 failures: two stale Jev
+matrix assertions and nine restart failures caused by replaying migration 027 after migration 038
+had widened the model-call ledgers. Commit `df8694b` preserves the historical migrations, skips
+migration 027's superseded replay only after 38 is recorded, and pins repeated Question Engine roles through a
+normal database restart. The fixed candidate passes 1818 backend tests (2 environmental skips),
+115 Web tests, 92 Agent tests, four real-Chrome suites plus the V3 private-image journey, and a
+verified synthetic backup/restore/schema-25-to-38 rehearsal. Exact evidence and limits are in
+`docs/coursejesus/QUESTION_ENGINE_P4_RELEASE_EVIDENCE.md`.
 
 ## 1. What this round changed
 
@@ -92,7 +101,7 @@ call was made. The next implementation phase is P4 same-SHA regression and migra
 | P1 | ~~One real node end-to-end through 做一题, including attempt, hint/reveal, feedback, history recovery and different-family re-practice~~ | **Completed at `0fc77fc`**; included in the current 15/15 browser suite |
 | P2 | ~~Five complementary slots through the existing `AssessmentService`~~ | **Completed at `1df8dbc`**; exact prepared revisions freeze in slot order and all ten provider stages use the existing reservation ledger |
 | P3 | ~~MCQ distractors with recorded misconceptions; rule-violation questions from real course rules; per-module Jev quality gates~~ | **Local implementation completed at `f00f3e3`**; live-model and human quality evidence remain separate external acceptance work |
-| P4 | Migration/rollback rehearsal, same-SHA regression, real image/text journeys, immutable release | **Current next phase**; no release claim until these gates complete |
+| P4 | ~~Migration/rollback rehearsal, same-SHA regression, real image/text journeys, immutable local candidate~~ | **Completed locally at `df8694b`**; live model, human quality and production gates remain external |
 
 The campus pause (§1) is independent of all of it and is already in force.
 
@@ -129,7 +138,7 @@ does not have to re-derive it:
   → re-verify → continue), with the project's own providers unchanged (DeepSeek generative, Jev
   semantic) and no new permission or safety boundary weakened.
 
-## 7. Gate results for this revision
+## 7. Inherited round-98 gate results
 
 **Revision `c039dd6`** (round-98 work committed; tree clean, nothing pushed). Every number below was
 measured on this tree:

@@ -24,6 +24,10 @@ Two rules this repository already follows, and which the numbers above depend on
   so a migration file that is not registered is not applied.
 * **Each migration file inserts its own `schema_migrations` row**, so a partially applied release
   cannot look complete.
+* Registered migrations are normally replayed for idempotent schema-object repair. A historical
+  table rebuild that a later migration has made unsafe is skipped only after that later version is
+  recorded. Migration 027 → 038 is the first explicit case; see
+  `docs/decisions/ADR-003-skip-superseded-table-rebuilds-on-replay.md`.
 
 ## 2. What this work adds to the database
 
