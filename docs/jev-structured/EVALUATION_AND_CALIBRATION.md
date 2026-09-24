@@ -168,7 +168,7 @@ marked **partial** rather than claimed.
 | 未揭晓答案不暴露 | `codex-audit.spec.ts` | an un-revealed exercise's answer canary is absent from **four** payloads (`/runs/{id}`, `/runs/{id}/events`, `/pairs/{id}`, `/exercises/{id}`) and from the page body, then present after reveal and after a reload | PASS |
 | 错误工具写操作被阻止 | `jev-structured.spec.ts` | with the guard enforcing and the endpoint unreachable, the proposed write is refused (`CONFIRMATION_REQUIRED`, `fallback:unavailable`, `jevCalls: 0`) and the task board is byte-identical | PASS |
 | 合法明确工具操作不被过度阻断 | `jev-structured.spec.ts` | the same explicit message creates the task under `enforce` with a live credential and a raised budget | PASS (live) |
-| private cache 不跨用户 | `learning.spec.ts` "two students stay isolated while an admin sees only the submitted Overlay snapshot" + `test_cache_scope_is_owner_scoped_and_never_crosses_users` | two identities cannot see each other's learning state, and a Jev cache key derived from the caller cannot serve user-b user-a's judgment | **PARTIAL at deployment level**: the browser deployment injects **one** identity (`AUTH_TEST_USER_ID` + `test-session-token`), so the cross-user Jev-cache property is pinned by unit tests, not by a browser journey. Stated rather than implied |
+| private cache 不跨用户 | `test_jev_cache_isolation_http.py` (two authenticated subjects against the running service) + `learning.spec.ts` "two students stay isolated while an admin sees only the submitted Overlay snapshot" + `test_cache_scope_is_owner_scoped_and_never_crosses_users` | two subjects asking the same question through the mounted product produce **two distinct `owner_scope_hash` values** for every definition they both reach, each decision is recorded with a typed outcome, and two identities cannot see each other's learning state. The unit test proves the scope *function*; the HTTP test proves the running service derives the scope from the authenticated subject | **PASS** (round 94). One qualification the browser layer keeps: the browser deployment injects a single identity, so this is proven at the HTTP/service boundary with two subjects rather than in a two-user browser journey |
 | Jev 断开系统安全降级 | `jev-structured.spec.ts` (two journeys) | with no credential every decision reports `used_jev: false`, cards get `INSUFFICIENT_CONTEXT` rather than a fabricated verdict, a complete answer still arrives; and the tool-intent guard refuses rather than allowing | PASS |
 
 **The §16 operational chain**, link by link, with the journey that covers it (all in the browser gate):
@@ -192,6 +192,16 @@ limits: the browser deployment shape authenticates with a single injected identi
 that needs *two* real users (private cache isolation, cross-user retrieval) is pinned by unit or
 in-process tests rather than by a journey. Adding a second injected identity is a product-code change
 for test convenience and has not been made.
+
+**Round 94 update:** the one PARTIAL row above is now **PASS**, and the constraint is unchanged. The
+cross-user property is asserted against the *running product* — `test_jev_cache_isolation_http.py`
+builds the mounted app with two authenticated subjects, has both ask the same question, and reads the
+receipt store the cache is keyed on: every definition both subjects reached carries **two distinct
+`owner_scope_hash` values**, which is exactly what a leak would collapse. That is the difference
+between "the scope function is correct" and "the service derives the scope from the caller". A
+two-user *browser* journey still cannot exist without a second injected identity, and that is stated
+rather than worked around.
+
 
 
 

@@ -2,19 +2,41 @@
 
 > **Snapshot, not a live status.** Every count below was measured on the revisions named in §1
 > (backend `169bd57`, browser `6ba70b0`) and is left as it was measured — rewriting a historical
-> measurement is how a report stops being evidence. What has moved since, measured at round 82 and
-> re-checked mechanically by `work/current-change/verify-jev-doc-claims.py`:
+> measurement is how a report stops being evidence. The body's §4–§7 are the round-31-to-35 record;
+> where they say "no live call was made" or `NOT_RUN`, this table is the current answer.
 >
-> | Figure | Here (as measured then) | Currently (round 82) | Evidence |
+> **Re-checked round 94 (HEAD `e096f22`, gate run on `897cc15`).** Three columns on purpose: what the
+> body measured, what round 82 re-checked, and what is true now. The round-82 column is kept because it
+> shows the drift rather than hiding it.
+>
+> | Figure | Body (as measured then) | Round 82 | **Now (round 94)** |
 > |---|---|---|---|
-> | V3 schema | 30 | **34** (033 the local bridge, 034 the shared OAuth state store) | `app/db.py`, `docs/coursejesus/DATA_MIGRATION_AND_ROLLBACK.md` |
-> | Backend gate | 1293 passed on `169bd57` | **1614 passed / 3 skipped / 0 failed** in 1728.14 s on `8d43dc6` | `work/current-change/full_run_round82.log` |
-> | Web unit tests | 73 (19 files) | **96 (22 files)**; `tsc -b` exit 0 | round 79/81 counts, `apps/web/src/**/*.test.ts` |
-> | Browser journeys | 46 totals across five suites, `ui-refresh` 19 | the two suites re-run green on `fba2291`: **`ui-refresh` 22/22 and `jev-structured` 6/6**; the five spec files now hold **49** journeys, and `coursemate` 4 / `learning` 3 / `codex-audit` 14 have not been re-run since their own older revisions | `work/current-change/browser_ui_round80c.log`, `browser_jev_round79c.log` |
-> | Canvas private import | routes + worker implemented | **the identity design was revised in round 79** (OAuth is the production route, the PAT is a local bridge) and the import result is now covered end to end | `docs/coursejesus/CANVAS_LOCAL_BRIDGE.md`, `tests/test_canvas_imported_course_lifecycle.py` |
+> | V3 schema | 30 | 34 | **35** — 029 proposal-only relations, 030 durable feedback queue, 033 the local Canvas bridge, 034 the shared OAuth state store, 035 the task credential. `LATEST_V3_SCHEMA_VERSION = 35`, 29 migration files |
+> | Backend gate | 1293 passed on `169bd57` | 1614 passed / 3 skipped on `8d43dc6` | **1721 passed / 2 skipped / 0 failed**, 2111.51 s (35:11), exit 0 on `897cc15` (`work/current-change/full_run_897cc15.log`). The two skips are environmental: a symlink needs a privilege this account lacks, and POSIX permission bits are not the Windows mechanism |
+> | Web unit tests | 73 (19 files) | 96 (22 files) | **107 (23 files)**, `tsc -b` exit 0, production build + PAT scan exit 0 (`no token field, notice present`) |
+> | Browser journeys | 46 across five suites, `ui-refresh` 19 | 49 spec slots; only two suites re-run | **60 journey slots across all five suites, all green on `897cc15`**: `ui-refresh` 23, `coursemate` 4, `v3-learning` 3, `jev-structured` 11 passed / 5 skipped (the five state their live precondition), `codex-audit` 14. The `jev-structured` suite was run **three times in a row** because a fix in it targeted an intermittent condition |
+> | Agent service | — | — | **92 tests (12 files)**, `tsc --noEmit` exit 0, build exit 0 |
+> | ruff / mypy | 1815 findings; mypy 1004 in 32 files | — | **0 findings added** against HEAD on every changed file; **0 mypy errors in `app/jev/` and `app/evaluation/`**, and 0 added in the changed modules (measured in a worktree of HEAD: `app/cm_update/app.py` 730 → 730, `provider.py` 56 → 56) |
+> | Live Jev | `NOT_RUN` | `NOT_RUN` | **315 decisions made, every one `outcome=ok`**: 31 definition sweep + 53 A–E ablation + 15 probes + 169 in one structured browser run + 47 in the promoted exact-locator run. Observed decision latency **0.65–1.36 s**. Token usage is **not reported by the transport**, so no USD figure is claimed |
+> | Live DeepSeek | `NOT_RUN` | `NOT_RUN` | **10 canary roles**: 8,728 input + 4,477 output tokens → **$0.0079908**; per call min `$0.0000642`, mean `$0.0007991`, max `$0.0038862`. The A–E ablation's live baseline cost 43 calls |
+> | A–E ablation | `NOT_RUN` | `NOT_RUN` | **RAN LIVE, verdict `INTERPRETABLE`, and unfavourable**: Jev better on citation support 0.667 → 0.833 and unsupported-claim rate 0.667 → 0.500; **worse** on `criterion_error` 0.000 → 0.333 and `key_fact_retention` 1.000 → 0.000; tie on `intent_accuracy` 0.667. Populations 1–8 samples, and `retrieval.support.v1` — the task's first promotion candidate — has **0** calibration samples |
+> | Six component arms | implemented | implemented | Offline complete after a round-91 harness fix (every metric now has the population its own dataset labels); **live `NOT_RUN`**: 93 decisions, pending the budget decision in `MINIMAL_OWNER_ACTION_CARD.md` §1b |
+> | Promotion | none; all `shadow` | none | **still none; all 19 definitions are `shadow` in the committed configuration.** The mechanism exists (`JEV_DEFINITION_MODES`) and was used for measurements only |
+> | §16's ten verifications | — | — | **10 PASS.** The last one to close was "private cache 不跨用户": round 94 added `test_jev_cache_isolation_http.py`, which runs the mounted product with **two authenticated subjects** and reads the receipt store the cache is keyed on — every definition both subjects reach carries two distinct `owner_scope_hash` values, which is what a leak would collapse. The qualification that remains is stated rather than hidden: the browser deployment injects one identity, so this is proven at the HTTP/service boundary, not in a two-user browser journey. Item-by-item table in `docs/jev-structured/EVALUATION_AND_CALIBRATION.md` §9 |
 >
-> `CANVAS_OAUTH_LIVE` and both live model gates remain `NOT_RUN`/`WAITING_INSTITUTION`; nothing in the
-> table above changes that.
+> `CANVAS_OAUTH_LIVE` remains `WAITING_INSTITUTION`; production deployment and acceptance remain
+> `BLOCKED` on the owner's approvals, one real login and the Jev USD figure. Nothing in this table
+> promotes a definition or claims a teaching-quality improvement.
+>
+> **Four module-level defects were found and fixed after the body was written**, each of which had made
+> a wired module inert, and each is recorded in `DSH_JEV_DEEPSEEK_EXECUTION_STATE.md` with its
+> measurement: the shared service was never handed to `LearningOrchestrator` (rounds 31–35, in the body
+> below); module D's layer 1 was built over the UI extension's own database, so every citation card
+> raised `no such table: document_versions` and no verdict ever reached a reader (round 90); the
+> labelled `test` provider emitted no citation markers, so the whole citation path was unreachable in
+> acceptance (round 90); and the shell could lose an answer and leave the composer disabled when a node
+> binding landed mid-run (rounds 92–93).
+
 
 Outcome of the "structured incremental enhancement built on the twelve Jev cases" round: what was
 adopted, merged, kept as development-only or deliberately not adopted; what actually changed in the
@@ -158,20 +180,33 @@ a fake transport or an HTTP 200 is never a PASS.
 
 ## 6. Cost, latency and quality
 
-No live Jev or DeepSeek call was made, so there is **no cost, latency or quality measurement** to
-report. The offline ablation numbers exist only to prove the arms are wired and differentiated and are
+**Superseded — see the header table.** What stood here was: "No live Jev or DeepSeek call was made, so
+there is **no cost, latency or quality measurement** to report." That was true when written and is not
+true now: 315 live Jev decisions and a 10-role DeepSeek canary have been made, the A–E ablation has run
+live with a live DeepSeek baseline, and the result is *unfavourable* on two metrics (§9 of
+`JEV_CALIBRATION_AND_ABLATION_REPORT.md`). The metric list below this paragraph is still the list that
+must be produced before any definition leaves `shadow`; several of its items now have numbers, on
+populations of one to eight samples, and none of them clears a quality gate.
+
+The offline ablation numbers exist only to prove the arms are wired and differentiated and are
 tagged `NON_INTERPRETABLE_PLUMBING_ONLY`. The measurements that must be produced before any definition
 leaves `shadow` — Recall@K, MRR, NDCG, exact-locator accuracy, citation support, field
 false-acceptance/rejection, entity false-merge, condition distinction, anchor retention, intent
 accuracy, capability misroute, tool false-allow/block, coverage FP/FN, criterion error, end-to-end
 success, p50/p95 latency, per-provider cost and failure rate — are specified in
-`docs/jev-structured/EVALUATION_AND_CALIBRATION.md` and remain `NOT_RUN`.
+`docs/jev-structured/EVALUATION_AND_CALIBRATION.md`.
 
 ## 7. Explicitly not done, not claimed
 
-* No live TypeSafe Jev call, no live DeepSeek call, no calibration, no ablation result.
-* No promotion of any definition out of `shadow`; no threshold was invented. A wired call site is
-  still not evidence of quality, and nothing here claims teaching quality improved.
+* **Corrected in round 94:** this section opened with "No live TypeSafe Jev call, no live DeepSeek
+  call, no calibration, no ablation result." All four have since happened — 315 live Jev decisions, a
+  10-role DeepSeek canary, and a live A–E ablation whose verdict is `INTERPRETABLE` and unfavourable on
+  two metrics. The header table carries the numbers; the paragraphs below keep their original wording
+  because they describe the round they were written in.
+* No promotion of any definition out of `shadow`; no threshold was invented. **Still true, and now for a
+  measured reason**: the calibration populations are one to eight samples and the first promotion
+  candidate has no calibration sample at all. A wired call site is still not evidence of quality, and
+  nothing here claims teaching quality improved.
 * No production change: no deployment, no migration, no DNS/Netlify/Clerk change; production still
   answers with Qwen and remains on schema 25.
 * Module **A (extraction)** is wired (round 30) to the query-side exact-locator label — the surface the
@@ -216,19 +251,31 @@ success, p50/p95 latency, per-provider cost and failure rate — are specified i
   round 35 and the one strict-mypy trade-off, is in `docs/recovery/CURRENT_BLOCKER_LEDGER.md` B-10.
 * Production browser acceptance, production deployment and production acceptance have not run.
 
-## 8. What the next round must do
+## 8. What remains (rewritten round 94)
 
-1. Move the semantic calls that run inside a business write transaction out of it (or write their
-   receipts on the caller's connection), so the assessment grading path never drops a receipt — the
-   only known place where the ledger and a business transaction contend.
-2. Extend the labelled dataset with samples for the five module definitions that currently report
-   `INSUFFICIENT_SAMPLES` (`extraction.field_grounded.v1`, `entity.relation.v1`,
-   `evidence.consistency.v1`, `teaching.capability.v1`, `tool.intent.v1`) — a sampling task that needs
-   the live model and the owner's budget.
-3. Add the browser journeys that can exist once a credential does (condition conflict, unsupported
-   citation end to end, and an extraction verdict that actually *drops* a label); the tool-misexecution
-   journey is impossible while the E2E agent uses the deterministic model client.
-4. Re-run the whole gate on one frozen APPLICATION SHA.
-5. Only then the live gate: TypeSafe credential + bounded budget, DeepSeek key, release window, one
-   real login — followed by backup, isolated rehearsal, migration 026–029, immutable release, real
-   acceptance and post-release monitoring.
+The list that stood here was written before the live runs; all five of its items are either done or
+superseded. The remaining work, in the order that unblocks the most:
+
+1. **The promotion decision, and the data it needs.** Every definition is still `shadow` because the
+   quality gate does not pass: the calibration populations are one to eight samples, and
+   `retrieval.support.v1` — the task's first candidate — has **zero** calibration samples. The next
+   concrete step is a labelled-data task, not a code change: enlarge the dataset so each definition has
+   a calibration population, re-run the A–E ablation on that split, freeze thresholds, and look at the
+   test split **once**.
+2. **The live component ablation** (93 decisions, no DeepSeek call). The harness is ready and reads both
+   datasets after the round-91 fix; the run waits on the ≤450-decision decision in
+   `MINIMAL_OWNER_ACTION_CARD.md` §1b, which also records that this work has already spent 315 against
+   an earlier stated ceiling of 300.
+3. **Cross-user isolation in a two-user browser journey** — the property itself is now PASS at the
+   HTTP/service boundary (round 94), so this is no longer a gap in the evidence, only in the *shape* of
+   it: a browser journey would need a second injected identity in the E2E deployment, which is test
+   infrastructure rather than product code.
+4. **The 15-second `load()` timer**, which can restore a pair while a run streams. Round 93 narrowed it
+   (`ask()` now waits for a binding in flight) but did not prove it impossible, and did not exercise
+   that interleaving deliberately.
+5. **§15 production deployment and acceptance**, which stays `BLOCKED` on the owner: native approvals,
+   one real login, and the Jev USD figure. The sequence is fixed and rehearsed locally (rollback
+   compatibility `ROLLBACK_SAFE_WITH_MIGRATED_DB`, the 25 → 30 migration rehearsal on a database built
+   by the production release's own code, and the production frontend build with its negative control);
+   none of it has been run against production.
+
