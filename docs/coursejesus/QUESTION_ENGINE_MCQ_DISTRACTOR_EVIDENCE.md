@@ -49,7 +49,8 @@ The isolated browser database also contains the expected private mapping for the
 
 - The local rule-violation contract is now recorded separately in
   `QUESTION_ENGINE_RULE_VIOLATION_EVIDENCE.md`.
-- Finish the remaining module-specific semantic quality gates without turning Jev into an
-  authoritative publisher, grader, permission check, or aggregate quality score.
+- The non-authoritative MCQ quality signal is now recorded in
+  `QUESTION_ENGINE_SPECIALIZED_QUALITY_SIGNALS.md`; it remains separate from all deterministic
+  source, shape, permission, grade and progress decisions.
 - Obtain separately authorized representative live DeepSeek generations and human review before
   making any claim about distractor quality.

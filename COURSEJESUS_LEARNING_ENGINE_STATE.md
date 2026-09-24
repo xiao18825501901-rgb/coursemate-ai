@@ -6,30 +6,37 @@ what was fixed, what is measured, and what is deliberately not done yet. Read it
 (the frozen batch) and `MINIMAL_OWNER_ACTION_CARD.md` (what only the owner can decide).
 
 Working tree: `D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY`, branch
-`fix/codex-dsh-audit-20260919`, current local HEAD `1df8dbc`, nothing deployed, no production
+`fix/codex-dsh-audit-20260919`, current local application HEAD `f00f3e3`, nothing deployed, no production
 system contacted during this continuation.
 
 ## Codex continuation update — 2026-09-25
 
-Current application HEAD is `1df8dbc29aa4f71c3954cb367d41ef320aecccbd`. Question Engine
-Stages 1–7, the real single-question practice journey and the five complementary assessment slots
-now exist locally. P1 landed at `0fc77fc190ed3f5ac89111ba918469341204139b`: 做一题 now preserves
+Current application HEAD is `f00f3e3eb012d2868930a3fb924b8ef0926fb940`. Question Engine
+Stages 1–7, the real single-question practice journey, five complementary assessment slots and the
+local P3 specialization now exist. P1 landed at `0fc77fc190ed3f5ac89111ba918469341204139b`: 做一题 preserves
 attempt, hint, feedback, reveal and different-family re-practice state through the existing Pair and
-exercise APIs. P2 landed at the current HEAD: five server-owned intents run through the same
+exercise APIs. P2 landed at `1df8dbc29aa4f71c3954cb367d41ef320aecccbd`: five server-owned intents run through the same
 evidence-bound author, blind-solve, hard-gate, exact-Jev-receipt and READY pipeline before the
-existing Assessment service freezes those exact revisions in `10/15/20/25/30` order.
+existing Assessment service freezes those exact revisions in `10/15/20/25/30` order. P3 landed in
+three slices: `bb68eca` binds every MCQ wrong option to a recorded misconception, `a2987c3` binds
+rule-violation questions to exact course-rule quotations, and `f00f3e3` adds separate non-authoritative
+module quality receipts without creating a combined score or granting Jev publication authority.
 
 Migration 038 adds immutable preparation-slot bindings and widens the existing model-call ledger
 roles so each of the five author and five blind-solver calls is separately reserved and recorded.
 Resume reuses only exact current READY slots; missing or invalidated semantic receipts fail closed.
 READY remains `AI_REVIEWED`, not deterministic, human or institutional correctness proof.
 
-Exact-commit local evidence for P2: 54 related backend assessment, Question Engine,
+Exact-code local evidence for the latest P3 slice: 99 related backend assessment, Question Engine,
+assessment-preparation and UI-extension tests passed with one dependency warning. A fresh targeted
+real-Chrome empty-pool five-question journey passed 1/1 with no retry; its isolated database contains
+the private MCQ mapping and third specialized receipt. Focused Ruff, byte compilation and diff checks
+passed. P2 additionally retained its earlier 54 related backend assessment, Question Engine,
 migration/rollback tests passed with one dependency warning; the isolated real-Chrome audit suite
 passed 15/15, including an empty-pool five-question journey. Focused Ruff, byte compilation and
 diff checks passed. Strict mypy retains the already-recorded imported legacy debt; no claim is made
 that the old UI adapter is globally typed. No live model, production, DNS, hosting or identity-system
-call was made. The next implementation slice is P3 question-quality specialization.
+call was made. The next implementation phase is P4 same-SHA regression and migration/restore rehearsal.
 
 ## 1. What this round changed
 
@@ -72,10 +79,11 @@ call was made. The next implementation slice is P3 question-quality specializati
 * **Learning objectives** remain authored text, but Question Engine generation now resolves the
   exact current REQUIRED `teaching_items` row and binds its item id, node spec hash and immutable
   evidence versions into the blueprint and provenance.
-* **Jev**: the current catalog has 21 definitions, including the two Choice-only question gates
-  (`question.ambiguity.v1` and `question.answer_agreement.v1`). The committed default remains
-  `shadow`; a READY question requires exact durable `on`-mode receipts for both gates. Jev still
-  cannot decide permissions, publication, grades, `LEARNED` or a combined quality score.
+* **Jev**: the current catalog has 23 definitions, including two base Choice-only question gates
+  (`question.ambiguity.v1` and `question.answer_agreement.v1`) and separate MCQ-distractor and
+  rule-violation quality signals. The committed default remains `shadow`; a READY specialized
+  question requires exact durable `on`-mode receipts for both base gates and its own module gate.
+  Jev still cannot decide permissions, publication, grades, `LEARNED` or a combined quality score.
 
 ## 4. What is next, in the order the plan fixes
 
@@ -83,8 +91,8 @@ call was made. The next implementation slice is P3 question-quality specializati
 |---|---|---|
 | P1 | ~~One real node end-to-end through 做一题, including attempt, hint/reveal, feedback, history recovery and different-family re-practice~~ | **Completed at `0fc77fc`**; included in the current 15/15 browser suite |
 | P2 | ~~Five complementary slots through the existing `AssessmentService`~~ | **Completed at `1df8dbc`**; exact prepared revisions freeze in slot order and all ten provider stages use the existing reservation ledger |
-| P3 | MCQ distractors with recorded misconceptions; rule-violation questions from real course rules; per-module Jev quality gates | **Current next slice**; needs representative live-model/human quality evidence later, but local contract work can continue |
-| P4 | Migration/rollback rehearsal, same-SHA regression, real image/text journeys, immutable release | Needs P1–P3 stable |
+| P3 | ~~MCQ distractors with recorded misconceptions; rule-violation questions from real course rules; per-module Jev quality gates~~ | **Local implementation completed at `f00f3e3`**; live-model and human quality evidence remain separate external acceptance work |
+| P4 | Migration/rollback rehearsal, same-SHA regression, real image/text journeys, immutable release | **Current next phase**; no release claim until these gates complete |
 
 The campus pause (§1) is independent of all of it and is already in force.
 

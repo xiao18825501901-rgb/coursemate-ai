@@ -45,7 +45,8 @@ evidence pack; the choice service cannot create or authorize a rule.
 
 ## Remaining P3 work
 
-- Add separate, non-authoritative TypeSafe Jev quality signals for MCQ distractors and rule-
-  violation semantics. Deterministic source/shape gates remain authoritative.
+- The separate non-authoritative rule-semantic signal is now recorded in
+  `QUESTION_ENGINE_SPECIALIZED_QUALITY_SIGNALS.md`. Deterministic source/shape gates remain
+  authoritative.
 - Obtain separately authorized representative live DeepSeek generations and human review before
   making any claim about question quality.
