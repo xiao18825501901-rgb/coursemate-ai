@@ -132,6 +132,21 @@ def add_document(database: Database, document_id: str, versions: tuple[int, ...]
             )
 
 
+def add_chunk(database: Database, document_id: str, chunk_id: str, ordinal: int = 0) -> None:
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO chunks(id,document_id,course_id,ordinal,content,locator_type,"
+            "locator_value,section,embedding) VALUES(?,?,?,?,?,'page','3','DBSCAN','[]')",
+            (
+                chunk_id,
+                document_id,
+                COURSE,
+                ordinal,
+                "Compute epsilon neighbourhoods and distinguish core, border and noise points.",
+            ),
+        )
+
+
 def blueprint(**overrides: Any) -> QuestionBlueprint:
     values: dict[str, Any] = {
         "blueprint_id": "bp-1",
@@ -298,20 +313,22 @@ def test_resolution_refuses_when_there_is_nothing_to_teach(tmp_path: pathlib.Pat
     assert refusal.value.code == "NO_REQUIRED_ITEM"
 
 
-def test_evidence_scope_uses_the_newest_version_and_refuses_unknown_documents(
+def test_evidence_scope_uses_the_bound_version_and_refuses_unknown_chunks(
     tmp_path: pathlib.Path,
 ) -> None:
     database = make_db(tmp_path)
     add_document(database, "doc-1", versions=(1, 2, 3))
+    add_chunk(database, "doc-1", "chunk-1")
 
     with database.connect() as connection:
-        scope = evidence_scope(connection, ("doc-1",))
+        scope = evidence_scope(connection, ("chunk-1",))
     assert len(scope) == 1
     assert scope[0].version == 3
     assert scope[0].content_hash == "3" * 64
+    assert scope[0].locator == "page:3"
 
     with database.connect() as connection, pytest.raises(ObjectiveResolutionError) as refusal:
-        evidence_scope(connection, ("doc-missing",))
+        evidence_scope(connection, ("chunk-missing",))
     assert refusal.value.code == "SOURCE_NOT_FOUND"
 
     # The resolved scope is exactly what the blueprint accepts, so the two cannot drift.
@@ -319,11 +336,29 @@ def test_evidence_scope_uses_the_newest_version_and_refuses_unknown_documents(
     blueprint(source_scope=[entry])
 
 
+def test_evidence_scope_resolves_teaching_item_chunk_ids_to_their_bound_versions(
+    tmp_path: pathlib.Path,
+) -> None:
+    """TeachingItem.evidence_ids are chunk ids in the real learning flow, not document ids."""
+    database = make_db(tmp_path)
+    add_document(database, "doc-1", versions=(1, 2))
+    add_chunk(database, "doc-1", "chunk-target")
+
+    with database.connect() as connection:
+        scope = evidence_scope(connection, ("chunk-target",))
+
+    assert len(scope) == 1
+    assert scope[0].document_id == "doc-1"
+    assert scope[0].version == 2
+    assert scope[0].content_hash == "2" * 64
+
+
 def test_a_resolved_objective_and_scope_produce_a_valid_blueprint(tmp_path: pathlib.Path) -> None:
     """The two stages compose: real rows in, a blueprint that the contract accepts out."""
     database = make_db(tmp_path)
-    add_spec(database, 1, [item("obj-cluster", evidence_ids=("doc-1",))])
+    add_spec(database, 1, [item("obj-cluster", evidence_ids=("chunk-1",))])
     add_document(database, "doc-1", versions=(1,))
+    add_chunk(database, "doc-1", "chunk-1")
 
     with database.connect() as connection:
         objective = resolve_objective(connection, node_id=NODE)

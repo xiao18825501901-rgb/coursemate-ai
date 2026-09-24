@@ -254,30 +254,35 @@ def resolve_objective(
 
 
 def evidence_scope(
-    connection: sqlite3.Connection, document_ids: tuple[str, ...]
+    connection: sqlite3.Connection, evidence_ids: tuple[str, ...]
 ) -> list[SourceScopeEntry]:
-    """Turn document ids into a blueprint's source scope, using each document's newest version.
+    """Resolve Teaching Item evidence chunk ids to their immutable source versions.
 
-    Refuses rather than narrowing: a caller that names evidence the course does not have gets an
-    error, because silently generating without the material the objective names is exactly how a
-    question ends up grounded in nothing.
+    The learning runtime stores chunk ids in ``TeachingItem.evidence_ids``.  Each chunk is bound to
+    the exact ``document_versions`` row that produced it by ``chunk_source_versions``; using the
+    newest version of a named document would silently move the blueprint to evidence it never
+    cited.  Refuse rather than narrowing when any cited chunk has lost that binding.
     """
     entries: list[SourceScopeEntry] = []
-    for document_id in document_ids:
+    for evidence_id in evidence_ids:
         row = connection.execute(
-            "SELECT version, sha256 FROM document_versions WHERE document_id = ?"
-            " ORDER BY version DESC LIMIT 1",
-            (document_id,),
+            "SELECT version.document_id,version.version,version.sha256,"
+            "chunk.locator_type,chunk.locator_value "
+            "FROM chunks AS chunk JOIN chunk_source_versions AS source "
+            "ON source.chunk_id=chunk.id JOIN document_versions AS version "
+            "ON version.id=source.document_version_id WHERE chunk.id=?",
+            (evidence_id,),
         ).fetchone()
         if row is None:
             raise ObjectiveResolutionError(
                 "SOURCE_NOT_FOUND",
-                f"document {document_id!r} has no stored version to build a question from",
+                f"evidence chunk {evidence_id!r} has no bound source version",
             )
         entries.append(
             SourceScopeEntry(
-                document_id=document_id,
+                document_id=cast(str, row["document_id"]),
                 version=int(row["version"]),
+                locator=f"{row['locator_type']}:{row['locator_value']}",
                 content_hash=cast(str, row["sha256"]),
             )
         )
