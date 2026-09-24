@@ -420,6 +420,36 @@ wired, and the reason the earlier decision was wrong is part of the record.
 > Both are recorded in `docs/recovery/CURRENT_BLOCKER_LEDGER.md` B-27, and the publish path's local
 > half in B-35.
 
+> **Added 2026-09-24 (round 89) — the four browser journeys the task asks for, and exactly where each
+> one attaches.**
+>
+> §12 of the task lists seven new browser journeys. Three exist: extraction verification (module A) and
+> the Jev-unavailable fallback have their own journeys, and the promoted-capability journey added in
+> round 88 covers Skill selection. **Four are missing — alias retrieval, condition conflict,
+> unsupported citation, and tool-intent misuse — and the reason is not effort, it is content.**
+>
+> The e2e environment has no content that those modules can act on: `playwright.jev.config.ts` builds a
+> fresh data directory per run and prepares it with `scripts/prepare_full_e2e.py`, which delegates to
+> `scripts/prepare_v3_e2e.py` (`seed_assessment_fixture`). So the seeding script is the attach point,
+> and each journey needs one concrete fixture plus one promoted definition:
+>
+> | Journey | Fixture needed in the prepared data | Promoted definition | What the journey can assert |
+> |---|---|---|---|
+> | Alias retrieval | one concept with a Chinese term in one document and its English form in another (same course) | `entity.relation.v1=on` | the Chinese query retrieves the English material, and the learner's original query and the exact locator survive |
+> | Same-word, different meaning | one word used in two unrelated senses in two documents | `entity.relation.v1=on` | the two are **not** merged, and no tree id changes |
+> | Condition conflict | two fragments stating the same quantity under different assumptions, and a third pair that genuinely contradict in the same context | `evidence.consistency.v1=on` | a contradiction is surfaced with **both** fragments kept (neither deleted), a condition difference is reported as a scope difference |
+> | Unsupported citation | a claim and a span that does not address it | `source.supports_claim.v1=on` | the run's evidence annotation is not `SUPPORTED`, and no source is removed |
+> | Tool-intent misuse | a side-effecting tool proposed from an ambiguous message, and an explicit authorised one | `tool.intent.v1=on` | the ambiguous one is refused or clarified, the explicit one is **not** over-blocked |
+>
+> Two constraints the implementer must respect, both already established: the suite runs
+> `test.describe.configure({ mode: "serial" })`, so a new journey that leaves a run in flight breaks the
+> next one; and the deterministic provider never emits citation markers, so a citation journey must
+> assert through the run's `meta` evidence (as the module-A journey already does) rather than through a
+> rendered citation list.
+>
+> Not done this round, and not claimed: the fixtures do not exist yet, so these four journeys are
+> **NOT_RUN** and `BROWSER_ACCEPTANCE` does not include them.
+
 > **Added 2026-09-24 (round 88) — the browser acceptance can now tell a promotion apart from shadow,
 > and it has been run both ways.**
 >
