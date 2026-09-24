@@ -90,8 +90,14 @@ export default defineConfig({
       url: "http://127.0.0.1:8100/health",
       reuseExistingServer: false,
       timeout: 90_000,
-      stdout: "ignore",
-      stderr: "ignore",
+      // Piped rather than ignored. A run of this suite with a live `TYPESAFE_API_KEY` in the
+      // environment failed at the first UI step (`.workspace-columns` never appeared) and the
+      // service's own log — the only thing that could say why — was being discarded, so the cause
+      // was unknowable from the run. Playwright only prints piped output when the server fails to
+      // start, so read it with `DEBUG=pw:webserver` (see the note in
+      // DSH_JEV_DEEPSEEK_EXECUTION_STATE.md, round 86).
+      stdout: "pipe",
+      stderr: "pipe",
     },
     {
       command: `"${nodeExecutable}" "${path.join(repositoryRoot, "services", "agent-api", "dist", "src", "server.js")}"`,
