@@ -420,6 +420,35 @@ wired, and the reason the earlier decision was wrong is part of the record.
 > Both are recorded in `docs/recovery/CURRENT_BLOCKER_LEDGER.md` B-27, and the publish path's local
 > half in B-35.
 
+> **Added 2026-09-24 (round 86) — the first browser run with a live credential, and it fails.**
+> The `jev-structured` suite had never been executed with `TYPESAFE_API_KEY` present; its committed
+> configuration deliberately has none, which is why it doubles as the "Jev unavailable" acceptance.
+> Running the same six journeys with the key supplied from the protected store (the config spreads
+> `process.env`, so no file changed) gives:
+>
+> | Run | Result |
+> |---|---|
+> | No credential (committed default) | **6 passed / 0 failed** (`browser_jev_round85.log`) |
+> | Live credential | **1 failed, 5 did not run** (`browser_jev_live_round86.log`) |
+>
+> The failure is in the **first** journey, at its first step, before any Jev call could matter:
+> `bindNode()` waits 20 s for `.workspace-columns` on `/app#/course/cs3481/learn` and the element
+> never appears. The suite is `test.describe.configure({ mode: "serial" })`, so the remaining five
+> journeys were skipped rather than run.
+>
+> **What this means, and what it does not.** It means the shipped shell has **not** been shown to
+> work with a live Jev credential, so every browser claim in these documents is a claim about the
+> no-credential deployment. It does **not** yet say *why*: the two candidates are (a) a live decision
+> on the page-load path failing or timing out past 20 s, and (b) the page-load path itself being
+> broken when Jev is available. The cause is **not identified**, and the reason it is not identified
+> is concrete: the Playwright config starts the RAG service with `stdout: "ignore", stderr: "ignore"`,
+> so the service's own log — the thing that would say which — is discarded. Capturing it (starting
+> the service separately with the same environment and `reuseExistingServer: true`, or piping its
+> output) is the first step of the diagnosis, and it has not been done.
+>
+> Until that runs and passes, `BROWSER_ACCEPTANCE` describes the **no-credential** shape only, and
+> the live-browser claim in §16 of the task is **NOT_RUN**.
+
 > **Added 2026-09-24 (round 85) — the local gate, on one frozen revision.** The revision is
 > `8556440` (code identical to `HEAD fed0e54`: `git diff 8556440 HEAD -- services scripts` is empty,
 > the only later change being `MINIMAL_OWNER_ACTION_CARD.md`, which no test reads). Every number
