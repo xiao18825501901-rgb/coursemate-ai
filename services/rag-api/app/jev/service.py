@@ -20,7 +20,7 @@ Every helper:
   ``jev_decision_receipts`` row plus this service's in-memory telemetry
   (:meth:`summary`), which exists so a test can assert the counts.
 
-The business layer imports :mod:`app.jev.callsites` (the 12 call-site functions),
+The business layer imports :mod:`app.jev.callsites` (the registered call-site functions),
 not this module directly; the callsites apply their own ``used_jev`` guard before
 acting on a value.
 """
@@ -48,6 +48,8 @@ _DEFAULT_MAX_STATE_CHARS = 6_000
 _STATE_BUDGETS: dict[str, int] = {
     "coverage.item_support.v1": 16_000,
     "assessment.criterion_review.v1": 12_000,
+    "question.ambiguity.v1": 14_000,
+    "question.answer_agreement.v1": 14_000,
     "template.match.v1": 12_000,
     "corpus.quality.v1": 10_000,
     "context.keep_segment.v1": 8_000,
@@ -65,6 +67,12 @@ _MUST_KEEP: dict[str, tuple[str, ...]] = {
     "coverage.item_support.v1": ("saved_delivery", "required_item", "node_spec_version"),
     "assessment.criterion_review.v1": (
         "frozen_question", "frozen_rubric_criterion", "reference_solution", "student_answer",
+    ),
+    "question.ambiguity.v1": (
+        "question_text", "blueprint_conditions", "allowed_rules",
+    ),
+    "question.answer_agreement.v1": (
+        "question_text", "author_candidate_answer", "blind_solution",
     ),
     "template.match.v1": (
         "course_title", "curriculum_samples", "materials_revision", "known_course_level",
@@ -775,6 +783,64 @@ class SemanticDecisionService:
             caller_role=caller_role,
             cache_scope=cache_scope,
             deterministic=deterministic,
+        )
+
+    # ------------------------------------------------ single-question validation
+
+    def question_ambiguity(
+        self,
+        *,
+        question_text: str,
+        question_type: str,
+        expected_answer_form: str,
+        blueprint_conditions: list[str],
+        allowed_rules: list[dict[str, str]],
+        caller_role: str,
+        cache_scope: CacheScope,
+    ) -> DecisionResult:
+        """Semantic wording/solvability signal; never an answer or READY decision."""
+        return self._choice_bounded(
+            "question.ambiguity.v1",
+            fields={
+                "question_text": question_text,
+                "question_type": question_type,
+                "expected_answer_form": expected_answer_form,
+                "blueprint_conditions": blueprint_conditions,
+                "allowed_rules": allowed_rules,
+            },
+            candidate_ids=(
+                "CLEAR", "AMBIGUOUS", "UNDER_SPECIFIED", "CONTRADICTORY", "UNCERTAIN",
+            ),
+            candidate_labels=None,
+            caller_role=caller_role,
+            cache_scope=cache_scope,
+            deterministic="UNCERTAIN",
+        )
+
+    def question_answer_agreement(
+        self,
+        *,
+        question_text: str,
+        author_candidate_answer: dict[str, Any],
+        blind_solution: str,
+        blueprint_conditions: list[str],
+        caller_role: str,
+        cache_scope: CacheScope,
+    ) -> DecisionResult:
+        """Author/blind consistency signal; neither solution becomes authoritative."""
+        return self._choice_bounded(
+            "question.answer_agreement.v1",
+            fields={
+                "question_text": question_text,
+                "author_candidate_answer": author_candidate_answer,
+                "blind_solution": blind_solution,
+                "blueprint_conditions": blueprint_conditions,
+            },
+            candidate_ids=("AGREE", "DISAGREE", "AMBIGUOUS", "UNCERTAIN"),
+            candidate_labels=None,
+            caller_role=caller_role,
+            cache_scope=cache_scope,
+            deterministic="UNCERTAIN",
         )
 
     # -------------------------------------------------------------- classification

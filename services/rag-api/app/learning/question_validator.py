@@ -13,6 +13,9 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
+from app.jev import callsites
+from app.jev.models import CacheScope
+from app.jev.service import DecisionResult, SemanticDecisionService
 from app.learning.blind_solve import BlindSolveReceipt
 from app.learning.models import Contract, Identifier
 from app.learning.question_author import AuthoredQuestionCandidate
@@ -22,6 +25,7 @@ from app.learning.question_evidence import QuestionEvidencePack
 AmbiguityVerdict = Literal["CLEAR", "AMBIGUOUS", "UNDER_SPECIFIED", "CONTRADICTORY", "UNCERTAIN"]
 AgreementVerdict = Literal["AGREE", "DISAGREE", "AMBIGUOUS", "UNCERTAIN"]
 SemanticVerdict = AmbiguityVerdict | AgreementVerdict
+SemanticDimension = Literal["AMBIGUITY", "AUTHOR_BLIND_AGREEMENT"]
 HardGateName = Literal[
     "INPUT_IDENTITY",
     "MARKS_MATCH",
@@ -33,7 +37,7 @@ HardGateName = Literal[
 
 
 class SemanticSignal(Contract):
-    dimension: Literal["AMBIGUITY", "AUTHOR_BLIND_AGREEMENT"]
+    dimension: SemanticDimension
     verdict: SemanticVerdict
     used_jev: bool
     receipt_id: Identifier | None = None
@@ -142,6 +146,80 @@ def _question_shape_matches(
     if blueprint.question_type == "MCQ_SINGLE":
         return len(options) >= 2 and correct is not None and 0 <= correct < len(options)
     return not options and correct is None
+
+
+def _fallback_signal(dimension: SemanticDimension, *, reason: str) -> SemanticSignal:
+    return SemanticSignal(
+        dimension=dimension,
+        verdict="UNCERTAIN",
+        used_jev=False,
+        receipt_id=None,
+        path=f"fallback:{reason}",
+    )
+
+
+def _semantic_signal(dimension: SemanticDimension, result: DecisionResult) -> SemanticSignal:
+    if result.used_jev and result.receipt_id is None:
+        return _fallback_signal(dimension, reason="unreceipted")
+    verdict = str(result.value) if result.used_jev else "UNCERTAIN"
+    return SemanticSignal(
+        dimension=dimension,
+        verdict=verdict,
+        used_jev=result.used_jev,
+        receipt_id=result.receipt_id if result.used_jev else None,
+        path=result.path,
+    )
+
+
+def collect_question_semantic_signals(
+    service: SemanticDecisionService | None,
+    *,
+    candidate: AuthoredQuestionCandidate,
+    blueprint: QuestionBlueprint,
+    evidence: QuestionEvidencePack,
+    blind_receipt: BlindSolveReceipt,
+    scope: CacheScope,
+) -> QuestionSemanticSignals:
+    """Collect two bounded TypeSafe signals; invalid prerequisites spend zero calls."""
+    reason: str | None = None
+    if service is None:
+        reason = "no_service"
+    elif not _input_identity_matches(candidate, blueprint, evidence):
+        reason = "input_mismatch"
+    elif not blind_receipt.is_current_for(candidate.question_revision):
+        reason = "stale_blind_solve"
+    if reason is not None:
+        return QuestionSemanticSignals(
+            ambiguity=_fallback_signal("AMBIGUITY", reason=reason),
+            answer_agreement=_fallback_signal("AUTHOR_BLIND_AGREEMENT", reason=reason),
+        )
+    assert service is not None  # narrowed above; no-service returned fallback signals
+
+    allowed_rules = [
+        {"evidence_id": fragment.evidence_id, "content": fragment.content}
+        for fragment in evidence.fragments
+    ]
+    ambiguity = callsites.review_question_ambiguity(
+        service,
+        question_text=candidate.public_question.question_text,
+        question_type=blueprint.question_type,
+        expected_answer_form=blueprint.expected_answer_form,
+        blueprint_conditions=blueprint.conditions,
+        allowed_rules=allowed_rules,
+        scope=scope,
+    )
+    agreement = callsites.review_question_answer_agreement(
+        service,
+        question_text=candidate.public_question.question_text,
+        author_candidate_answer=candidate.private_solution.model_dump(mode="json"),
+        blind_solution=blind_receipt.output,
+        blueprint_conditions=blueprint.conditions,
+        scope=scope,
+    )
+    return QuestionSemanticSignals(
+        ambiguity=_semantic_signal("AMBIGUITY", ambiguity),
+        answer_agreement=_semantic_signal("AUTHOR_BLIND_AGREEMENT", agreement),
+    )
 
 
 def validate_question_candidate(

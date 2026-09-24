@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from jev_fixtures import make_jev_database
+
+from app.jev.catalog import load_catalog
+from app.jev.gateway import FakeTransport, JevGateway
+from app.jev.models import JevAnswer, JevResult
+from app.jev.receipt_store import SqlReceiptStore
+from app.jev.service import SemanticDecisionService
 from app.learning.blind_solve import BlindSolveReceipt
 from app.learning.question_author import AuthoredQuestionCandidate
 from app.learning.question_blueprint import QuestionBlueprint
@@ -11,6 +18,7 @@ from app.learning.question_evidence import EvidenceFragment, QuestionEvidencePac
 from app.learning.question_validator import (
     QuestionSemanticSignals,
     SemanticSignal,
+    collect_question_semantic_signals,
     validate_question_candidate,
 )
 
@@ -293,3 +301,142 @@ def test_mcq_single_correct_is_rechecked_as_a_hard_gate() -> None:
 
     assert report.status == "REJECTED"
     assert gate_status(report, "QUESTION_SHAPE") == "FAIL"
+
+
+def jev_service(tmp_path: Any, *, mode: str = "on") -> tuple[SemanticDecisionService, Any]:
+    database = make_jev_database(tmp_path)
+
+    def responder(call: Any) -> JevResult:
+        key = next(iter(call.questions))
+        verdict = "CLEAR" if key == "question.ambiguity.v1" else "AGREE"
+        return JevResult(answers={key: JevAnswer(choice=verdict)})
+
+    transport = FakeTransport(responder)
+    gateway = JevGateway(
+        transport=transport,
+        catalog=load_catalog(),
+        modes={
+            "question.ambiguity.v1": mode,
+            "question.answer_agreement.v1": mode,
+        },
+        receipt_store=SqlReceiptStore(database),
+    )
+    return SemanticDecisionService(gateway), transport
+
+
+def test_typesafe_jev_signals_are_receipted_separate_and_feed_the_validator(tmp_path: Any) -> None:
+    service, transport = jev_service(tmp_path)
+    scope = service.scope(
+        owner_user_id="user-a",
+        authorization_scope="question_validation",
+        course_id="cs3481",
+        node_id="node-dbscan",
+        spec_version=2,
+        question_hash=REVISION,
+    )
+
+    semantic = collect_question_semantic_signals(
+        service,
+        candidate=candidate(),
+        blueprint=blueprint(),
+        evidence=evidence_pack(),
+        blind_receipt=blind_receipt(),
+        scope=scope,
+    )
+    report = validate(semantic_signals=semantic)
+
+    assert report.status == "VALIDATED"
+    assert semantic.ambiguity.verdict == "CLEAR"
+    assert semantic.answer_agreement.verdict == "AGREE"
+    assert semantic.ambiguity.receipt_id != semantic.answer_agreement.receipt_id
+    assert len(transport.calls) == 2
+    ambiguity_state, agreement_state = (call.state for call in transport.calls)
+    assert set(ambiguity_state) == {
+        "question_text",
+        "question_type",
+        "expected_answer_form",
+        "blueprint_conditions",
+        "allowed_rules",
+    }
+    assert "author_candidate_answer" not in ambiguity_state
+    assert set(agreement_state) == {
+        "question_text",
+        "author_candidate_answer",
+        "blind_solution",
+        "blueprint_conditions",
+    }
+    assert all(
+        "marks" not in state and "grade" not in state
+        for state in (ambiguity_state, agreement_state)
+    )
+
+
+def test_shadow_or_absent_typesafe_signals_stay_uncertain_and_never_ready(tmp_path: Any) -> None:
+    service, _ = jev_service(tmp_path, mode="shadow")
+    scope = service.scope(
+        owner_user_id="user-a",
+        authorization_scope="question_validation",
+        course_id="cs3481",
+        node_id="node-dbscan",
+        spec_version=2,
+        question_hash=REVISION,
+    )
+    shadow = collect_question_semantic_signals(
+        service,
+        candidate=candidate(),
+        blueprint=blueprint(),
+        evidence=evidence_pack(),
+        blind_receipt=blind_receipt(),
+        scope=scope,
+    )
+    absent = collect_question_semantic_signals(
+        None,
+        candidate=candidate(),
+        blueprint=blueprint(),
+        evidence=evidence_pack(),
+        blind_receipt=blind_receipt(),
+        scope=scope,
+    )
+
+    assert {item.verdict for item in shadow.ordered()} == {"UNCERTAIN"}
+    assert {item.verdict for item in absent.ordered()} == {"UNCERTAIN"}
+    assert validate(semantic_signals=shadow).status == "NEEDS_REVIEW"
+    assert validate(semantic_signals=absent).status == "NEEDS_REVIEW"
+
+
+def test_unreceipted_jev_answer_is_not_allowed_to_validate_a_candidate() -> None:
+    def responder(call: Any) -> JevResult:
+        key = next(iter(call.questions))
+        verdict = "CLEAR" if key == "question.ambiguity.v1" else "AGREE"
+        return JevResult(answers={key: JevAnswer(choice=verdict)})
+
+    service = SemanticDecisionService(
+        JevGateway(
+            transport=FakeTransport(responder),
+            catalog=load_catalog(),
+            modes={
+                "question.ambiguity.v1": "on",
+                "question.answer_agreement.v1": "on",
+            },
+            receipt_store=None,
+        )
+    )
+    scope = service.scope(
+        owner_user_id="user-a",
+        authorization_scope="question_validation",
+        course_id="cs3481",
+        question_hash=REVISION,
+    )
+
+    semantic = collect_question_semantic_signals(
+        service,
+        candidate=candidate(),
+        blueprint=blueprint(),
+        evidence=evidence_pack(),
+        blind_receipt=blind_receipt(),
+        scope=scope,
+    )
+
+    assert all(signal.used_jev is False for signal in semantic.ordered())
+    assert {signal.path for signal in semantic.ordered()} == {"fallback:unreceipted"}
+    assert validate(semantic_signals=semantic).status == "NEEDS_REVIEW"

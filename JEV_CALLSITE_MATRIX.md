@@ -1,11 +1,25 @@
 # Jev Call-Site Matrix
 
-Two tables, because the system now has two kinds of definition:
+Three tables, because the system now has three kinds of definition:
 
 1. **the 12 case definitions** (the original Jev catalog rows) — table 1;
-2. **the six structured-enhancement modules** (round-7 P0/P1/P2 work) — table 2,
+2. **the seven structured-enhancement modules** (A-F plus P2 feedback) — table 2,
    each of which either reaches a real business path or is explicitly marked
-   `MODULE_ONLY` with the reason.
+   `MODULE_ONLY` with the reason;
+3. **the two Question Engine validation signals** — table 3. They are separately receipted
+   Choice signals and can only keep a candidate under review or allow the deterministic validator
+   to proceed; neither returns marks, grades, correctness probability or a combined quality score.
+
+The current catalog contains 21 definitions. **All 21 definitions are `shadow` by default.** The
+two Question Engine rows have offline `FakeTransport` contract evidence only; they are not included
+in the historical 19-definition live run below and have no live-quality claim.
+
+## Table 3 — Question Engine validation signals (added after the historical live run)
+
+| definition id | business entry point | state fields | Jev returns | permitted effect | fallback | test | live evidence |
+|---|---|---|---|---|---|---|---|
+| `question.ambiguity.v1` | `question_validator.py::collect_question_semantic_signals` → `callsites.review_question_ambiguity` | public question, type/form, blueprint conditions, objective-scoped evidence rules | Choice `CLEAR/AMBIGUOUS/UNDER_SPECIFIED/CONTRADICTORY/UNCERTAIN` | one ambiguity dimension in `QuestionValidationReport`; only a receipted `CLEAR` can satisfy it | `UNCERTAIN`, candidate stays `NEEDS_REVIEW` | `test_typesafe_jev_signals_are_receipted_separate_and_feed_the_validator`, `test_shadow_or_absent_typesafe_signals_stay_uncertain_and_never_ready` | NOT_RUN |
+| `question.answer_agreement.v1` | `question_validator.py::collect_question_semantic_signals` → `callsites.review_question_answer_agreement` | public question, private author candidate, isolated blind solution, blueprint conditions | Choice `AGREE/DISAGREE/AMBIGUOUS/UNCERTAIN` | one consistency dimension; not proof of correctness and never a mark | `UNCERTAIN`, candidate stays `NEEDS_REVIEW` | same two tests | NOT_RUN |
 
 ## Live evidence — measured 2026-09-24, and it supersedes the `NOT_RUN` column below
 
@@ -175,7 +189,7 @@ Column key:
 | 11 | `graph.prerequisite.v1` | `knowledge.py::select_repair_prerequisite` → `callsites.select_prerequisite` | `KnowledgeService` (from `orchestrator.teach` on remediation); legal neighbours only | published graph neighbourhood | `current_node, error, allowed_predecessor_nodes` | Choice among legal predecessors or `NONE` | Yes — legal predecessors in one call | selects a legal predecessor to review; never creates/publishes a knowledge node | published prerequisite order (first legal predecessor) | No (shadow) — selection only | owner + `prerequisite` + workspace/node | `test_full_wired_flow_writes_no_learning_grade_or_coverage` | NOT_RUN |
 | 12 | `corpus.quality.v1` | `cm_update/app.py::upload` → `callsites.assess_corpus_quality` | `cm_update`; document upload parse (also reusable offline) | parse output + parse flags | `document_fragment, source_metadata, parse_flags` | Score `0..3` | No | mark-only parse-quality flag (missing pages/stems/params/weak sourcing/duplicates); never auto-deletes a file | retain original, mark parse limitations (`1`) | No (shadow) — mark only | owner + `corpus_quality` + course | `test_oversized_input_falls_back_without_half_sending` | NOT_RUN |
 
-## Table 2 — the six structured modules
+## Table 2 — the seven structured modules
 
 | module | definition(s) | business entry point | when it runs | state source | batch? | Jev returns | how it really affects business | authority boundary | fallback | cache scope | tests | live evidence | status |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|

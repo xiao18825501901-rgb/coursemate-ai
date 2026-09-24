@@ -1,5 +1,4 @@
-"""Catalog integrity: the 12 core definitions plus the 2 structured-enhancement ones,
-primitive split, thresholds unset."""
+"""Catalog integrity: core, structured-enhancement and Question Engine definitions."""
 
 from __future__ import annotations
 
@@ -14,6 +13,8 @@ EXPECTED_KEYS = (
     "pedagogy.next_method.v1",
     "coverage.item_support.v1",
     "assessment.criterion_review.v1",
+    "question.ambiguity.v1",
+    "question.answer_agreement.v1",
     "template.match.v1",
     "exercise.prototype.v1",
     "graph.prerequisite.v1",
@@ -37,7 +38,7 @@ EXPECTED_KEYS = (
 def test_catalog_has_exactly_the_expected_definitions() -> None:
     catalog = load_catalog()
     assert catalog.keys() == EXPECTED_KEYS
-    assert len(catalog.definitions) == 19
+    assert len(catalog.definitions) == 21
 
 
 def test_catalog_primitive_split() -> None:
@@ -51,6 +52,8 @@ def test_catalog_primitive_split() -> None:
         "pedagogy.next_method.v1",
         "coverage.item_support.v1",
         "assessment.criterion_review.v1",
+        "question.ambiguity.v1",
+        "question.answer_agreement.v1",
         "template.match.v1",
         "exercise.prototype.v1",
         # the two structured-enhancement definitions are both Choice primitives

@@ -1,6 +1,6 @@
 """The real business call sites the CourseMate layer invokes.
 
-This is the 12 case-derived decisions plus the structured-enhancement modules
+This is the 12 case-derived decisions plus the structured-enhancement and Question Engine modules
 that have a real business consumer (today: extraction field grounding, used by
 the exact-locator reference path). They are thin, business-facing wrappers over
 :class:`SemanticDecisionService`. They are what the business modules import — not
@@ -256,6 +256,48 @@ def review_criterion(
     )
 
 
+def review_question_ambiguity(
+    service: SemanticDecisionService,
+    *,
+    question_text: str,
+    question_type: str,
+    expected_answer_form: str,
+    blueprint_conditions: list[str],
+    allowed_rules: list[dict[str, str]],
+    scope: Any,
+) -> DecisionResult:
+    """Question Engine ambiguity signal; never authors an answer or READY state."""
+    return service.question_ambiguity(
+        question_text=question_text,
+        question_type=question_type,
+        expected_answer_form=expected_answer_form,
+        blueprint_conditions=blueprint_conditions,
+        allowed_rules=allowed_rules,
+        caller_role="question_validator",
+        cache_scope=scope,
+    )
+
+
+def review_question_answer_agreement(
+    service: SemanticDecisionService,
+    *,
+    question_text: str,
+    author_candidate_answer: dict[str, Any],
+    blind_solution: str,
+    blueprint_conditions: list[str],
+    scope: Any,
+) -> DecisionResult:
+    """Compare author and blind results as a signal, never as correctness proof."""
+    return service.question_answer_agreement(
+        question_text=question_text,
+        author_candidate_answer=author_candidate_answer,
+        blind_solution=blind_solution,
+        blueprint_conditions=blueprint_conditions,
+        caller_role="question_validator",
+        cache_scope=scope,
+    )
+
+
 def match_template(
     service: SemanticDecisionService | None,
     templates: Sequence[TemplateOption],
@@ -413,6 +455,8 @@ __all__ = [
     "match_template",
     "rerank_retrieval",
     "review_criterion",
+    "review_question_ambiguity",
+    "review_question_answer_agreement",
     "route_next_action",
     "select_citation_span",
     "select_exercise_prototype",
