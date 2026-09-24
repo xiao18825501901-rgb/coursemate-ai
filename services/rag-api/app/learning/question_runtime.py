@@ -40,6 +40,7 @@ from app.learning.practice_feedback import (
 )
 from app.learning.question_author import (
     QUESTION_AUTHOR_PROMPT_VERSION,
+    RULE_VIOLATION_POLICY_VERSION,
     AuthorGenerationError,
     author_question,
 )
@@ -149,7 +150,9 @@ class GeneratedExercise(Contract):
     status: Literal["READY"]
     verification_status: Literal["AI_REVIEWED"]
     generation_version: Literal["exercise.v2+question-engine.v1"]
-    prototype_id: Literal["worked_application", "concept_short_answer"]
+    prototype_id: Literal[
+        "worked_application", "concept_short_answer", "rule_violation_analysis"
+    ]
     public: PublicExerciseProjection
     private: PrivateExerciseProjection
     references: list[ExerciseReference] = Field(min_length=1, max_length=20)
@@ -158,12 +161,15 @@ class GeneratedExercise(Contract):
 
 @dataclass(frozen=True)
 class _Prototype:
-    prototype_id: Literal["worked_application", "concept_short_answer"]
-    bloom_target: Literal["UNDERSTAND", "APPLY"]
+    prototype_id: Literal[
+        "worked_application", "concept_short_answer", "rule_violation_analysis"
+    ]
+    bloom_target: Literal["UNDERSTAND", "APPLY", "ANALYZE"]
     target_difficulty: int
     difficulty_features: tuple[Literal["STEPS", "CONCEPTS"], ...]
     question_type: Literal["SHORT_TEXT", "EXPLANATION"]
     expected_answer_form: Literal["SHORT_ANSWER", "WORKED_STEPS"]
+    generation_policy_version: str
 
 
 _PROTOTYPES: Final[dict[str, _Prototype]] = {
@@ -174,6 +180,7 @@ _PROTOTYPES: Final[dict[str, _Prototype]] = {
         difficulty_features=("STEPS", "CONCEPTS"),
         question_type="EXPLANATION",
         expected_answer_form="WORKED_STEPS",
+        generation_policy_version=GENERATION_POLICY_VERSION,
     ),
     "concept_short_answer": _Prototype(
         prototype_id="concept_short_answer",
@@ -182,6 +189,16 @@ _PROTOTYPES: Final[dict[str, _Prototype]] = {
         difficulty_features=("CONCEPTS",),
         question_type="SHORT_TEXT",
         expected_answer_form="SHORT_ANSWER",
+        generation_policy_version=GENERATION_POLICY_VERSION,
+    ),
+    "rule_violation_analysis": _Prototype(
+        prototype_id="rule_violation_analysis",
+        bloom_target="ANALYZE",
+        target_difficulty=4,
+        difficulty_features=("CONCEPTS", "STEPS"),
+        question_type="EXPLANATION",
+        expected_answer_form="WORKED_STEPS",
+        generation_policy_version=RULE_VIOLATION_POLICY_VERSION,
     ),
 }
 
@@ -749,7 +766,7 @@ class QuestionEngineRuntime:
             visibility_policy="OWNER_ONLY",
             answer_policy="HIDDEN_UNTIL_REVEAL",
             prompt_versions={"question_author": QUESTION_AUTHOR_PROMPT_VERSION},
-            generation_policy_version=GENERATION_POLICY_VERSION,
+            generation_policy_version=prototype.generation_policy_version,
         )
 
     @staticmethod

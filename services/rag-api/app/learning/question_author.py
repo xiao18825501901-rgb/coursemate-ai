@@ -21,9 +21,10 @@ from app.learning.provider import ProviderCallFailure
 from app.learning.question_blueprint import Hex64, QuestionBlueprint
 from app.learning.question_evidence import QuestionEvidencePack
 
-QUESTION_AUTHOR_PROMPT_VERSION: Final = "question-author.v2"
-QUESTION_AUTHOR_SCHEMA_VERSION: Final = "question-author-output.v2"
-PROMPT_PATH: Final = Path(__file__).with_name("prompts") / "question_author_v2.md"
+QUESTION_AUTHOR_PROMPT_VERSION: Final = "question-author.v3"
+QUESTION_AUTHOR_SCHEMA_VERSION: Final = "question-author-output.v3"
+RULE_VIOLATION_POLICY_VERSION: Final = "question-rule-violation-policy-v1"
+PROMPT_PATH: Final = Path(__file__).with_name("prompts") / "question_author_v3.md"
 
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 
@@ -62,15 +63,26 @@ class DistractorRationale(Contract):
     source_refs: list[Identifier] = Field(min_length=1, max_length=20)
 
 
+class RuleViolationAnalysis(Contract):
+    """Private proof that a rule-violation question uses a real course rule."""
+
+    proposed_statement: Text
+    rule_source_ref: Identifier
+    rule_quote: Text
+    correction: Text
+    explanation: Text
+
+
 class QuestionAuthorOutput(Contract):
     """The model-authored fields; everything authoritative remains in the blueprint."""
 
-    schema_version: Literal["question-author-output.v2"] = QUESTION_AUTHOR_SCHEMA_VERSION
+    schema_version: Literal["question-author-output.v3"] = QUESTION_AUTHOR_SCHEMA_VERSION
     question_text: Text
     options: list[ShortText] = Field(default_factory=list, max_length=10)
     candidate_answer: Text = Field(repr=False)
     correct_option_index: int | None = Field(default=None, ge=0, le=9)
     distractor_rationales: list[DistractorRationale] = Field(default_factory=list, max_length=9)
+    rule_violation_analysis: RuleViolationAnalysis | None = None
     solution_steps: list[AuthorSolutionStep] = Field(min_length=1, max_length=12, repr=False)
     source_refs: list[Identifier] = Field(min_length=1, max_length=20)
 
@@ -119,6 +131,7 @@ class PrivateCandidateSolution(Contract):
     candidate_answer: Text = Field(repr=False)
     correct_option_index: int | None = Field(default=None, ge=0, le=9)
     distractor_rationales: list[DistractorRationale] = Field(default_factory=list, max_length=9)
+    rule_violation_analysis: RuleViolationAnalysis | None = None
     solution_steps: list[AuthorSolutionStep] = Field(min_length=1, max_length=12, repr=False)
     source_refs: list[Identifier] = Field(min_length=1, max_length=20)
 
@@ -129,8 +142,10 @@ class AuthorProviderRun(Contract):
     protocol: ShortText
     region: ShortText
     role: Literal["QUESTION_AUTHOR"]
-    template_version: Literal["question-author.v1", "question-author.v2"]
-    schema_version: Literal["question-author-output.v1", "question-author-output.v2"]
+    template_version: Literal["question-author.v1", "question-author.v2", "question-author.v3"]
+    schema_version: Literal[
+        "question-author-output.v1", "question-author-output.v2", "question-author-output.v3"
+    ]
     input_hash: Hex64
     started_at: ShortText
     finished_at: ShortText
@@ -185,6 +200,7 @@ class AuthoredQuestionCandidate(Contract):
             candidate_answer=self.private_solution.candidate_answer,
             correct_option_index=self.private_solution.correct_option_index,
             distractor_rationales=self.private_solution.distractor_rationales,
+            rule_violation_analysis=self.private_solution.rule_violation_analysis,
             solution_steps=self.private_solution.solution_steps,
             source_refs=self.public_question.source_refs,
         )
@@ -248,6 +264,8 @@ def _assert_output_scope(
     used = set(output.source_refs)
     used.update(ref for step in output.solution_steps for ref in step.source_refs)
     used.update(ref for item in output.distractor_rationales for ref in item.source_refs)
+    if output.rule_violation_analysis is not None:
+        used.add(output.rule_violation_analysis.rule_source_ref)
     if not used.issubset(allowed):
         raise AuthorGenerationError(
             "AUTHOR_OUTPUT_OUT_OF_SCOPE",
@@ -279,6 +297,32 @@ def _assert_output_scope(
         raise AuthorGenerationError(
             "AUTHOR_OUTPUT_INVALID",
             "Only a single-choice blueprint may return options or a correct-option index.",
+        )
+    rule_analysis = output.rule_violation_analysis
+    if blueprint.generation_policy_version == RULE_VIOLATION_POLICY_VERSION:
+        fragment_by_id = {fragment.evidence_id: fragment for fragment in evidence.fragments}
+        rule_fragment = (
+            fragment_by_id.get(rule_analysis.rule_source_ref)
+            if rule_analysis is not None
+            else None
+        )
+        valid_rule = (
+            blueprint.question_type == "EXPLANATION"
+            and rule_analysis is not None
+            and rule_fragment is not None
+            and rule_analysis.rule_source_ref in output.source_refs
+            and rule_analysis.rule_quote in rule_fragment.content
+            and rule_analysis.proposed_statement in output.question_text
+        )
+        if not valid_rule:
+            raise AuthorGenerationError(
+                "AUTHOR_OUTPUT_INVALID",
+                "The rule-violation question is not bound to an exact course rule.",
+            )
+    elif rule_analysis is not None:
+        raise AuthorGenerationError(
+            "AUTHOR_OUTPUT_INVALID",
+            "Only the rule-violation policy may return a rule analysis.",
         )
 
 
@@ -374,6 +418,7 @@ def author_question(
             candidate_answer=output.candidate_answer,
             correct_option_index=output.correct_option_index,
             distractor_rationales=output.distractor_rationales,
+            rule_violation_analysis=output.rule_violation_analysis,
             solution_steps=output.solution_steps,
             source_refs=output.source_refs,
         ),

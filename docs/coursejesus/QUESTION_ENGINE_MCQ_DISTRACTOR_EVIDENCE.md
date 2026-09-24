@@ -47,8 +47,8 @@ The isolated browser database also contains the expected private mapping for the
 
 ## Remaining P3 work
 
-- Add an explicitly server-authorized rule-violation question intent that can only use real course
-  rules from the evidence pack; do not infer a rule taxonomy that the source does not contain.
+- The local rule-violation contract is now recorded separately in
+  `QUESTION_ENGINE_RULE_VIOLATION_EVIDENCE.md`.
 - Finish the remaining module-specific semantic quality gates without turning Jev into an
   authoritative publisher, grader, permission check, or aggregate quality score.
 - Obtain separately authorized representative live DeepSeek generations and human review before

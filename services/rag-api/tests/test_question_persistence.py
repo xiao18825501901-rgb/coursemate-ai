@@ -275,6 +275,7 @@ def test_validated_candidate_is_ready_private_and_idempotent(tmp_path: Path) -> 
     assert question["verification_method"] == "AI_REVIEWED"
     answer = json.loads(question["answer_json"])
     assert "correct_option" not in answer
+    assert answer["rule_violation_analysis"] is None
     assert answer["verification_notice"] == "AI_REVIEWED_NOT_DETERMINISTIC_PROOF"
     assert AssessmentService._is_deterministic(
         {

@@ -542,6 +542,7 @@ def persist_question_candidate(
                     candidate.private_solution.correct_option_index
                 ),
                 "distractor_rationales": private_solution["distractor_rationales"],
+                "rule_violation_analysis": private_solution["rule_violation_analysis"],
                 "solution_steps": private_solution["solution_steps"],
                 "source_refs": private_solution["source_refs"],
                 "verification_notice": "AI_REVIEWED_NOT_DETERMINISTIC_PROOF",

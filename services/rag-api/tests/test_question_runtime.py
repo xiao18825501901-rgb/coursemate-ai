@@ -7,22 +7,12 @@ proves orchestration and persistence, not live model quality.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any
 
 import pytest
-from app.errors import ApiError
-from app.jev.catalog import load_catalog
-from app.jev.gateway import FakeTransport, JevGateway
-from app.jev.models import JevAnswer, JevResult
-from app.jev.receipt_store import SqlReceiptStore
-from app.jev.service import SemanticDecisionService
-from app.learning.provider import LearningProvider, ProviderCallFailure
-from app.learning.question_runtime import (
-    QuestionEngineRuntime,
-    QuestionEngineRuntimeError,
-)
 from test_question_persistence import (
     COURSE,
     NODE,
@@ -32,12 +22,27 @@ from test_question_persistence import (
     database_with_objective,
 )
 
+from app.errors import ApiError
+from app.jev.catalog import load_catalog
+from app.jev.gateway import FakeTransport, JevGateway
+from app.jev.models import JevAnswer, JevResult
+from app.jev.receipt_store import SqlReceiptStore
+from app.jev.service import SemanticDecisionService
+from app.learning.provider import LearningProvider, ProviderCallFailure
+from app.learning.question_author import RULE_VIOLATION_POLICY_VERSION
+from app.learning.question_runtime import (
+    QuestionEngineRuntime,
+    QuestionEngineRuntimeError,
+)
 
-def decisions(database: Any) -> SemanticDecisionService:
+
+def decisions(
+    database: Any, *, prototype_id: str = "worked_application"
+) -> SemanticDecisionService:
     def responder(call: Any) -> JevResult:
         key = next(iter(call.questions))
         verdict = {
-            "exercise.prototype.v1": "worked_application",
+            "exercise.prototype.v1": prototype_id,
             "question.ambiguity.v1": "CLEAR",
             "question.answer_agreement.v1": "AGREE",
         }[key]
@@ -102,6 +107,49 @@ def test_runtime_generates_ready_private_exercise_for_exact_workspace_node(
     assert provenance["workspace_id"] == WORKSPACE
     assert provenance["publication_status"] == "READY"
     assert question["owner_user_id"] == OWNER
+
+
+def test_runtime_rule_violation_prototype_persists_an_exact_course_rule(
+    tmp_path: Path,
+) -> None:
+    database, config = database_with_objective(tmp_path)
+    runtime = QuestionEngineRuntime(
+        database=database,
+        provider=LearningProvider(config),
+        semantic_decisions=decisions(database, prototype_id="rule_violation_analysis"),
+    )
+
+    result = runtime.generate_one(
+        owner_user_id=OWNER,
+        workspace_id=WORKSPACE,
+        course_id=COURSE,
+        private_course_id=PRIVATE_COURSE,
+        node_id=NODE,
+        operation_id="rule-violation-question-0001",
+    )
+
+    assert result["status"] == "READY"
+    assert result["prototype_id"] == "rule_violation_analysis"
+    assert "violated rule" in result["public"]["question_text"]
+    assert "rule_violation_analysis" not in result["public"]
+    with database.connect() as connection:
+        row = connection.execute(
+            "SELECT provenance.blueprint_json,question.answer_json "
+            "FROM question_engine_provenance AS provenance "
+            "JOIN assessment_question_revisions AS question "
+            "ON question.id=provenance.question_revision_id "
+            "WHERE provenance.question_revision_id=?",
+            (result["question_revision_id"],),
+        ).fetchone()
+    blueprint = json.loads(row["blueprint_json"])
+    answer = json.loads(row["answer_json"])
+    analysis = answer["rule_violation_analysis"]
+    assert blueprint["generation_policy_version"] == RULE_VIOLATION_POLICY_VERSION
+    assert analysis["rule_source_ref"] == "chunk-course"
+    assert analysis["rule_quote"] == (
+        "A core point has at least MinPts points in its epsilon neighbourhood."
+    )
+    assert analysis["proposed_statement"] in result["public"]["question_text"]
 
 
 def test_runtime_repractice_uses_a_new_family_without_changing_the_objective(

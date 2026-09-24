@@ -12,7 +12,10 @@ from app.jev.models import JevAnswer, JevResult
 from app.jev.receipt_store import SqlReceiptStore
 from app.jev.service import SemanticDecisionService
 from app.learning.blind_solve import BlindSolveReceipt
-from app.learning.question_author import AuthoredQuestionCandidate
+from app.learning.question_author import (
+    RULE_VIOLATION_POLICY_VERSION,
+    AuthoredQuestionCandidate,
+)
 from app.learning.question_blueprint import QuestionBlueprint
 from app.learning.question_evidence import EvidenceFragment, QuestionEvidencePack
 from app.learning.question_validator import (
@@ -372,6 +375,89 @@ def test_mcq_distractor_mapping_is_a_validator_hard_gate() -> None:
     assert gate_status(accepted, "QUESTION_SHAPE") == "PASS"
     assert missing_mapping.status == "REJECTED"
     assert gate_status(missing_mapping, "QUESTION_SHAPE") == "FAIL"
+
+
+def test_rule_violation_evidence_binding_is_a_validator_hard_gate() -> None:
+    rule_blueprint = blueprint(
+        bloom_target="ANALYZE",
+        target_difficulty=4,
+        difficulty_features=["CONCEPTS", "STEPS"],
+        question_type="EXPLANATION",
+        expected_answer_form="WORKED_STEPS",
+        conditions=[],
+        generation_policy_version=RULE_VIOLATION_POLICY_VERSION,
+    )
+    proposed = "Every point inside an epsilon neighbourhood is a core point."
+    rule_candidate = candidate(
+        blueprint_hash=rule_blueprint.identity(),
+        question_type="EXPLANATION",
+        public_question={
+            "question_text": (
+                f'A learner proposes: "{proposed}" Identify the violated rule and correct it.'
+            ),
+            "options": [],
+            "source_refs": ["chunk-course"],
+            "answer_policy": "HIDDEN_UNTIL_REVEAL",
+        },
+        private_solution={
+            "candidate_answer": "The claim omits the MinPts threshold.",
+            "correct_option_index": None,
+            "rule_violation_analysis": {
+                "proposed_statement": proposed,
+                "rule_source_ref": "chunk-course",
+                "rule_quote": (
+                    "A core point has at least MinPts points in its epsilon neighbourhood."
+                ),
+                "correction": "Check MinPts before classifying the point as core.",
+                "explanation": "Distance membership alone is insufficient under the cited rule.",
+            },
+            "solution_steps": [
+                {
+                    "ordinal": 1,
+                    "operation": "Check the governing rule",
+                    "result": "The proposal is invalid",
+                    "explanation": "The stated proposal omits the required MinPts condition.",
+                    "source_refs": ["chunk-course"],
+                }
+            ],
+            "source_refs": ["chunk-course"],
+        },
+    )
+
+    accepted = validate(candidate=rule_candidate, blueprint=rule_blueprint)
+    missing_analysis = validate(
+        candidate=rule_candidate.model_copy(
+            update={
+                "private_solution": rule_candidate.private_solution.model_copy(
+                    update={"rule_violation_analysis": None}
+                )
+            }
+        ),
+        blueprint=rule_blueprint,
+    )
+    rule_analysis = rule_candidate.private_solution.rule_violation_analysis
+    assert rule_analysis is not None
+    fabricated_quote = validate(
+        candidate=rule_candidate.model_copy(
+            update={
+                "private_solution": rule_candidate.private_solution.model_copy(
+                    update={
+                        "rule_violation_analysis": rule_analysis.model_copy(
+                            update={"rule_quote": "A fabricated course rule."}
+                        )
+                    }
+                )
+            }
+        ),
+        blueprint=rule_blueprint,
+    )
+
+    assert accepted.status == "VALIDATED"
+    assert gate_status(accepted, "QUESTION_SHAPE") == "PASS"
+    assert missing_analysis.status == "REJECTED"
+    assert gate_status(missing_analysis, "QUESTION_SHAPE") == "FAIL"
+    assert fabricated_quote.status == "REJECTED"
+    assert gate_status(fabricated_quote, "QUESTION_SHAPE") == "FAIL"
 
 
 def jev_service(tmp_path: Any, *, mode: str = "on") -> tuple[SemanticDecisionService, Any]:

@@ -54,13 +54,23 @@ def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
         }
     if schema == "QuestionAuthorOutput":
         blueprint = context["blueprint"]
-        evidence_ids = context["evidence_pack"]["evidence_ids"]
+        evidence = context["evidence_pack"]
+        evidence_ids = evidence["evidence_ids"]
         source_id = evidence_ids[0]
         is_mcq = blueprint["question_type"] == "MCQ_SINGLE"
+        is_rule_violation = (
+            blueprint["generation_policy_version"] == "question-rule-violation-policy-v1"
+        )
+        proposed_statement = (
+            "[FAKE TEST FIXTURE] The proposed solution ignores the governing course rule."
+        )
         return {
-            "schema_version": "question-author-output.v2",
+            "schema_version": "question-author-output.v3",
             "question_text": (
-                "[FAKE TEST FIXTURE] Apply the bounded course rule to the supplied "
+                proposed_statement
+                + " Identify the violated rule, explain the error, and correct the statement."
+                if is_rule_violation
+                else "[FAKE TEST FIXTURE] Apply the bounded course rule to the supplied "
                 "synthetic example and report the result."
             ),
             "options": ["Synthetic option A", "Synthetic option B"] if is_mcq else [],
@@ -80,6 +90,22 @@ def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
                 ]
                 if is_mcq and blueprint["misconception_targets"]
                 else []
+            ),
+            "rule_violation_analysis": (
+                {
+                    "proposed_statement": proposed_statement,
+                    "rule_source_ref": source_id,
+                    "rule_quote": evidence["fragments"][0]["content"],
+                    "correction": (
+                        "[FAKE TEST FIXTURE] Apply the cited governing rule before concluding."
+                    ),
+                    "explanation": (
+                        "[FAKE TEST FIXTURE] The proposal omits a condition stated in the "
+                        "exact cited course rule."
+                    ),
+                }
+                if is_rule_violation
+                else None
             ),
             "solution_steps": [
                 {

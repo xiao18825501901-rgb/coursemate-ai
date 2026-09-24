@@ -18,7 +18,10 @@ from app.jev.models import CacheScope
 from app.jev.service import DecisionResult, SemanticDecisionService
 from app.learning.blind_solve import BlindSolveReceipt
 from app.learning.models import Contract, Identifier
-from app.learning.question_author import AuthoredQuestionCandidate
+from app.learning.question_author import (
+    RULE_VIOLATION_POLICY_VERSION,
+    AuthoredQuestionCandidate,
+)
 from app.learning.question_blueprint import QuestionBlueprint
 from app.learning.question_evidence import QuestionEvidencePack
 
@@ -135,6 +138,9 @@ def _source_scope_matches(
         for distractor in candidate.private_solution.distractor_rationales
         for ref in distractor.source_refs
     )
+    rule_analysis = candidate.private_solution.rule_violation_analysis
+    if rule_analysis is not None:
+        used.add(rule_analysis.rule_source_ref)
     return bool(used) and used.issubset(allowed)
 
 
@@ -144,7 +150,9 @@ def _conditions_present(candidate: AuthoredQuestionCandidate, blueprint: Questio
 
 
 def _question_shape_matches(
-    candidate: AuthoredQuestionCandidate, blueprint: QuestionBlueprint
+    candidate: AuthoredQuestionCandidate,
+    blueprint: QuestionBlueprint,
+    evidence: QuestionEvidencePack,
 ) -> bool:
     options = candidate.public_question.options
     correct = candidate.private_solution.correct_option_index
@@ -152,7 +160,7 @@ def _question_shape_matches(
         mappings = candidate.private_solution.distractor_rationales
         expected = set(range(len(options))) - ({correct} if correct is not None else set())
         actual = [item.option_index for item in mappings]
-        return (
+        base_shape = (
             len(options) >= 2
             and correct is not None
             and 0 <= correct < len(options)
@@ -163,10 +171,24 @@ def _question_shape_matches(
                 item.misconception in blueprint.misconception_targets for item in mappings
             )
         )
+    else:
+        base_shape = (
+            not options
+            and correct is None
+            and not candidate.private_solution.distractor_rationales
+        )
+    rule_analysis = candidate.private_solution.rule_violation_analysis
+    if blueprint.generation_policy_version != RULE_VIOLATION_POLICY_VERSION:
+        return base_shape and rule_analysis is None
+    if not base_shape or blueprint.question_type != "EXPLANATION" or rule_analysis is None:
+        return False
+    fragment_by_id = {fragment.evidence_id: fragment for fragment in evidence.fragments}
+    rule_fragment = fragment_by_id.get(rule_analysis.rule_source_ref)
     return (
-        not options
-        and correct is None
-        and not candidate.private_solution.distractor_rationales
+        rule_fragment is not None
+        and rule_analysis.rule_source_ref in candidate.public_question.source_refs
+        and rule_analysis.rule_quote in rule_fragment.content
+        and rule_analysis.proposed_statement in candidate.public_question.question_text
     )
 
 
@@ -281,7 +303,7 @@ def validate_question_candidate(
     marks = candidate.marks == blueprint.marks
     sources = _source_scope_matches(candidate, evidence)
     conditions = _conditions_present(candidate, blueprint)
-    shape = _question_shape_matches(candidate, blueprint)
+    shape = _question_shape_matches(candidate, blueprint, evidence)
     blind = blind_receipt.is_current_for(candidate.question_revision)
     hard_gates = [
         _gate("INPUT_IDENTITY", identity, "candidate is bound to the exact blueprint/evidence"),

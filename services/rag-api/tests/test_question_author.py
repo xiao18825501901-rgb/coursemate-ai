@@ -11,10 +11,12 @@ from app.learning.provider import LearningProvider, ProviderCallFailure
 from app.learning.question_author import (
     QUESTION_AUTHOR_PROMPT_VERSION,
     QUESTION_AUTHOR_SCHEMA_VERSION,
+    RULE_VIOLATION_POLICY_VERSION,
     AuthorGenerationError,
     AuthorSolutionStep,
     DistractorRationale,
     QuestionAuthorOutput,
+    RuleViolationAnalysis,
     author_question,
 )
 from app.learning.question_blueprint import QuestionBlueprint
@@ -147,6 +149,50 @@ def mcq_output(**overrides: Any) -> QuestionAuthorOutput:
                 source_refs=["chunk-course"],
             ),
         ],
+        "solution_steps": author_output().solution_steps,
+        "source_refs": ["chunk-course"],
+    }
+    values.update(overrides)
+    return QuestionAuthorOutput(**values)
+
+
+def rule_violation_blueprint() -> QuestionBlueprint:
+    return blueprint(
+        bloom_target="ANALYZE",
+        target_difficulty=4,
+        difficulty_features=["CONCEPTS", "STEPS"],
+        question_type="EXPLANATION",
+        expected_answer_form="WORKED_STEPS",
+        conditions=[],
+        generation_policy_version=RULE_VIOLATION_POLICY_VERSION,
+    )
+
+
+def rule_violation_output(**overrides: Any) -> QuestionAuthorOutput:
+    proposed = "Every point inside an epsilon neighbourhood is a core point."
+    values: dict[str, Any] = {
+        "question_text": (
+            f'A learner proposes: "{proposed}" Identify the violated course rule, '
+            "explain the error, and correct the claim."
+        ),
+        "candidate_answer": (
+            "The claim is invalid because a core point must also meet the MinPts threshold."
+        ),
+        "rule_violation_analysis": RuleViolationAnalysis(
+            proposed_statement=proposed,
+            rule_source_ref="chunk-course",
+            rule_quote=(
+                "A core point has at least MinPts points in its epsilon neighbourhood."
+            ),
+            correction=(
+                "A point inside an epsilon neighbourhood is core only when its own "
+                "neighbourhood meets MinPts."
+            ),
+            explanation=(
+                "The proposal uses distance membership alone and omits the course rule's "
+                "minimum-neighbour condition."
+            ),
+        ),
         "solution_steps": author_output().solution_steps,
         "source_refs": ["chunk-course"],
     }
@@ -351,6 +397,56 @@ def test_mcq_refuses_missing_partial_or_invented_distractor_mappings(
         author_question(
             SpyProvider(mcq_output(distractor_rationales=rationales)),
             blueprint=mcq_blueprint(),
+            evidence=evidence_pack(),
+        )
+
+    assert refusal.value.code == "AUTHOR_OUTPUT_INVALID"
+
+
+def test_rule_violation_analysis_is_bound_to_an_exact_course_rule() -> None:
+    candidate = author_question(
+        SpyProvider(rule_violation_output()),
+        blueprint=rule_violation_blueprint(),
+        evidence=evidence_pack(),
+    )
+
+    analysis = candidate.private_solution.rule_violation_analysis
+    assert analysis is not None
+    assert analysis.rule_source_ref == "chunk-course"
+    assert analysis.rule_quote in evidence_pack().fragments[0].content
+    assert analysis.proposed_statement in candidate.public_question.question_text
+    assert "rule_violation_analysis" not in str(candidate.public_payload())
+
+
+@pytest.mark.parametrize(
+    "analysis",
+    [
+        None,
+        RuleViolationAnalysis(
+            proposed_statement="Every point inside epsilon is a core point.",
+            rule_source_ref="chunk-course",
+            rule_quote="An invented rule that is not present in the course evidence.",
+            correction="Check MinPts before classifying the point.",
+            explanation="The invented quote cannot establish a real course rule.",
+        ),
+        RuleViolationAnalysis(
+            proposed_statement="A statement absent from the learner-facing question.",
+            rule_source_ref="chunk-course",
+            rule_quote=(
+                "A core point has at least MinPts points in its epsilon neighbourhood."
+            ),
+            correction="Check MinPts before classifying the point.",
+            explanation="The private analysis must describe the public statement being reviewed.",
+        ),
+    ],
+)
+def test_rule_violation_refuses_missing_fabricated_or_unasked_analysis(
+    analysis: RuleViolationAnalysis | None,
+) -> None:
+    with pytest.raises(AuthorGenerationError) as refusal:
+        author_question(
+            SpyProvider(rule_violation_output(rule_violation_analysis=analysis)),
+            blueprint=rule_violation_blueprint(),
             evidence=evidence_pack(),
         )
 
