@@ -548,6 +548,42 @@ wired, and the reason the earlier decision was wrong is part of the record.
 > ceiling this work stated in `MINIMAL_OWNER_ACTION_CARD.md` §1b, so the card now carries the exact
 > command and asks for ≤400 instead of quietly spending past a number I gave the owner.
 
+> **Added 2026-09-24 (round 91, second half) — the browser gate was missing a suite the task asks
+> for, and running it found a journey that had been failing since a deliberate product change.**
+>
+> §12 asks for "coursemate learning UI-refresh / **audit** 相关 Playwright/Chrome journeys". The round
+> 90 gate ran ui-refresh, coursemate, v3-learning and jev-structured — **not**
+> `playwright.codex-audit.config.ts`, which is 14 journeys in a fully isolated environment (its own
+> venv, its own ports 8200/8201/5373, its own synthetic-only prepared run). Running it gave **13
+> passed / 1 failed**, and the failure is a real one:
+>
+> | | |
+> |---|---|
+> | Journey | "active registered actor automatically accesses campus content and can start learning" |
+> | Asserted | `/me/verification` → `{verified: true, method: "registered"}` for a merely-registered actor |
+> | Product answers | `{verified: false, method: null}` |
+> | Why | The registration auto-grant was **removed on purpose**: it used to run *inside the access check*, so the gate certified the very row it then accepted (`app/cmui/auth.py`: "registration no longer qualifies anyone, and no access check may"; the only remaining writer is the test-only `CMUI_AUTO_VERIFY_NEW_USERS` flag, which the audit config sets to `false`). `method:"registered"` no longer exists as a value this service produces |
+>
+> So the journey was stale, not the product — and the honest repair is not to delete it. It is now the
+> guardrail for that change, asserting **both** directions, from a contract measured in process first
+> rather than guessed (`work/current-change/probe_campus_gate.py`, which drives the real audit app over
+> a copy of a prepared run):
+>
+> | Actor | `/me/verification` | course DTO | files / knowledge / layout / pairs | `POST /pairs` | exercise |
+> |---|---|---|---|---|---|
+> | registered, no verification | `{verified: false, method: null}` | **200** (the learner must see the course and be told why) | **403** `STUDENT_VERIFICATION_REQUIRED` | 403 | — |
+> | verified with a real origin | `{verified: true, method: "admin"}` | 200 | 200 | 201 | 202 |
+>
+> The journey now asserts that a registered actor is **not** verified, that the course stays visible
+> while every content surface behind the gate answers 403 with the campus message, and that an actor
+> whose qualification proves a real origin still reaches all of it and can start an exercise. That is
+> the property the removed auto-grant existed to fake, pinned in both directions.
+>
+> Two things this says about the gate rather than about this journey: the `codex-audit` suite had not
+> been run for many rounds while four other suites were, so a journey encoding a removed behaviour went
+> unnoticed; and the fix was found by running a suite the task explicitly lists, not by reading code.
+> The full suite is re-run after the repair and its result is in the gate table below.
+
 > **Added 2026-09-24 (round 89) — the four browser journeys the task asks for, and exactly where each
 > one attaches.**
 >

@@ -152,4 +152,46 @@ The live version of that run is **NOT_RUN**, and the reason is budget rather tha
 call), against a ≤300 ceiling with 268 already spent. The exact command is in
 `MINIMAL_OWNER_ACTION_CARD.md` §1b.
 
+## 9. §16's ten verifications, item by item
+
+§16 of the task names ten properties the acceptance must demonstrate. Naming the suite is not
+evidence, so each row below names the journey and what it actually asserts. Two rows are deliberately
+marked **partial** rather than claimed.
+
+| §16 verification | Journey (file) | What the assertion actually checks | Status |
+|---|---|---|---|
+| 中文别名找到英文材料 | `jev-structured.spec.ts` | a Chinese question returns a citation card for a page that contains only the English term, and `user_text` is the question verbatim | PASS (credential-free) |
+| 同词不同义不错误合并 | `jev-structured.spec.ts` | two senses come back as separate cards with different `document_id`, and the tree's node identity/title/parent/position is unchanged across the run — in the live promoted shape too | PASS |
+| 精确题号不被语义替换 | `jev-structured.spec.ts` (module A journeys) + `test_real_course_golden.py::test_real_exact_locator_is_course_isolated` + `test_rerank_exact_target_keeps_slot_under_hostile_rerank` | the parsed label is verified and the locator actually used is reported; an exact target keeps its slot under a hostile rerank; and an exact locator is course-isolated | **PARTIAL**: the slot-preservation property is asserted offline against a hostile rerank and never end-to-end against a *live* rerank, because that needs `retrieval.support.v1` promoted, which the quality gate has not allowed |
+| 错误引用不标supported | `jev-structured.spec.ts` | every card whose claim asserts an absent figure is `NOT_ADDRESSED_IN_AVAILABLE_EVIDENCE` at layer `quote` with zero model calls, the cards are still rendered with the unverified marker, and the control figure a page does state is not flagged | PASS |
+| normal/Thinking 不被 skill 误选 | `jev-structured.spec.ts` + `codex-audit.spec.ts` | "answer only" does not take the teaching flow and spends no Jev call, a normal teaching request does, and both Normal and Thinking modes go through the integrated services | PASS |
+| 未揭晓答案不暴露 | `codex-audit.spec.ts` | an un-revealed exercise's answer canary is absent from **four** payloads (`/runs/{id}`, `/runs/{id}/events`, `/pairs/{id}`, `/exercises/{id}`) and from the page body, then present after reveal and after a reload | PASS |
+| 错误工具写操作被阻止 | `jev-structured.spec.ts` | with the guard enforcing and the endpoint unreachable, the proposed write is refused (`CONFIRMATION_REQUIRED`, `fallback:unavailable`, `jevCalls: 0`) and the task board is byte-identical | PASS |
+| 合法明确工具操作不被过度阻断 | `jev-structured.spec.ts` | the same explicit message creates the task under `enforce` with a live credential and a raised budget | PASS (live) |
+| private cache 不跨用户 | `learning.spec.ts` "two students stay isolated while an admin sees only the submitted Overlay snapshot" + `test_cache_scope_is_owner_scoped_and_never_crosses_users` | two identities cannot see each other's learning state, and a Jev cache key derived from the caller cannot serve user-b user-a's judgment | **PARTIAL at deployment level**: the browser deployment injects **one** identity (`AUTH_TEST_USER_ID` + `test-session-token`), so the cross-user Jev-cache property is pinned by unit tests, not by a browser journey. Stated rather than implied |
+| Jev 断开系统安全降级 | `jev-structured.spec.ts` (two journeys) | with no credential every decision reports `used_jev: false`, cards get `INSUFFICIENT_CONTEXT` rather than a fabricated verdict, a complete answer still arrives; and the tool-intent guard refuses rather than allowing | PASS |
+
+**The §16 operational chain**, link by link, with the journey that covers it (all in the browser gate):
+file upload and indexing — `coursemate.spec.ts` ("creates, indexes, teaches from, and deletes a
+private course") and `ui-refresh.spec.ts` ("lists real course files, uploads a private one, previews
+it, and offers download"); retrieval and Jev relevance — the `jev-structured` alias and consistency
+journeys above; conflict/condition judgement — `jev-structured` ("fragments from different tasks…",
+"a genuine contradiction…"); DeepSeek teaching — `v3-learning.spec.ts` ("V3 private image problem
+teaches and returns across browser contexts", i.e. the image path as well); citation verification —
+`jev-structured` (module D); coverage — `ui-refresh.spec.ts` ("teaching a node from the shell books
+reviewed coverage end-to-end"); the five-question assessment, grading and raw score —
+`ui-refresh.spec.ts` ("a node assessment runs the real V3 flow: start, answer, submit, grade" and
+"renders the real V3 result instead of raw JSON"); explanation — `ui-refresh.spec.ts` ("a problem's
+steps stay in the problem pane and keep the detached detail flow") and `codex-audit.spec.ts`
+("supplied problem exposes steps and opens explanation"); node result — `ui-refresh.spec.ts` ("the
+knowledge tree renders the seeded hierarchy with real V3 statuses"); history — `ui-refresh.spec.ts`
+("the original V3 question history stays readable and read-only").
+
+One structural constraint behind the second PARTIAL row, stated once because it explains several
+limits: the browser deployment shape authenticates with a single injected identity, so any property
+that needs *two* real users (private cache isolation, cross-user retrieval) is pinned by unit or
+in-process tests rather than by a journey. Adding a second injected identity is a product-code change
+for test convenience and has not been made.
+
+
 

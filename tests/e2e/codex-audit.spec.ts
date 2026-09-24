@@ -140,18 +140,45 @@ test("directory can be browsed and paginated before searching",async({page},info
   await page.screenshot({path:info.outputPath("directory.png"),fullPage:true});
 });
 
-test("active registered actor automatically accesses campus content and can start learning",async({request})=>{
+test("registration is not a student verification: campus content stays refused until one exists",async({request})=>{
+  // This journey used to assert the opposite, and it was right at the time: an active
+  // registered actor was auto-granted a `method:"registered"` qualification *inside the
+  // access check*, so the gate certified the very row it then accepted. That grant was
+  // removed deliberately (see `app/cmui/auth.py` and `ui_extension/mount.py`:
+  // "registration no longer qualifies anyone, and no access check may"), which left this
+  // assertion encoding behaviour the product no longer has. It is now the guardrail for
+  // that change, measured in both directions instead of assumed.
   const me=await request.get(API+"/me/verification",{headers:unverified});
-  expect(me.ok()).toBeTruthy();expect(await me.json()).toMatchObject({verified:true,method:"registered"});
+  expect(me.ok()).toBeTruthy();
+  const status=await me.json();
+  expect(status).toMatchObject({verified:false,method:null});
+  expect(status.method).not.toBe("registered");
+
+  // The course itself stays visible — a learner must be able to see the course and be
+  // told why it is closed — while every content surface behind the gate is refused.
   expect((await request.get(API+"/courses/cs3481",{headers:unverified})).status()).toBe(200);
-  for(const path of ["/courses/cs3481/files","/courses/cs3481/knowledge","/courses/cs3481/comments","/courses/cs3481/layout"]) {
-    const response=await request.get(API+path,{headers:unverified});expect(response.status(),path).toBe(200);
+  for(const path of ["/courses/cs3481/files","/courses/cs3481/knowledge","/courses/cs3481/layout",
+                     "/pairs?course_id=cs3481"]) {
+    const response=await request.get(API+path,{headers:unverified});
+    expect(response.status(),path).toBe(403);
+    expect(String((await response.json()).detail),path).toContain("学生认证");
   }
-  const pair=await request.post(API+"/pairs",{headers:unverified,data:{course:"cs3481"}});
+  expect((await request.post(API+"/pairs",{headers:unverified,data:{course:"cs3481"}})).status()).toBe(403);
+
+  // And the same surfaces open for an actor whose qualification proves a real origin,
+  // which is the half that must not be over-blocked.
+  const verifiedMe=await (await request.get(API+"/me/verification",{headers:auth})).json();
+  expect(verifiedMe.verified).toBe(true);
+  expect(verifiedMe.method).not.toBe("registered");
+  for(const path of ["/courses/cs3481/files","/courses/cs3481/knowledge","/courses/cs3481/layout",
+                     "/pairs?course_id=cs3481"]) {
+    expect((await request.get(API+path,{headers:auth})).status(),path).toBe(200);
+  }
+  const pair=await request.post(API+"/pairs",{headers:auth,data:{course:"cs3481"}});
   expect(pair.status()).toBe(201);
   const pairBody=await pair.json();
-  const exercise=await request.post(API+"/courses/cs3481/exercises",{headers:unverified,data:{
-    request_id:"unverified-browser-exercise",pair_id:pairBody.id,
+  const exercise=await request.post(API+"/courses/cs3481/exercises",{headers:auth,data:{
+    request_id:"verified-browser-exercise",pair_id:pairBody.id,
   }});
   expect(exercise.status()).toBe(202);
 });
