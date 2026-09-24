@@ -268,14 +268,81 @@ Evidence: `work/current-change/semantic-arms-companion-r39.json` (companion run)
 `work/current-change/semantic-arms-r39.json` (frozen run), both produced by
 `scripts/run_jev_semantic_ablation.py --arm all-components --transport fake`.
 
-**Before running this CLI live, read this.** `--transport live` on
-`run_jev_semantic_ablation.py` now **refuses** (exit 3, no output written): the CLI has no live predictor
-wiring, and until round 40 it fell through to the fake transport while labelling the artefact `live` — with
-both credentials present and `--allow-billable`, which is exactly the live-gate condition. The live Jev
-transport exists for the A–E arms in `scripts/run_jev_ablation.py`; the six component arms need live
-predictors that do not exist yet, so a live component-arm run has to be built first rather than faked. Every
-ablation artefact now records `transport_used` beside the requested `transport`, and the CLI refuses to write
-if the two disagree.
+**Before running this CLI live, read this.** The paragraph that stood here said a live component
+run is impossible because the CLI "has no live predictor wiring" and refuses with exit 3. **That
+stopped being true in round 84**, when the semantic harness got `live_jev_predictor` and the CLI's
+live branch was wired to the real `SdkTransport`; the CLI's own tests now drive a live-labelled run
+and assert that its recorded calls came from a transport other than the fake one. What remains true
+from that paragraph is the part that still applies everywhere: every ablation artefact records
+`transport_used` beside the requested `transport`, and the CLI refuses to write when the two
+disagree — so a fake run cannot be labelled live.
+
+The six component arms are therefore runnable live. Whether they **should** be is a budget question,
+and §6.4 has the measured number.
+
+### 6.4 Round 91: the pairing rule is now structural, and a metric-free table is refused
+
+§6.3 stated the pairing as an operator instruction — "`M-CITATION` with the frozen dataset, the other
+five with the companion" — and nothing enforced it. The CLI reads one dataset, so in practice
+`--arm all-components` against the default file printed **five arms of `INSUFFICIENT_SAMPLES` and one
+arm of real numbers**: a page that looks like a result, contains one metric family out of six, and
+says nothing about why. Two changes close that:
+
+* **component arms read both datasets.** The union is taken after each file is validated, sample-id
+  collisions are refused rather than assumed absent, and every metric keeps its own population,
+  because a metric is computed from the samples carrying *its* decision key (7 for the module
+  families, 42 and 16 for the citation pair). The artefact records `dataset_sources` (path, status,
+  sample count, and the frozen split manifest + hash each dataset is pinned by) and, per metric,
+  `metric_sources` — so a reader can see that `citation_support_accuracy` came from the frozen
+  dataset and `tool_false_allow` from the companion without re-running anything.
+* **a component run in which no metric has a sample is refused** (exit 4, nothing written). That is
+  exactly the `--no-module-dataset` case, and it is the case that used to produce the misleading
+  table. The A–E arms are untouched: they still read exactly `--dataset`.
+
+Offline re-run on this revision, all six arms in one command
+(`work/current-change/jev-component-union-round91b.json`), still tagged
+`NON_INTERPRETABLE_PLUMBING_ONLY`:
+
+| Arm | Metric | Value | Samples | Rate denominator |
+|---|---|---|---|---|
+| `M-EXTRACT` | extraction_false_acceptance | 1.0 | 7 | 4 |
+| | extraction_false_rejection | 0.0 | 7 | 2 |
+| `M-ENTITY` | entity_false_merge | 1.0 | 7 | 4 |
+| | entity_missed_alias | 1.0 | 7 | **1** |
+| | entity_conflict_false_positive | 0.0 | 7 | 4 |
+| `M-CONSISTENCY` | condition_distinction | 0.0 | 7 | 4 |
+| `M-CITATION` | citation_support_accuracy | 0.300 | **42** | 42 |
+| | unsupported_claim_rate | 1.000 | **42** | 42 |
+| | span_selection_accuracy | 0.438 | **16** | 16 |
+| `M-CAPABILITY` | capability_misroute | 0.200 | 7 | 5 |
+| `M-TOOL` | tool_false_allow | 1.000 | 7 | 3 |
+| | tool_false_block | 0.000 | 7 | 2 |
+
+These are the **fake** transport's numbers: they measure that each arm computes its metric over the
+right population, not that any module is any good. The `M-CITATION` row is new in the sense that it
+is now produced by the same command as the others; its population is the frozen dataset's citation
+labels, which the earlier companion-only run could not reach.
+
+**What a live component ablation would cost, counted rather than estimated**
+(`work/current-change/count_component_ablation_calls.py`, no model call):
+
+| Arm | Decision keys | Live decisions |
+|---|---|---|
+| `M-EXTRACT` | `extraction.field_grounded.v1` | 7 |
+| `M-ENTITY` | `entity.relation.v1` | 7 |
+| `M-CONSISTENCY` | `evidence.consistency.v1` | 7 |
+| `M-CITATION` | `source.supports_claim.v1`, `source.select_span.v1` | **58** |
+| `M-CAPABILITY` | `teaching.capability.v1` | 7 |
+| `M-TOOL` | `tool.intent.v1` | 7 |
+| **total** | | **93** |
+
+No DeepSeek call is needed: the component metrics are all Jev-side. Against the ceiling stated in
+`MINIMAL_OWNER_ACTION_CARD.md` §1b (≤300 decisions, of which **268** are already spent by the
+definition sweep, the A–E comparison and the structured browser run), 93 more would cross it. So the
+live component ablation is **not run here**: it needs the budget decision, and the exact command is
+recorded in that card rather than guessed at later.
+
+
 
 ## 7. What is needed to produce a real result
 

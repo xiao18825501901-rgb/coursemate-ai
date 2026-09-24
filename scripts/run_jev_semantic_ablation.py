@@ -19,6 +19,17 @@ M-CONSISTENCY|M-CITATION|M-CAPABILITY|M-TOOL`` (the six structured-enhancement
 component arms), ``--arm all`` (A–E), or ``--arm all-components`` (the six component
 arms).
 
+**A component arm reads both datasets, because no single one covers all six.** The primary
+dataset labels the citation definitions (``source.supports_claim.v1`` 42 samples,
+``source.select_span.v1`` 16) and none of the four module-specific families; the companion
+dataset labels extraction / entity / consistency / capability / tool (7 each) and no citation
+sample at all. Run against either file alone, five of the six arms — or the sixth — print a
+page of ``INSUFFICIENT_SAMPLES`` and nothing else, which looks like a result and is not one.
+So component arms default to the union, each metric keeps its own population (metrics are
+computed per decision key, so the union cannot mix them), and the artefact records which
+dataset supplied each metric. A component run in which **no** metric has a sample is refused
+rather than written. The A–E arms are untouched: they still read exactly ``--dataset``.
+
 Nothing here can cost money without the explicit ``--allow-billable`` flag.
 """
 
@@ -45,6 +56,7 @@ from app.evaluation.jev_semantic_ablation import (  # noqa: E402 -- after sys.pa
     INSUFFICIENT_SAMPLES,
     FakeJevTransport,
     compare_jev_arms,
+    component_arm_metrics,
     deterministic_fake_jev_predictor,
     live_jev_predictor,
     load_jev_dataset,
@@ -54,13 +66,99 @@ from app.evaluation.provider_safety import validate_deepseek_base_url  # noqa: E
 from app.jev.gateway import SdkTransport  # noqa: E402 -- after sys.path bootstrap
 
 DATASET_PATH = ROOT / "benchmarks" / "jev-judgments.dataset.json"
+# The primary dataset's frozen split manifest has its own name (the companion dataset's is
+# `<stem>.split.json`); both are recorded as provenance so a reader can tie a run to the
+# exact split a temperature was fitted against.
+PRIMARY_SPLIT_PATH = ROOT / "benchmarks" / "jev-calibration.split.json"
+# The companion dataset added in round 31 for the definitions the primary one does not
+# label. A component arm needs both; see the module docstring.
+MODULE_DATASET_PATH = ROOT / "benchmarks" / "jev-module-judgments.dataset.json"
 DEFAULT_OUT = ROOT / "work" / "current-change" / "jev-ablation-offline.json"
+
+
+def _dataset_provenance(path: Path, payload: dict) -> dict[str, Any]:
+    """Where a dataset's samples came from, and which frozen split pins it.
+
+    The datasets do not carry their own content hash — the split manifests do — so the
+    manifest is looked up by the same naming rule the split builder uses, with the primary
+    dataset's differently-named manifest as the one documented exception. A missing manifest
+    is recorded as ``None`` rather than as an empty string that reads like a value.
+    """
+
+    declared = str(payload.get("content_hash") or "")
+    # `X.dataset.json` -> `X.split.json`: `with_suffix` would replace only the final `.json`
+    # and look for `X.dataset.split.json`, which does not exist.
+    suffix = ".dataset.json"
+    name = path.name
+    manifest_path = (
+        path.with_name(name[: -len(suffix)] + ".split.json")
+        if name.endswith(suffix)
+        else path.with_suffix(".split.json")
+    )
+    if path == DATASET_PATH:
+        manifest_path = PRIMARY_SPLIT_PATH
+    manifest_hash: str | None = None
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            manifest = {}
+        manifest_hash = str(manifest.get("content_hash") or "") or None
+    return {
+        "path": str(path),
+        "status": str(payload.get("dataset_status") or ""),
+        "samples": len(payload.get("samples") or []),
+        "dataset_content_hash": declared or None,
+        "split_manifest": str(manifest_path) if manifest_hash else None,
+        "split_content_hash": manifest_hash,
+    }
 
 
 def _write_json_atomically(path: Path, payload: dict) -> None:
     temporary = path.with_name(f".{path.name}.partial")
     temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temporary.replace(path)
+
+
+def _merge_datasets(primary: dict, companion: dict, companion_path: Path) -> dict:
+    """Concatenate two validated datasets so every component metric has its population.
+
+    Each metric is computed from the samples carrying *its* decision key, so merging cannot
+    mix populations — but the merged payload must still say where its samples came from, or
+    a later reader cannot tell a 42-sample metric from a 7-sample one. Sample ids are
+    checked for collisions rather than assumed unique.
+    """
+
+    primary_samples = list(primary.get("samples") or [])
+    companion_samples = list(companion.get("samples") or [])
+    seen = {str(sample.get("sample_id")) for sample in primary_samples}
+    collisions = sorted(
+        str(sample.get("sample_id"))
+        for sample in companion_samples
+        if str(sample.get("sample_id")) in seen
+    )
+    if collisions:
+        raise ValueError(f"the two datasets share sample ids: {collisions[:5]}")
+    merged = dict(primary)
+    merged["samples"] = [*primary_samples, *companion_samples]
+    merged["dataset_status"] = (
+        f"{primary.get('dataset_status')}+{companion.get('dataset_status')}"
+    )
+    merged["merged_datasets"] = [
+        {"path": str(companion_path), "samples": len(companion_samples)},
+    ]
+    return merged
+
+
+def _metric_sources(datasets: list[tuple[Path, dict]], samples: list) -> dict[str, str]:
+    """Which dataset labels each decision key, for the artefact's per-metric record."""
+    sources: dict[str, str] = {}
+    for path, payload in datasets:
+        for sample in payload.get("samples") or []:
+            sources.setdefault(str(sample.get("definition_id")), str(path))
+    return {key: value for key, value in sources.items() if key in {
+        str(sample.get("definition_id")) for sample in samples
+    }}
 
 
 def parse_args() -> argparse.Namespace:
@@ -76,6 +174,25 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--dataset", type=Path, default=DATASET_PATH)
+    parser.add_argument(
+        "--module-dataset",
+        type=Path,
+        default=MODULE_DATASET_PATH,
+        help=(
+            "The companion dataset a component arm also reads: it labels the module-specific "
+            "families the primary dataset does not (extraction / entity / consistency / "
+            "capability / tool), while the primary labels the citation metrics."
+        ),
+    )
+    parser.add_argument(
+        "--no-module-dataset",
+        action="store_true",
+        help=(
+            "Read --dataset alone even for a component arm. The run is refused if that leaves "
+            "every metric of the arm without a sample, so a metric-free table can never be "
+            "written as a result."
+        ),
+    )
     parser.add_argument("--transport", choices=["fake", "live"], default="fake")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--allow-billable", action="store_true")
@@ -189,8 +306,19 @@ def main() -> int:
         _live_preflight(args)
 
     dataset = None
+    datasets: list[tuple[Path, dict]] = []
     try:
         dataset = load_jev_dataset(args.dataset)
+        datasets.append((args.dataset, dataset))
+        components_requested = args.arm == "all-components" or args.arm in COMPONENT_ARM_NAMES
+        if (
+            components_requested
+            and not args.no_module_dataset
+            and args.module_dataset != args.dataset
+        ):
+            companion = load_jev_dataset(args.module_dataset)
+            datasets.append((args.module_dataset, companion))
+            dataset = _merge_datasets(dataset, companion, args.module_dataset)
     except ValueError as error:
         print(f"Ablation preflight failed: {error}")
         return 2
@@ -237,10 +365,42 @@ def main() -> int:
     runs = {summary["arm"]: summary for summary in arm_summaries}
     comparison = compare_jev_arms(runs)
 
+    # A component arm that measured nothing is not a result. Before this check the runner
+    # happily printed a table of zeros and INSUFFICIENT_SAMPLES for five of the six arms —
+    # the numbers it did print came from the one arm whose definitions the primary dataset
+    # happens to label, so the run looked complete and measured almost nothing.
+    metric_sources = _metric_sources(datasets, dataset.get("samples") or [])
+    empty_components = []
+    for summary in arm_summaries:
+        arm = str(summary.get("arm"))
+        if arm not in COMPONENT_ARM_NAMES:
+            continue
+        component = summary.get("component") or {}
+        summary["metric_sources"] = {
+            metric: metric_sources.get(key)
+            for metric, key in component_arm_metrics(arm)
+        }
+        if component.get("metrics") and all(
+            metric.get("status") == INSUFFICIENT_SAMPLES
+            for metric in component["metrics"].values()
+        ):
+            empty_components.append(arm)
+
     print(f"Jev ablation: transport={args.transport} arms={','.join(arms)}")
     for summary in arm_summaries:
         _summarize_arm(summary)
     print(f"comparison verdict={comparison['verdict']}")
+
+    if empty_components:
+        print(
+            "Refusing to write: every metric of "
+            + ", ".join(empty_components)
+            + " has no labelled sample in "
+            + ", ".join(str(path) for path, _ in datasets)
+            + ". A component arm needs the dataset that labels its definitions — see the "
+            "module docstring for which one that is."
+        )
+        return 4
 
     effective_transports = sorted({summary.get("transport") for summary in arm_summaries})
     expected_transport = "deterministic_fake" if args.transport == "fake" else args.transport
@@ -259,6 +419,12 @@ def main() -> int:
         "transport_used": effective_transports[0],
         "dataset_status": dataset.get("dataset_status"),
         "dataset_path": str(args.dataset),
+        # Every dataset this run actually read, and how many samples each contributed: a
+        # component arm reads two, and a reader must be able to see which one a metric's
+        # population came from without reproducing the run.
+        "dataset_sources": [
+            _dataset_provenance(path, payload_) for path, payload_ in datasets
+        ],
         "allow_billable": args.allow_billable,
         "baseline": {
             "injected": baseline_predictor is not None,

@@ -512,6 +512,42 @@ wired, and the reason the earlier decision was wrong is part of the record.
 > production system was contacted, no migration was run against a live database, and the release
 > sequence still waits on the owner's native approvals, one real login, and the Jev USD figure.
 
+> **Added 2026-09-24 (round 91) — the component ablation could not produce a complete table, and now
+> can.**
+>
+> §12's journey list is complete (all seven exist, five of them from round 90), so this round went
+> back to §10. The six component arms existed and ran, but **no single dataset labels all six** and
+> the CLI reads one dataset, so `--arm all-components` printed five arms of `INSUFFICIENT_SAMPLES`
+> and one arm of real numbers. That page reads like a result, contains one metric family out of six,
+> and does not say why. Nothing was wrong with the metrics; the pairing rule lived in a document
+> (§6.3 of the ablation report) instead of in the code.
+>
+> | Change | Effect |
+> |---|---|
+> | Component arms read **both** datasets (validated separately, merged with a collision check) | every metric gets its own population — 7 for the module families, 42 and 16 for the citation pair — in one command. The A–E arms are untouched and still read exactly `--dataset` |
+> | The artefact records `dataset_sources` (path, status, sample count, frozen split manifest + hash) and per-metric `metric_sources` | a reader can see that `citation_support_accuracy` came from the frozen dataset and `tool_false_allow` from the companion, without re-running anything |
+> | A component run in which **no** metric has a sample is **refused** (exit 4, nothing written) | the `--no-module-dataset` case is exactly the misleading one, and it can no longer be written as a result. This is the same "refuse rather than ignore" rule `JEV_DEFINITION_MODES` follows |
+> | `component_arm_metrics(arm)` exposed from the library | the runner needed the metric→decision-key pairing to name each metric's source; it was private, so the caller could only guess — which is how the empty table happened |
+>
+> Offline re-run on this revision: all six arms in one command, every metric `MEASURED` with its own
+> population, verdict still `NOT_INTERPRETABLE` (fake transport), artefact
+> `work/current-change/jev-component-union-round91b.json`. The numbers are in §6.4 of
+> `JEV_CALIBRATION_AND_ABLATION_REPORT.md`; they show the arms compute over the right samples and say
+> nothing about quality.
+>
+> **A stale claim was corrected while in there.** §6.3 said a live component run is impossible because
+> the CLI "has no live predictor wiring" and refuses with exit 3. That stopped being true in round 84,
+> when `live_jev_predictor` and the `SdkTransport` branch landed; the CLI's own test drives a
+> live-labelled run and asserts its recorded calls did not come from the fake transport. The report now
+> says so, because a document that describes a refusal which no longer exists is the same class of
+> error as a metric that measures nothing.
+>
+> **The live component ablation costs 93 decisions, counted rather than estimated**
+> (`work/current-change/count_component_ablation_calls.py`: `M-CITATION` 58, the other five 7 each; no
+> DeepSeek call). It is **NOT_RUN**: 268 decisions are already spent and 268 + 93 crosses the ≤300
+> ceiling this work stated in `MINIMAL_OWNER_ACTION_CARD.md` §1b, so the card now carries the exact
+> command and asks for ≤400 instead of quietly spending past a number I gave the owner.
+
 > **Added 2026-09-24 (round 89) — the four browser journeys the task asks for, and exactly where each
 > one attaches.**
 >

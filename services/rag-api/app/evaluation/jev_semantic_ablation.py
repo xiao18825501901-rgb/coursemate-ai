@@ -251,6 +251,21 @@ def validate_arm_nesting() -> None:
         raise ValueError("Ablation arms must nest strictly: A ⊂ B ⊂ C ⊂ D ⊂ E.")
 
 
+def component_arm_metrics(arm: str) -> tuple[tuple[str, str], ...]:
+    """The ``(metric, decision key)`` pairs one component arm publishes.
+
+    Public because a runner has to answer a question the report cannot answer for it:
+    *which* labelled samples a metric was computed from, and therefore which dataset a
+    component run must read. The pairing was private, so a caller could only discover it by
+    reading this module — and the runner that needed it printed an empty table instead.
+    """
+    if arm not in COMPONENT_ARM_NAMES:
+        raise ValueError(
+            f"{arm!r} is not a component arm; expected one of {list(COMPONENT_ARM_NAMES)}."
+        )
+    return _COMPONENT_ARM_METRICS[arm]
+
+
 def arm_modes(arm: str) -> dict[str, str]:
     """Return the full per-key mode map for ``arm`` ("on" for Jev, "off" otherwise).
 

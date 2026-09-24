@@ -129,3 +129,27 @@ did establish by failing first: module D's layer 1 was pointed at the wrong data
 verdict had ever reached a reader; and the tool-intent guard's 1.5 s default sits barely above the
 measured decision latency, so an `enforce` deployment needs a larger budget.
 
+## 8. The component ablation: a metric with no samples is not a result (round 91)
+
+The six component arms are the measurement half of §10 — one arm per structured module, each turning
+on exactly its own decision key(s). They exist, and they run. What they could not do was produce a
+**complete** table, because the labels are split across two datasets on purpose and the CLI read one:
+`benchmarks/jev-judgments.dataset.json` labels the citation pair (42 + 16 samples) and none of the four
+module-specific families, while `benchmarks/jev-module-judgments.dataset.json` labels
+extraction/entity/consistency/capability/tool (7 each) and no citation sample. Run against either file
+alone, five arms — or the sixth — print only `INSUFFICIENT_SAMPLES`, which is a statement about the
+pairing, not about the system.
+
+The pairing is now in the code rather than in a document: component arms read both datasets, each
+metric keeps its own population, the artefact names the dataset behind every metric, and a component
+run in which **no** metric has a sample is refused instead of written. The A–E arms are unchanged.
+Offline, on this revision, all six arms measure in one command and the verdict is still
+`NOT_INTERPRETABLE`, because the transport is still fake — the numbers say the arms compute over the
+right samples and nothing about quality.
+
+The live version of that run is **NOT_RUN**, and the reason is budget rather than capability: it costs
+**93** Jev decisions (counted, not estimated — `M-CITATION` 58, the other five 7 each, no DeepSeek
+call), against a ≤300 ceiling with 268 already spent. The exact command is in
+`MINIMAL_OWNER_ACTION_CARD.md` §1b.
+
+

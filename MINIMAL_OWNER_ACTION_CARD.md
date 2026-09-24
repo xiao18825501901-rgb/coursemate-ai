@@ -105,9 +105,19 @@ belongs in the release checklist next to the Jev env values.
 | Item | Planned calls | Worst case reserved | Hard ceiling | Measured basis |
 |---|---|---|---|---|
 | Jev live acceptance | ≤ 180 decisions | +50% for timeouts | **≤ 300 decisions** | 268 decisions already made, all answered; 1–3 decisions per operation |
+| Jev live **component ablation** (§10's six modules) | **93 decisions** | — | included above | **counted, not estimated**: `work/current-change/count_component_ablation_calls.py`, 58 of them `M-CITATION` and 7 for each of the other five; 0 DeepSeek calls |
 | DeepSeek live acceptance (teaching, image problem, exercise, five-question grading, feedback) | ≤ 120 calls | 3× operations, every call at the measured **maximum** | **≤ 200 calls** | measured max $0.0038862/call |
 | Embeddings | ≤ 500 chunks | — | ≤ 500 chunks | unchanged; the deterministic provider is used unless a journey re-indexes |
 | **Total** | **≤ 300 paid model calls** | — | **≤ 500 calls** | the estimate this replaces was ≤ 1,700 |
+
+**One decision I am asking for inside this item.** The component ablation is the last piece of §10 that
+is local-and-ready: the harness runs, the six arms read the right populations, and the command is
+`services\rag-api\.venv\Scripts\python.exe scripts\run_jev_semantic_ablation.py --arm all-components
+--transport live --allow-billable --out <fresh path>` — 93 Jev decisions, no DeepSeek. It is **not
+run** because 268 + 93 = 361 crosses the ≤300 ceiling I stated here, and I will not quietly spend past
+a number I gave you. Either raise the ceiling to **≤ 400** (which the measured $0.70 DeepSeek worst
+case does not touch, since this run spends no DeepSeek call) or tell me to skip it; until then it
+stays recorded as NOT_RUN rather than folded into a PASS.
 
 **USD.** DeepSeek: the worst case above is **$0.70** (180 calls × the measured maximum $0.0038862), so
 a cap of **USD 3** leaves more than 4× headroom and is what I am asking for. Jev: **I cannot state a
