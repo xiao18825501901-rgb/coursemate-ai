@@ -4,13 +4,15 @@ Date: 2026-09-25
 Branch: `fix/codex-dsh-audit-20260919`
 Frozen application candidate: `978e3f714ee9a1a39a34e1969c82615346a60f82`
 Test-harness checkpoint: `c36782e69a51becd1fd690f782b0ae458115c987`
-Production acceptance: **NOT YET ACCEPTED / CUTOVER AUTHORIZED**
+Deployment source/document checkpoint: `e0980c81050c90ec91ba981bdbec8f2111f60fd1`
+Production acceptance: **PASS WITH RECORDED LIMITATIONS**
 
 P5 source correction, local regression and a bounded real DeepSeek/Jev C1-C5 workflow are complete.
 The workflow produced exact READY revisions and all four required Jev gates returned real `on + ok`
-receipts, and the Owner has approved the exact content manifest. Production is still unchanged
-because no new candidate backup, migration, deployment or signed-in production acceptance has run
-after that decision.
+receipts. The Owner approved the exact content manifest, the matched backend and frontend were
+deployed, real Clerk sessions completed the two-user acceptance, and a post-release recovery unit
+was restored in isolation. Two strict blind-solver schema failures and the assessment preparation
+state described below remain visible rather than being rewritten as success.
 
 ## Current status matrix
 
@@ -22,13 +24,13 @@ after that decision.
 | `LIVE_JEV_BASE_SIGNALS` | **PASS** | ambiguity and answer-agreement receipts are real `on + ok + jev-latest` for the generated revisions |
 | `LIVE_JEV_SPECIALIZED_SIGNALS` | **PASS** | real MCQ distractor-quality and rule-violation-quality receipts |
 | `HUMAN_CONTENT_REVIEW` | **PASS** | Owner approved manifest `fc917044...3d7ad4` at `2026-09-25T11:26:39.9319867Z` |
-| `PRODUCTION_SNAPSHOT_RESTORED` | **PASS — EARLIER REHEARSAL** | three-database/file snapshot restored in isolation with checksums, integrity and FK checks green |
-| `MIGRATION38_RUNTIME_VERIFIED` | **PASS VIA TARGET SCHEMA 39 — EARLIER REHEARSAL** | actual schema-25 snapshot migrated through schema 39; old rows stayed unchanged |
+| `PRODUCTION_SNAPSHOT_RESTORED` | **PASS** | drained cutover backup and post-release backup were each restored in isolation; checksums, SQLite integrity and FK checks are green |
+| `MIGRATION38_RUNTIME_VERIFIED` | **PASS VIA TARGET SCHEMA 39** | live RAG/UI/Agent schemas are 39/14/1; restored post-release copies match |
 | `ROLLBACK_RUNTIME_VERIFIED` | **PASS IN ISOLATION — EARLIER REHEARSAL** | old runtime served health against a disposable schema-39 copy without changing its fingerprint |
 | `UNCERTAIN_OPERATION_RECOVERY` | **SOURCE + LOCAL PASS** | old UNKNOWN is immutable; same id was not retried; new ids and reconciliation links are durable |
-| `PRODUCTION_DEPLOYED` | **NO** | the subsequent backup, migration and cutover gates are in progress |
-| `SIGNED_IN_STUDENT_ACCEPTANCE` | **NOT RUN** | local synthetic identity is not production Clerk evidence |
-| `POST_RELEASE_BACKUP_AND_MONITORING` | **NOT RUN** | no P5 release has occurred |
+| `PRODUCTION_DEPLOYED` | **PASS** | backend source `e0980c8`, Netlify deploy `6ab6650875f30b0bb26558f0`, DeepSeek and the four approved Jev gates are serving |
+| `SIGNED_IN_STUDENT_ACCEPTANCE` | **PASS** | two real Clerk users proved qualification, CS3481 access, private-file isolation and learning-state isolation; synthetic users were then deleted upstream and marked inactive locally |
+| `POST_RELEASE_BACKUP_AND_MONITORING` | **PASS** | backup `coursemate-v2-20260925T130253.544550Z` restored to a new directory; HTTPS monitor and Singapore relay checks passed |
 | `CAMPUS_EXPANSION_PAUSED` | **PASS / ENFORCED** | no Canvas roots were scanned and no withheld campus content was published |
 
 ## Three original attempts: corrected interpretation
@@ -92,11 +94,17 @@ estimated new-workflow cost USD `0.0350511`. This does not settle the old UNKNOW
 
 ## Current production reality
 
-Last verified production remains immutable release `4ef5064`, Qwen `qwen3.8-max`, schema 25. The
-new CourseJesus P5 application is not deployed, production databases were not migrated during this
-recovery, and no production model/provider switch was made. The earlier backup/migration/rollback
-rehearsal is reusable evidence, but it does not replace a fresh consistent cutover backup after
-Owner review.
+Production now serves immutable backend source `e0980c81050c90ec91ba981bdbec8f2111f60fd1`
+from `/srv/coursemate/releases/e0980c8` and frontend deploy
+`6ab6650875f30b0bb26558f0`. RAG/UI/Agent schemas are `39/14/1`; the active model is
+`deepseek-flash` at `api.deepseek.com`. Exactly the four reviewed Question Engine Jev definitions
+are `on`; the other 19 definitions remain `off`.
+
+The frontend is `https://qqttai.com/`. Because the original API hostnames are intercepted at the
+mainland ICP boundary, production currently uses the controlled Singapore TLS relay
+`rag.47-237-179-69.sslip.io` and `agent.47-237-179-69.sslip.io`, backed by a restricted pinned-key
+SSH tunnel to the Hangzhou loopback services. Caddy, the tunnel and both application services are
+active; public health, unauthenticated 401 and allowed-origin CORS checks passed.
 
 ## Human review gate
 
@@ -108,9 +116,33 @@ Private content is deliberately not committed. The exact card is:
 - Manifest SHA-256: `fc91704466ef1b1082d7833dc9965e9a587d462da89cdd88118b18a4993d7ad4`
 - Current decision: **PASS**
 
-The Owner signed this exact bundle PASS. The authorized sequence is now: fresh consistent backup →
-restore verification → schema migration → immutable backend/front-end deployment → real Clerk
-student flows → two-user isolation → post-release backup and monitoring.
+The Owner signed this exact bundle PASS. The authorized sequence has completed: fresh consistent
+backup → restore verification → schema migration → immutable backend/front-end deployment → real
+Clerk student flows → two-user isolation → post-release backup and monitoring.
+
+## Production acceptance and recorded limitations
+
+- A new production exercise completed as `exercise.v2+question-engine.v1`; the answer stayed hidden
+  before reveal, four steps rendered, independent explanation completed, and unified history
+  survived reload.
+- The first production generation is a durable known failure: the blind solver returned a paid
+  complete response that failed strict schema validation. A new operation ID, explicitly linked to
+  that failure, succeeded on an earlier live-validated atomic node. No implicit paid retry occurred.
+- Assessment preparation persisted four new slots, then a fifth blind-solver response failed strict
+  validation. The job correctly remains `BLOCKED`. Five distinct immutable READY families were
+  nevertheless available, so a model-free start created a real five-question session with
+  10/15/20/25/30 marks and a persisted draft. The current UI does not automatically recover this
+  specific `BLOCKED + sufficient pool` state; this is a recorded non-blocking product limitation.
+- Production acceptance used 14 DeepSeek calls and 11 Jev receipts. It recorded 47,330 input and
+  17,460 output tokens with estimated cost USD `0.0383397`. Together with the pre-production
+  bounded workflow, recorded P5 cost is approximately USD `0.0733908`; the historical Attempt 2
+  UNKNOWN amount is excluded and remains UNKNOWN.
+- Light theme, persisted dark theme, the dual pane, four steps, independent explanation window and
+  five-question assessment were rendered in the production browser with zero console errors.
+- The post-release recovery unit is
+  `/srv/coursemate/backups/post-e0980c8-p5-20260925/coursemate-v2-20260925T130253.544550Z`.
+  Manifest SHA-256 is `1aa1a71e890f1ef9b7582c49dc78c0ea524d2e3449791859bd8b48285f584fa9`;
+  its isolated restored databases are schema 39/14/1, integrity `ok`, FK 0.
 
 ## Evidence index
 
@@ -123,6 +155,7 @@ student flows → two-user isolation → post-release backup and monitoring.
 - `docs/coursejesus/evidence/p5/live-attempt-summary.json`
 - `docs/coursejesus/evidence/p5/recovery-local-verification.json`
 - `docs/coursejesus/evidence/p5/production-rehearsal-summary.json`
+- `docs/coursejesus/evidence/p5/production-cutover-summary.json`
 
-The accurate disposition at this checkpoint is: **bounded live-model and human content acceptance
-passed; production cutover authorized but not yet accepted**.
+The accurate disposition at this checkpoint is: **production deployed and accepted with the two
+strict model-output limitations above retained as evidence, not hidden or retried**.

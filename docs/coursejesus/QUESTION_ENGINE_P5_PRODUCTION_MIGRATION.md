@@ -1,15 +1,16 @@
 # CourseJesus P5 production snapshot and migration evidence
 
 Date: 2026-09-25
-Production application observed: `4ef50642c0b2336e64c384752ea262901a32d81d`
+Pre-cutover production application observed: `4ef50642c0b2336e64c384752ea262901a32d81d`
 Rehearsed candidate: `4305955f161f5bb247cc3908d88d8481dfdf1a84`
-Final local candidate: `a24fac535eda85358965f516964df0c40510e7a0`
+Final application candidate: `978e3f714ee9a1a39a34e1969c82615346a60f82`
+Deployed source/document checkpoint: `e0980c81050c90ec91ba981bdbec8f2111f60fd1`
 
 The final local SHA differs from the rehearsed candidate only by test-process environment
 isolation. Application and migration code are identical. This supports reuse of the production
-snapshot rehearsal, but it does not turn the candidate into a deployed release.
+snapshot rehearsal. The later sections record the independently completed live cutover.
 
-## Production facts observed
+## Pre-cutover production facts observed
 
 | Fact | Value |
 |---|---|
@@ -58,7 +59,7 @@ Evidence file SHA-256:
 The P5 target is schema 39, which includes the previously required schema-38 Question Engine work
 plus migration 039 for practice metering and reconciliation integrity.
 
-## What was not changed
+## Rehearsal boundary at that checkpoint
 
 No production schema migration, release symlink switch, model change, Clerk change, DNS change or
 frontend deploy occurred. The only production writes were non-serving backup/rehearsal artifacts,
@@ -66,3 +67,38 @@ a monitor-readable copy of the verified backup, and the minimum parent-directory
 the existing `coursemate` monitor user to traverse its configured backup root.
 
 Versioned summary: `docs/coursejesus/evidence/p5/production-rehearsal-summary.json`.
+
+## Live cutover and current production facts
+
+After Owner approval of manifest
+`fc91704466ef1b1082d7833dc9965e9a587d462da89cdd88118b18a4993d7ad4`, the controlled
+cutover completed:
+
+| Fact | Current value |
+|---|---|
+| Backend release | `/srv/coursemate/releases/e0980c8` |
+| Frontend deploy | Netlify `6ab6650875f30b0bb26558f0`, published `2026-09-25T12:12:40.999Z` |
+| Provider | `deepseek-flash` at `api.deepseek.com` |
+| Jev modes | four Question Engine gates `on`; the other 19 definitions `off` |
+| RAG / UI / Agent schema | `39 / 14 / 1` |
+| Public frontend | `https://qqttai.com/` |
+| Public APIs | Singapore TLS relay over a restricted pinned-key tunnel to Hangzhou loopback |
+
+The stopped-writer cutover backup is
+`/srv/coursemate/backups/coursemate-v2-20260925T115551.985225Z`; manifest SHA-256 is
+`5060f48a67e8b849cff376832051d806af035678e55ce033f76ae1471ea0e135` and `SHA256SUMS`
+SHA-256 is `6efbe3828cab1a5c3f481417a723e0b41c9e7d4335648ff8d376f6a6c6ed7edf`.
+It was restored under `/srv/coursemate/rehearsals/p5-live-cutover-20260925T115551Z/restored`
+before the live migration and release switch.
+
+The post-release recovery unit is
+`/srv/coursemate/backups/post-e0980c8-p5-20260925/coursemate-v2-20260925T130253.544550Z`.
+Its descriptor, manifest and `SHA256SUMS` SHA-256 values are respectively
+`5844bc3abf811c95249fe413726b2db12eaab0171754dbae11ecd5dc94594c73`,
+`1aa1a71e890f1ef9b7582c49dc78c0ea524d2e3449791859bd8b48285f584fa9` and
+`4c2c310c4e4600c206331ca33eb76f86f668ecc6530867b97c36f322b1cfb41f`.
+The isolated restore at `/srv/coursemate/rehearsals/p5-post-release-20260925T130253Z/restored`
+contains schema 39/14/1, returns `integrity_check=ok`, has zero foreign-key violations and carries
+the exact non-secret release descriptor. Credentials remain external.
+
+Versioned cutover summary: `docs/coursejesus/evidence/p5/production-cutover-summary.json`.

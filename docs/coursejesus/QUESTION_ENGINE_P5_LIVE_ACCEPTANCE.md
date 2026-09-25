@@ -3,7 +3,7 @@
 Date: 2026-09-25
 Application candidate: `978e3f714ee9a1a39a34e1969c82615346a60f82`
 Test-harness checkpoint: `c36782e69a51becd1fd690f782b0ae458115c987`
-Verdict: **BOUNDED LIVE C1-C5 AND OWNER CONTENT REVIEW PASSED; PRODUCTION CUTOVER AUTHORIZED BUT NOT YET PASSED**
+Verdict: **BOUNDED LIVE C1-C5, OWNER REVIEW AND PRODUCTION ACCEPTANCE PASSED WITH RECORDED LIMITATIONS**
 
 This report separates real transports, automated business acceptance, human content judgment and
 production acceptance. New controlled operations produced exact READY revisions for C1-C5, all
@@ -83,7 +83,7 @@ USD `0.0350511`. This estimate does not overwrite Attempt 2: its possible call a
 | `LIVE_JEV_SPECIALIZED_SIGNALS` | **PASS** | MCQ distractor and rule-violation receipts are `on`, `ok`, `jev-latest` |
 | `CONTENT_AUTOMATED_CHECKS` | **PASS** | exact revisions, private mappings, answer visibility, persistence and database integrity verified |
 | `HUMAN_CONTENT_REVIEW` | **PASS** | Owner signed the exact manifest `fc917044...3d7ad4` at `2026-09-25T11:26:39.9319867Z` |
-| `PRODUCTION_ACCEPTANCE` | **IN PROGRESS / NOT YET PASSED** | deployment and signed-in acceptance remain required |
+| `PRODUCTION_ACCEPTANCE` | **PASS WITH RECORDED LIMITATIONS** | matched release deployed; two real Clerk users passed qualification, CS3481, private isolation, exercise, explanation, history and five-question UI; strict blind-solver failures remain visible |
 
 ## Evidence
 
@@ -100,7 +100,10 @@ USD `0.0350511`. This estimate does not overwrite Attempt 2: its possible call a
   `work/p5-live-c1-c2-20260925T061320Z`, `work/p5-live-c1-c2-20260925T063014Z`
 - State SHA-256: `ea5bd59a...3675f6`, `6fe5a0dc...75fc5`, `d1cf6b0f...572ed`
 - Reconciliation SHA-256: `8e0b9add...6c70b`, `852770a5...ca35`
+- Production cutover summary: `docs/coursejesus/evidence/p5/production-cutover-summary.json`
 
 The old UNKNOWN was never overwritten or retried. The Owner has approved the exact review manifest.
-No additional model run is required for this bundle; the remaining gates are backup, migration,
-deployment and signed-in production acceptance.
+Production generated one accepted exercise plus a valid five-question assessment session. Two
+blind-solver responses failed strict schema validation and were not retried implicitly. The final
+assessment preparation job remains `BLOCKED` even though five distinct READY families allowed a
+model-free session start; this recovery UX limitation is retained for a later reviewed release.

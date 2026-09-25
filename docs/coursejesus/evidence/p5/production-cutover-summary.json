@@ -1,0 +1,111 @@
+{
+  "formatVersion": 1,
+  "recordedAt": "2026-09-25T13:06:07.221455Z",
+  "status": "PASS_WITH_RECORDED_LIMITATIONS",
+  "ownerReview": {
+    "decision": "PASS",
+    "manifestSha256": "fc91704466ef1b1082d7833dc9965e9a587d462da89cdd88118b18a4993d7ad4",
+    "recordedAt": "2026-09-25T11:26:39.9319867Z"
+  },
+  "release": {
+    "applicationCandidateSha": "978e3f714ee9a1a39a34e1969c82615346a60f82",
+    "deploymentSourceSha": "e0980c81050c90ec91ba981bdbec8f2111f60fd1",
+    "backendRelease": "/srv/coursemate/releases/e0980c8",
+    "frontendDeployId": "6ab6650875f30b0bb26558f0",
+    "frontendPublishedAt": "2026-09-25T12:12:40.999Z",
+    "frontendUrl": "https://qqttai.com/",
+    "ragUrl": "https://rag.47-237-179-69.sslip.io",
+    "agentUrl": "https://agent.47-237-179-69.sslip.io"
+  },
+  "runtime": {
+    "model": "deepseek-flash",
+    "modelEndpointIdentity": "api.deepseek.com",
+    "schemaVersions": {
+      "rag": 39,
+      "ui": 14,
+      "agent": 1
+    },
+    "jevOn": [
+      "question.ambiguity.v1",
+      "question.answer_agreement.v1",
+      "question.mcq_distractor_quality.v1",
+      "question.rule_violation_quality.v1"
+    ],
+    "otherJevDefinitions": "off"
+  },
+  "cutoverBackup": {
+    "path": "/srv/coursemate/backups/coursemate-v2-20260925T115551.985225Z",
+    "manifestSha256": "5060f48a67e8b849cff376832051d806af035678e55ce033f76ae1471ea0e135",
+    "sha256SumsSha256": "6efbe3828cab1a5c3f481417a723e0b41c9e7d4335648ff8d376f6a6c6ed7edf"
+  },
+  "postReleaseRecovery": {
+    "descriptorSha256": "5844bc3abf811c95249fe413726b2db12eaab0171754dbae11ecd5dc94594c73",
+    "backupPath": "/srv/coursemate/backups/post-e0980c8-p5-20260925/coursemate-v2-20260925T130253.544550Z",
+    "manifestSha256": "1aa1a71e890f1ef9b7582c49dc78c0ea524d2e3449791859bd8b48285f584fa9",
+    "sha256SumsSha256": "4c2c310c4e4600c206331ca33eb76f86f668ecc6530867b97c36f322b1cfb41f",
+    "restorePath": "/srv/coursemate/rehearsals/p5-post-release-20260925T130253Z/restored",
+    "restoredSchemaVersions": {
+      "rag": 39,
+      "ui": 14,
+      "agent": 1
+    },
+    "sqliteIntegrity": "ok",
+    "foreignKeyViolations": 0,
+    "monitorCheckedAt": "2026-09-25T13:06:07.221455Z",
+    "monitorStatus": "ok"
+  },
+  "productionAcceptance": {
+    "realClerkUsers": 2,
+    "qualificationAndCourseAccess": "passed",
+    "privateFileAndLearningIsolation": "passed",
+    "syntheticAccountsDeletedUpstream": true,
+    "syntheticDirectoryRowsInactive": true,
+    "exercise": {
+      "status": "completed",
+      "verification": "AI_REVIEWED",
+      "generationVersion": "exercise.v2+question-engine.v1",
+      "stepsHiddenBeforeReveal": true,
+      "stepCount": 4,
+      "explanationStatus": "completed",
+      "historyPersisted": true
+    },
+    "assessment": {
+      "sessionStatus": "IN_PROGRESS",
+      "questionCount": 5,
+      "marks": [10, 15, 20, 25, 30],
+      "totalMarks": 100,
+      "draftPersisted": true,
+      "preparationJobStatus": "BLOCKED",
+      "preparationError": "BLIND_SOLVER_OUTPUT_INVALID",
+      "eligibleReadyFamilies": 5
+    },
+    "browser": {
+      "lightTheme": "passed",
+      "darkThemePersistence": "passed",
+      "dualPane": "passed",
+      "exerciseSteps": "passed",
+      "explanationWindow": "passed",
+      "fiveQuestionAssessment": "passed",
+      "consoleErrors": 0
+    }
+  },
+  "productionModelEvidence": {
+    "deepSeekCalls": 14,
+    "deepSeekInputTokens": 47330,
+    "deepSeekOutputTokens": 17460,
+    "deepSeekCompletedAuthor": 7,
+    "deepSeekCompletedBlindSolver": 5,
+    "deepSeekFailedBlindSolver": 2,
+    "jevReceipts": 11,
+    "estimatedUsd": "0.0383397",
+    "combinedPreProductionAndProductionEstimatedUsd": "0.0733908",
+    "oldUnknownAttemptExcluded": true,
+    "implicitRetries": 0
+  },
+  "recordedLimitations": [
+    "Two paid blind-solver responses failed strict schema validation; both are durable known failures and were not retried implicitly.",
+    "The five-slot preparation job is BLOCKED after its final slot failed, although five distinct immutable READY families existed and a valid five-question session was started without another model call.",
+    "The historical Attempt 2 provider outcome and cost remain UNKNOWN and were neither overwritten nor retried.",
+    "The public API uses the temporary Singapore sslip.io TLS ingress because the original API hostnames are intercepted by the mainland ICP boundary."
+  ]
+}
