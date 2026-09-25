@@ -212,6 +212,36 @@ BEGIN
     SELECT RAISE(ABORT, 'Practice operation reconciliations are immutable');
 END;
 
+CREATE TABLE IF NOT EXISTS practice_operation_retry_links (
+    workspace_id TEXT NOT NULL,
+    prior_operation_id TEXT NOT NULL,
+    new_operation_id TEXT NOT NULL,
+    reconciliation_id TEXT NOT NULL UNIQUE
+        REFERENCES practice_operation_reconciliations(id) ON DELETE RESTRICT,
+    created_at TEXT NOT NULL DEFAULT(strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    PRIMARY KEY(workspace_id, new_operation_id),
+    UNIQUE(workspace_id, prior_operation_id),
+    FOREIGN KEY(workspace_id, prior_operation_id)
+        REFERENCES practice_interaction_operations(workspace_id, operation_id)
+        ON DELETE RESTRICT,
+    FOREIGN KEY(workspace_id, new_operation_id)
+        REFERENCES practice_interaction_operations(workspace_id, operation_id)
+        ON DELETE RESTRICT,
+    CHECK(prior_operation_id != new_operation_id)
+);
+
+CREATE TRIGGER IF NOT EXISTS immutable_practice_retry_link_update
+BEFORE UPDATE ON practice_operation_retry_links
+BEGIN
+    SELECT RAISE(ABORT, 'Practice operation retry links are immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS immutable_practice_retry_link_delete
+BEFORE DELETE ON practice_operation_retry_links
+BEGIN
+    SELECT RAISE(ABORT, 'Practice operation retry links are immutable');
+END;
+
 PRAGMA legacy_alter_table=OFF;
 PRAGMA foreign_keys=ON;
 

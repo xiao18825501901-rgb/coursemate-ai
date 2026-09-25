@@ -17,7 +17,7 @@ import hashlib
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, cast
 from uuid import uuid4
 
 from pydantic import Field
@@ -38,6 +38,7 @@ from app.learning.practice_feedback import (
     generate_practice_feedback,
     generate_practice_hint,
 )
+from app.learning.practice_recovery import PRACTICE_OPERATION_ACTIVE_WINDOW_SECONDS
 from app.learning.question_author import (
     QUESTION_AUTHOR_PROMPT_VERSION,
     RULE_VIOLATION_POLICY_VERSION,
@@ -392,6 +393,30 @@ class QuestionEngineRuntime:
                     "workspace_id,operation_id,guard_version) VALUES(?,?,'metered-practice.v1')",
                     (workspace_id, operation_id),
                 )
+                connection.execute(
+                    "INSERT INTO practice_operation_retry_links("
+                    "workspace_id,prior_operation_id,new_operation_id,reconciliation_id) "
+                    "SELECT old.workspace_id,old.operation_id,?,reconciliation.id "
+                    "FROM practice_operation_reconciliations AS reconciliation "
+                    "JOIN practice_interaction_operations AS old "
+                    "ON old.workspace_id=reconciliation.workspace_id "
+                    "AND old.operation_id=reconciliation.operation_id "
+                    "WHERE old.workspace_id=? AND old.operation_id!=? "
+                    "AND old.question_revision_id=? AND old.owner_user_id=? "
+                    "AND old.kind=? AND old.input_hash=? "
+                    "AND NOT EXISTS(SELECT 1 FROM practice_operation_retry_links AS retry "
+                    "WHERE retry.reconciliation_id=reconciliation.id) "
+                    "ORDER BY reconciliation.created_at DESC,reconciliation.rowid DESC LIMIT 1",
+                    (
+                        operation_id,
+                        workspace_id,
+                        operation_id,
+                        question_revision_id,
+                        owner_user_id,
+                        kind,
+                        input_hash,
+                    ),
+                )
             row = connection.execute(
                 "SELECT * FROM practice_interaction_operations "
                 "WHERE workspace_id=? AND operation_id=?",
@@ -413,11 +438,48 @@ class QuestionEngineRuntime:
                 "The practice operation id is already bound to different input.",
             )
         if row["status"] == "COMPLETED":
-            return json.loads(row["result_json"])
+            return cast(dict[str, Any], json.loads(row["result_json"]))
         if row["status"] == "FAILED":
             raise QuestionEngineRuntimeError(
                 str(row["error_code"]),
                 "The original practice operation failed and was not billed again.",
+            )
+        with self.database.connect() as connection:
+            reconciliation = connection.execute(
+                "SELECT disposition FROM practice_operation_reconciliations "
+                "WHERE workspace_id=? AND operation_id=? "
+                "ORDER BY created_at DESC,rowid DESC LIMIT 1",
+                (workspace_id, operation_id),
+            ).fetchone()
+            stale = bool(
+                connection.execute(
+                    "SELECT COALESCE((julianday('now')-julianday(?))*86400 > ?,0)",
+                    (row["updated_at"], PRACTICE_OPERATION_ACTIVE_WINDOW_SECONDS),
+                ).fetchone()[0]
+            )
+        if reconciliation is not None:
+            disposition = str(reconciliation["disposition"])
+            if disposition in {"NOT_SENT", "UPSTREAM_FAILED"}:
+                raise QuestionEngineRuntimeError(
+                    "PRACTICE_OPERATION_RECOVERED",
+                    "The original operation was reconciled. Retry with a new request id; "
+                    "the new receipt will be linked to this operation.",
+                )
+            if disposition == "UPSTREAM_COMPLETED_NO_RESULT":
+                raise QuestionEngineRuntimeError(
+                    "PRACTICE_OPERATION_RESULT_UNAVAILABLE",
+                    "The provider call completed but no complete practice result was saved. "
+                    "Retry only with a new linked request id.",
+                )
+            raise QuestionEngineRuntimeError(
+                "PRACTICE_OPERATION_COST_UNKNOWN",
+                "The original provider outcome and cost remain unknown. Retry only with a new "
+                "linked request id after accepting possible duplicate cost.",
+            )
+        if stale:
+            raise QuestionEngineRuntimeError(
+                "PRACTICE_OPERATION_RECOVERY_REQUIRED",
+                "The practice operation did not finish and requires operator reconciliation.",
             )
         raise QuestionEngineRuntimeError(
             "PRACTICE_OPERATION_IN_PROGRESS",
