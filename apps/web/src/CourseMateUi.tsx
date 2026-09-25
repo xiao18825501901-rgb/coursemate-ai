@@ -1,6 +1,6 @@
 import { ClerkProvider, useAuth, useClerk } from "@clerk/react";
 import katex from "katex";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { App as CourseMateApp } from "./ui/App.jsx";
 import { BRAND } from "./brand";
@@ -41,6 +41,8 @@ declare global {
 const testToken = import.meta.env.VITE_AUTH_TEST_TOKEN;
 
 function TestAuthBridge({ token }: { token: string }) {
+  const [bridgeReady, setBridgeReady] = useState(false);
+
   useEffect(() => {
     window.CourseMateAuth = {
       getToken: async () => token,
@@ -48,12 +50,13 @@ function TestAuthBridge({ token }: { token: string }) {
       signIn: () => undefined,
       signOut: async () => undefined,
     };
+    setBridgeReady(true);
     return () => {
       delete window.CourseMateAuth;
     };
   }, [token]);
 
-  return <CourseMateApp />;
+  return bridgeReady ? <CourseMateApp /> : null;
 }
 
 /**
@@ -67,6 +70,7 @@ function TestAuthBridge({ token }: { token: string }) {
 function AuthBridge() {
   const { getToken } = useAuth();
   const clerk = useClerk();
+  const [bridgeReady, setBridgeReady] = useState(false);
 
   useEffect(() => {
     window.CourseMateAuth = {
@@ -84,12 +88,13 @@ function AuthBridge() {
         await clerk.signOut();
       },
     };
+    setBridgeReady(true);
     return () => {
       delete window.CourseMateAuth;
     };
   }, [clerk, getToken]);
 
-  return <CourseMateApp />;
+  return bridgeReady ? <CourseMateApp /> : null;
 }
 
 export function CourseMateUi() {

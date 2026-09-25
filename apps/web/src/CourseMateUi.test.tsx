@@ -20,7 +20,12 @@ vi.mock("@clerk/react", () => ({
 
 // The delivered shell is plain JSX with no type declarations; keep it honest here.
 vi.mock("./ui/App.jsx", () => ({
-  App: () => <div data-testid="course-mate-app" />,
+  App: () => {
+    if (!window.CourseMateAuth) {
+      throw new Error("CourseJesus auth bridge must exist before the shell mounts");
+    }
+    return <div data-testid="course-mate-app" />;
+  },
 }));
 
 vi.mock("katex", () => ({
