@@ -6,6 +6,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import shutil
 import sqlite3
 import sys
 import tarfile
@@ -27,6 +29,19 @@ ARTIFACTS = (
 UI_DATABASE_NAME = "ui.sqlite3"
 UI_UPLOADS_NAME = "ui-uploads.tar.gz"
 UI_ARTIFACTS = (UI_DATABASE_NAME, UI_UPLOADS_NAME)
+RELEASE_CONFIG_NAME = "release-config.json"
+RELEASE_CONFIG_KEYS = {
+    "formatVersion",
+    "applicationReleaseSha",
+    "frontendDeployId",
+    "runtimeConfigVersion",
+    "model",
+    "modelEndpointIdentity",
+    "jevDefinitionModes",
+    "templateVersions",
+    "serviceUnitHashes",
+    "credentialRecovery",
+}
 
 
 def _ui_data_dir() -> Path | None:
@@ -102,6 +117,66 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _release_config() -> Path | None:
+    required_value = os.environ.get("REQUIRE_RECOVERY_CONFIG", "false").strip().casefold()
+    if required_value not in {"true", "false"}:
+        raise ValueError("REQUIRE_RECOVERY_CONFIG must be true or false.")
+    raw_value = os.environ.get("RECOVERY_CONFIG_MANIFEST", "").strip()
+    if not raw_value:
+        if required_value == "true":
+            raise ValueError(
+                "Set RECOVERY_CONFIG_MANIFEST for a production-complete recovery unit."
+            )
+        return None
+    path = _required_path("RECOVERY_CONFIG_MANIFEST")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("Recovery config manifest must be valid UTF-8 JSON.") from error
+    if not isinstance(value, dict) or set(value) != RELEASE_CONFIG_KEYS:
+        raise ValueError(
+            "Recovery config manifest keys must match the non-secret release descriptor schema."
+        )
+    if value["formatVersion"] != 1:
+        raise ValueError("Recovery config manifest formatVersion must be 1.")
+    sha = value["applicationReleaseSha"]
+    if not isinstance(sha, str) or re.fullmatch(r"[0-9a-f]{40}", sha) is None:
+        raise ValueError("Recovery config applicationReleaseSha must be a lowercase Git SHA.")
+    for key in ("frontendDeployId", "runtimeConfigVersion", "model"):
+        if not isinstance(value[key], str) or not 1 <= len(value[key].strip()) <= 200:
+            raise ValueError(f"Recovery config {key} must be a non-empty bounded string.")
+    endpoint = value["modelEndpointIdentity"]
+    if not isinstance(endpoint, str) or re.fullmatch(
+        r"[A-Za-z0-9.-]+(?::[0-9]{1,5})?", endpoint
+    ) is None:
+        raise ValueError("Recovery config modelEndpointIdentity must be a hostname identity.")
+    modes = value["jevDefinitionModes"]
+    if not isinstance(modes, dict) or any(
+        not isinstance(key, str) or mode not in {"off", "shadow", "on"}
+        for key, mode in modes.items()
+    ):
+        raise ValueError("Recovery config Jev modes are invalid.")
+    templates = value["templateVersions"]
+    if not isinstance(templates, dict) or not templates or any(
+        not isinstance(key, str)
+        or not isinstance(version, str)
+        or not version.strip()
+        for key, version in templates.items()
+    ):
+        raise ValueError("Recovery config template versions are invalid.")
+    hashes = value["serviceUnitHashes"]
+    if not isinstance(hashes, dict) or not hashes or any(
+        not isinstance(key, str)
+        or not isinstance(digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+        for key, digest in hashes.items()
+    ):
+        raise ValueError("Recovery config service unit hashes are invalid.")
+    if value["credentialRecovery"] != "EXTERNAL_NOT_INCLUDED":
+        raise ValueError("Credentials must remain external and must not enter this backup.")
+    return path
+
+
 def create_backup() -> Path:
     rag_database = _required_path("RAG_DATABASE_PATH")
     agent_database = _required_path("AGENT_DATABASE_PATH")
@@ -132,6 +207,10 @@ def create_backup() -> Path:
         "agentDatabase": "agent.sqlite3",
         "uploads": "uploads.tar.gz",
     }
+    release_config = _release_config()
+    if release_config is not None:
+        shutil.copyfile(release_config, partial_destination / RELEASE_CONFIG_NAME)
+        artifacts["releaseConfig"] = RELEASE_CONFIG_NAME
 
     ui_root = _ui_data_dir()
     ui_counts: dict[str, int] = {}
@@ -180,6 +259,7 @@ def create_backup() -> Path:
             "sqliteIntegrity": "ok",
             "foreignKeyViolations": 0,
         },
+        "releaseConfigIncluded": release_config is not None,
     }
     if ui_counts:
         manifest["uiUploadFileCount"] = ui_counts["fileCount"]
@@ -195,6 +275,8 @@ def create_backup() -> Path:
     )
     if 'uiShares' in artifacts:
         checksum_artifacts += ('ui-shares.tar.gz',)
+    if release_config is not None:
+        checksum_artifacts += (RELEASE_CONFIG_NAME,)
     checksum_lines = [
         f"{_sha256(partial_destination / name)}  {name}" for name in checksum_artifacts
     ]

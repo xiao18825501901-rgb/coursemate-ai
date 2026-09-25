@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import os
 import sqlite3
 import subprocess
@@ -100,6 +101,105 @@ def test_backup_and_restore_preserve_both_databases_and_uploads(tmp_path: Path) 
     assert restore_target.joinpath("uploads", "owner", "course", "notes.md").read_text(
         encoding="utf-8"
     ) == "private course evidence"
+
+
+def test_backup_and_restore_preserve_validated_nonsecret_release_descriptor(
+    tmp_path: Path,
+) -> None:
+    rag_database = tmp_path / "rag.sqlite3"
+    agent_database = tmp_path / "agent.sqlite3"
+    uploads = tmp_path / "uploads"
+    backup_root = tmp_path / "backups"
+    restore_target = tmp_path / "restored"
+    uploads.mkdir()
+    _database(rag_database, "courses", "cs3481")
+    _database(agent_database, "tasks", "review clustering")
+    descriptor = tmp_path / "release-descriptor.json"
+    descriptor.write_text(
+        json.dumps(
+            {
+                "formatVersion": 1,
+                "applicationReleaseSha": "a" * 40,
+                "frontendDeployId": "deploy-coursejesus-20260925",
+                "runtimeConfigVersion": "p5-20260925-v1",
+                "model": "deepseek-flash",
+                "modelEndpointIdentity": "api.deepseek.com",
+                "jevDefinitionModes": {
+                    "question.ambiguity.v1": "on",
+                    "question.answer_agreement.v1": "on",
+                    "question.mcq_distractor_quality.v1": "on",
+                    "question.rule_violation_quality.v1": "on",
+                },
+                "templateVersions": {"questionAuthor": "question-author.v3"},
+                "serviceUnitHashes": {
+                    "coursemate-rag.service": "b" * 64,
+                    "coursemate-agent.service": "c" * 64,
+                    "Caddyfile": "d" * 64,
+                },
+                "credentialRecovery": "EXTERNAL_NOT_INCLUDED",
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    backup = _run(
+        BACKUP_SCRIPT,
+        {
+            "RAG_DATABASE_PATH": str(rag_database),
+            "RAG_UPLOAD_DIR": str(uploads),
+            "AGENT_DATABASE_PATH": str(agent_database),
+            "BACKUP_ROOT": str(backup_root),
+            "RECOVERY_CONFIG_MANIFEST": str(descriptor),
+            "REQUIRE_RECOVERY_CONFIG": "true",
+        },
+    )
+    assert backup.returncode == 0, backup.stderr
+    backup_directory = Path(backup.stdout.strip().splitlines()[-1])
+    manifest = json.loads((backup_directory / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["artifacts"]["releaseConfig"] == "release-config.json"
+    assert (backup_directory / "release-config.json").read_bytes() == descriptor.read_bytes()
+
+    restore = _run(
+        RESTORE_SCRIPT,
+        {"RESTORE_SOURCE": str(backup_directory), "RESTORE_TARGET": str(restore_target)},
+    )
+    assert restore.returncode == 0, restore.stderr
+    restored = json.loads((restore_target / "release-config.json").read_text(encoding="utf-8"))
+    assert restored["credentialRecovery"] == "EXTERNAL_NOT_INCLUDED"
+    assert restored["applicationReleaseSha"] == "a" * 40
+
+
+def test_production_backup_refuses_missing_or_unexpected_release_descriptor(
+    tmp_path: Path,
+) -> None:
+    rag_database = tmp_path / "rag.sqlite3"
+    agent_database = tmp_path / "agent.sqlite3"
+    uploads = tmp_path / "uploads"
+    uploads.mkdir()
+    _database(rag_database, "courses", "cs3481")
+    _database(agent_database, "tasks", "review clustering")
+    environment = {
+        "RAG_DATABASE_PATH": str(rag_database),
+        "RAG_UPLOAD_DIR": str(uploads),
+        "AGENT_DATABASE_PATH": str(agent_database),
+        "BACKUP_ROOT": str(tmp_path / "backups"),
+        "REQUIRE_RECOVERY_CONFIG": "true",
+    }
+    missing = _run(BACKUP_SCRIPT, environment)
+    assert missing.returncode != 0
+    assert "RECOVERY_CONFIG_MANIFEST" in missing.stderr
+
+    descriptor = tmp_path / "unsafe-release-descriptor.json"
+    descriptor.write_text(
+        json.dumps({"formatVersion": 1, "apiKey": "must-not-enter-backup"}),
+        encoding="utf-8",
+    )
+    unsafe = _run(
+        BACKUP_SCRIPT,
+        {**environment, "RECOVERY_CONFIG_MANIFEST": str(descriptor)},
+    )
+    assert unsafe.returncode != 0
+    assert "keys" in unsafe.stderr.casefold()
 
 
 def test_backup_from_wal_databases_has_no_unverified_sidecars(tmp_path: Path) -> None:

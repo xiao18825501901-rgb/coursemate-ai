@@ -11,9 +11,9 @@ Keep the source, staging, and target parent private and quiescent while restorin
 
 from __future__ import annotations
 
-import hashlib
 import ctypes
 import errno
+import hashlib
 import json
 import os
 import re
@@ -40,6 +40,19 @@ METADATA_ARTIFACTS = {"manifest.json", "sqlite-check.txt"}
 
 # Present only when the refreshed learning shell is part of the deployment.
 OPTIONAL_ARTIFACTS = {"ui.sqlite3", "ui-uploads.tar.gz"}
+RELEASE_CONFIG_NAME = "release-config.json"
+RELEASE_CONFIG_KEYS = {
+    "formatVersion",
+    "applicationReleaseSha",
+    "frontendDeployId",
+    "runtimeConfigVersion",
+    "model",
+    "modelEndpointIdentity",
+    "jevDefinitionModes",
+    "templateVersions",
+    "serviceUnitHashes",
+    "credentialRecovery",
+}
 
 
 def _rename_no_replace(source: Path, target: Path) -> None:
@@ -127,9 +140,15 @@ def _data_artifacts(manifest: dict[str, object]) -> set[str]:
     if artifacts is None:
         return declared
     if not isinstance(artifacts, dict):
-        raise ValueError("Backup manifest artifacts must be an object.")
+        raise TypeError("Backup manifest artifacts must be an object.")
     named = {value for value in artifacts.values() if isinstance(value, str)}
-    unexpected = named - BASE_DATA_ARTIFACTS - OPTIONAL_ARTIFACTS - METADATA_ARTIFACTS - {'ui-shares.tar.gz'}
+    unexpected = (
+        named
+        - BASE_DATA_ARTIFACTS
+        - OPTIONAL_ARTIFACTS
+        - METADATA_ARTIFACTS
+        - {'ui-shares.tar.gz', RELEASE_CONFIG_NAME}
+    )
     if unexpected:
         raise ValueError(f"Backup manifest declares unknown artifacts: {sorted(unexpected)}")
     optional_declared = named & OPTIONAL_ARTIFACTS
@@ -139,7 +158,25 @@ def _data_artifacts(manifest: dict[str, object]) -> set[str]:
         if optional_declared != OPTIONAL_ARTIFACTS:
             raise ValueError('Snapshot archive requires the complete UI recovery unit.')
         optional_declared = optional_declared | {'ui-shares.tar.gz'}
+    if RELEASE_CONFIG_NAME in named:
+        optional_declared = optional_declared | {RELEASE_CONFIG_NAME}
     return declared | optional_declared
+
+
+def _verify_release_config(path: Path) -> None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("Restored release config must be valid UTF-8 JSON.") from error
+    if not isinstance(value, dict) or set(value) != RELEASE_CONFIG_KEYS:
+        raise ValueError("Restored release config keys are invalid.")
+    if value.get("formatVersion") != 1 or value.get("credentialRecovery") != (
+        "EXTERNAL_NOT_INCLUDED"
+    ):
+        raise ValueError("Restored release config violates the credential boundary.")
+    sha = value.get("applicationReleaseSha")
+    if not isinstance(sha, str) or re.fullmatch(r"[0-9a-f]{40}", sha) is None:
+        raise ValueError("Restored release config Git SHA is invalid.")
 
 
 def _sha256(path: Path) -> str:
@@ -246,7 +283,9 @@ def _extract_uploads(
             if verify_only:
                 digest = hashlib.sha256()
                 with extracted:
-                    for block in iter(lambda: extracted.read(1024 * 1024), b""):
+                    for block in iter(
+                        lambda source=extracted: source.read(1024 * 1024), b""
+                    ):
                         digest.update(block)
                 if _sha256(target) != digest.hexdigest():
                     raise ValueError(f"Staged upload differs from verified archive: {target}")
@@ -319,6 +358,8 @@ def restore_backup() -> Path:
             expected_top["ui-uploads"] = "directory"
         if 'ui-shares.tar.gz' in data_artifacts:
             expected_top["ui-shares"] = "directory"
+        if RELEASE_CONFIG_NAME in data_artifacts:
+            expected_top[RELEASE_CONFIG_NAME] = "file"
         if top != expected_top:
             raise ValueError("Staged restore tree does not match the verified recovery unit")
     else:
@@ -335,6 +376,14 @@ def restore_backup() -> Path:
         else:
             shutil.copyfile(source / name, destination)
         _verify_sqlite(destination)
+    if RELEASE_CONFIG_NAME in data_artifacts:
+        release_config_target = partial_target / RELEASE_CONFIG_NAME
+        if resume_raw:
+            if _sha256(release_config_target) != _sha256(source / RELEASE_CONFIG_NAME):
+                raise ValueError("Staged release config differs from verified backup.")
+        else:
+            shutil.copyfile(source / RELEASE_CONFIG_NAME, release_config_target)
+        _verify_release_config(release_config_target)
     _extract_uploads(
         source / "uploads.tar.gz",
         uploads_target,
@@ -369,7 +418,14 @@ def restore_backup() -> Path:
 def main() -> int:
     try:
         print(f"Isolated restore ready at {restore_backup()}")
-    except (OSError, sqlite3.Error, tarfile.TarError, ValueError, RuntimeError) as error:
+    except (
+        OSError,
+        sqlite3.Error,
+        tarfile.TarError,
+        TypeError,
+        ValueError,
+        RuntimeError,
+    ) as error:
         print(f"Restore failed: {error}", file=sys.stderr)
         return 2
     return 0
