@@ -185,6 +185,8 @@ def test_a_bare_topic_is_not_an_objective() -> None:
     with pytest.raises(ValidationError) as refusal:
         blueprint(objective_text="DBSCAN")
     assert "observable action" in str(refusal.value)
+    assert refusal.value.errors()[0]["loc"] == ("objective_text",)
+    assert refusal.value.errors()[0]["type"] == "value_error"
 
 
 def test_a_model_cannot_grant_itself_authority() -> None:

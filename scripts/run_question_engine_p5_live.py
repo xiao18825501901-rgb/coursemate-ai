@@ -14,8 +14,10 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -100,6 +102,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-jev-calls", type=int, default=C1_C2_PLAN.jev_calls)
     parser.add_argument("--input-price-per-million", type=float)
     parser.add_argument("--output-price-per-million", type=float)
+    parser.add_argument("--operation-usd-baseline", type=float)
     parser.add_argument("--currency", default="USD")
     parser.add_argument("--max-cost", type=float)
     parser.add_argument(
@@ -195,6 +198,11 @@ def _configure_process_environment(
 ) -> None:
     """Configure both V3 and mounted UI providers from the same frozen bounds."""
 
+    # The owner-authorized whole-workflow ceiling and the product's per-operation
+    # reasoning baseline are independent controls.  Never derive B from the
+    # former: medium=B, high=2B and max=None are product semantics.
+    del conservative_ceiling
+
     os.environ["TYPESAFE_API_KEY"] = jev_key
     os.environ["CMUI_DATA_DIR"] = str(run_dir / "ui-extension")
     os.environ["CMUI_ENV"] = "development"
@@ -206,7 +214,7 @@ def _configure_process_environment(
     os.environ["CMUI_DEEPSEEK_PROTOCOL"] = "responses"
     os.environ["CMUI_MODEL_TIMEOUT"] = str(args.timeout)
     os.environ["CMUI_ANSWER_TOKENS"] = str(args.max_output_tokens)
-    os.environ["CMUI_OPERATION_USD_BASELINE"] = f"{conservative_ceiling:.8f}"
+    os.environ["CMUI_OPERATION_USD_BASELINE"] = f"{args.operation_usd_baseline:.8f}"
     os.environ["CMUI_OPERATION_INPUT_USD_PER_MILLION"] = str(
         args.input_price_per_million
     )
@@ -253,10 +261,66 @@ class CallBudget:
         }
 
 
+@dataclass(slots=True)
+class DurableTransportLedger:
+    """Private transport evidence, atomically persisted after every event."""
+
+    path: Path
+    events: list[dict[str, Any]]
+
+    @classmethod
+    def create(cls, path: Path) -> DurableTransportLedger:
+        ledger = cls(path=path, events=[])
+        ledger._flush()
+        return ledger
+
+    def _flush(self) -> None:
+        _write_json(
+            self.path,
+            {
+                "format_version": "coursejesus.p5.private-transport-ledger.v1",
+                "classification": "PRIVATE_PROVIDER_RESULT_EVIDENCE",
+                "events": self.events,
+            },
+        )
+
+    def record(self, source: str, event: dict[str, Any]) -> None:
+        self.events.append(
+            {
+                "sequence": len(self.events) + 1,
+                "recorded_at": _now(),
+                "source": source,
+                **event,
+            }
+        )
+        self._flush()
+
+    def public_summary(self) -> dict[str, Any]:
+        phases: dict[str, int] = {}
+        sources: dict[str, int] = {}
+        for event in self.events:
+            phase = str(event.get("phase") or "UNKNOWN")
+            source = str(event.get("source") or "UNKNOWN")
+            phases[phase] = phases.get(phase, 0) + 1
+            sources[source] = sources.get(source, 0) + 1
+        return {
+            "event_count": len(self.events),
+            "phases": phases,
+            "sources": sources,
+            "sha256": hashlib.sha256(self.path.read_bytes()).hexdigest(),
+        }
+
+
 class BoundedJevTransport:
-    def __init__(self, inner: Any, budget: CallBudget) -> None:
+    def __init__(
+        self,
+        inner: Any,
+        budget: CallBudget,
+        ledger: DurableTransportLedger | None = None,
+    ) -> None:
         self.inner = inner
         self.budget = budget
+        self.ledger = ledger
 
     @property
     def model_version(self) -> str | None:
@@ -265,7 +329,71 @@ class BoundedJevTransport:
     def call(self, call: Any, *, timeout_seconds: float) -> Any:
         definition = next(iter(call.questions), "UNKNOWN")
         self.budget.claim_jev(str(definition))
-        return self.inner.call(call, timeout_seconds=timeout_seconds)
+        input_hash = hashlib.sha256(
+            json.dumps(
+                {
+                    "state": call.state,
+                    "questions": {
+                        key: {
+                            "primitive": value.primitive,
+                            "instructions": value.instructions,
+                            "criteria": value.criteria,
+                        }
+                        for key, value in call.questions.items()
+                    },
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+            ).encode()
+        ).hexdigest()
+        if self.ledger is not None:
+            self.ledger.record(
+                "jev",
+                {
+                    "phase": "SEND_INTENT",
+                    "definition": str(definition),
+                    "input_hash": input_hash,
+                    "timeout_seconds": timeout_seconds,
+                },
+            )
+        try:
+            result = self.inner.call(call, timeout_seconds=timeout_seconds)
+        except Exception as error:
+            if self.ledger is not None:
+                self.ledger.record(
+                    "jev",
+                    {
+                        "phase": "RESPONSE_UNKNOWN",
+                        "definition": str(definition),
+                        "input_hash": input_hash,
+                        "error_class": type(error).__name__,
+                    },
+                )
+            raise
+        if self.ledger is not None:
+            self.ledger.record(
+                "jev",
+                {
+                    "phase": "RESPONSE_COMPLETE",
+                    "definition": str(definition),
+                    "input_hash": input_hash,
+                    "request_id": getattr(result, "request_id", None),
+                    "model_version": getattr(result, "model_version", None),
+                    "answers": {
+                        key: {
+                            "choice": answer.choice,
+                            "noul": answer.noul,
+                            "score": answer.score,
+                            "score_value": answer.score_value,
+                            "probability": answer.probability,
+                            "raw": answer.raw,
+                        }
+                        for key, answer in result.answers.items()
+                    },
+                },
+            )
+        return result
 
 
 def _print_plan(args: argparse.Namespace, ceiling: float | None) -> None:
@@ -282,6 +410,148 @@ def _print_plan(args: argparse.Namespace, ceiling: float | None) -> None:
     for case in C1_C2_PLAN.cases:
         print(f"- {case}")
     print("Stop conditions: first failed/unknown provider call, call cap, cost cap, or receipt mismatch")
+
+
+def _nearest_existing_parent(path: Path) -> Path:
+    candidate = path.resolve()
+    while not candidate.exists() and candidate.parent != candidate:
+        candidate = candidate.parent
+    return candidate
+
+
+def _run_static_preflight(
+    args: argparse.Namespace, ceiling: float | None
+) -> dict[str, Any]:
+    """Exercise the real local schema/workspace/evidence/blueprint path with zero transport.
+
+    A disposable schema-39 database is used so this validates the same builder
+    called by UI generation without mutating the requested run directory or any
+    persistent user data.  Merely listing a plan is not a preflight.
+    """
+
+    from types import SimpleNamespace
+
+    from app.cm_update.budget import evaluate_operation_budget
+    from app.cm_update.provider import DeepSeekProvider
+    from app.config import Settings
+    from app.main import create_app
+
+    owner = "p5-static-owner"
+    course_id = "p5-static-course"
+    parent = _nearest_existing_parent(args.run_dir.parent)
+    disk = shutil.disk_usage(parent)
+    if disk.free < 50 * 1024 * 1024:
+        raise RuntimeError("P5_PREFLIGHT_DISK_SPACE_LOW")
+
+    budget_report: dict[str, Any] = {
+        "status": "NOT_VERIFIED_MISSING_EXPLICIT_PRICES_OR_BASELINE"
+    }
+    if (
+        _positive_finite(args.input_price_per_million)
+        and _positive_finite(args.output_price_per_million)
+        and _positive_finite(args.operation_usd_baseline)
+    ):
+        estimate = DeepSeekProvider(
+            SimpleNamespace(
+                deepseek_model=args.model,
+                deepseek_base_url=args.base_url,
+                deepseek_protocol="responses",
+                deepseek_key="STATIC_PREFLIGHT_ONLY",
+                operation_input_usd_per_million=str(args.input_price_per_million),
+                operation_output_usd_per_million=str(args.output_price_per_million),
+                image_max_pixels=2_621_440,
+                answer_tokens=args.max_output_tokens,
+            )
+        ).estimate_question_engine()
+        decision = evaluate_operation_budget(
+            "medium", str(args.operation_usd_baseline), estimate.usd
+        )
+        budget_report = {
+            "status": "PASSED",
+            "strength": "medium",
+            "product_baseline_usd": str(decision.baseline_usd),
+            "application_cap_usd": str(decision.application_usd_cap),
+            "question_engine_estimate_usd": str(estimate.usd),
+            "operator_workflow_ceiling_usd": ceiling,
+        }
+
+    with tempfile.TemporaryDirectory(prefix="coursejesus-p5-static-") as temporary:
+        root = Path(temporary)
+        settings = Settings(
+            _env_file=None,
+            database_path=root / "rag.sqlite3",
+            upload_dir=root / "uploads",
+            app_env="test",
+            auth_test_user_id=owner,
+            rag_provider_mode="deterministic",
+            v3_enabled=True,
+            ui_extension_enabled=False,
+            v3_model="deepseek-flash",
+            v3_model_base_url=args.base_url,
+            v3_max_output_tokens=args.max_output_tokens,
+            v3_model_timeout_seconds=args.timeout,
+            jev_definition_modes=",".join(
+                f"{key}={value}"
+                for key, value in (REQUIRED_JEV_MODES | NON_REQUIRED_JEV_MODES_OFF).items()
+            ),
+        )
+        application = create_app(settings=settings)
+        database = application.state.database
+        with database.connect() as connection:
+            connection.execute(
+                "INSERT INTO courses(id,name,owner_user_id,course_type,visibility,publication_status) "
+                "VALUES(?,?,?,'user','private','private')",
+                (course_id, "P5 static preflight", owner),
+            )
+        node_id = _seed_synthetic_objective(application, course_id, owner, root)
+        with database.connect() as connection:
+            workspace = connection.execute(
+                "SELECT id,private_course_id FROM learning_workspaces "
+                "WHERE owner_user_id=? AND course_id=?",
+                (owner, course_id),
+            ).fetchone()
+            schema_version = int(
+                connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
+            )
+            ledger_tables = {
+                str(row["name"])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+                    "('learning_operations','learning_model_call_reservations',"
+                    "'learning_model_run_evidence','jev_decision_receipts')"
+                ).fetchall()
+            }
+        if workspace is None or schema_version < 39 or len(ledger_tables) != 4:
+            raise RuntimeError("P5_PREFLIGHT_SCHEMA_OR_LEDGER_INVALID")
+        blueprint = application.state.learning.question_engine.preflight_generate_one(
+            owner_user_id=owner,
+            workspace_id=str(workspace["id"]),
+            course_id=course_id,
+            private_course_id=str(workspace["private_course_id"]),
+            node_id=node_id,
+            operation_id="p5-static-preflight-operation",
+        )
+        if application.state.jev_service.gateway.transport.__class__.__name__ == "FakeTransport":
+            raise RuntimeError("P5_PREFLIGHT_UNEXPECTED_FAKE_JEV_TRANSPORT")
+
+    return {
+        "status": "STATIC_PREFLIGHT_PASSED",
+        "schema_version": schema_version,
+        "blueprint_schema": blueprint["blueprint"]["schema_version"],
+        "blueprint_hash": blueprint["blueprint_hash"],
+        "evidence_pack_hash": blueprint["evidence_pack_hash"],
+        "evidence_count": blueprint["evidence_count"],
+        "required_jev_modes": REQUIRED_JEV_MODES,
+        "call_caps": {
+            "deepseek": args.max_deepseek_calls,
+            "jev": args.max_jev_calls,
+        },
+        "timeout_seconds": args.timeout,
+        "run_directory_absent": not args.run_dir.exists(),
+        "free_disk_bytes": disk.free,
+        "budget": budget_report,
+        "network_calls": 0,
+    }
 
 
 def _validate(args: argparse.Namespace) -> tuple[float | None, list[str]]:
@@ -322,6 +592,8 @@ def _validate(args: argparse.Namespace) -> tuple[float | None, list[str]]:
             output_price_per_million=prices[1],
         )
     if args.allow_billable and not args.preflight_only:
+        if not _positive_finite(args.operation_usd_baseline):
+            errors.append("--operation-usd-baseline is required and must be positive.")
         if args.cost_policy == COST_POLICY_CAPPED:
             if not _positive_finite(args.max_cost):
                 errors.append("--max-cost is required and must be positive for capped policy.")
@@ -510,7 +782,11 @@ def _actual_cost(
     }
 
 
-def _run_c1_c2(args: argparse.Namespace, ceiling: float) -> int:
+def _run_c1_c2(
+    args: argparse.Namespace,
+    ceiling: float,
+    static_preflight: dict[str, Any],
+) -> int:
     from app.config import Settings
     from app.main import create_app
     from fastapi import Request
@@ -535,7 +811,11 @@ def _run_c1_c2(args: argparse.Namespace, ceiling: float) -> int:
         "conservative_deepseek_ceiling": ceiling,
         "currency": args.currency,
         "required_jev_modes": REQUIRED_JEV_MODES,
+        "static_preflight": static_preflight,
         "private_material_location": str(run_dir / "private-review.json"),
+        "private_transport_ledger_location": str(
+            run_dir / "private-transport-ledger.json"
+        ),
     }
     prior_attempt = _prior_attempt_summary(args.prior_run_state)
     prior_reconciliation = _prior_reconciliation_summary(args.prior_reconciliation)
@@ -544,6 +824,9 @@ def _run_c1_c2(args: argparse.Namespace, ceiling: float) -> int:
     if prior_reconciliation is not None:
         state["prior_reconciliation"] = prior_reconciliation
     _write_json(state_path, state)
+    transport_ledger = DurableTransportLedger.create(
+        run_dir / "private-transport-ledger.json"
+    )
 
     class P5AuthVerifier:
         def authenticate(self, request: Request) -> str | None:
@@ -601,6 +884,9 @@ def _run_c1_c2(args: argparse.Namespace, ceiling: float) -> int:
             auth_verifier=P5AuthVerifier(),
         )
         learning = application.state.learning
+        learning.provider.transport_event_sink = lambda event: transport_ledger.record(
+            "deepseek", event
+        )
         original_generate = learning.generate
 
         def bounded_generate(*generate_args: Any, **generate_kwargs: Any) -> Any:
@@ -609,15 +895,59 @@ def _run_c1_c2(args: argparse.Namespace, ceiling: float) -> int:
 
         learning.question_engine.metered_generate = bounded_generate
         gateway = application.state.jev_service.gateway
-        gateway.transport = BoundedJevTransport(gateway.transport, budget)
+        gateway.transport = BoundedJevTransport(
+            gateway.transport, budget, transport_ledger
+        )
 
         ui_model = application.state.ui_extension_app.state.provider
         original_explanation = ui_model.generate_explanation
 
         async def bounded_explanation(*model_args: Any, **model_kwargs: Any) -> Any:
             budget.claim_deepseek("EXPLANATION")
-            async for event in original_explanation(*model_args, **model_kwargs):
-                yield event
+            transport_ledger.record(
+                "deepseek-ui",
+                {"phase": "SEND_INTENT", "role": "EXPLANATION"},
+            )
+            output_parts: list[str] = []
+            usage: list[dict[str, Any]] = []
+            try:
+                async for event in original_explanation(*model_args, **model_kwargs):
+                    if isinstance(event, dict) and isinstance(event.get("text"), str):
+                        output_parts.append(event["text"])
+                    if isinstance(event, dict) and isinstance(event.get("usage"), dict):
+                        usage.append(event["usage"])
+                    if isinstance(event, dict):
+                        # Streaming fragments are private evidence. Persist each
+                        # fragment before the UI worker can parse or project the
+                        # event so a crash cannot erase a received provider body.
+                        transport_ledger.record(
+                            "deepseek-ui",
+                            {
+                                "phase": "RESPONSE_FRAGMENT",
+                                "role": "EXPLANATION",
+                                "event": event,
+                            },
+                        )
+                    yield event
+            except Exception as error:
+                transport_ledger.record(
+                    "deepseek-ui",
+                    {
+                        "phase": "RESPONSE_UNKNOWN",
+                        "role": "EXPLANATION",
+                        "error_class": type(error).__name__,
+                    },
+                )
+                raise
+            transport_ledger.record(
+                "deepseek-ui",
+                {
+                    "phase": "RESPONSE_COMPLETE",
+                    "role": "EXPLANATION",
+                    "output_text": "".join(output_parts),
+                    "usage": usage,
+                },
+            )
 
         ui_model.generate_explanation = bounded_explanation
 
@@ -687,6 +1017,98 @@ def _run_c1_c2(args: argparse.Namespace, ceiling: float) -> int:
             )
             if hidden.get("steps") != [] or any(text in public_events for text in private_texts):
                 raise RuntimeError("C1_PRIVATE_ANSWER_LEAK")
+
+            # Persist the first complete READY chain before any hint, grading,
+            # explanation, or repractice call can spend additional money.  A
+            # later failure must not erase the usable question, Jev receipts,
+            # hidden-answer proof, or owner review material from this checkpoint.
+            with database.connect() as connection:
+                first_provenance = connection.execute(
+                    "SELECT provenance.validation_report_json,"
+                    "provenance.publication_status,"
+                    "provenance.question_revision_hash AS question_hash "
+                    "FROM question_engine_provenance AS provenance "
+                    "WHERE provenance.question_revision_id=?",
+                    (question_revision_id,),
+                ).fetchone()
+                first_model_runs = _rows(
+                    connection,
+                    "SELECT role,model_id,provider_label,protocol,region_label,"
+                    "template_version,schema_version,input_hash,started_at,finished_at,"
+                    "latency_ms,input_tokens,output_tokens,status,error_class,"
+                    "provider_response_id FROM learning_model_run_evidence "
+                    "ORDER BY started_at,rowid",
+                )
+                if first_provenance is None:
+                    raise RuntimeError("C1_READY_PROVENANCE_MISSING")
+                first_receipts = _rows(
+                    connection,
+                    "SELECT id,definition_key,mode,caller_role,course_id,workspace_id,"
+                    "node_id,spec_version,question_hash,input_hash,outcome,latency_ms,"
+                    "model_version FROM jev_decision_receipts "
+                    "WHERE question_hash=? ORDER BY created_at,rowid",
+                    (str(first_provenance["question_hash"]),),
+                )
+            if first_provenance["publication_status"] != "READY":
+                raise RuntimeError("C1_READY_PROVENANCE_MISSING")
+            first_required_receipts = [
+                row for row in first_receipts if row["definition_key"] in REQUIRED_JEV_MODES
+            ]
+            if len(first_required_receipts) != 2 or any(
+                row["mode"] != "on" or row["outcome"] != "ok"
+                for row in first_required_receipts
+            ):
+                raise RuntimeError("C1_REQUIRED_JEV_RECEIPT_MISMATCH")
+            first_private_review = {
+                "classification": "PRIVATE_HUMAN_REVIEW_MATERIAL",
+                "checkpoint": "FIRST_READY_QUESTION",
+                "question_revision_id": question_revision_id,
+                "question": str(exercise["question"]),
+                "reference_steps": stored_steps,
+                "validation_report": json.loads(
+                    str(first_provenance["validation_report_json"])
+                ),
+                "human_decision": {
+                    "status": "PENDING_OWNER_REVIEW",
+                    "allowed_values": ["PASS", "REVISE", "REJECT"],
+                    "reason": None,
+                },
+            }
+            _write_json(run_dir / "first-ready-private-review.json", first_private_review)
+            first_ready_checkpoint = {
+                "format_version": "coursejesus.p5.first-ready.v1",
+                "status": "FIRST_READY_QUESTION_SAVED",
+                "application_sha": state["application_sha"],
+                "operation_id": str(first_start["id"]),
+                "question_revision_id": question_revision_id,
+                "question_content_sha256": hashlib.sha256(
+                    str(exercise["question"]).encode()
+                ).hexdigest(),
+                "private_answer_sha256": hashlib.sha256(
+                    json.dumps(stored_steps, ensure_ascii=False, sort_keys=True).encode()
+                ).hexdigest(),
+                "publication_status": "READY",
+                "answer_hidden_in_ui_projection": True,
+                "model_run_evidence": first_model_runs,
+                "required_jev_receipts": first_required_receipts,
+                "human_content_review": "PENDING",
+                "transport_ledger": transport_ledger.public_summary(),
+                "prior_attempt": prior_attempt,
+                "prior_reconciliation": prior_reconciliation,
+            }
+            _write_json(run_dir / "first-ready-checkpoint.json", first_ready_checkpoint)
+            state.update(
+                status="FIRST_READY_CHECKPOINT_SAVED",
+                first_ready_checkpoint=str(run_dir / "first-ready-checkpoint.json"),
+                first_ready_private_review=str(
+                    run_dir / "first-ready-private-review.json"
+                ),
+                deepseek_calls=len(budget.deepseek_roles),
+                jev_calls=len(budget.jev_definitions),
+                call_budget_audit=budget.audit_snapshot(),
+                transport_ledger=transport_ledger.public_summary(),
+            )
+            _write_json(state_path, state)
 
             independent = _expect(
                 client.post(
@@ -929,6 +1351,7 @@ def _run_c1_c2(args: argparse.Namespace, ceiling: float) -> int:
                 "refresh_history_restored": True,
                 "different_family_repractice": True,
                 "human_content_review": "PENDING",
+                "transport_ledger": transport_ledger.public_summary(),
                 "prior_attempt": prior_attempt,
                 "prior_reconciliation": prior_reconciliation,
                 "cumulative_attempted_calls": {
@@ -947,6 +1370,7 @@ def _run_c1_c2(args: argparse.Namespace, ceiling: float) -> int:
             deepseek_calls=len(budget.deepseek_roles),
             jev_calls=len(budget.jev_definitions),
             call_budget_audit=budget.audit_snapshot(),
+            transport_ledger=transport_ledger.public_summary(),
         )
         _write_json(state_path, state)
         print(f"P5 C1/C2 live run completed; private human review is required: {run_dir}")
@@ -960,6 +1384,7 @@ def _run_c1_c2(args: argparse.Namespace, ceiling: float) -> int:
             deepseek_calls=len(budget.deepseek_roles),
             jev_calls=len(budget.jev_definitions),
             call_budget_audit=budget.audit_snapshot(),
+            transport_ledger=transport_ledger.public_summary(),
         )
         _write_json(state_path, state)
         print(f"P5 live run stopped safely: {type(error).__name__}")
@@ -974,11 +1399,20 @@ def main(argv: list[str] | None = None) -> int:
         for error in errors:
             print(error)
         return 2
+    try:
+        static_preflight = _run_static_preflight(args, ceiling)
+    except Exception as error:  # noqa: BLE001 - preflight is a fail-closed release gate
+        print(f"Static preflight failed: {type(error).__name__}: {_safe_error_code(error)}")
+        return 2
+    print(
+        "Static preflight: "
+        + json.dumps(static_preflight, ensure_ascii=False, sort_keys=True)
+    )
     if args.preflight_only or not args.allow_billable:
         return 0
 
     assert ceiling is not None
-    return _run_c1_c2(args, ceiling)
+    return _run_c1_c2(args, ceiling, static_preflight)
 
 
 if __name__ == "__main__":

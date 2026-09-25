@@ -256,6 +256,126 @@ def test_learning_provider_uses_deepseek_payload_without_qwen_fields(monkeypatch
     assert request["extra_body"]["text"]["format"]["type"] == "json_schema"
 
 
+def test_learning_provider_durably_reports_complete_response_before_schema_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic import BaseModel
+
+    from app.learning.provider import ProviderCallFailure
+
+    class ExampleOutput(BaseModel):
+        value: str
+
+    class FakeOpenAI:
+        def __init__(self, **_kwargs: Any) -> None:
+            self.responses = SimpleNamespace(create=self.create)
+
+        @staticmethod
+        def create(**_kwargs: Any) -> SimpleNamespace:
+            return SimpleNamespace(
+                id="response-invalid-contract",
+                usage=SimpleNamespace(input_tokens=17, output_tokens=9),
+                status="completed",
+                output_text="not valid json",
+            )
+
+    monkeypatch.setattr("app.learning.provider.OpenAI", FakeOpenAI)
+    provider = LearningProvider(
+        Settings(
+            _env_file=None,
+            app_env="development",
+            rag_provider_mode="openai",
+            v3_enabled=True,
+            v3_model="deepseek-flash",
+            v3_model_api_key="test-only-key",
+            v3_model_base_url="https://api.deepseek.com",
+        )
+    )
+    events: list[dict[str, Any]] = []
+    provider.transport_event_sink = events.append
+
+    with pytest.raises(ProviderCallFailure) as raised:
+        provider.generate(
+            ExampleOutput,
+            instructions="Return the fixture.",
+            context={},
+            role="test-invalid-contract",
+        )
+
+    assert [event["phase"] for event in events] == [
+        "SEND_INTENT",
+        "RESPONSE_COMPLETE",
+        "CONTRACT_REJECTED",
+    ]
+    assert events[1] == {
+        "phase": "RESPONSE_COMPLETE",
+        "provider": "DEEPSEEK_API",
+        "model": "deepseek-flash",
+        "protocol": "responses",
+        "role": "test-invalid-contract",
+        "input_hash": events[0]["input_hash"],
+        "provider_response_id": "response-invalid-contract",
+        "provider_status": "completed",
+        "input_tokens": 17,
+        "output_tokens": 9,
+        "output_text": "not valid json",
+    }
+    assert raised.value.run["status"] == "FAILED"
+    assert raised.value.run["error_class"] == "SCHEMA_INVALID"
+
+
+def test_learning_provider_does_not_send_when_transport_intent_cannot_be_saved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic import BaseModel
+
+    from app.learning.provider import ProviderCallFailure
+
+    class ExampleOutput(BaseModel):
+        value: str
+
+    called = False
+
+    class FakeOpenAI:
+        def __init__(self, **_kwargs: Any) -> None:
+            self.responses = SimpleNamespace(create=self.create)
+
+        @staticmethod
+        def create(**_kwargs: Any) -> SimpleNamespace:
+            nonlocal called
+            called = True
+            raise AssertionError("the provider send must remain unreachable")
+
+    monkeypatch.setattr("app.learning.provider.OpenAI", FakeOpenAI)
+    provider = LearningProvider(
+        Settings(
+            _env_file=None,
+            app_env="development",
+            rag_provider_mode="openai",
+            v3_enabled=True,
+            v3_model="deepseek-flash",
+            v3_model_api_key="test-only-key",
+            v3_model_base_url="https://api.deepseek.com",
+        )
+    )
+
+    def fail_closed(_event: dict[str, Any]) -> None:
+        raise OSError("synthetic durable ledger failure")
+
+    provider.transport_event_sink = fail_closed
+    with pytest.raises(ProviderCallFailure) as raised:
+        provider.generate(
+            ExampleOutput,
+            instructions="Return the fixture.",
+            context={},
+            role="test-ledger-failure",
+        )
+
+    assert called is False
+    assert raised.value.run["status"] == "UNKNOWN"
+    assert raised.value.run["error_class"] == "OSError"
+
+
 def test_learning_provider_rejects_non_deepseek_host_for_deepseek_model() -> None:
     from pydantic import BaseModel
 

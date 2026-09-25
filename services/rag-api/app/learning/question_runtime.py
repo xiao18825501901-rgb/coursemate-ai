@@ -47,9 +47,13 @@ from app.learning.question_author import (
     author_question,
 )
 from app.learning.question_blueprint import (
+    AnswerForm,
+    BloomTarget,
+    DifficultyFeature,
     Hex64,
     ObjectiveResolutionError,
     QuestionBlueprint,
+    QuestionType,
     TeachingObjective,
     resolve_objective,
 )
@@ -900,6 +904,59 @@ class QuestionEngineRuntime:
         return _PROTOTYPES.get(selected, _PROTOTYPES["worked_application"])
 
     @staticmethod
+    def _canonical_blueprint(
+        *,
+        blueprint_kind: Literal["practice", "assessment"],
+        course_id: str,
+        objective: TeachingObjective,
+        evidence: QuestionEvidencePack,
+        identity_parts: tuple[object, ...],
+        bloom_target: BloomTarget,
+        target_difficulty: int,
+        difficulty_features: list[DifficultyFeature],
+        question_type: QuestionType,
+        expected_answer_form: AnswerForm,
+        marks: int,
+        scoring_criteria: list[str],
+        misconception_targets: list[str],
+        generation_policy_version: str,
+    ) -> QuestionBlueprint:
+        operation_hash = _hash(
+            course_id,
+            objective.node_id,
+            objective.spec_version,
+            objective.item_id,
+            *identity_parts,
+        )
+        return QuestionBlueprint(
+            blueprint_id=f"{blueprint_kind}_{operation_hash[:32]}",
+            course_id=course_id,
+            node_id=objective.node_id,
+            spec_version=objective.spec_version,
+            spec_content_hash=objective.spec_content_hash,
+            objective_id=objective.item_id,
+            objective_text=objective.objective,
+            source_scope=evidence.source_scope(),
+            bloom_target=bloom_target,
+            target_difficulty=target_difficulty,
+            difficulty_features=difficulty_features,
+            question_type=question_type,
+            expected_answer_form=expected_answer_form,
+            marks=marks,
+            scoring_criteria=scoring_criteria,
+            assumptions=[],
+            conditions=[],
+            unit_conventions=[],
+            misconception_targets=misconception_targets,
+            question_family_id=f"{blueprint_kind}_family_{operation_hash[:24]}",
+            variant_seed=int(operation_hash[:8], 16),
+            visibility_policy="OWNER_ONLY",
+            answer_policy="HIDDEN_UNTIL_REVEAL",
+            prompt_versions={"question_author": QUESTION_AUTHOR_PROMPT_VERSION},
+            generation_policy_version=generation_policy_version,
+        )
+
+    @staticmethod
     def _blueprint(
         *,
         course_id: str,
@@ -908,22 +965,12 @@ class QuestionEngineRuntime:
         prototype: _Prototype,
         operation_id: str,
     ) -> QuestionBlueprint:
-        operation_hash = _hash(
-            course_id,
-            objective.node_id,
-            objective.spec_version,
-            objective.item_id,
-            operation_id,
-        )
-        return QuestionBlueprint(
-            blueprint_id=f"practice_{operation_hash[:32]}",
+        return QuestionEngineRuntime._canonical_blueprint(
+            blueprint_kind="practice",
             course_id=course_id,
-            node_id=objective.node_id,
-            spec_version=objective.spec_version,
-            spec_content_hash=objective.spec_content_hash,
-            objective_id=objective.item_id,
-            objective_text=objective.objective,
-            source_scope=evidence.source_scope(),
+            objective=objective,
+            evidence=evidence,
+            identity_parts=(operation_id,),
             bloom_target=prototype.bloom_target,
             target_difficulty=prototype.target_difficulty,
             difficulty_features=list(prototype.difficulty_features),
@@ -931,15 +978,7 @@ class QuestionEngineRuntime:
             expected_answer_form=prototype.expected_answer_form,
             marks=100,
             scoring_criteria=[objective.acceptance],
-            assumptions=[],
-            conditions=[],
-            unit_conventions=[],
             misconception_targets=[],
-            question_family_id=f"practice_family_{operation_hash[:24]}",
-            variant_seed=int(operation_hash[:8], 16),
-            visibility_policy="OWNER_ONLY",
-            answer_policy="HIDDEN_UNTIL_REVEAL",
-            prompt_versions={"question_author": QUESTION_AUTHOR_PROMPT_VERSION},
             generation_policy_version=prototype.generation_policy_version,
         )
 
@@ -952,23 +991,12 @@ class QuestionEngineRuntime:
         slot: AssessmentQuestionSlot,
         preparation_key: str,
     ) -> QuestionBlueprint:
-        operation_hash = _hash(
-            course_id,
-            objective.node_id,
-            objective.spec_version,
-            objective.item_id,
-            preparation_key,
-            slot.model_dump(mode="json"),
-        )
-        return QuestionBlueprint(
-            blueprint_id=f"assessment_{operation_hash[:32]}",
+        return QuestionEngineRuntime._canonical_blueprint(
+            blueprint_kind="assessment",
             course_id=course_id,
-            node_id=objective.node_id,
-            spec_version=objective.spec_version,
-            spec_content_hash=objective.spec_content_hash,
-            objective_id=objective.item_id,
-            objective_text=objective.objective,
-            source_scope=evidence.source_scope(),
+            objective=objective,
+            evidence=evidence,
+            identity_parts=(preparation_key, slot.model_dump(mode="json")),
             bloom_target=slot.bloom_target,
             target_difficulty=slot.target_difficulty,
             difficulty_features=slot.difficulty_features,
@@ -976,15 +1004,7 @@ class QuestionEngineRuntime:
             expected_answer_form=slot.expected_answer_form,
             marks=slot.marks,
             scoring_criteria=[objective.acceptance, slot.scoring_focus],
-            assumptions=[],
-            conditions=[],
-            unit_conventions=[],
             misconception_targets=[slot.misconception_target],
-            question_family_id=f"assessment_family_{operation_hash[:24]}",
-            variant_seed=int(operation_hash[:8], 16),
-            visibility_policy="OWNER_ONLY",
-            answer_policy="HIDDEN_UNTIL_REVEAL",
-            prompt_versions={"question_author": QUESTION_AUTHOR_PROMPT_VERSION},
             generation_policy_version=ASSESSMENT_GENERATION_POLICY_VERSION,
         )
 
@@ -1439,6 +1459,103 @@ class QuestionEngineRuntime:
             for fragment in evidence.fragments
         ]
 
+    def _preflight_generate_one_inputs(
+        self,
+        *,
+        owner_user_id: str,
+        workspace_id: str,
+        course_id: str,
+        private_course_id: str,
+        node_id: str,
+        operation_id: str,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> tuple[TeachingObjective, QuestionEvidencePack, QuestionBlueprint]:
+        """Resolve and validate every local input before any Jev/model call.
+
+        The deterministic worked-application prototype is used only to exercise
+        the exact production blueprint builder and validator.  Live prototype
+        selection remains a later, optional semantic decision; therefore a bad
+        objective or evidence binding cannot consume even a shadow Jev call.
+        This method intentionally creates no operation or reservation rows.
+        """
+
+        if not 8 <= len(operation_id.strip()) <= 100:
+            raise QuestionEngineRuntimeError(
+                "QUESTION_OPERATION_REQUIRED",
+                "A stable exercise operation id between 8 and 100 characters is required.",
+            )
+        try:
+            self._check_cancelled(should_cancel)
+            workspace = workspace_for(self.database, workspace_id, owner_user_id)
+            if (
+                str(workspace["course_id"]) != course_id
+                or str(workspace["private_course_id"]) != private_course_id
+            ):
+                raise QuestionEngineRuntimeError(
+                    "QUESTION_WORKSPACE_MISMATCH",
+                    "The exercise request does not match the learner workspace.",
+                )
+            with self.database.connect() as connection:
+                objective = resolve_objective(connection, node_id=node_id)
+            evidence = build_evidence_pack(
+                self.database,
+                objective=objective,
+                access=EvidencePackAccess(
+                    owner_user_id=owner_user_id,
+                    course_id=course_id,
+                    private_course_id=private_course_id,
+                ),
+            )
+            blueprint = self._blueprint(
+                course_id=course_id,
+                objective=objective,
+                evidence=evidence,
+                prototype=_PROTOTYPES["worked_application"],
+                operation_id=operation_id,
+            )
+            return objective, evidence, blueprint
+        except QuestionEngineRuntimeError:
+            raise
+        except ValidationError as error:
+            raise QuestionEngineRuntimeError(
+                "QUESTION_BLUEPRINT_INVALID",
+                "The local question blueprint failed its field contract before any provider call.",
+            ) from error
+        except (ObjectiveResolutionError, EvidencePackError) as error:
+            raise QuestionEngineRuntimeError(
+                getattr(error, "code", "QUESTION_PREFLIGHT_FAILED"),
+                "The question inputs failed local preflight before any provider call.",
+            ) from error
+
+    def preflight_generate_one(
+        self,
+        *,
+        owner_user_id: str,
+        workspace_id: str,
+        course_id: str,
+        private_course_id: str,
+        node_id: str,
+        operation_id: str,
+    ) -> dict[str, Any]:
+        """Return a content-safe, zero-transport proof of the actual blueprint."""
+
+        objective, evidence, blueprint = self._preflight_generate_one_inputs(
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            course_id=course_id,
+            private_course_id=private_course_id,
+            node_id=node_id,
+            operation_id=operation_id,
+        )
+        return {
+            "status": "STATIC_PREFLIGHT_PASSED",
+            "objective_id": objective.item_id,
+            "blueprint": blueprint.model_dump(mode="json"),
+            "blueprint_hash": blueprint.identity(),
+            "evidence_pack_hash": evidence.identity(),
+            "evidence_count": len(evidence.fragments),
+        }
+
     def generate_one(
         self,
         *,
@@ -1452,22 +1569,18 @@ class QuestionEngineRuntime:
     ) -> dict[str, Any]:
         """Generate, independently solve, validate and persist one question."""
 
-        if not operation_id.strip():
-            raise QuestionEngineRuntimeError(
-                "QUESTION_OPERATION_REQUIRED", "A stable exercise operation id is required."
-            )
+        objective, evidence, preflight_blueprint = self._preflight_generate_one_inputs(
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            course_id=course_id,
+            private_course_id=private_course_id,
+            node_id=node_id,
+            operation_id=operation_id,
+            should_cancel=should_cancel,
+        )
         operation_claimed = False
         try:
             self._check_cancelled(should_cancel)
-            workspace = workspace_for(self.database, workspace_id, owner_user_id)
-            if (
-                str(workspace["course_id"]) != course_id
-                or str(workspace["private_course_id"]) != private_course_id
-            ):
-                raise QuestionEngineRuntimeError(
-                    "QUESTION_WORKSPACE_MISMATCH",
-                    "The exercise request does not match the learner workspace.",
-                )
             if self.metered_generate is not None:
                 self._claim_generation_operation(
                     workspace_id=workspace_id,
@@ -1481,17 +1594,6 @@ class QuestionEngineRuntime:
                     ),
                 )
                 operation_claimed = True
-            with self.database.connect() as connection:
-                objective = resolve_objective(connection, node_id=node_id)
-            evidence = build_evidence_pack(
-                self.database,
-                objective=objective,
-                access=EvidencePackAccess(
-                    owner_user_id=owner_user_id,
-                    course_id=course_id,
-                    private_course_id=private_course_id,
-                ),
-            )
             self._check_cancelled(should_cancel)
             prototype = self._select_prototype(
                 owner_user_id=owner_user_id,
@@ -1500,12 +1602,16 @@ class QuestionEngineRuntime:
                 objective=objective,
             )
             self._check_cancelled(should_cancel)
-            blueprint = self._blueprint(
-                course_id=course_id,
-                objective=objective,
-                evidence=evidence,
-                prototype=prototype,
-                operation_id=operation_id,
+            blueprint = (
+                preflight_blueprint
+                if prototype.prototype_id == "worked_application"
+                else self._blueprint(
+                    course_id=course_id,
+                    objective=objective,
+                    evidence=evidence,
+                    prototype=prototype,
+                    operation_id=operation_id,
+                )
             )
             persisted, candidate, blind, report = self._execute_pipeline(
                 owner_user_id=owner_user_id,

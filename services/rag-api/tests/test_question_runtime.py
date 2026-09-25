@@ -175,7 +175,7 @@ def test_generate_one_routes_author_and_blind_solver_through_metered_operation(
     assert len(calls) == 2
 
 
-def test_invalid_blueprint_fails_the_parent_operation_before_provider(
+def test_invalid_blueprint_fails_static_preflight_before_parent_or_provider(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database, config = database_with_objective(tmp_path)
@@ -212,7 +212,7 @@ def test_invalid_blueprint_fails_the_parent_operation_before_provider(
             operation_id="invalid-blueprint-operation",
         )
 
-    assert refused.value.code == "QUESTION_ENGINE_FAILED"
+    assert refused.value.code == "QUESTION_BLUEPRINT_INVALID"
     assert calls == []
     with database.connect() as connection:
         operation = connection.execute(
@@ -224,8 +224,106 @@ def test_invalid_blueprint_fails_the_parent_operation_before_provider(
             "WHERE workspace_id=? AND operation_id=?",
             (WORKSPACE, "invalid-blueprint-operation"),
         ).fetchone()[0]
-    assert operation["status"] == "FAILED"
+    assert operation is None
     assert reservations == 0
+
+
+def test_static_preflight_builds_the_real_blueprint_without_claiming_or_calling(
+    tmp_path: Path,
+) -> None:
+    database, config = database_with_objective(tmp_path)
+    semantic_decisions = decisions(database)
+    transport = semantic_decisions.gateway.transport
+    runtime = QuestionEngineRuntime(
+        database=database,
+        provider=LearningProvider(config),
+        semantic_decisions=semantic_decisions,
+        metered_generate=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("static preflight attempted a model call")
+        ),
+    )
+
+    result = runtime.preflight_generate_one(
+        owner_user_id=OWNER,
+        workspace_id=WORKSPACE,
+        course_id=COURSE,
+        private_course_id=PRIVATE_COURSE,
+        node_id=NODE,
+        operation_id="static-preflight-question-0001",
+    )
+
+    assert result["status"] == "STATIC_PREFLIGHT_PASSED"
+    assert result["blueprint"]["schema_version"] == "question-blueprint.v1"
+    assert result["blueprint"]["objective_id"] == "objective-density"
+    assert result["blueprint_hash"]
+    assert result["evidence_pack_hash"]
+    assert getattr(transport, "calls", []) == []
+    with database.connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM learning_operations WHERE id=?",
+            ("static-preflight-question-0001",),
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM learning_model_call_reservations WHERE operation_id=?",
+            ("static-preflight-question-0001",),
+        ).fetchone()[0] == 0
+
+
+def test_invalid_objective_is_refused_before_operation_claim_and_jev(
+    tmp_path: Path,
+) -> None:
+    database, config = database_with_objective(tmp_path)
+    invalid_node = "node-invalid-objective"
+    invalid_item = {
+        "item_id": "objective-invalid",
+        "requirement": "REQUIRED",
+        "objective": "Density clustering",
+        "acceptance": "Describe the supplied rule accurately",
+        "evidence_ids": ["chunk-course"],
+    }
+    invalid_spec = json.dumps([invalid_item], ensure_ascii=False)
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO knowledge_nodes(id,course_id,owner_user_id,title,description,major,kind,status) "
+            "VALUES(?,?,?,'Invalid objective','Synthetic','CS','ATOMIC','PRIVATE')",
+            (invalid_node, COURSE, OWNER),
+        )
+        connection.execute(
+            "INSERT INTO teaching_specs(node_id,version,content_json,content_hash) VALUES(?,1,?,?)",
+            (invalid_node, invalid_spec, __import__("hashlib").sha256(invalid_spec.encode()).hexdigest()),
+        )
+    semantic_decisions = decisions(database)
+    transport = semantic_decisions.gateway.transport
+    runtime = QuestionEngineRuntime(
+        database=database,
+        provider=LearningProvider(config),
+        semantic_decisions=semantic_decisions,
+        metered_generate=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("invalid local input attempted a model call")
+        ),
+    )
+
+    with pytest.raises(QuestionEngineRuntimeError) as refusal:
+        runtime.generate_one(
+            owner_user_id=OWNER,
+            workspace_id=WORKSPACE,
+            course_id=COURSE,
+            private_course_id=PRIVATE_COURSE,
+            node_id=invalid_node,
+            operation_id="invalid-objective-preflight-0001",
+        )
+
+    assert refusal.value.code == "QUESTION_BLUEPRINT_INVALID"
+    assert getattr(transport, "calls", []) == []
+    with database.connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM learning_operations WHERE id=?",
+            ("invalid-objective-preflight-0001",),
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM learning_model_call_reservations WHERE operation_id=?",
+            ("invalid-objective-preflight-0001",),
+        ).fetchone()[0] == 0
 
 
 def test_runtime_rule_violation_prototype_persists_an_exact_course_rule(

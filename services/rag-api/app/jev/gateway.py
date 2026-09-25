@@ -194,7 +194,7 @@ class SdkTransport:
                 "TypeSafe API key is not configured; the live Jev path is unavailable."
             )
         try:
-            from typesafe_sdk import Choice, Noul, Score, TypeSafeClient
+            from typesafe_sdk import Choice, Noul, RetryPolicy, Score, TypeSafeClient
         except ImportError as exc:  # pragma: no cover - depends on environment
             raise JevUnavailableError(
                 "typesafe-sdk is not installed; cannot reach the live Jev API."
@@ -219,7 +219,16 @@ class SdkTransport:
                 questions[key] = Noul(instructions=question.instructions)
 
         try:
-            client = TypeSafeClient(model=self.model)
+            # P5 acceptance requires one observable transport attempt per
+            # reservation.  The SDK's default policy may retry transient
+            # failures, which would make both billing and UNKNOWN recovery
+            # ambiguous, so retries are explicitly disabled here.
+            client = TypeSafeClient(
+                api_key=self.api_key,
+                model=self.model,
+                retry=RetryPolicy(max_retries=0),
+                timeout=timeout_seconds,
+            )
             result = client.system_one(call.state, questions)
         except Exception as exc:  # noqa: BLE001 - any transport failure fails closed
             raise JevUnavailableError(f"TypeSafe Jev call failed: {exc}") from exc

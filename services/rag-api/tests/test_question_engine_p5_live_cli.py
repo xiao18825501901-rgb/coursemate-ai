@@ -47,6 +47,8 @@ def test_preflight_is_default_and_lists_the_finite_c1_c2_plan(tmp_path: Path) ->
     assert "DeepSeek calls: at most 8" in result.stdout
     assert "Jev calls: at most 4" in result.stdout
     assert "C1" in result.stdout and "C2" in result.stdout
+    assert '"status": "STATIC_PREFLIGHT_PASSED"' in result.stdout
+    assert '"network_calls": 0' in result.stdout
     assert not (tmp_path / "unused").exists()
 
 
@@ -140,6 +142,51 @@ def test_call_budgets_refuse_before_an_extra_provider_attempt() -> None:
     }
 
 
+def test_jev_transport_persists_intent_before_complete_result(tmp_path: Path) -> None:
+    runner = load_runner()
+    from app.jev.models import JevAnswer, JevCall, JevQuestion, JevResult
+
+    class Inner:
+        model_version = "jev-fake-ledger-v1"
+
+        def call(self, _call, *, timeout_seconds: float):
+            assert timeout_seconds == 7.0
+            return JevResult(
+                answers={"question.ambiguity.v1": JevAnswer(choice="CLEAR")},
+                request_id="jev-ledger-response",
+                model_version=self.model_version,
+            )
+
+    ledger = runner.DurableTransportLedger.create(tmp_path / "private-ledger.json")
+    transport = runner.BoundedJevTransport(
+        Inner(),
+        runner.CallBudget.create(deepseek_limit=1, jev_limit=1),
+        ledger,
+    )
+    result = transport.call(
+        JevCall(
+            state={"synthetic": True},
+            questions={
+                "question.ambiguity.v1": JevQuestion(
+                    "question.ambiguity.v1",
+                    "Choice",
+                    "Is the synthetic question clear?",
+                    {"CLEAR": "clear", "AMBIGUOUS": "ambiguous"},
+                )
+            },
+        ),
+        timeout_seconds=7.0,
+    )
+
+    assert result.answers["question.ambiguity.v1"].choice == "CLEAR"
+    payload = json.loads((tmp_path / "private-ledger.json").read_text(encoding="utf-8"))
+    assert [event["phase"] for event in payload["events"]] == [
+        "SEND_INTENT",
+        "RESPONSE_COMPLETE",
+    ]
+    assert payload["events"][1]["answers"]["question.ambiguity.v1"]["choice"] == "CLEAR"
+
+
 def test_mounted_ui_environment_uses_the_same_frozen_price_and_output_bounds(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -154,6 +201,8 @@ def test_mounted_ui_environment_uses_the_same_frozen_price_and_output_bounds(
             "1.2",
             "--max-output-tokens",
             "4000",
+            "--operation-usd-baseline",
+            "0.20",
         ]
     )
     configured_names = (
@@ -194,7 +243,7 @@ def test_mounted_ui_environment_uses_the_same_frozen_price_and_output_bounds(
             conservative_ceiling=0.0744,
         )
 
-        assert os.environ["CMUI_OPERATION_USD_BASELINE"] == "0.07440000"
+        assert os.environ["CMUI_OPERATION_USD_BASELINE"] == "0.20000000"
         assert os.environ["CMUI_OPERATION_INPUT_USD_PER_MILLION"] == "0.3"
         assert os.environ["CMUI_OPERATION_OUTPUT_USD_PER_MILLION"] == "1.2"
         assert os.environ["CMUI_ANSWER_TOKENS"] == "4000"
@@ -213,6 +262,72 @@ def test_mounted_ui_environment_uses_the_same_frozen_price_and_output_bounds(
         assert estimate.output_tokens == 8_000
 
     assert {name: os.environ.get(name) for name in configured_names} == environment_before
+
+
+def test_operator_workflow_ceiling_is_not_reused_as_the_product_baseline(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    runner = load_runner()
+    args = runner.parse_args(
+        [
+            "--run-dir",
+            str(tmp_path / "run"),
+            "--input-price-per-million",
+            "0.3",
+            "--output-price-per-million",
+            "1.2",
+            "--operation-usd-baseline",
+            "0.20",
+        ]
+    )
+    with monkeypatch.context() as environment:
+        for name in (
+            "TYPESAFE_API_KEY",
+            "CMUI_DATA_DIR",
+            "CMUI_ENV",
+            "CMUI_PROVIDER_MODE",
+            "CMUI_ALLOW_BILLABLE",
+            "CMUI_DEEPSEEK_API_KEY",
+            "CMUI_DEEPSEEK_BASE_URL",
+            "CMUI_DEEPSEEK_MODEL",
+            "CMUI_DEEPSEEK_PROTOCOL",
+            "CMUI_MODEL_TIMEOUT",
+            "CMUI_OPERATION_USD_BASELINE",
+            "CMUI_OPERATION_INPUT_USD_PER_MILLION",
+            "CMUI_OPERATION_OUTPUT_USD_PER_MILLION",
+            "CMUI_ANSWER_TOKENS",
+            "CMUI_AUTO_VERIFY_NEW_USERS",
+        ):
+            environment.setenv(name, "sentinel")
+        runner._configure_process_environment(
+            args,
+            run_dir=(tmp_path / "run").resolve(),
+            deepseek_key="test-deepseek",
+            jev_key="test-jev",
+            conservative_ceiling=99.0,
+        )
+        assert os.environ["CMUI_OPERATION_USD_BASELINE"] == "0.20000000"
+
+
+def test_billable_run_requires_an_explicit_product_baseline(tmp_path: Path) -> None:
+    runner = load_runner()
+    args = runner.parse_args(
+        [
+            "--allow-billable",
+            "--run-dir",
+            str(tmp_path / "run"),
+            "--cost-policy",
+            "owner_authorized_unlimited_for_this_workflow",
+            "--input-price-per-million",
+            "0.3",
+            "--output-price-per-million",
+            "1.2",
+        ]
+    )
+
+    _ceiling, errors = runner._validate(args)
+
+    assert "--operation-usd-baseline is required and must be positive." in errors
 
 
 def test_prior_failed_attempt_is_hash_linked_without_private_material(tmp_path: Path) -> None:

@@ -1,5 +1,6 @@
 import base64
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -89,6 +90,15 @@ class LearningProvider:
         self.model = settings.v3_model
         self.is_deepseek = self.model == "deepseek-flash"
         self.client: OpenAI | None = None
+        # Optional evidence sink used by bounded acceptance runners.  Production
+        # behavior is unchanged when absent.  A configured sink is fail-closed:
+        # if SEND_INTENT cannot be durably recorded, the provider request is not
+        # attempted.
+        self.transport_event_sink: Callable[[dict[str, Any]], None] | None = None
+
+    def _transport_event(self, phase: str, **values: Any) -> None:
+        if self.transport_event_sink is not None:
+            self.transport_event_sink({"phase": phase, **values})
 
     @property
     def cache_model(self) -> str:
@@ -162,6 +172,8 @@ class LearningProvider:
             "provider_response_id": None,
         }
         response_received = False
+        send_intent_recorded = False
+        contract_terminal_recorded = False
         try:
             if any(
                 len(item.content) > settings.v3_problem_image_max_bytes
@@ -231,6 +243,18 @@ class LearningProvider:
                         for item in safe_images
                     )
                     provider_input = [{"role": "user", "content": content}]
+                self._transport_event(
+                    "SEND_INTENT",
+                    provider=run["provider"],
+                    model=self.model,
+                    protocol="responses",
+                    role=role,
+                    input_hash=run["input_hash"],
+                    template_version=template_version,
+                    schema_version=schema_version or schema.__name__,
+                    max_output_tokens=settings.v3_max_output_tokens,
+                )
+                send_intent_recorded = True
                 if self.is_deepseek:
                     # Structured output via the documented Responses text.format
                     # json_schema; native thinking explicitly off.  NO Qwen-only
@@ -269,14 +293,63 @@ class LearningProvider:
                 usage = response.usage
                 run["input_tokens"] = usage.input_tokens if usage else 0
                 run["output_tokens"] = usage.output_tokens if usage else 0
+                raw_output_text = response.output_text
+                self._transport_event(
+                    "RESPONSE_COMPLETE",
+                    provider=run["provider"],
+                    model=self.model,
+                    protocol="responses",
+                    role=role,
+                    input_hash=run["input_hash"],
+                    provider_response_id=response.id,
+                    provider_status=response.status,
+                    input_tokens=run["input_tokens"],
+                    output_tokens=run["output_tokens"],
+                    output_text=raw_output_text,
+                )
                 if response.status != "completed":
+                    self._transport_event(
+                        "CONTRACT_REJECTED",
+                        role=role,
+                        input_hash=run["input_hash"],
+                        provider_response_id=response.id,
+                        reason="MODEL_INCOMPLETE",
+                    )
+                    contract_terminal_recorded = True
                     raise ApiError(
                         502,
                         "MODEL_INCOMPLETE",
                         "Incomplete output was not recorded as teaching coverage.",
                     )
-                output = schema.model_validate_json(response.output_text)
+                output = schema.model_validate_json(raw_output_text)
+                self._transport_event(
+                    "CONTRACT_VALID",
+                    role=role,
+                    input_hash=run["input_hash"],
+                    provider_response_id=response.id,
+                    schema_version=schema_version or schema.__name__,
+                )
+                contract_terminal_recorded = True
         except Exception as error:
+            if send_intent_recorded and not response_received:
+                self._transport_event(
+                    "RESPONSE_UNKNOWN",
+                    role=role,
+                    input_hash=run["input_hash"],
+                    error_class=(
+                        error.code
+                        if isinstance(error, ApiError)
+                        else type(error).__name__
+                    ),
+                )
+            elif response_received and not contract_terminal_recorded:
+                self._transport_event(
+                    "CONTRACT_REJECTED",
+                    role=role,
+                    input_hash=run["input_hash"],
+                    provider_response_id=run["provider_response_id"],
+                    reason=(error.code if isinstance(error, ApiError) else type(error).__name__),
+                )
             run.update(
                 finished_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                 latency_ms=max(0, round((perf_counter() - started) * 1000)),

@@ -31,7 +31,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Annotated, Final, Literal, cast
 
-from pydantic import Field, StringConstraints, model_validator
+from pydantic import Field, StringConstraints, field_validator, model_validator
 
 from app.learning.models import Contract, Identifier, Text
 
@@ -126,13 +126,20 @@ class QuestionBlueprint(Contract):
     prompt_versions: dict[str, str] = Field(default_factory=dict)
     generation_policy_version: Identifier
 
-    @model_validator(mode="after")
-    def checks(self) -> QuestionBlueprint:
-        if not objective_is_observable(self.objective_text):
+    @field_validator("objective_text")
+    @classmethod
+    def observable_objective(cls, value: str) -> str:
+        """Attach an invalid objective to its actual field, not the model root."""
+
+        if not objective_is_observable(value):
             raise ValueError(
                 "objective_text must name an observable action (e.g. compute, distinguish, 解释, "
-                "判断, not a bare topic): " + self.objective_text[:80]
+                "判断, not a bare topic): " + value[:80]
             )
+        return value
+
+    @model_validator(mode="after")
+    def checks(self) -> QuestionBlueprint:
         expected = EXPECTED_FORM_BY_TYPE[self.question_type]
         if self.expected_answer_form != expected:
             raise ValueError(

@@ -163,6 +163,58 @@ def test_live_sdk_transport_raises_not_configured_without_key() -> None:
         )
 
 
+def test_live_sdk_transport_disables_hidden_retries_and_passes_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import typesafe_sdk
+
+    from app.jev.models import JevCall, JevQuestion
+
+    captured = {}
+
+    class Retry:
+        def __init__(self, *, max_retries: int) -> None:
+            captured["max_retries"] = max_retries
+
+    class NoulQuestion:
+        def __init__(self, *, instructions: str) -> None:
+            self.instructions = instructions
+
+    class Client:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def system_one(self, _state, _questions):
+            return type(
+                "Result",
+                (),
+                {
+                    "nouls": {"q": type("NoulResult", (), {"noul": 0.75})()},
+                    "choices": {},
+                    "scores": {},
+                    "request_id": "fake-sdk-request",
+                },
+            )()
+
+    monkeypatch.setattr(typesafe_sdk, "RetryPolicy", Retry)
+    monkeypatch.setattr(typesafe_sdk, "Noul", NoulQuestion)
+    monkeypatch.setattr(typesafe_sdk, "TypeSafeClient", Client)
+
+    result = SdkTransport(api_key="protected-test-key", model="jev-latest").call(
+        JevCall(
+            state={"synthetic": True},
+            questions={"q": JevQuestion("q", "Noul", "is this synthetic?")},
+        ),
+        timeout_seconds=17.0,
+    )
+
+    assert captured["api_key"] == "protected-test-key"
+    assert captured["model"] == "jev-latest"
+    assert captured["max_retries"] == 0
+    assert captured["timeout"] == 17.0
+    assert result.answers["q"].noul == 0.75
+
+
 def test_receipt_persists_input_hash_and_mode() -> None:
     def responder(call):
         return JevResult(
