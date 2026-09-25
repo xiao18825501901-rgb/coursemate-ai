@@ -110,6 +110,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--allow-billable", action="store_true")
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--prior-run-state", type=Path)
+    parser.add_argument("--prior-reconciliation", type=Path)
     return parser.parse_args(argv)
 
 
@@ -151,6 +152,36 @@ def _prior_attempt_summary(path: Path | None) -> dict[str, Any] | None:
         "deepseek_calls": payload.get("deepseek_calls"),
         "jev_calls": payload.get("jev_calls"),
         "call_budget_audit": audit,
+    }
+
+
+def _prior_reconciliation_summary(path: Path | None) -> dict[str, Any] | None:
+    if path is None:
+        return None
+    raw = path.read_bytes()
+    payload = json.loads(raw)
+    if not isinstance(payload, dict) or payload.get("disposition") != "UPSTREAM_UNKNOWN":
+        raise ValueError("Prior reconciliation must preserve UPSTREAM_UNKNOWN.")
+    attempt = payload.get("attempt")
+    if not isinstance(attempt, dict):
+        raise TypeError("Prior reconciliation is missing its attempt evidence.")
+    retry_policy = payload.get("retry_policy")
+    if (
+        not isinstance(retry_policy, dict)
+        or retry_policy.get("reuse_old_operation_id") is not False
+        or retry_policy.get("new_attempt_requires_new_operation_id") is not True
+        or retry_policy.get("preserve_unknown_charge") is not True
+    ):
+        raise ValueError("Prior reconciliation has an unsafe retry policy.")
+    return {
+        "reconciliation_sha256": hashlib.sha256(raw).hexdigest(),
+        "disposition": payload["disposition"],
+        "potential_unmetered_deepseek_calls": attempt.get(
+            "potential_unmetered_deepseek_calls"
+        ),
+        "deepseek_charge": attempt.get("deepseek_charge"),
+        "corrective_application_sha": payload.get("corrective_application_sha"),
+        "retry_policy": retry_policy,
     }
 
 
@@ -316,6 +347,13 @@ def _validate(args: argparse.Namespace) -> tuple[float | None, list[str]]:
                 _prior_attempt_summary(args.prior_run_state)
             except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
                 errors.append(f"Invalid --prior-run-state: {error}")
+        if args.prior_reconciliation is not None:
+            if args.prior_run_state is None:
+                errors.append("--prior-reconciliation requires --prior-run-state.")
+            try:
+                _prior_reconciliation_summary(args.prior_reconciliation)
+            except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+                errors.append(f"Invalid --prior-reconciliation: {error}")
     return ceiling, errors
 
 
@@ -500,8 +538,11 @@ def _run_c1_c2(args: argparse.Namespace, ceiling: float) -> int:
         "private_material_location": str(run_dir / "private-review.json"),
     }
     prior_attempt = _prior_attempt_summary(args.prior_run_state)
+    prior_reconciliation = _prior_reconciliation_summary(args.prior_reconciliation)
     if prior_attempt is not None:
         state["prior_attempt"] = prior_attempt
+    if prior_reconciliation is not None:
+        state["prior_reconciliation"] = prior_reconciliation
     _write_json(state_path, state)
 
     class P5AuthVerifier:
@@ -889,6 +930,7 @@ def _run_c1_c2(args: argparse.Namespace, ceiling: float) -> int:
                 "different_family_repractice": True,
                 "human_content_review": "PENDING",
                 "prior_attempt": prior_attempt,
+                "prior_reconciliation": prior_reconciliation,
                 "cumulative_attempted_calls": {
                     "deepseek": len(budget.deepseek_roles)
                     + int((prior_attempt or {}).get("deepseek_calls") or 0),

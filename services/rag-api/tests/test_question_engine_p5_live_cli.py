@@ -222,3 +222,34 @@ def test_prior_failed_attempt_is_hash_linked_without_private_material(tmp_path: 
     assert summary["state_sha256"] == __import__("hashlib").sha256(
         state.read_bytes()
     ).hexdigest()
+
+
+def test_upstream_unknown_reconciliation_requires_a_new_operation_id(tmp_path: Path) -> None:
+    runner = load_runner()
+    reconciliation = tmp_path / "reconciliation.json"
+    reconciliation.write_text(
+        json.dumps(
+            {
+                "disposition": "UPSTREAM_UNKNOWN",
+                "attempt": {
+                    "potential_unmetered_deepseek_calls": 1,
+                    "deepseek_charge": "UNKNOWN",
+                },
+                "corrective_application_sha": "fix-sha",
+                "retry_policy": {
+                    "reuse_old_operation_id": False,
+                    "automatic_retry": False,
+                    "new_attempt_requires_new_operation_id": True,
+                    "preserve_unknown_charge": True,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = runner._prior_reconciliation_summary(reconciliation)
+
+    assert summary is not None
+    assert summary["disposition"] == "UPSTREAM_UNKNOWN"
+    assert summary["deepseek_charge"] == "UNKNOWN"
+    assert summary["retry_policy"]["reuse_old_operation_id"] is False
