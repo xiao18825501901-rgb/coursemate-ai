@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -410,6 +411,39 @@ def test_v3_restart_preserves_repeated_question_engine_and_practice_model_roles(
         ("reservation-practice_feedback", "PRACTICE_FEEDBACK"),
         ("reservation-practice_hint", "PRACTICE_HINT"),
     ]
+
+
+def test_model_ledgers_reject_unknown_learning_and_practice_operations(tmp_path: Path) -> None:
+    settings = Settings(
+        database_path=tmp_path / "rag.sqlite3",
+        upload_dir=tmp_path / "uploads",
+        app_env="test",
+        v3_enabled=True,
+    )
+    database = Database(settings)
+    database.initialize()
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO courses(id,name,owner_user_id,course_type,visibility,"
+            "publication_status) VALUES('course-main','Main',NULL,'official','public',"
+            "'published')"
+        )
+        connection.execute(
+            "INSERT INTO courses(id,name,owner_user_id,course_type,visibility,"
+            "publication_status) VALUES('course-private','Private','owner','user','private',"
+            "'private')"
+        )
+        connection.execute(
+            "INSERT INTO learning_workspaces(id,owner_user_id,course_id,private_course_id) "
+            "VALUES('workspace','owner','course-main','course-private')"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="known operation"):
+            connection.execute(
+                "INSERT INTO learning_model_call_reservations("
+                "id,workspace_id,operation_id,owner_user_id,course_id,role,"
+                "reserved_output_tokens,status) VALUES('reservation','workspace',"
+                "'missing-operation','owner','course-main','PRACTICE_HINT',100,'RESERVED')"
+            )
 
 
 def test_v3_has_an_immutable_practice_operation_reconciliation_ledger(tmp_path: Path) -> None:

@@ -39,9 +39,7 @@ CREATE TABLE learning_model_run_evidence_new (
     status TEXT NOT NULL
         CHECK(status IN ('COMPLETED','FAILED','UNKNOWN','BLOCKED','LEGACY_COMPLETED')),
     error_class TEXT CHECK(error_class IS NULL OR length(error_class) BETWEEN 1 AND 100),
-    provider_response_id TEXT,
-    FOREIGN KEY(workspace_id, operation_id)
-        REFERENCES learning_operations(workspace_id, id) ON DELETE RESTRICT
+    provider_response_id TEXT
 );
 
 INSERT INTO learning_model_run_evidence_new
@@ -51,6 +49,34 @@ ALTER TABLE learning_model_run_evidence_new RENAME TO learning_model_run_evidenc
 
 CREATE INDEX idx_learning_model_run_operation
 ON learning_model_run_evidence(workspace_id, operation_id, role);
+
+CREATE TRIGGER validate_model_run_operation_insert
+BEFORE INSERT ON learning_model_run_evidence
+WHEN NOT EXISTS(
+    SELECT 1 FROM learning_operations
+    WHERE workspace_id=NEW.workspace_id AND id=NEW.operation_id
+)
+AND NOT EXISTS(
+    SELECT 1 FROM practice_interaction_operations
+    WHERE workspace_id=NEW.workspace_id AND operation_id=NEW.operation_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'Model run does not reference a known operation');
+END;
+
+CREATE TRIGGER validate_model_run_operation_update
+BEFORE UPDATE OF workspace_id, operation_id ON learning_model_run_evidence
+WHEN NOT EXISTS(
+    SELECT 1 FROM learning_operations
+    WHERE workspace_id=NEW.workspace_id AND id=NEW.operation_id
+)
+AND NOT EXISTS(
+    SELECT 1 FROM practice_interaction_operations
+    WHERE workspace_id=NEW.workspace_id AND operation_id=NEW.operation_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'Model run does not reference a known operation');
+END;
 
 CREATE TABLE learning_model_call_reservations_new (
     id TEXT PRIMARY KEY,
@@ -71,8 +97,6 @@ CREATE TABLE learning_model_call_reservations_new (
     output_tokens INTEGER NOT NULL DEFAULT 0 CHECK(output_tokens >= 0),
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     finished_at TEXT,
-    FOREIGN KEY(workspace_id, operation_id)
-        REFERENCES learning_operations(workspace_id, id) ON DELETE RESTRICT,
     CHECK(
         (status = 'RESERVED' AND finished_at IS NULL)
         OR (status != 'RESERVED' AND finished_at IS NOT NULL)
@@ -89,6 +113,48 @@ ON learning_model_call_reservations(owner_user_id, created_at);
 
 CREATE INDEX idx_model_call_reservations_owner_course_day
 ON learning_model_call_reservations(owner_user_id, course_id, created_at);
+
+CREATE TRIGGER validate_model_reservation_operation_insert
+BEFORE INSERT ON learning_model_call_reservations
+WHEN NOT EXISTS(
+    SELECT 1 FROM learning_operations
+    WHERE workspace_id=NEW.workspace_id AND id=NEW.operation_id
+)
+AND NOT EXISTS(
+    SELECT 1 FROM practice_interaction_operations
+    WHERE workspace_id=NEW.workspace_id AND operation_id=NEW.operation_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'Model reservation does not reference a known operation');
+END;
+
+CREATE TRIGGER validate_model_reservation_operation_update
+BEFORE UPDATE OF workspace_id, operation_id ON learning_model_call_reservations
+WHEN NOT EXISTS(
+    SELECT 1 FROM learning_operations
+    WHERE workspace_id=NEW.workspace_id AND id=NEW.operation_id
+)
+AND NOT EXISTS(
+    SELECT 1 FROM practice_interaction_operations
+    WHERE workspace_id=NEW.workspace_id AND operation_id=NEW.operation_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'Model reservation does not reference a known operation');
+END;
+
+CREATE TRIGGER IF NOT EXISTS restrict_metered_learning_operation_delete
+BEFORE DELETE ON learning_operations
+WHEN EXISTS(
+    SELECT 1 FROM learning_model_call_reservations
+    WHERE workspace_id=OLD.workspace_id AND operation_id=OLD.id
+)
+OR EXISTS(
+    SELECT 1 FROM learning_model_run_evidence
+    WHERE workspace_id=OLD.workspace_id AND operation_id=OLD.id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'Metered learning operations cannot be deleted');
+END;
 
 CREATE TABLE IF NOT EXISTS practice_operation_metering_guards (
     workspace_id TEXT NOT NULL,

@@ -265,7 +265,15 @@ def test_mounted_do_one_question_uses_ready_revision_and_keeps_answer_private(
             "WHERE question_revision_id=?",
             (exercise["question_revision_id"],),
         ).fetchone()
+        practice_reservations = connection.execute(
+            "SELECT operation_id,role,status FROM learning_model_call_reservations "
+            "WHERE role IN ('PRACTICE_HINT','PRACTICE_FEEDBACK') ORDER BY operation_id"
+        ).fetchall()
     assert provenance["publication_status"] == "READY"
+    assert [tuple(row) for row in practice_reservations] == [
+        ("question-engine-attempt-0001", "PRACTICE_FEEDBACK", "COMPLETED"),
+        ("question-engine-hint-0001", "PRACTICE_HINT", "COMPLETED"),
+    ]
 
     revealed = test_client.post(
         f"{UI}/exercises/{exercise['id']}/reveal",
