@@ -23,7 +23,7 @@ def test_retired_cross_pane_actions_preserve_read_only_history_surface(client: T
     assert client.get(f"{UI}/courses/cs3481/bridges", headers=auth("token-a")).status_code == 200
 
 
-def test_layout_strengths_are_independent_and_theme_is_server_persisted(client: TestClient) -> None:
+def test_legacy_layout_strengths_are_ignored_and_theme_is_server_persisted(client: TestClient) -> None:
     make_course(client)
     saved = client.put(
         f"{UI}/courses/cs3481/layout", headers=auth("token-a"),
@@ -31,8 +31,15 @@ def test_layout_strengths_are_independent_and_theme_is_server_persisted(client: 
     )
     assert saved.status_code == 200, saved.text
     restored = client.get(f"{UI}/courses/cs3481/layout", headers=auth("token-a")).json()
-    assert restored["teach_strength"] == "high"
+    assert restored["teach_strength"] == "max"
     assert restored["problem_strength"] == "max"
+
+    config = client.get(f"{UI}/config").json()
+    assert "reasoning_strengths" not in config
+    assert config["reasoning_policy"] == {
+        "strength": "max",
+        "application_usd_cap": None,
+    }
 
     assert client.get(f"{UI}/me/preferences", headers=auth("token-a")).json()["theme"] == "light"
     changed = client.put(f"{UI}/me/preferences", headers=auth("token-a"), json={"theme": "dark"})
@@ -41,7 +48,7 @@ def test_layout_strengths_are_independent_and_theme_is_server_persisted(client: 
     assert client.get(f"{UI}/me/preferences", headers=auth("token-b")).json()["theme"] == "light"
 
 
-def test_next_run_receives_and_persists_the_selected_reasoning_strength(client: TestClient) -> None:
+def test_next_run_ignores_legacy_client_strength_and_persists_max(client: TestClient) -> None:
     make_course(client)
     conversation = client.post(
         f"{UI}/conversations", headers=auth("token-a"),
@@ -55,11 +62,11 @@ def test_next_run_receives_and_persists_the_selected_reasoning_strength(client: 
               "reasoning_strength": "high"},
     )
     assert started.status_code == 202, started.text
-    assert started.json()["reasoning_strength"] == "high"
+    assert started.json()["reasoning_strength"] == "max"
     # The deterministic fixture has no synthetic Qwen price; it must not
     # masquerade as a configured dollar baseline.
     assert started.json()["application_budget_usd"] is None
 
     restored = client.get(f"{UI}/runs/{started.json()['id']}", headers=auth("token-a"))
     assert restored.status_code == 200, restored.text
-    assert restored.json()["reasoning_strength"] == "high"
+    assert restored.json()["reasoning_strength"] == "max"

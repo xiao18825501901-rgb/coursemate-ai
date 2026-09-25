@@ -87,6 +87,7 @@ from app.brand import BRAND
 
 User=Annotated[dict,Depends(current_user)]
 TERMINAL={'completed','failed','cancelled'}
+FORCED_REASONING_STRENGTH='max'
 
 
 def classification_key(course_id, owner):
@@ -303,8 +304,10 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
     ) -> tuple[object | None, OperationEstimate | None]:
         """Gate a billable UI operation with a server-constructed estimate.
 
-        The browser sends only the requested strength. Messages, output bounds,
-        stage count and any image bound are reconstructed here by the Qwen
+        Product policy forces every new request to the highest-quality tier.
+        The legacy ``strength`` argument remains accepted during rolling
+        upgrades, but it is never trusted as policy input. Messages, output
+        bounds, stage count and any image bound are reconstructed here by the
         provider. Test/disabled providers intentionally do not emulate money.
         """
 
@@ -316,18 +319,16 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         try:
             estimate = estimate_builder(*estimate_args, **estimate_kwargs)
             budget = evaluate_operation_budget(
-                strength, cfg.operation_usd_baseline, estimate.usd
+                FORCED_REASONING_STRENGTH, cfg.operation_usd_baseline, estimate.usd
             )
         except BudgetPolicyError as error:
             raise HTTPException(409, {'code': error.code, 'message': str(error)}) from None
         return budget, estimate
 
     def problem_strength(user: dict, course_id: str) -> str:
-        layout = db.one(
-            'SELECT problem_strength FROM cmui_layout WHERE owner=? AND course=?',
-            (user['id'], course_id),
-        )
-        return layout['problem_strength'] if layout else 'medium'
+        # Historical layout values remain in the database for audit and
+        # rollback, but no longer control any new operation.
+        return FORCED_REASONING_STRENGTH
 
     def heartbeat(run_id):
         db.execute("UPDATE cmui_runs SET lease_heartbeat=? WHERE id=? AND status IN ('queued','planning','generating')",(str(time.time()),run_id))
@@ -599,7 +600,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             'provider_mode':cfg.provider_mode,'model':cfg.deepseek_model if cfg.provider_mode=='deepseek' else cfg.qwen_model,'integration_mode':cfg.integration_mode,
             'clerk_publishable_key':cfg.clerk_publishable_key,'clerk_issuer':cfg.clerk_issuer,
             'max_upload_bytes':cfg.max_upload_bytes,'agent_connected':bool(domain),
-            'reasoning_strengths':['medium','high','max']}
+            'reasoning_policy':{'strength':FORCED_REASONING_STRENGTH,'application_usd_cap':None}}
 
     @r.post('/dev/login')
     async def dev_login(request:Request,response:Response):
@@ -1176,7 +1177,9 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
     @r.get('/courses/{cid}/layout')
     async def get_layout(cid:str,user:User,request:Request):
         await course(user,cid,request)
-        result=db.one('SELECT * FROM cmui_layout WHERE owner=? AND course=?',(user['id'],cid)) or {'ratio':.5,'teach_conversation':None,'problem_conversation':None,'active_node':None,'teach_strength':'medium','problem_strength':'medium'}
+        result=db.one('SELECT * FROM cmui_layout WHERE owner=? AND course=?',(user['id'],cid)) or {'ratio':.5,'teach_conversation':None,'problem_conversation':None,'active_node':None,'teach_strength':FORCED_REASONING_STRENGTH,'problem_strength':FORCED_REASONING_STRENGTH}
+        result['teach_strength']=FORCED_REASONING_STRENGTH
+        result['problem_strength']=FORCED_REASONING_STRENGTH
         return result
 
     @r.put('/courses/{cid}/layout')
@@ -1190,8 +1193,11 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         if data.active_node and not domain:
             if not db.one('SELECT id FROM cmui_nodes WHERE id=? AND course=?',(data.active_node,cid)): raise HTTPException(404,'知识点不存在')
         db.execute('INSERT INTO cmui_layout(owner,course,ratio,teach_conversation,problem_conversation,active_node,teach_strength,problem_strength) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(owner,course) DO UPDATE SET ratio=excluded.ratio,teach_conversation=excluded.teach_conversation,problem_conversation=excluded.problem_conversation,active_node=excluded.active_node,teach_strength=excluded.teach_strength,problem_strength=excluded.problem_strength',
-            (user['id'],cid,data.ratio,data.teach_conversation,data.problem_conversation,data.active_node,data.teach_strength,data.problem_strength))
-        return data.model_dump()
+            (user['id'],cid,data.ratio,data.teach_conversation,data.problem_conversation,data.active_node,FORCED_REASONING_STRENGTH,FORCED_REASONING_STRENGTH))
+        result=data.model_dump()
+        result['teach_strength']=FORCED_REASONING_STRENGTH
+        result['problem_strength']=FORCED_REASONING_STRENGTH
+        return result
 
     @r.get('/courses/{cid}/knowledge')
     async def tree(cid:str,user:User,request:Request):
@@ -1592,7 +1598,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             spec_items=spec_items,
             teaching_mode=budget_teaching_mode,
             template_id=template_id,
-            strength=data.reasoning_strength,
+            strength=FORCED_REASONING_STRENGTH,
         )
         rid=uid('run_')
         try:
@@ -1601,7 +1607,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                     first=c.execute('INSERT OR IGNORE INTO cmui_node_starts(owner,course,node,run) VALUES(?,?,?,?)',
                         (user['id'],conv['course'],data.node_id,rid)).rowcount
                     teaching_mode='thinking' if first else data.teaching_mode
-                c.execute('INSERT INTO cmui_runs(id,owner,conversation,request_id,status,user_text,teaching_mode,reasoning_strength,budget_baseline_usd,budget_estimate_usd,application_budget_usd,usage,lease_worker,lease_heartbeat,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(rid,user['id'],conv_id,data.request_id,'queued',data.text,teaching_mode,data.reasoning_strength,str(budget.baseline_usd) if budget and budget.baseline_usd is not None else None,str(budget.estimated_usd) if budget and budget.estimated_usd is not None else None,str(budget.application_usd_cap) if budget and budget.application_usd_cap is not None else None,json.dumps([estimate.audit()]) if estimate else '[]',worker_id,str(time.time()),now(),now()))
+                c.execute('INSERT INTO cmui_runs(id,owner,conversation,request_id,status,user_text,teaching_mode,reasoning_strength,budget_baseline_usd,budget_estimate_usd,application_budget_usd,usage,lease_worker,lease_heartbeat,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(rid,user['id'],conv_id,data.request_id,'queued',data.text,teaching_mode,FORCED_REASONING_STRENGTH,str(budget.baseline_usd) if budget and budget.baseline_usd is not None else None,str(budget.estimated_usd) if budget and budget.estimated_usd is not None else None,str(budget.application_usd_cap) if budget and budget.application_usd_cap is not None else None,json.dumps([estimate.audit()]) if estimate else '[]',worker_id,str(time.time()),now(),now()))
                 c.execute('INSERT INTO cmui_run_inputs VALUES (?,?,?)',(rid,digest,json.dumps(attachment_meta,ensure_ascii=False)))
                 c.execute('INSERT INTO cmui_messages(id,conversation,role,text,citations,run,created_at,provenance,exercise) VALUES (?,?,?,?,?,?,?,?,NULL)',(uid('message_'),conv_id,'user',data.text,'[]',rid,now(),''))
                 c.execute("UPDATE cmui_conversations SET title=CASE WHEN title='新对话' THEN ? ELSE title END,updated_at=? WHERE id=?",(data.text[:40],now(),conv_id))
@@ -1618,7 +1624,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         event(rid,'status',{'status':'queued','label':'正在思考中'})
         task=asyncio.create_task(generate_run(rid,user,course_data,conv,sources,history,data,bridge_data,images,v3_link,spec_items,teaching_mode,template_id,estimate.audit() if estimate else None))
         jobs[rid]=task
-        return {'id':rid,'status':'queued','teaching_mode':teaching_mode,'reasoning_strength':data.reasoning_strength,
+        return {'id':rid,'status':'queued','teaching_mode':teaching_mode,'reasoning_strength':FORCED_REASONING_STRENGTH,
                 'application_budget_usd':str(budget.application_usd_cap) if budget and budget.application_usd_cap is not None else None,
                 # The capability this run was dispatched to, and why: the recorded
                 # decision (path/used_jev) plus the flow it selected, so the caller
@@ -1698,11 +1704,11 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 classification_state.fail(db,course_id,token,'未授权模型调用费用')
                 return
             budget, estimate = qwen_operation_budget(
-                'estimate_classification', bundle, strength='medium'
+                'estimate_classification', bundle, strength=FORCED_REASONING_STRENGTH
             )
             if estimate is not None:
                 billing = {
-                    'reasoning_strength': 'medium',
+                    'reasoning_strength': FORCED_REASONING_STRENGTH,
                     'baseline_usd': str(budget.baseline_usd) if budget and budget.baseline_usd is not None else None,
                     'estimated_usd': str(estimate.usd),
                     'application_usd_cap': str(budget.application_usd_cap) if budget and budget.application_usd_cap is not None else None,

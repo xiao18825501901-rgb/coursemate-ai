@@ -22,7 +22,6 @@ def test_existing_layout_and_verification_rows_survive_additive_upgrade(tmp_path
     verification = db.one("SELECT verified,method,boundary_notes FROM cmui_verification WHERE owner='owner'")
     layout = db.one("SELECT ratio,teach_conversation,problem_conversation,active_node,teach_strength,problem_strength FROM cmui_layout WHERE owner='owner' AND course='course-1'")
     assert verification == {"verified": 1, "method": "code", "boundary_notes": "original audit"}
-    assert layout == {"ratio": 0.62, "teach_conversation": "teach-old", "problem_conversation": "problem-old", "active_node": "node-old", "teach_strength": "medium", "problem_strength": "medium"}
+    assert layout == {"ratio": 0.62, "teach_conversation": "teach-old", "problem_conversation": "problem-old", "active_node": "node-old", "teach_strength": "max", "problem_strength": "max"}
     assert db.one("SELECT value FROM cmui_meta WHERE key='schema_version'")["value"] == str(SCHEMA_VERSION)
     assert db.one("SELECT name FROM sqlite_master WHERE type='table' AND name='cmui_preferences'") is not None
-

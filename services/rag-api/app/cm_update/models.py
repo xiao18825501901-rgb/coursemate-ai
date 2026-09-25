@@ -81,8 +81,8 @@ class Layout(Input):
     teach_conversation: str|None=None
     problem_conversation: str|None=None
     active_node: str|None=None
-    teach_strength: Literal['medium','high','max']='medium'
-    problem_strength: Literal['medium','high','max']='medium'
+    teach_strength: Literal['medium','high','max']='max'
+    problem_strength: Literal['medium','high','max']='max'
 
 class ThemePreference(Input):
     theme: Literal['light','dark']
@@ -92,7 +92,7 @@ class RunCreate(Text):
     node_id: str|None=None
     attachment_ids: list[str]=Field(default_factory=list,max_length=4)
     teaching_mode: Literal['normal','thinking']='normal'
-    reasoning_strength: Literal['medium','high','max']='medium'
+    reasoning_strength: Literal['medium','high','max']='max'
 
 class BridgeCreate(Input):
     problem_message: str

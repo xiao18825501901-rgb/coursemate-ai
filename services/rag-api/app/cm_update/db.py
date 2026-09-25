@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS cmui_runs (
  request_id TEXT NOT NULL, status TEXT NOT NULL, user_text TEXT NOT NULL, generated_prompt TEXT,
  partial_text TEXT NOT NULL DEFAULT '', citations TEXT NOT NULL DEFAULT '[]', usage TEXT NOT NULL DEFAULT '[]',
  error TEXT, lease_worker TEXT, lease_heartbeat TEXT,
- reasoning_strength TEXT NOT NULL DEFAULT 'medium' CHECK(reasoning_strength IN ('medium','high','max')),
+ reasoning_strength TEXT NOT NULL DEFAULT 'max' CHECK(reasoning_strength IN ('medium','high','max')),
  budget_baseline_usd TEXT, budget_estimate_usd TEXT, application_budget_usd TEXT,
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(owner,request_id)
 );
@@ -114,8 +114,8 @@ CREATE TABLE IF NOT EXISTS cmui_run_events (
 CREATE TABLE IF NOT EXISTS cmui_layout (
  owner TEXT NOT NULL REFERENCES cmui_users(id), course TEXT NOT NULL, ratio REAL NOT NULL DEFAULT 0.5,
  teach_conversation TEXT, problem_conversation TEXT, active_node TEXT,
- teach_strength TEXT NOT NULL DEFAULT 'medium' CHECK(teach_strength IN ('medium','high','max')),
- problem_strength TEXT NOT NULL DEFAULT 'medium' CHECK(problem_strength IN ('medium','high','max')),
+ teach_strength TEXT NOT NULL DEFAULT 'max' CHECK(teach_strength IN ('medium','high','max')),
+ problem_strength TEXT NOT NULL DEFAULT 'max' CHECK(problem_strength IN ('medium','high','max')),
  PRIMARY KEY(owner,course)
 );
 CREATE TABLE IF NOT EXISTS cmui_preferences (
@@ -325,7 +325,7 @@ class Database:
                           "NOT NULL DEFAULT 'normal' CHECK(teaching_mode IN ('normal','thinking'))")
             if 'reasoning_strength' not in run_columns:
                 c.execute("ALTER TABLE cmui_runs ADD COLUMN reasoning_strength TEXT "
-                          "NOT NULL DEFAULT 'medium' CHECK(reasoning_strength IN ('medium','high','max'))")
+                          "NOT NULL DEFAULT 'max' CHECK(reasoning_strength IN ('medium','high','max'))")
             if 'budget_baseline_usd' not in run_columns:
                 c.execute("ALTER TABLE cmui_runs ADD COLUMN budget_baseline_usd TEXT")
             if 'budget_estimate_usd' not in run_columns:
@@ -359,10 +359,10 @@ class Database:
                 c.execute("ALTER TABLE cmui_exercises ADD COLUMN question_revision_id TEXT")
             layout_columns = {r[1] for r in c.execute("PRAGMA table_info(cmui_layout)")}
             if 'teach_strength' not in layout_columns:
-                c.execute("ALTER TABLE cmui_layout ADD COLUMN teach_strength TEXT NOT NULL DEFAULT 'medium' "
+                c.execute("ALTER TABLE cmui_layout ADD COLUMN teach_strength TEXT NOT NULL DEFAULT 'max' "
                           "CHECK(teach_strength IN ('medium','high','max'))")
             if 'problem_strength' not in layout_columns:
-                c.execute("ALTER TABLE cmui_layout ADD COLUMN problem_strength TEXT NOT NULL DEFAULT 'medium' "
+                c.execute("ALTER TABLE cmui_layout ADD COLUMN problem_strength TEXT NOT NULL DEFAULT 'max' "
                           "CHECK(problem_strength IN ('medium','high','max'))")
             self._migrate_verification_secrets(c, verification_secret)
             self._migrate_verification_methods(c)

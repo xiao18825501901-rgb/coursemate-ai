@@ -203,7 +203,11 @@ def test_ui_reports_integrated_config_without_leaking_secrets(client: TestClient
         "clerk_issuer",
         "max_upload_bytes",
         "agent_connected",
-        "reasoning_strengths",
+        "reasoning_policy",
+    }
+    assert body["reasoning_policy"] == {
+        "strength": "max",
+        "application_usd_cap": None,
     }
     assert all("qwen" not in name for name in body)
 

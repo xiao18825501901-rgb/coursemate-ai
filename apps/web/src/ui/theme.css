@@ -214,17 +214,6 @@
 /* Both composer controls share this real control. The native range supplies
    mouse, touch and keyboard interaction; labelled ticks make all values
    discoverable without relying on colour alone. */
-.reasoning-strength { position: relative; display: inline-flex; }
-.reasoning-trigger { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); cursor: pointer; font: inherit; font-size: 12px; }
-.reasoning-trigger svg { width: 16px; height: 16px; }
-.reasoning-popover { position: absolute; z-index: 260; bottom: calc(100% + 8px); left: 0; width: 218px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); background: var(--surface); color: var(--ink); }
-.reasoning-popover strong { display: block; margin-bottom: 8px; font-size: 13px; }
-.reasoning-popover input[type="range"] { display: block; width: 100%; accent-color: var(--accent); }
-.reasoning-ticks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 7px; }
-.reasoning-ticks button { display: grid; justify-items: center; gap: 2px; padding: 4px 2px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
-.reasoning-ticks button i { width: 16px; height: 16px; border-radius: 50%; background: var(--line); color: var(--surface); font-size: 10px; font-style: normal; line-height: 16px; }
-.reasoning-ticks button.selected { border-color: var(--accent); color: var(--ink); background: color-mix(in srgb, var(--accent) 11%, transparent); }
-.reasoning-ticks button.selected i { background: var(--accent); color: #fff; }
 .pane-footer, .chat-composer { overflow: visible; }
 
 @media (max-width: 620px) {

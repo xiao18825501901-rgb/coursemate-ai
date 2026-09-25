@@ -68,7 +68,7 @@ class BudgetProbeProvider:
         return result, [{"input_tokens": 11, "output_tokens": 7}]
 
 
-def test_qwen_route_uses_server_estimate_before_generation_and_snapshots_it(
+def test_qwen_route_forces_max_before_generation_and_snapshots_estimate(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setenv("CMUI_PROVIDER_MODE", "qwen")
@@ -94,32 +94,36 @@ def test_qwen_route_uses_server_estimate_before_generation_and_snapshots_it(
             json={"course": "cs3481", "lane": "problem"},
         ).json()
 
-        rejected = client.post(
+        legacy_medium = client.post(
             f"{UI}/conversations/{conversation['id']}/runs", headers=auth("token-a"),
             json={
-                "text": "medium must stop before model generation",
+                "text": "legacy medium is ignored by the new server policy",
                 "request_id": "server-budget-medium-001",
                 "reasoning_strength": "medium",
             },
         )
-        assert rejected.status_code == 409, rejected.text
-        assert rejected.json()["detail"]["code"] == "APPLICATION_USD_BUDGET_EXCEEDED"
-        assert provider.generate_calls == 0
+        assert legacy_medium.status_code == 202, legacy_medium.text
+        assert legacy_medium.json()["reasoning_strength"] == "max"
+        assert legacy_medium.json()["application_budget_usd"] is None
+        assert wait_terminal(client, legacy_medium.json()["id"])["status"] == "completed"
+        assert provider.generate_calls == 1
 
         accepted = client.post(
             f"{UI}/conversations/{conversation['id']}/runs", headers=auth("token-a"),
             json={
-                "text": "high may use two times the same B",
+                "text": "legacy high is ignored by the new server policy",
                 "request_id": "server-budget-high-001",
                 "reasoning_strength": "high",
             },
         )
         assert accepted.status_code == 202, accepted.text
+        assert accepted.json()["reasoning_strength"] == "max"
+        assert accepted.json()["application_budget_usd"] is None
         completed = wait_terminal(client, accepted.json()["id"])
         assert completed["status"] == "completed"
         assert completed["usage"][0]["kind"] == "server_operation_estimate"
         assert completed["usage"][0]["usd"] == "0.21"
-        assert provider.generate_calls == 1
+        assert provider.generate_calls == 2
 
         unlimited = client.post(
             f"{UI}/conversations/{conversation['id']}/runs", headers=auth("token-a"),
@@ -132,10 +136,10 @@ def test_qwen_route_uses_server_estimate_before_generation_and_snapshots_it(
         assert unlimited.status_code == 202, unlimited.text
         assert unlimited.json()["application_budget_usd"] is None
         assert wait_terminal(client, unlimited.json()["id"])["status"] == "completed"
-        assert provider.generate_calls == 2
+        assert provider.generate_calls == 3
 
 
-def test_qwen_automatic_classification_fails_closed_before_a_billable_call(
+def test_qwen_automatic_classification_uses_forced_max_policy(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setenv("CMUI_PROVIDER_MODE", "qwen")
@@ -166,11 +170,11 @@ def test_qwen_automatic_classification_fails_closed_before_a_billable_call(
             state = client.get(
                 f"{UI}/courses/cs3481/classification", headers=auth("token-a")
             ).json()
-            if state["status"] == "FAILED_RETRYABLE":
+            if state["status"] in {"OTHER", "CLASSIFIED", "FAILED_RETRYABLE"}:
                 break
             time.sleep(0.02)
-        assert state["status"] == "FAILED_RETRYABLE", state
-        assert provider.classification_calls == 0
+        assert state["status"] == "OTHER", state
+        assert provider.classification_calls == 1
 
 
 def test_qwen_classification_persists_a_non_content_billing_audit(
