@@ -184,11 +184,12 @@ def test_configurable_assessment_freezes_exact_slots_without_setup_leak(
 ) -> None:
     with client_at(tmp_path) as client:
         workspace, node = setup_workspace(client)
+        answers: dict[str, str] = {}
         # Each fixture batch contributes one SHORT_TEXT family. Seed enough compatible
         # *families*, not merely enough total rows: a numerically large but type-incompatible
         # pool must remain BLOCKED by the runtime.
         for batch in range(1, 1 + ((question_count + 2) // 3)):
-            seed_assessment_pool(client, node, prefix=f"batch-{batch}-")
+            answers.update(seed_assessment_pool(client, node, prefix=f"batch-{batch}-"))
 
         setup = client.get(
             f"/api/learning/workspaces/{workspace['id']}/assessments/setup/{node['id']}"
@@ -248,6 +249,17 @@ def test_configurable_assessment_freezes_exact_slots_without_setup_leak(
         assert configuration["status"] == "FROZEN"
         assert len(configuration["content_hash"]) == 64
         assert [int(row["marks_basis_points"]) for row in slots] == expected_basis_points
+        if question_count == 12:
+            submitted = submit_assessment(
+                client,
+                workspace["id"],
+                assessment,
+                answers,
+                "configured-twelve-question-submit",
+            )
+            assert submitted.status_code == 200, submitted.text
+            assert submitted.json()["status"] == "GRADED"
+            assert submitted.json()["raw_score"] == 100
 
 
 def submit_assessment(
