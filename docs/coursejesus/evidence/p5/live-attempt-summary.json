@@ -1,0 +1,49 @@
+{
+  "formatVersion": 1,
+  "candidateAfterCorrections": "a24fac535eda85358965f516964df0c40510e7a0",
+  "productionAcceptance": false,
+  "automaticRetry": false,
+  "attempts": [
+    {
+      "startedAt": "2026-09-25T06:01:41.042729Z",
+      "applicationSha": "2d61ca069b7e240f548f3e134a59621101753740",
+      "stateSha256": "ea5bd59a2f2ca671ef07ce2279be8261058a8d7f6a55b61bf80f4331403675f6",
+      "result": "FAILED_SAFE",
+      "deepseekCalls": 0,
+      "jevCalls": 2,
+      "jevDefinitions": ["retrieval.support.v1", "source.select_span.v1"],
+      "reason": "The mounted UI application budget refused the run before Question Engine generation."
+    },
+    {
+      "startedAt": "2026-09-25T06:13:23.892654Z",
+      "applicationSha": "0b05f51718bf53fd939d0037b854529726fb750c",
+      "stateSha256": "6fe5a0dcad724e9f5f46229066a97e588102d865cc50ca0e37fee56590e75fc5",
+      "reconciliationSha256": "8e0b9addcc61a837906866e5b67bdd581567cd37fafd4c2a5d76ad398766c70b",
+      "result": "UPSTREAM_UNKNOWN",
+      "knownJevCalls": 1,
+      "knownJevDefinitions": ["exercise.prototype.v1"],
+      "potentialUnmeteredDeepSeekCalls": 1,
+      "deepseekOutcome": "UNKNOWN",
+      "deepseekUsage": "UNKNOWN",
+      "deepseekCharge": "UNKNOWN",
+      "reason": "The operation id did not reach the author pipeline, so the possible author transport bypassed the durable ledgers."
+    },
+    {
+      "startedAt": "2026-09-25T06:30:17.979338Z",
+      "applicationSha": "f2876415c22f6b9d91fa015fbbc7bfea37833a1b",
+      "stateSha256": "d1cf6b0fed75583bd12d4d343a1491567ffa9f8fd89ceb877f2853b2ca1572ed",
+      "reconciliationSha256": "852770a5463938954d6376f2b93929a09ca0423b620aa0686d4a7a7de823ca35",
+      "result": "NOT_SENT",
+      "deepseekCalls": 0,
+      "jevCalls": 0,
+      "deepseekCharge": "ZERO_FOR_THIS_ATTEMPT",
+      "reason": "The synthetic objective failed blueprint validation before any provider reservation or transport."
+    }
+  ],
+  "acceptance": {
+    "liveProviderContract": "NOT_PASSED",
+    "questionEngineLiveEndToEnd": "NOT_PASSED",
+    "humanContentReview": "PENDING_EMPTY",
+    "furtherPaidAttempts": "STOPPED"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "formatVersion": 1,
+  "applicationSha": "a24fac535eda85358965f516964df0c40510e7a0",
+  "pytest": {"passed": 1838, "skipped": 2, "failed": 0, "seconds": 1095.270},
+  "webUnit": {"passed": 115, "files": 25},
+  "agentUnit": {"passed": 92, "files": 12},
+  "typescript": {"web": "PASS", "agent": "PASS"},
+  "browser": {
+    "codexAudit": {"passed": 15, "failed": 0},
+    "ui": {"passed": 23, "failed": 0},
+    "base": {"passed": 4, "failed": 0},
+    "v3": {"passed": 3, "failed": 0},
+    "jev": {"passed": 12, "skipped": 5, "failed": 0, "skipReason": "Promoted real TypeSafe modes were intentionally not configured for the offline run."}
+  },
+  "productionShapedBuild": {
+    "result": "PASS_LOCAL_SHAPE_ONLY",
+    "buildInfoSha256": "c28e43cabb315f9c56e4b994b4c46ef6a7038b2fa9f52b50cd1c099998125a32",
+    "artifacts": 16,
+    "bundleFilesScanned": 7,
+    "releaseSha": "a24fac535eda85358965f516964df0c40510e7a0",
+    "clerk": "synthetic pk_live-shaped value; not a real login proof"
+  },
+  "focusedStaticChecks": {
+    "ruffChangedFile": "PASS",
+    "compileall": "PASS",
+    "runnerMypyFollowImportsSkip": "PASS",
+    "globalRuff": "NOT_GREEN_PRE_EXISTING_DEBT",
+    "globalStrictMypy": "1032_ERRORS_IN_30_FILES_PRE_EXISTING_DEBT"
+  }
+}

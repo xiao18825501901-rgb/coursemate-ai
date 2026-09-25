@@ -1,5 +1,29 @@
 # COURSEJESUS LEARNING ENGINE STATE
 
+## P5 checkpoint — 2026-09-25
+
+The frozen local application candidate is
+`a24fac535eda85358965f516964df0c40510e7a0`. It passes 1,838 backend tests with two honest
+Windows/platform skips, 115 Web tests, 92 Agent tests, both TypeScript checks and the five browser
+suites (15, 23, 4, 3 and 12 passes; the Jev suite retains 5 configuration skips). The final
+test-only change prevents the live runner's DeepSeek environment from leaking into later UI tests.
+
+P5 **did not pass live-model quality**. Three bounded attempts produced no READY revision: the first
+stopped at the UI budget gate after two unrelated Jev shadow calls; the second made one prototype
+Jev call and may have made one unmetered DeepSeek author call whose result/usage/charge remain
+`UNKNOWN`; the third failed blueprint validation before any transport. The unknown operation is
+immutably reconciled, never retried under the same id, and later transport is now metered. No
+further paid attempt was made. Consequently the human review card is empty and production was not
+deployed.
+
+Production preparation that does not depend on model quality is complete: a fresh real
+three-database/file backup was restored in isolation; the actual schema-25 snapshot migrated
+through schema 39 with unchanged old data and clean integrity/foreign keys; and the actual old
+release initialized against a disposable migrated copy without changing its representative row
+fingerprint. The serving system remains release `4ef5064`, schema 25 and Qwen. Full evidence and
+the resume condition are in `FINAL_COURSEJESUS_QUESTION_ENGINE_PRODUCTION_REPORT.md` and
+`P5_RELEASE_LEDGER.md`.
+
 **Round 98 (2026-09-24).** This is the current state of the learning-engine work: what was frozen,
 what was fixed, what is measured, and what is deliberately not done yet. Read it with
 `docs/learning-engine/CURRENT_ARCHITECTURE_FACTS.md` (the code map), `CAMPUS_FINAL_BATCH_CLOSURE.md`

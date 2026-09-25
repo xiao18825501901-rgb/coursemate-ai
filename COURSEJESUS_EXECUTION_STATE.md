@@ -1,5 +1,25 @@
 # COURSEJESUS_EXECUTION_STATE
 
+## P5 release checkpoint — 2026-09-25
+
+Current application candidate: `a24fac535eda85358965f516964df0c40510e7a0` on
+`fix/codex-dsh-audit-20260919`. The candidate is locally green and has a production-shaped local
+build, but **is not deployed**. Production remains immutable release `4ef5064`, RAG schema 25 and
+Qwen `qwen3.8-max`; no production database, symlink, model, Clerk, DNS or frontend release was
+switched.
+
+Completed outside the serving path: a fresh verified backup of RAG/Agent/UI plus all file stores;
+isolated restore; real snapshot migration 25→39; actual old-runtime startup against a migrated
+copy; monitor permission recovery and a final healthy readiness result. The final local regression
+is 1,838 passed / 2 skipped / 0 failed, plus Web 115, Agent 92 and browser suites 15/23/4/3/12.
+
+Stop reason is exact and external to local implementation: no real DeepSeek author→blind→READY
+chain succeeded, the required four live Jev receipts were not produced, and there is no exact
+content revision for human review. One possible DeepSeek author transport has unknown result,
+usage and charge and is permanently preserved as `UPSTREAM_UNKNOWN`; it must never be retried with
+the same operation id. See `P5_RELEASE_LEDGER.md` and
+`FINAL_COURSEJESUS_QUESTION_ENGINE_PRODUCTION_REPORT.md` for the evidence matrix and resume point.
+
 Run state for the appended CourseJesus work (brand + domain, Canvas private import, campus course
 expansion). This file is written so a later round resumes without re-doing the reconnaissance.
 It does not replace `docs/recovery/CURRENT_BLOCKER_LEDGER.md`; the DeepSeek/Jev work keeps its own

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites name="CourseJesus P5 frozen candidate" tests="1840" failures="0" errors="0" skipped="2" time="1095.270">
+  <testsuite name="pytest" tests="1840" failures="0" errors="0" skipped="2" time="1095.270" timestamp="2026-09-25T15:15:32.625526+08:00">
+    <properties>
+      <property name="application_sha" value="a24fac535eda85358965f516964df0c40510e7a0" />
+      <property name="full_junit_sha256" value="2c0073a695b501127747111f844f8ba45458fb23df094353b10174e7223abbb8" />
+      <property name="full_junit_private_path" value="work/p5-final-regression/pytest-a24fac5.xml" />
+    </properties>
+    <testcase classname="tests.test_campus_inventory_scan" name="test_symlinks_are_skipped_rather_than_followed">
+      <skipped message="Windows runner lacks symlink creation privilege; Linux path was verified separately during the production restore rehearsal." />
+    </testcase>
+    <testcase classname="tests.test_canvas_credential_store" name="test_the_credential_directory_permissions_are_owner_only">
+      <skipped message="POSIX permission bits are not the Windows mechanism; Linux permissions remain a separate runtime control." />
+    </testcase>
+  </testsuite>
+</testsuites>

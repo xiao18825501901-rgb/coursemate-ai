@@ -1,0 +1,45 @@
+{
+  "formatVersion": 1,
+  "observedAt": "2026-09-25",
+  "productionReleaseSha": "4ef50642c0b2336e64c384752ea262901a32d81d",
+  "productionCandidateSha": "4305955f161f5bb247cc3908d88d8481dfdf1a84",
+  "finalLocalCandidateSha": "a24fac535eda85358965f516964df0c40510e7a0",
+  "candidateDifference": "The final local candidate adds only test-process environment isolation; production application and migration code are unchanged from the rehearsed candidate.",
+  "backup": {
+    "path": "/srv/coursemate/backups/coursemate-v2-20260925T064343.776717Z",
+    "manifestSha256": "2b3f0f2245c3f200140329cb9bcba2b0d49a154d66d96682431bd778628f4b63",
+    "releaseConfigSha256": "af57a54a587aa05b647186d077a8ab6800d3ff5d261755781e93d07d23dc870c",
+    "sqliteIntegrity": "ok",
+    "foreignKeyViolations": 0,
+    "restoredPath": "/srv/coursemate/rehearsals/p5-20260925T064343Z/restored",
+    "restored": true
+  },
+  "migration": {
+    "sourceSchema": 25,
+    "targetSchema": 39,
+    "versionsContiguous": true,
+    "oldRowsUnchanged": true,
+    "sqliteIntegrity": "ok",
+    "foreignKeyViolations": 0,
+    "v3InvariantsOk": true,
+    "evidenceSha256": "bb368e5b0df20a5317e11c05ca2abfb9a65bf5f1ef47637082cb585d1cc01067"
+  },
+  "rollback": {
+    "staticVerdict": "ROLLBACK_SAFE_WITH_MIGRATED_DB",
+    "staticEvidenceSha256": "b88dc2dddaaafdcc44d0333e092a724c4d7995d08375f47d3e1008b6cf6e037d",
+    "actualOldRuntimeHealth": 200,
+    "actualOldRuntimeDatabaseFingerprintBefore": "ff530e655eda9811216fe1535894e4ac95730710efe3519f39641fc84024a22c",
+    "actualOldRuntimeDatabaseFingerprintAfter": "ff530e655eda9811216fe1535894e4ac95730710efe3519f39641fc84024a22c",
+    "sqliteIntegrity": "ok",
+    "foreignKeyViolations": 0
+  },
+  "monitor": {
+    "checkedAt": "2026-09-25T07:50:39.210854+00:00",
+    "status": "ok",
+    "rag": "healthy",
+    "agent": "healthy",
+    "backupAgeSeconds": 4015,
+    "freeBytes": 28376305664
+  },
+  "productionChanged": "No application release, schema, symlink, model, identity or frontend deploy was changed. A verified pre-release backup, isolated rehearsal artifacts and a monitor-readable copy of that backup were added."
+}
