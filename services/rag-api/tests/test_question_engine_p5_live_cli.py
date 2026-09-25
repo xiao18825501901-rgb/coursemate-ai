@@ -156,40 +156,63 @@ def test_mounted_ui_environment_uses_the_same_frozen_price_and_output_bounds(
             "4000",
         ]
     )
-    for name in (
+    configured_names = (
         "TYPESAFE_API_KEY",
+        "CMUI_DATA_DIR",
+        "CMUI_ENV",
+        "CMUI_PROVIDER_MODE",
+        "CMUI_ALLOW_BILLABLE",
+        "CMUI_DEEPSEEK_API_KEY",
+        "CMUI_DEEPSEEK_BASE_URL",
+        "CMUI_DEEPSEEK_MODEL",
+        "CMUI_DEEPSEEK_PROTOCOL",
+        "CMUI_MODEL_TIMEOUT",
         "CMUI_OPERATION_USD_BASELINE",
         "CMUI_OPERATION_INPUT_USD_PER_MILLION",
         "CMUI_OPERATION_OUTPUT_USD_PER_MILLION",
         "CMUI_ANSWER_TOKENS",
-    ):
-        monkeypatch.delenv(name, raising=False)
-
-    runner._configure_process_environment(
-        args,
-        run_dir=(tmp_path / "run").resolve(),
-        deepseek_key="test-deepseek",
-        jev_key="test-jev",
-        conservative_ceiling=0.0744,
+        "CMUI_AUTO_VERIFY_NEW_USERS",
     )
+    environment_before = {name: os.environ.get(name) for name in configured_names}
 
-    assert os.environ["CMUI_OPERATION_USD_BASELINE"] == "0.07440000"
-    assert os.environ["CMUI_OPERATION_INPUT_USD_PER_MILLION"] == "0.3"
-    assert os.environ["CMUI_OPERATION_OUTPUT_USD_PER_MILLION"] == "1.2"
-    assert os.environ["CMUI_ANSWER_TOKENS"] == "4000"
+    # The live runner deliberately configures the current process. Register every
+    # key with a bounded monkeypatch context so this contract test cannot silently
+    # switch later UI tests to a billable provider mode.
+    with monkeypatch.context() as scoped_environment:
+        for name in configured_names:
+            # ``delenv(..., raising=False)`` does not register an absent key for
+            # restoration, so a direct ``os.environ`` write by the runner would
+            # survive the context. A sentinel ``setenv`` records both absent and
+            # pre-existing states; the runner overwrites every listed key below.
+            scoped_environment.setenv(name, "P5_TEST_ENVIRONMENT_SENTINEL")
 
-    from app.cm_update.budget import evaluate_operation_budget
-    from app.cm_update.config import Settings as UiSettings
-    from app.cm_update.provider import DeepSeekProvider
+        runner._configure_process_environment(
+            args,
+            run_dir=(tmp_path / "run").resolve(),
+            deepseek_key="test-deepseek",
+            jev_key="test-jev",
+            conservative_ceiling=0.0744,
+        )
 
-    ui_settings = UiSettings()
-    ui_settings.validate()
-    estimate = DeepSeekProvider(ui_settings).estimate_question_engine()
-    decision = evaluate_operation_budget(
-        "medium", ui_settings.operation_usd_baseline, estimate.usd
-    )
-    assert decision.application_usd_cap is not None
-    assert estimate.output_tokens == 8_000
+        assert os.environ["CMUI_OPERATION_USD_BASELINE"] == "0.07440000"
+        assert os.environ["CMUI_OPERATION_INPUT_USD_PER_MILLION"] == "0.3"
+        assert os.environ["CMUI_OPERATION_OUTPUT_USD_PER_MILLION"] == "1.2"
+        assert os.environ["CMUI_ANSWER_TOKENS"] == "4000"
+
+        from app.cm_update.budget import evaluate_operation_budget
+        from app.cm_update.config import Settings as UiSettings
+        from app.cm_update.provider import DeepSeekProvider
+
+        ui_settings = UiSettings()
+        ui_settings.validate()
+        estimate = DeepSeekProvider(ui_settings).estimate_question_engine()
+        decision = evaluate_operation_budget(
+            "medium", ui_settings.operation_usd_baseline, estimate.usd
+        )
+        assert decision.application_usd_cap is not None
+        assert estimate.output_tokens == 8_000
+
+    assert {name: os.environ.get(name) for name in configured_names} == environment_before
 
 
 def test_prior_failed_attempt_is_hash_linked_without_private_material(tmp_path: Path) -> None:
