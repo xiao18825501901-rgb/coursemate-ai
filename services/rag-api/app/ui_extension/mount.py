@@ -42,22 +42,6 @@ def ui_allowed_origins(settings: Settings) -> tuple[str, ...]:
     return (settings.web_origin,)
 
 
-def _policy_requires_real_origin(cfg: object) -> bool:
-    """Whether the deployment asks for a provable (non-registration) qualification.
-
-    `CMUI_CAMPUS_QUALIFICATION_POLICY=registered_active` is the unchanged default:
-    any verified qualification row is accepted, including the historical
-    registration-auto rows that this change deliberately keeps alive.
-    `verified_only` additionally requires an origin of `code`, `admin` or
-    `grandfathered`; a row that only says `registered` cannot prove it.
-
-    The policy decides how strict the gate is. It never decides who is granted a
-    qualification — no value of this setting makes an access check write one.
-    """
-
-    return getattr(cfg, 'campus_qualification_policy', 'registered_active') == 'verified_only'
-
-
 def _coverage_reviewer(settings: Settings) -> object:
     """Resolve the injected free-text coverage reviewer.
 
@@ -208,34 +192,28 @@ def mount_ui_extension(
     # Exposed for tests and operational diagnostics; the adapter holds no secrets.
     host_app.state.ui_extension_adapter = adapter
     host_app.state.ui_extension_app = ui
+    from app.cm_update.campus_access import can_access_campus, identity_is_active
     from app.errors import ApiError
-    def authorize_content(course, subject, is_admin=False):
-        from app.cm_update import social
-        directory = ui.state.db.one('SELECT active FROM cmui_directory WHERE subject=?', (subject,))
-        active = directory is None or bool(directory['active'])
-        if not active:
+
+    def authorize_identity(subject):
+        if not identity_is_active(ui.state.db, subject):
             raise ApiError(403, 'STUDENT_IDENTITY_INACTIVE', 'This account is no longer active.')
-        if is_admin or subject in settings.admin_user_id_set:
-            return
+
+    host_app.state.identity_access_authorizer = authorize_identity
+
+    def authorize_content(course, subject, is_admin=False):
+        authorize_identity(subject)
         fields=set(course.keys())
         required=('requires_student_verification' in fields and course['requires_student_verification']) or ('display_type' in fields and course['display_type']=='campus') or ('course_type' in fields and course['course_type']=='official')
-        if required:
-            # The legacy V3 routes do not enter cm_update.current_user(), so the
-            # campus qualification gate is applied here as well.
-            #
-            # This check READS a qualification; it never writes one. It used to
-            # call social.ensure_registered_qualification first, which granted
-            # `method='registered'` inside the access check itself — so the gate
-            # certified the very row it then accepted. Registration no longer
-            # qualifies anyone, and no access check may.
-            status=social.verification_status(ui.state.db, subject)
-            unproven_origin=(
-                _policy_requires_real_origin(ui.state.cfg)
-                and social.qualification_origin(status)!='real'
-            )
-            if not status['verified'] or unproven_origin:
-                raise ApiError(403,'STUDENT_VERIFICATION_REQUIRED',
-                    '此课程为校园课程：请先在账户中完成学生认证（7 位认证码）。')
+        if required and not can_access_campus(
+            ui.state.db,
+            subject,
+            mode=ui.state.cfg.campus_access_mode,
+            verification_effective_at=ui.state.cfg.verification_effective_at or None,
+            is_admin=is_admin or subject in settings.admin_user_id_set,
+        ):
+            raise ApiError(403,'STUDENT_VERIFICATION_REQUIRED',
+                '此课程为校园课程：请先在账户中完成学生认证（7 位认证码）。')
     database.course_content_authorizer=authorize_content
     return ui
 

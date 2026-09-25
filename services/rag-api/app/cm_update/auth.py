@@ -1,20 +1,25 @@
 import hashlib
 import time
+
 import jwt
-from fastapi import Request, HTTPException
-from .db import now
+from fastapi import HTTPException, Request
+
 from app.brand import BRAND
+
+from .campus_access import identity_is_active
+from .db import now
 
 
 def ensure_user(db, user_id: str, auto_verify: bool = False):
     """Return the local projection of an authenticated identity, creating it once.
 
-    Registration grants NO campus qualification. The only paths that still do are
+    Registration grants NO student-verification record. The only paths that do are
     a redeemed 7-digit code (`social.redeem_code`), an operator grant
     (`social.set_verified` with `admin`) and the approved pre-enablement snapshot
     (`grandfathered`). A brand-new identity therefore ends this function with no
     `cmui_verification` row at all — `verified=0`, `method IS NULL` — and the
-    campus gate refuses it until it is really verified.
+    verification features. Campus access is a separate deployment policy and is
+    currently open to every active authenticated account.
 
     This function used to call `social.ensure_registered_qualification`, which
     wrote `verified=1, method='registered'` on the first authenticated request.
@@ -37,32 +42,38 @@ def ensure_user(db, user_id: str, auto_verify: bool = False):
         # Production validation forbids the flag, and this path never marks
         # users as code-verified. It is the one remaining writer here, it is
         # off by default, and it is not a registration policy: the deployed
-        # `campus_qualification_policy` is never consulted in this function.
+        # `campus_access_mode` is never consulted in this function.
         from . import social
         if created or not social.verification_status(db, user_id)['verified']:
             social.set_verified(db, user_id, 'grandfathered', 'auto-verify dev flag')
     return row
 
 
+def require_active_user(db, user):
+    if not identity_is_active(db, user['id']):
+        raise HTTPException(403, '当前账号已停用，无法访问 CourseJesus。')
+    return user
+
+
 async def current_user(request: Request):
     cfg, db = request.app.state.cfg, request.app.state.db
     auto_verify = bool(getattr(cfg, 'auto_verify_new_users', False))
-    # `campus_qualification_policy` is deliberately NOT read here. It selects how
-    # strict the campus access gate is; it must never decide whether an identity
-    # is granted a qualification, so the old `registered_active` => auto-grant
-    # coupling is gone. The gate that reads the policy lives in app.py's
+    # `campus_access_mode` is deliberately NOT read here. It selects how strict
+    # the campus access gate is; it must never decide whether an identity
+    # is granted a qualification, so the old registration-auto-grant coupling
+    # is gone. The gate that reads the policy lives in app.py's
     # `course_gate` and in ui_extension/mount.py's content authorizer.
     if cfg.auth_mode == 'injected':
         subject = await request.app.state.subject_resolver(request)
         if not isinstance(subject,str) or not subject: raise HTTPException(401,'请登录')
-        return ensure_user(db,subject,auto_verify)
+        return require_active_user(db, ensure_user(db,subject,auto_verify))
     if cfg.auth_mode == 'development':
         # No client-supplied user IDs. This endpoint mode is forbidden by production startup gates.
         token = request.cookies.get('cmui_dev_session','')
         hashed = hashlib.sha256(token.encode()).hexdigest()
         session = db.one('SELECT owner FROM cmui_sessions WHERE token_hash=? AND expires>?',(hashed,time.time()))
         if not session: raise HTTPException(401,'请先选择本机测试账号')
-        return ensure_user(db,session['owner'],auto_verify)
+        return require_active_user(db, ensure_user(db,session['owner'],auto_verify))
     header=request.headers.get('authorization','')
     if not header.startswith('Bearer '): raise HTTPException(401,'请登录')
     try:
@@ -72,6 +83,6 @@ async def current_user(request: Request):
         if claims.get('azp') not in cfg.allowed_origins or claims.get('sts') == 'pending':
             raise ValueError('Invalid session origin/status')
         if not isinstance(claims['sub'],str) or not claims['sub']: raise ValueError('Invalid subject')
-        return ensure_user(db,claims['sub'],auto_verify)
+        return require_active_user(db, ensure_user(db,claims['sub'],auto_verify))
     except (jwt.PyJWTError,ValueError,KeyError):
         raise HTTPException(401,'登录状态无效，请重新登录') from None

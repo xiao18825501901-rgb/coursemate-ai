@@ -106,12 +106,18 @@ updates = {
     "CMUI_OPERATION_INPUT_USD_PER_MILLION": "2",
     "CMUI_OPERATION_OUTPUT_USD_PER_MILLION": "6",
     "CMUI_IMAGE_MAX_PIXELS": "2621440",
-    "CMUI_CAMPUS_QUALIFICATION_POLICY": "registered_active",
+    "CMUI_CAMPUS_ACCESS_MODE": "open_to_registered",
+}
+retired = {
+    "CMUI_CAMPUS_QUALIFICATION_POLICY",
+    "CMUI_VERIFICATION_EFFECTIVE_AT",
 }
 seen: set[str] = set()
 lines: list[str] = []
 for line in path.read_text(encoding="utf-8").splitlines():
     key, separator, _ = line.partition("=")
+    if separator and key in retired:
+        continue
     if separator and key in updates:
         if key not in seen:
             lines.append(f"{key}={updates[key]}")
@@ -129,7 +135,7 @@ temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
 os.chmod(temporary, stat.st_mode)
 os.chown(temporary, stat.st_uid, stat.st_gid)
 os.replace(temporary, path)
-print("CONFIGURATION=updated non-secret policy keys=5")
+print("CONFIGURATION=updated non-secret policy keys=5 retired campus keys removed")
 PY
 
 systemctl stop coursemate-agent coursemate-rag

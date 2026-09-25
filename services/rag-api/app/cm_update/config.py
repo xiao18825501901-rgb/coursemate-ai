@@ -53,15 +53,14 @@ class Settings:
     web_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parents[2] / 'web' / 'dist')
     verification_secret: str = field(default_factory=lambda: os.getenv('CMUI_VERIFICATION_SECRET', ''))
     auto_verify_new_users: bool = field(default_factory=lambda: flag('CMUI_AUTO_VERIFY_NEW_USERS'))
-    # How strict the campus access gate is. `registered_active` (default, and the
-    # only value that ever existed) accepts any verified qualification row,
-    # including the historical registration-auto rows, which are kept as they
-    # are. `verified_only` additionally requires a provable origin
-    # (`code`/`admin`/`grandfathered`). Neither value grants anything: since the
-    # registration auto-grant was removed, only a redeemed code, an operator
-    # grant or the approved pre-enablement snapshot creates a qualification.
-    campus_qualification_policy: str = field(default_factory=lambda: os.getenv(
-        'CMUI_CAMPUS_QUALIFICATION_POLICY', 'registered_active'))
+    # Campus access is independent from the retained student-verification data.
+    # The current owner policy admits every active authenticated account.  A
+    # future switch is valid only with an explicit effective timestamp and then
+    # grandfathers accounts created before it.
+    campus_access_mode: str = field(default_factory=lambda: os.getenv(
+        'CMUI_CAMPUS_ACCESS_MODE', 'open_to_registered').lower())
+    verification_effective_at: str = field(default_factory=lambda: os.getenv(
+        'CMUI_VERIFICATION_EFFECTIVE_AT', '').strip())
 
     def validate(self) -> None:
         if self.environment not in {'development','test','production'}: raise ValueError('Unknown environment')
@@ -71,8 +70,8 @@ class Settings:
         if not 10<=self.timeout<=300: raise ValueError('Model timeout invalid')
         if self.auth_mode not in {'development', 'clerk', 'injected'}:
             raise ValueError('Unsupported authentication mode')
-        if self.campus_qualification_policy not in {'registered_active', 'verified_only'}:
-            raise ValueError('Unsupported campus qualification policy')
+        from .campus_access import validate_policy
+        validate_policy(self.campus_access_mode, self.verification_effective_at or None)
         if self.environment == 'production':
             marker=self.web_dir/'build-info.json'
             if marker.exists() and json.loads(

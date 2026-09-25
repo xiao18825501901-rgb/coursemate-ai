@@ -75,6 +75,8 @@ def main() -> int:
     output.mkdir(mode=0o700, parents=True)
     rag_database = output / "rag.sqlite3"
     ui_data = output / "ui"
+    os.environ.pop("CMUI_CAMPUS_QUALIFICATION_POLICY", None)
+    os.environ.pop("CMUI_VERIFICATION_EFFECTIVE_AT", None)
     os.environ.update(
         {
             "CMUI_ENV": "development",
@@ -88,7 +90,7 @@ def main() -> int:
             "CMUI_OPERATION_INPUT_USD_PER_MILLION": "2",
             "CMUI_OPERATION_OUTPUT_USD_PER_MILLION": "6",
             "CMUI_IMAGE_MAX_PIXELS": "2621440",
-            "CMUI_CAMPUS_QUALIFICATION_POLICY": "registered_active",
+            "CMUI_CAMPUS_ACCESS_MODE": "open_to_registered",
         }
     )
 

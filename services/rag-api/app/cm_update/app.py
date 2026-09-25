@@ -44,6 +44,7 @@ from . import classification as classification_state
 from . import share_recovery, social, templates
 from .auth import current_user, ensure_user
 from .budget import BudgetPolicyError, OperationEstimate, evaluate_operation_budget
+from .campus_access import can_access_campus, identity_is_active
 from .config import Settings
 from .db import Database, now, uid
 from .directory import project_local_ids, resolve_recipient
@@ -553,45 +554,27 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         # approved directory job creates one. A projected tombstone, however,
         # is authoritative and may never regain content access merely because
         # an old local token is replayed in an integration test.
-        row = db.one('SELECT active FROM cmui_directory WHERE subject=?', (user['id'],))
-        return row is None or bool(row['active'])
+        return identity_is_active(db, user['id'])
 
-    def campus_qualified(user_id):
-        """Campus qualification under the deployment policy. Read-only, always.
-
-        `campus_qualification_policy` selects how strict this is:
-
-        - `registered_active` (the default, unchanged): any verified qualification
-          row is enough. That deliberately includes the historical
-          `method='registered'` rows the auto-grant wrote before it was removed —
-          those users keep campus access, and nobody's row is downgraded here.
-        - `verified_only`: the row must also *prove* its origin, i.e.
-          `code`/`admin`/`grandfathered`. A row that only says `registered`
-          cannot, so such a user is refused until they redeem a real code.
-
-        Never writes: an access check reads qualification, it never grants one.
-        """
-        status = social.verification_status(db, user_id)
-        if not status['verified']:
-            return False
-        if getattr(cfg, 'campus_qualification_policy', 'registered_active') != 'verified_only':
-            return True
-        return social.qualification_origin(status) == 'real'
-
-    def verified(user):
-        return identity_active(user) and campus_qualified(user['id'])
+    def campus_authorized(user):
+        """Read the centralized campus policy without changing verification data."""
+        return can_access_campus(
+            db,
+            user['id'],
+            mode=cfg.campus_access_mode,
+            verification_effective_at=cfg.verification_effective_at or None,
+            is_admin=user['id'] in cfg.admin_ids,
+        )
 
     def is_admin(user):
         return identity_active(user) and user['id'] in cfg.admin_ids
 
     def course_gate(course_dto, user):
-        """Campus courses require student verification for CONTENT access.
-        Directory metadata (name/type) stays visible; this gate is applied to
-        every content-bearing endpoint. Admins keep access for operations."""
-        if is_admin(user):
-            return
+        """Apply the current campus policy to every content-bearing endpoint."""
+        if not identity_active(user):
+            raise HTTPException(403, '当前账号已停用，无法访问课程内容。')
         requires = course_dto.get('requires_student_verification') or course_dto.get('display_type')=='campus'
-        if requires and not verified(user):
+        if requires and not campus_authorized(user):
             raise HTTPException(403,'此课程为校园课程：请先在账户中完成学生认证（7 位认证码）。')
 
     @r.get('/config')
@@ -600,6 +583,9 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             'provider_mode':cfg.provider_mode,'model':cfg.deepseek_model if cfg.provider_mode=='deepseek' else cfg.qwen_model,'integration_mode':cfg.integration_mode,
             'clerk_publishable_key':cfg.clerk_publishable_key,'clerk_issuer':cfg.clerk_issuer,
             'max_upload_bytes':cfg.max_upload_bytes,'agent_connected':bool(domain),
+            'campus_access_mode':cfg.campus_access_mode,
+            'student_verification_required_for_campus':cfg.campus_access_mode!='open_to_registered',
+            'verification_effective_at':cfg.verification_effective_at or None,
             'reasoning_policy':{'strength':FORCED_REASONING_STRENGTH,'application_usd_cap':None}}
 
     @r.post('/dev/login')
@@ -2163,7 +2149,9 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         if not row: raise HTTPException(404,'共享不存在或尚未准备完成')
         recipient=db.one('SELECT * FROM cmui_share_recipients WHERE share=? AND recipient=?',(share_id,user['id']))
         if not recipient: raise HTTPException(404,'共享不存在')
-        if row['requires_student_verification'] and not verified(user):
+        if not identity_active(user):
+            raise HTTPException(403,'当前账号已停用，无法加入共享课程')
+        if row['requires_student_verification'] and not campus_authorized(user):
             raise HTTPException(403,'该共享来自校园课程：请先在账户中完成学生认证（7 位认证码）')
         joined_row=db.one('SELECT joined_course_id FROM cmui_share_recipients WHERE share=? AND recipient=?',(share_id,user['id']))
         if joined_row and joined_row['joined_course_id']:

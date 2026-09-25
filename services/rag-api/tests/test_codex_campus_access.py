@@ -17,8 +17,8 @@ def test_campus_restriction_covers_existing_histories_and_original_api(client):
     results = {path: client.get(path, headers=auth('token-a')).status_code for path in paths}
     for path, code in results.items():
         assert code in (403, 404), (path,code)
-    assert client.get(f'{UI}/courses', headers=auth('token-a')).status_code == 200
-    assert client.get(f'{UI}/courses/cs3481', headers=auth('token-a')).status_code == 200
+    assert client.get(f'{UI}/courses', headers=auth('token-a')).status_code == 403
+    assert client.get(f'{UI}/courses/cs3481', headers=auth('token-a')).status_code == 403
     # A disabled identity is stronger than the retired, code-only gate: it
     # cannot create fresh private content either.
     assert client.post(f'{UI}/courses', headers=auth('token-a'), json={'name':'Private'}).status_code == 403
@@ -77,9 +77,9 @@ def test_revoked_historical_owner_cannot_read_or_write_campus_content_paths(clie
     results.extend((path, client.post(path, headers=auth('token-a'), json=payload).status_code) for path, payload in writes)
     assert all(code == 403 for _, code in results), [(path, code) for path, code in results if code != 403]
     unfiltered = client.get('/api/conversations', headers=auth('token-a'))
-    assert unfiltered.status_code == 200
+    assert unfiltered.status_code == 403
     assert canary not in unfiltered.text, 'unfiltered history leaked revoked campus conversation title'
-    assert client.get(f'{UI}/courses/cs3481', headers=auth('token-a')).status_code == 200
+    assert client.get(f'{UI}/courses/cs3481', headers=auth('token-a')).status_code == 403
     private = client.post(f'{UI}/courses', headers=auth('token-a'), json={'name': 'CS3481', 'code': 'CS3481'})
     assert private.status_code == 403
 

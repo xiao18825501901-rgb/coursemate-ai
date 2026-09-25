@@ -61,6 +61,9 @@ def require_user(request: Request) -> AuthenticatedUser:
     user_id = verifier.authenticate(request)
     if user_id is None:
         raise ApiError(401, "UNAUTHENTICATED", "A valid sign-in session is required.")
+    identity_authorizer = getattr(request.app.state, "identity_access_authorizer", None)
+    if identity_authorizer is not None:
+        identity_authorizer(user_id)
     settings: Settings = request.app.state.settings
     return AuthenticatedUser(user_id=user_id, is_admin=user_id in settings.admin_user_id_set)
 

@@ -203,8 +203,14 @@ def test_ui_reports_integrated_config_without_leaking_secrets(client: TestClient
         "clerk_issuer",
         "max_upload_bytes",
         "agent_connected",
+        "campus_access_mode",
+        "student_verification_required_for_campus",
+        "verification_effective_at",
         "reasoning_policy",
     }
+    assert body["campus_access_mode"] == "open_to_registered"
+    assert body["student_verification_required_for_campus"] is False
+    assert body["verification_effective_at"] is None
     assert body["reasoning_policy"] == {
         "strength": "max",
         "application_usd_cap": None,

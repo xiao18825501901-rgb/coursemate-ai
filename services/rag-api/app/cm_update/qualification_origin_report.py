@@ -1,15 +1,11 @@
 """Offline, read-only diagnostic: which qualification origins an existing UI
 database actually holds.
 
-`campus_qualification_policy` has two supported values. `registered_active` is
-the default and the only value that ever existed: any verified qualification row
-opens campus content, including the historical `method='registered'` rows the
-registration auto-grant wrote before it was removed. `verified_only` also
-requires the row to prove its origin (`code`/`admin`/`grandfathered`).
-
-The owner needs one aggregate number before switching: `registration_auto` is
-exactly how many accounts a switch to `verified_only` would newly refuse. This
-program prints that count and the two others, and nothing else.
+Campus access is currently open to active registered users, independently of
+these records. A future owner-authorized gate can require verification only for
+new registrations after an explicit effective timestamp. This report never
+changes either class; it preserves the aggregate evidence needed to assess that
+future switch without changing the current access policy.
 
 It never prints a subject id, a display name or a verification code, and it
 opens the database read-only (`mode=ro`) with `PRAGMA query_only=ON`, so a

@@ -175,10 +175,11 @@ export class Inbox extends React.Component {
     compose = () => this.props.modal('发送信息', <ComposeMessage onSubmit={async (payload) => { const m = await send('/messages', payload); this.props.closeModal(); await this.load(); const t = this.state.threads.find(t => t.id === m.thread); if (t)
         this.select({ ...t, kind: 'thread' }); this.props.toast('信息已发送到对方收件箱'); }}/>);
     shareCourse = () => this.props.modal('共享课程', <ShareCourseModal toast={this.props.toast} closeModal={this.props.closeModal} onDone={() => this.load()}/>);
+    campusVerificationLabel = (requires) => requires && this.props.config?.student_verification_required_for_campus ? ' · 需学生认证' : '';
     async viewShare(share) { try {
         const d = await getShare(share.id);
         const files = d.files || [];
-        this.props.modal('共享内容 · ' + d.course_name, <div className="share-review"><p><strong>{d.sender_name}</strong> · {formatTime(d.snapshot_at)}</p><p className="muted">{files.length} 个文件 · {d.history_scope === 'none' ? '不含历史' : '含历史'}{d.pair_count ? ' · ' + d.pair_count + ' 个知识点对话' : ''}{d.requires_student_verification ? ' · 需学生认证' : ''}</p><div className="divider"/>{files.map(f => <div key={f.id || f.name} className="share-pair-row"><Icon name="file"/><span>{f.name}</span></div>)}{!files.length && <p className="helper-note">没有文件</p>}</div>);
+        this.props.modal('共享内容 · ' + d.course_name, <div className="share-review"><p><strong>{d.sender_name}</strong> · {formatTime(d.snapshot_at)}</p><p className="muted">{files.length} 个文件 · {d.history_scope === 'none' ? '不含历史' : '含历史'}{d.pair_count ? ' · ' + d.pair_count + ' 个知识点对话' : ''}{this.campusVerificationLabel(d.requires_student_verification)}</p><div className="divider"/>{files.map(f => <div key={f.id || f.name} className="share-pair-row"><Icon name="file"/><span>{f.name}</span></div>)}{!files.length && <p className="helper-note">没有文件</p>}</div>);
     }
     catch (e) {
         this.props.toast(e.message);
@@ -191,12 +192,12 @@ export class Inbox extends React.Component {
         this.props.onRead?.();
     }
     catch (e) {
-        if (e.status === 403)
+        if (e.status === 403 && this.props.config?.student_verification_required_for_campus)
             this.props.toast('请先完成学生认证（账户 → 学生认证）');
         else
             this.props.toast(e.message);
     } }
-    renderShares() { const { shares, sharesQ } = this.state; const rows = shares[sharesQ] || []; return <div className="inbox-share-list"><div className="mail-tabs"><button className={sharesQ === 'received' ? 'active' : ''} onClick={() => this.setState({ sharesQ: 'received' })}>收到</button><button className={sharesQ === 'sent' ? 'active' : ''} onClick={() => this.setState({ sharesQ: 'sent' })}>发出</button></div>{rows.map(sh => <div key={sh.id} className="inbox-share-item"><div className="inbox-share-head"><strong>{sh.course_name}</strong><span>{formatTime(sh.snapshot_at)}</span></div><div className="share-meta">{sharesQ === 'received' && sh.sender_name ? sh.sender_name + ' · ' : ''}{sh.file_count} 个文件 · {sh.history_scope === 'none' ? '不含历史' : '含历史'}{sh.requires_student_verification ? ' · 需学生认证' : ''}</div><div className="share-actions"><button className="btn" onClick={() => this.viewShare(sh)}>查看共享内容</button>{sharesQ === 'received' && (sh.joined_course_id ? <span className="helper-note">已加入</span> : <button className="btn primary" onClick={() => this.joinShare(sh)}>加入所有课程</button>)}</div></div>)}{!rows.length && <div className="empty-state">还没有共享课程</div>}</div>; }
+    renderShares() { const { shares, sharesQ } = this.state; const rows = shares[sharesQ] || []; return <div className="inbox-share-list"><div className="mail-tabs"><button className={sharesQ === 'received' ? 'active' : ''} onClick={() => this.setState({ sharesQ: 'received' })}>收到</button><button className={sharesQ === 'sent' ? 'active' : ''} onClick={() => this.setState({ sharesQ: 'sent' })}>发出</button></div>{rows.map(sh => <div key={sh.id} className="inbox-share-item"><div className="inbox-share-head"><strong>{sh.course_name}</strong><span>{formatTime(sh.snapshot_at)}</span></div><div className="share-meta">{sharesQ === 'received' && sh.sender_name ? sh.sender_name + ' · ' : ''}{sh.file_count} 个文件 · {sh.history_scope === 'none' ? '不含历史' : '含历史'}{this.campusVerificationLabel(sh.requires_student_verification)}</div><div className="share-actions"><button className="btn" onClick={() => this.viewShare(sh)}>查看共享内容</button>{sharesQ === 'received' && (sh.joined_course_id ? <span className="helper-note">已加入</span> : <button className="btn primary" onClick={() => this.joinShare(sh)}>加入所有课程</button>)}</div></div>)}{!rows.length && <div className="empty-state">还没有共享课程</div>}</div>; }
     async reply(e) { e.preventDefault(); const s = this.state.selected; try {
         await send('/messages', { recipient: s.peer.id, text: this.state.reply, request_id: key() });
         this.setState({ reply: '' });

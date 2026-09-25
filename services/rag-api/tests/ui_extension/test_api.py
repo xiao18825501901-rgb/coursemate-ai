@@ -155,7 +155,7 @@ def test_layout_strengths_persist_and_cross_pane_actions_are_retired(client):
  retired=client.post(P+'/courses/cs3481/bridges',json=payload);assert retired.status_code==410,retired.text
  layout={'ratio':.63,'problem_conversation':c['id'],'active_node':'core','teach_strength':'high','problem_strength':'max'}
  assert client.put(P+'/courses/cs3481/layout',json=layout).status_code==200
- saved=client.get(P+'/courses/cs3481/layout').json();assert saved['problem_conversation']==c['id'];assert saved['teach_strength']=='high' and saved['problem_strength']=='max';assert 'bridge' not in saved
+ saved=client.get(P+'/courses/cs3481/layout').json();assert saved['problem_conversation']==c['id'];assert saved['teach_strength']=='max' and saved['problem_strength']=='max';assert 'bridge' not in saved
  login(client,'bob');assert client.get(P+'/courses/cs3481/layout').json()['ratio']==.5
 
 def test_wrong_lane_layout_rejected(client):

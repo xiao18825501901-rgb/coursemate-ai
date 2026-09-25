@@ -157,11 +157,11 @@ def make_course(client: TestClient) -> None:
     # ensure the two student users exist in the UI user table
     for token in ("token-a", "token-b"):
         client.get(f"{UI}/me", headers=auth(token))
-    # cs3481 is an official (campus) course, so every campus-content test in this
-    # round needs real qualification. Registration no longer grants it, so the two
-    # declared synthetic actors are qualified explicitly; tests that exercise a
-    # deleted/disabled identity still create a local tombstone, which dominates
-    # this grant. `user-c` is intentionally left unqualified.
+    # Preserve explicit verification provenance for the two long-lived fixtures;
+    # the current open-to-registered campus policy does not depend on it. Tests
+    # that exercise a deleted/disabled identity still create a local tombstone,
+    # which dominates both this record and the open policy. `user-c` is
+    # intentionally left unverified to exercise current access semantics.
     qualify_for_campus(client, "user-a", "user-b")
     # Binding contracts require real authorized nodes rather than invented IDs.
     # Question evidence/specs are opt-in via prepare_exercise_course so unrelated
@@ -309,23 +309,10 @@ def test_pair_lifecycle_restores_both_lanes(client: TestClient) -> None:
     assert client.get(f"{UI}/pairs/{pair_id}", headers=auth("token-a")).status_code == 404
 
 
-def test_a_new_registration_is_not_qualified_and_campus_content_is_refused(
+def test_a_new_registration_is_unverified_but_campus_content_is_open(
     client: TestClient,
 ) -> None:
-    """Registration grants no campus qualification any more.
-
-    This test used to assert the opposite — that the first authenticated request
-    returned `{"verified": true, "method": "registered"}` and that campus content
-    then answered 200 without a code, a second login or an operator. The owner
-    stopped that auto-grant: it was written by the access check itself (so the
-    gate certified the row it accepted) and it made a registration
-    indistinguishable from a real verification.
-
-    `user-c` is used because no helper in this suite qualifies it: `make_course`
-    qualifies `user-a`/`user-b` explicitly for the campus-content tests. Nothing
-    is denied by deletion — the actor simply was never granted anything, and
-    `user-a`/`user-b`'s own rows are untouched by this test.
-    """
+    """Current access is open without falsifying student-verification data."""
     make_course(client)
     status = client.get(f"{UI}/me/verification", headers=auth("token-c"))
     assert status.status_code == 200, status.text
@@ -334,16 +321,15 @@ def test_a_new_registration_is_not_qualified_and_campus_content_is_refused(
     assert db.one('SELECT * FROM cmui_verification WHERE owner=?', ("user-c",)) is None, \
         "registration must leave no qualification row at all (verified=0, method NULL)"
 
-    assert client.put(f"{UI}/courses/cs3481/pin", headers=auth("token-c")).status_code == 403
-    assert client.get(f"{UI}/courses/cs3481/files", headers=auth("token-c")).status_code == 403
+    assert client.put(f"{UI}/courses/cs3481/pin", headers=auth("token-c")).status_code == 200
+    assert client.get(f"{UI}/courses/cs3481/files", headers=auth("token-c")).status_code == 200
 
 
 def test_disabled_local_identity_is_not_requalified_or_given_campus_content(client: TestClient) -> None:
     make_course(client)
     disable_local_identity(client, 'user-b')
     status = client.get(f"{UI}/me/verification", headers=auth("token-b"))
-    assert status.status_code == 200
-    assert status.json()["verified"] is False
+    assert status.status_code == 403
     assert client.put(f"{UI}/courses/cs3481/pin", headers=auth("token-b")).status_code == 403
     assert client.get(f"{UI}/courses/cs3481/files", headers=auth("token-b")).status_code == 403
 
@@ -554,7 +540,7 @@ def test_explanation_flow_and_reuse(client: TestClient) -> None:
 # --------------------------------------------------------------- verification
 
 
-def test_code_redemption_is_what_qualifies_and_legacy_provenance_is_never_overwritten(client: TestClient) -> None:
+def test_code_redemption_records_verification_without_being_the_current_access_gate(client: TestClient) -> None:
     """A 7-digit code is the way in, and it is recorded as the real origin.
 
     The old version of this test asserted that a first authenticated request
@@ -570,8 +556,9 @@ def test_code_redemption_is_what_qualifies_and_legacy_provenance_is_never_overwr
     codes = issued.json()["codes"]
     assert len(codes) == 2 and all(len(c) == 7 and c.isdigit() for c in codes)
 
-    # An unqualified registration cannot read campus content and holds no row ...
-    assert client.get(f"{UI}/courses/cs3481/files", headers=auth("token-c")).status_code == 403
+    # An active registration can read campus content while holding no
+    # student-verification row under the current policy.
+    assert client.get(f"{UI}/courses/cs3481/files", headers=auth("token-c")).status_code == 200
     before = client.get(f"{UI}/me/verification", headers=auth("token-c")).json()
     assert before["verified"] is False and before["method"] is None
 

@@ -4,19 +4,17 @@ per row, and a policy that can be strict without changing the default.
 What this file pins, and why each pin exists:
 
 - A new registration holds no qualification at all (`verified=0`, `method IS
-  NULL`) and is refused on the real campus routes. It used to be granted
+  NULL`) but is admitted by the current open-to-registered campus policy. It used to be granted
   `method='registered'` by the first authenticated request.
 - A redeemed 7-digit code still grants and still records `method='code'`.
 - `social.qualification_origin` separates a real verification
   (`code`/`admin`/`grandfathered`) from the old registration-auto source
   (`registered`), and `social.qualification_origin_counts` reports the three
   classes as aggregates.
-- `campus_qualification_policy='verified_only'` refuses a `registered`-only user
-  on both gates (the shell's `course_gate` and the injected authorizer the legacy
-  V3 routes go through) while a `code` user is allowed.
-- The default policy still allows a historical `registered` row: that is the
-  deliberate, stated decision of this change. Nothing is downgraded, and no test
-  here deletes a user, a course, a grade or a verification row.
+- The dormant `new_users_require_verification` mode grandfathers accounts created
+  before an explicit timestamp and requires real verification for later ones.
+- The current policy allows every active registered account. Nothing is
+  downgraded, and no test here deletes a user, course, grade or verification row.
 """
 
 from __future__ import annotations
@@ -48,17 +46,12 @@ CAMPUS_COURSE = "cs3481"
 
 
 @pytest.fixture
-def strict_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
-    """The same real host app with the strict policy, selected the way a
-    deployment selects it: through the environment, before the extension mounts.
-
-    A separate fixture rather than a live mutation of the default `client`,
-    because `verified_only` is read when the `cmui` settings are built. The
-    default policy's behaviour is pinned by the tests that use `client`.
-    """
+def future_gate_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    """The dormant future gate with a fixed, explicit effective timestamp."""
     monkeypatch.setenv("CMUI_PROVIDER_MODE", "test")
     monkeypatch.setenv("CMUI_AUTO_VERIFY_NEW_USERS", "false")
-    monkeypatch.setenv("CMUI_CAMPUS_QUALIFICATION_POLICY", "verified_only")
+    monkeypatch.setenv("CMUI_CAMPUS_ACCESS_MODE", "new_users_require_verification")
+    monkeypatch.setenv("CMUI_VERIFICATION_EFFECTIVE_AT", "2026-01-01T00:00:00Z")
     application = create_app(
         settings=make_settings(tmp_path),
         embedding_provider=FakeEmbeddingProvider(),
@@ -86,8 +79,8 @@ def ensure_actor(client: TestClient, token: str) -> None:
     assert client.get(f"{UI}/me", headers=auth(token)).status_code == 200
 
 
-def test_a_new_registration_is_unverified_and_campus_content_is_refused(client: TestClient) -> None:
-    """`verified=0`, `method IS NULL`, and every campus content route refuses."""
+def test_a_new_registration_is_unverified_and_campus_content_is_open(client: TestClient) -> None:
+    """The gate is open, but no false verification row is created."""
     make_course(client)
     # Asking for the status is itself an authenticated request, so it is the
     # first thing a brand-new registration does.
@@ -98,18 +91,18 @@ def test_a_new_registration_is_unverified_and_campus_content_is_refused(client: 
         "a registration must not write a qualification row at all"
     )
 
-    # The same routes the campus deny matrix uses, still refused for an actor who
-    # was never granted anything (nothing was deleted to deny them).
-    refused = {
+    # The same routes the campus matrix uses are open for an active actor who
+    # was never given a student-verification record.
+    allowed = {
         "files": client.get(f"{UI}/courses/{CAMPUS_COURSE}/files", headers=auth("token-c")),
         "pin": client.put(f"{UI}/courses/{CAMPUS_COURSE}/pin", headers=auth("token-c")),
         "knowledge": client.get(f"{UI}/courses/{CAMPUS_COURSE}/knowledge", headers=auth("token-c")),
         "comments": client.get(f"{UI}/courses/{CAMPUS_COURSE}/comments", headers=auth("token-c")),
         "documents": client.get(f"/api/courses/{CAMPUS_COURSE}/documents", headers=auth("token-c")),
     }
-    assert {name: response.status_code for name, response in refused.items()} == {
-        "files": 403, "pin": 403, "knowledge": 403, "comments": 403, "documents": 403,
-    }, {name: response.text for name, response in refused.items()}
+    assert {name: response.status_code for name, response in allowed.items()} == {
+        "files": 200, "pin": 200, "knowledge": 200, "comments": 200, "documents": 200,
+    }, {name: response.text for name, response in allowed.items()}
     # Course metadata stays visible: only content is gated.
     assert client.get(f"{UI}/courses/{CAMPUS_COURSE}", headers=auth("token-c")).status_code == 200
 
@@ -120,7 +113,7 @@ def test_redeeming_a_valid_code_still_grants_and_keeps_method_code(client: TestC
         f"{UI}/admin/verification-codes", headers=auth("admin-token"), json={"count": 1}
     ).json()["codes"]
     files = client.get(f"{UI}/courses/{CAMPUS_COURSE}/files", headers=auth("token-c"))
-    assert files.status_code == 403
+    assert files.status_code == 200
 
     redeemed = client.post(
         f"{UI}/me/verification/redeem", headers=auth("token-c"),
@@ -266,57 +259,56 @@ def test_origin_report_cli_prints_only_the_three_counts(
     assert not_a_database.read_bytes() == b"not a database"
 
 
-def test_verified_only_refuses_registration_auto_and_allows_a_code(
-    strict_client: TestClient,
+def test_future_gate_refuses_new_registration_auto_and_allows_a_code(
+    future_gate_client: TestClient,
 ) -> None:
-    """Both gates honour the strict policy, with the existing error code."""
+    """Both gates honour the future policy, with the existing error code."""
     from app.cm_update import social
 
-    make_course(strict_client)
-    db = ui_db(strict_client)
+    make_course(future_gate_client)
+    db = ui_db(future_gate_client)
     # A historical registration-auto row (the shape the removed auto-grant wrote)
     # and a real code redemption, on two different synthetic actors.
-    ensure_actor(strict_client, "token-d")
+    ensure_actor(future_gate_client, "token-d")
     social.set_verified(db, "user-d", "registered", "historical registration auto grant")
-    codes = strict_client.post(
+    codes = future_gate_client.post(
         f"{UI}/admin/verification-codes", headers=auth("admin-token"), json={"count": 1}
     ).json()["codes"]
-    redeemed = strict_client.post(
+    redeemed = future_gate_client.post(
         f"{UI}/me/verification/redeem", headers=auth("token-c"),
         json={"code": codes[0], "request_id": "strict-code-grant"},
     )
     assert redeemed.status_code == 200, redeemed.text
-    strict_status = strict_client.get(f"{UI}/me/verification", headers=auth("token-c")).json()
+    strict_status = future_gate_client.get(f"{UI}/me/verification", headers=auth("token-c")).json()
     assert strict_status["method"] == "code"
 
     # The shell gate (cm_update.app.course_gate) refuses the registration-only user.
-    refused = strict_client.get(f"{UI}/courses/{CAMPUS_COURSE}/files", headers=auth("token-d"))
+    refused = future_gate_client.get(f"{UI}/courses/{CAMPUS_COURSE}/files", headers=auth("token-d"))
     assert refused.status_code == 403, refused.text
     # The legacy V3 authorizer (ui_extension.mount.authorize_content) refuses too,
     # with the existing stable error code and the existing Chinese message style.
-    legacy = strict_client.get(f"/api/courses/{CAMPUS_COURSE}/documents", headers=auth("token-d"))
+    legacy = future_gate_client.get(f"/api/courses/{CAMPUS_COURSE}/documents", headers=auth("token-d"))
     assert legacy.status_code == 403, legacy.text
     assert legacy.json()["error"]["code"] == "STUDENT_VERIFICATION_REQUIRED"
     assert legacy.json()["error"]["message"].startswith("此课程为校园课程")
 
     # A provable origin is allowed on both gates.
-    assert strict_client.get(
+    assert future_gate_client.get(
         f"{UI}/courses/{CAMPUS_COURSE}/files", headers=auth("token-c")
     ).status_code == 200
-    assert strict_client.get(
+    assert future_gate_client.get(
         f"/api/courses/{CAMPUS_COURSE}/documents", headers=auth("token-c")
     ).status_code == 200
     # The refusal is a decision about origin, not a deletion of anything:
     assert social.verification_status(db, "user-d")["verified"] is True
-    assert verification_row(strict_client, "user-d")["method"] == "registered"
+    assert verification_row(future_gate_client, "user-d")["method"] == "registered"
 
 
-def test_the_default_policy_still_allows_a_historical_auto_row(client: TestClient) -> None:
+def test_the_open_policy_allows_a_historical_auto_row_without_rewriting_it(client: TestClient) -> None:
     """The deliberate decision of this change: stop granting, do not revoke.
 
-    Switching to `verified_only` is the owner's decision, and it has a cost:
-    every `registered`-only account would newly be refused. Until the owner makes
-    it, those accounts keep campus access and their rows keep their value.
+    Access comes from the active registration, while the historical row keeps
+    its original provenance for a possible future explicit policy switch.
     """
     from app.cm_update import social
 

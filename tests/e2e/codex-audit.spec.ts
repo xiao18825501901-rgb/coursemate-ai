@@ -150,7 +150,7 @@ test("empty assessment pool generates and freezes five complementary Question En
   await node.hover();
   await node.locator(".node-popover").getByRole("button",{name:/测评结果/}).click();
 
-  const workspace=page.locator('.assessment-overlay[aria-label="五题测评工作区"]');
+  const workspace=page.getByRole("dialog",{name:"测评工作区",exact:true});
   await expect(workspace).toBeVisible();
   const frozen=page.waitForResponse(async response=>{
     if(response.request().method()!=="POST"||!response.url().endsWith("/assessment/session")||!response.ok()) return false;
@@ -171,8 +171,10 @@ test("empty assessment pool generates and freezes five complementary Question En
     expect(question).not.toHaveProperty("distractor_rationales");
   }
   await expect(workspace.locator(".assessment-question")).toHaveCount(5);
-  await expect(workspace.locator(".assessment-question").nth(0)).toContainText("MCQ_SINGLE · 10 分");
-  await expect(workspace.locator(".assessment-question").nth(4)).toContainText("EXPLANATION · 30 分");
+  await expect(workspace.locator(".assessment-question").nth(0)).toContainText("第 1 题");
+  await expect(workspace.locator(".assessment-question").nth(0)).toContainText("单项选择 · 10 分");
+  await expect(workspace.locator(".assessment-question").nth(4)).toContainText("第 5 题");
+  await expect(workspace.locator(".assessment-question").nth(4)).toContainText("分析与解释 · 30 分");
   await page.screenshot({path:info.outputPath("five-question-slots.png"),fullPage:true});
 });
 
@@ -220,30 +222,22 @@ test("directory can be browsed and paginated before searching",async({page},info
   await page.screenshot({path:info.outputPath("directory.png"),fullPage:true});
 });
 
-test("registration is not a student verification: campus content stays refused until one exists",async({request})=>{
-  // This journey used to assert the opposite, and it was right at the time: an active
-  // registered actor was auto-granted a `method:"registered"` qualification *inside the
-  // access check*, so the gate certified the very row it then accepted. That grant was
-  // removed deliberately (see `app/cmui/auth.py` and `ui_extension/mount.py`:
-  // "registration no longer qualifies anyone, and no access check may"), which left this
-  // assertion encoding behaviour the product no longer has. It is now the guardrail for
-  // that change, measured in both directions instead of assumed.
+test("active registration opens campus learning without forging student verification",async({request})=>{
   const me=await request.get(API+"/me/verification",{headers:unverified});
   expect(me.ok()).toBeTruthy();
   const status=await me.json();
   expect(status).toMatchObject({verified:false,method:null});
   expect(status.method).not.toBe("registered");
 
-  // The course itself stays visible — a learner must be able to see the course and be
-  // told why it is closed — while every content surface behind the gate is refused.
+  // The current campus policy admits this active authenticated user on every
+  // content surface while keeping the independent verification fact unchanged.
   expect((await request.get(API+"/courses/cs3481",{headers:unverified})).status()).toBe(200);
   for(const path of ["/courses/cs3481/files","/courses/cs3481/knowledge","/courses/cs3481/layout",
                      "/pairs?course_id=cs3481"]) {
     const response=await request.get(API+path,{headers:unverified});
-    expect(response.status(),path).toBe(403);
-    expect(String((await response.json()).detail),path).toContain("学生认证");
+    expect(response.status(),path).toBe(200);
   }
-  expect((await request.post(API+"/pairs",{headers:unverified,data:{course:"cs3481"}})).status()).toBe(403);
+  expect((await request.post(API+"/pairs",{headers:unverified,data:{course:"cs3481"}})).status()).toBe(201);
 
   // And the same surfaces open for an actor whose qualification proves a real origin,
   // which is the half that must not be over-blocked.
