@@ -1010,7 +1010,7 @@ export class AssessmentWorkspace extends React.Component {
     async loadSummary() { try {
         const summary = await getAssessment(this.props.course.id, this.props.node.id);
         this.setState({ summary });
-        if (['IN_PROGRESS', 'SUBMITTED', 'GRADED'].includes(summary.status) && summary.session)
+        if (['IN_PROGRESS', 'SUBMITTED', 'NEEDS_REVIEW', 'GRADED'].includes(summary.status) && summary.session)
             await this.open(summary.session);
     }
     catch (e) {

@@ -93,7 +93,7 @@ describe('AssessmentWorkspace', () => {
   });
 
   it('shows a clearly provisional total when question grading awaits review', async () => {
-    vi.mocked(getAssessment).mockResolvedValue({ status: 'SUBMITTED', session: 's1' });
+    vi.mocked(getAssessment).mockResolvedValue({ status: 'NEEDS_REVIEW', session: 's1' });
     vi.mocked(getAssessmentSession).mockResolvedValue({
       id: 's1',
       status: 'SUBMITTED',
