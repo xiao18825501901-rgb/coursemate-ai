@@ -30,7 +30,7 @@ from .job import (
     JobStateError,
 )
 from .oauth import Connection
-from .transient_credential import NEVER_STORED
+from .transient_credential import NEVER_STORED, PRESENT_TRANSIENTLY
 
 LEASE_SECONDS = 120
 
@@ -313,6 +313,19 @@ class CanvasJobRepository:
             "UPDATE canvas_import_jobs SET credential_state=?, "
             "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
             (state, job_id),
+        )
+        return cursor.rowcount == 1
+
+    def resume_with_transient_credential(self, job_id: str, credential_ref: str) -> bool:
+        """Attach a new in-memory credential to the same frozen import checkpoint."""
+
+        cursor = self._connection.execute(
+            "UPDATE canvas_import_jobs SET credential_ref=?, credential_state=?, status='QUEUED', "
+            "error_code=NULL, error_message=NULL, leased_until=NULL, worker_id=NULL, "
+            "completed_at=NULL, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+            "WHERE id=? AND credential_kind='transient_task' "
+            "AND status NOT IN ('COMPLETED','COMPLETED_WITH_WARNINGS','FAILED','CANCELLED')",
+            (credential_ref, PRESENT_TRANSIENTLY, job_id),
         )
         return cursor.rowcount == 1
 

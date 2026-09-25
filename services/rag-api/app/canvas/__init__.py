@@ -13,6 +13,7 @@ from .adapter import (
 from .http_safety import (
     UnsafeUrlError,
     is_public_address,
+    normalize_canvas_page_origin,
     normalize_origin,
     resolve_public_host,
     validate_api_url,
@@ -106,6 +107,7 @@ __all__ = [
     "callback_matches_institution",
     "default_institutions",
     "is_public_address",
+    "normalize_canvas_page_origin",
     "normalize_origin",
     "parse_next_link",
     "resolve_public_host",

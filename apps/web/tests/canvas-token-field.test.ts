@@ -13,9 +13,9 @@ const SRC = path.join(WEB_ROOT, "src");
  *
  * The shipped shell has exactly one screen that accepts a personal access token: the one-off task
  * credential, which the server offers only to listed accounts on a deployment that enables it. The
- * public connect screen and the local-bridge screen must keep saying that this site does not accept
- * one — that sentence is a design decision, not decoration, because it is what stops a student
- * pasting a credential into a page that has nowhere to put it.
+ * public connect screen and the local-bridge screen must keep saying that their public path does
+ * not accept one — that sentence is a design decision, not decoration, because it stops a student
+ * pasting a credential into a path that has nowhere to put it.
  *
  * `scripts/scan_web_bundle_for_pat.mjs` runs the same idea against the **built** bytes. This test
  * runs against the sources as well, and adds the rule the scanner cannot express: a token field is
@@ -33,7 +33,7 @@ const OWNER_MODE_FILE = path.join("src", "ui", "CanvasImport.jsx");
 const OWNER_MODE_WARNING = "这个 Token 会发送到 CourseJesus 服务器";
 
 /** What every other screen must keep saying. */
-const PUBLIC_REFUSAL = "本站不接收个人访问令牌";
+const PUBLIC_REFUSAL = "公共学生入口不接收个人访问令牌";
 
 /** The data module that owns the wording, so the component renders it rather than paraphrasing it. */
 const WARNING_MODULE = path.join("src", "ui", "canvasImport.js");

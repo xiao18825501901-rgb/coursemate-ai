@@ -22,11 +22,10 @@ import {
  *
  *   * the client's calls carry a one-time *code* out and the user's own session token, never a Canvas
  *     credential in any direction;
- *   * there is no input field anywhere in the web sources where a token could be typed — that
- *     check runs in `scripts/scan_web_bundle_for_pat.mjs` on every build, against the built
- *     output and the sources, because a build-time transform could hide one from a unit test.
- *   * the tutorial the task requires is present, and so is the sentence that tells the user not to
- *     paste a token into the page.
+ *   * this public bridge has no credential input or credential-bearing request. A separately
+ *     gated owner flow is the only web exception, and the build scanner verifies that boundary;
+ *   * the tutorial the task requires is present, and so is the sentence that tells public users
+ *     not to paste a token into this path.
  */
 
 const calls: { url: string; options: RequestInit }[] = [];
@@ -36,7 +35,12 @@ type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Respo
 function stubFetch({ ok = true, status = 200, body = {} } = {}): FetchLike {
   return (async (input: RequestInfo | URL, init: RequestInit = {}) => {
     calls.push({ url: String(input), options: init });
-    return { ok, status, json: async () => body } as unknown as Response;
+    return {
+      ok,
+      status,
+      headers: { get: (name: string) => name.toLowerCase() === "content-type" ? "application/json" : null },
+      json: async () => body,
+    } as unknown as Response;
   }) as unknown as FetchLike;
 }
 

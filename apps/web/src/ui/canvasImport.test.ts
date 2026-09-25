@@ -13,6 +13,7 @@ import {
   openTaskCredential,
   outcomeFromSearch,
   reasonFor,
+  resumeTaskCredential,
   setCanvasTokenGetter,
   startImport,
   taskCourses,
@@ -33,10 +34,15 @@ const calls: { url: string; options: RequestInit }[] = [];
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 /** A fetch stub: only the fields this client reads exist, and the cast says so out loud. */
-function stubFetch({ ok = true, status = 200, body = {} } = {}): FetchLike {
+function stubFetch({ ok = true, status = 200, body = {}, contentType = "application/json" } = {}): FetchLike {
   return (async (input: RequestInfo | URL, init: RequestInit = {}) => {
     calls.push({ url: String(input), options: init });
-    return { ok, status, json: async () => body } as unknown as Response;
+    return {
+      ok,
+      status,
+      headers: { get: (name: string) => name.toLowerCase() === "content-type" ? contentType : null },
+      json: async () => body,
+    } as unknown as Response;
   }) as unknown as FetchLike;
 }
 
@@ -113,9 +119,28 @@ describe("Canvas import client", () => {
     // The credential is in the body, never in the URL, and never on the courses call that uses it.
     await taskCourses("conn-1", "ref-abc123");
     expect(callAt(2).url).toBe(
-      "/api/integrations/canvas/courses?connection_id=conn-1&credential_ref=ref-abc123",
+      "/api/integrations/canvas/courses?connection_id=conn-1&credential_ref=ref-abc123" +
+        "&include_file_summary=true",
     );
     expect(callAt(2).url).not.toContain("pasted-value");
+  });
+
+  it("reattaches a replacement credential to the same frozen import", async () => {
+    await resumeTaskCredential("job/with space", "replacement-value", {
+      canvasBaseUrl: "https://canvas.cityu.edu.hk/profile/settings",
+    });
+
+    const request = callAt(0);
+    expect(request.url).toBe(
+      "/api/integrations/canvas/imports/job%2Fwith%20space/credential",
+    );
+    expect(request.options.method).toBe("POST");
+    expect(JSON.parse(String(request.options.body))).toEqual({
+      personal_access_token: "replacement-value",
+      institution_key: "",
+      canvas_base_url: "https://canvas.cityu.edu.hk/profile/settings",
+    });
+    expect(request.url).not.toContain("replacement-value");
   });
 
   it("polls a job, cancels it and disconnects with the documented methods", async () => {
@@ -162,11 +187,29 @@ describe("Canvas import client", () => {
       ({
         ok: false,
         status: 502,
+        headers: { get: () => "text/html; charset=utf-8" },
         json: async () => {
           throw new Error("not json");
         },
       }) as unknown as Response) as unknown as typeof fetch;
-    await expect(connections()).rejects.toMatchObject({ status: 502, code: null });
+    await expect(connections()).rejects.toMatchObject({
+      status: 502,
+      code: "API_RESPONSE_NOT_JSON",
+    });
+  });
+
+  it("rejects a successful SPA fallback before attempting to parse it as JSON", async () => {
+    globalThis.fetch = stubFetch({
+      ok: true,
+      status: 200,
+      body: "<html>CourseJesus</html>",
+      contentType: "text/html; charset=utf-8",
+    });
+
+    await expect(institutions()).rejects.toMatchObject({
+      status: 200,
+      code: "API_RESPONSE_NOT_JSON",
+    });
   });
 
   it("describes an unavailable school instead of offering it", () => {

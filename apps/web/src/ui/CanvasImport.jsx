@@ -20,6 +20,7 @@ import {
     outcomeFromSearch,
     OUTCOME_MESSAGES,
     reasonFor,
+    resumeTaskCredential,
     selectLocalCourses,
     setCanvasTokenGetter,
     startImport,
@@ -117,6 +118,7 @@ export class CanvasImport extends React.Component {
         // it is being submitted, the reference the server returned and the stage of the flow.
         taskCredential: { available: false, reason: 'TASK_CREDENTIAL_DISABLED', ownerOnly: true },
         taskOpen: false, taskStage: 'paste', taskToken: '', taskPicked: '', task: null,
+        canvasAddress: '', resumeJobId: '',
     };
     poll = null;
     bridgePoll = null;
@@ -139,13 +141,16 @@ export class CanvasImport extends React.Component {
             const [body, existing] = await Promise.all([listInstitutions(), listConnections()]);
             const connectable = connectableInstitutions(body);
             const connection = existing.connections[0] || null;
+            const taskCredential = taskCredentialOf(body);
             this.setState({
                 institutions: body.institutions || [],
                 credentialsReady: body.credentialsReady,
                 connections: existing.connections || [],
                 connection,
-                taskCredential: taskCredentialOf(body),
-                step: connectable.length ? (connection ? 'select' : 'connect') : 'unavailable',
+                taskCredential,
+                step: taskCredential.available
+                    ? 'taskToken'
+                    : (connectable.length ? (connection ? 'select' : 'connect') : 'unavailable'),
             }, () => { if (this.state.step === 'select' && connection) this.loadCourses(connection); });
         }
         catch (error) {
@@ -292,32 +297,34 @@ export class CanvasImport extends React.Component {
 
     /** Paste a token for one task: the server reads the Canvas identity before holding anything. */
     async openTask() {
-        const { picked, otherSchool, institutions, taskToken } = this.state;
+        const { canvasAddress, taskToken, resumeJobId } = this.state;
         const token = (taskToken || '').trim();
         if (!token) {
             this.setState({ error: '请先粘贴 Canvas Token。' });
             return;
         }
-        let key = picked;
-        let baseUrl = '';
-        if (key === 'other') {
-            const match = institutionForAddress({ institutions }, otherSchool);
-            if (!match) {
-                this.setState({
-                    error: '这所学校还没有在 CourseJesus 登记，无法确认它的地址；请选择列表里的学校。',
-                });
-                return;
-            }
-            key = match.key;
-            baseUrl = otherSchool;
-        }
-        if (!key) {
-            this.setState({ error: '请先选择一所学校。' });
+        const baseUrl = (canvasAddress || '').trim();
+        if (!baseUrl) {
+            this.setState({ error: '请粘贴学校 Canvas 页面地址。' });
             return;
         }
         this.setState({ busy: true, error: '' });
         try {
-            const opened = await openTaskCredential(token, { institutionKey: key, canvasBaseUrl: baseUrl });
+            if (resumeJobId) {
+                const resumed = await resumeTaskCredential(
+                    resumeJobId, token, { canvasBaseUrl: baseUrl });
+                this.setState({
+                    busy: false,
+                    step: 'job',
+                    taskToken: '',
+                    resumeJobId: '',
+                    task: { ...this.state.task, credentialRef: resumed.credentialRef, state: resumed.credentialState },
+                    job: { ...this.state.job, status: resumed.status, credentialState: resumed.credentialState, needsCredential: false },
+                });
+                this.watch(resumeJobId);
+                return;
+            }
+            const opened = await openTaskCredential(token, { canvasBaseUrl: baseUrl });
             const list = await taskCourses(opened.connectionId, opened.credentialRef);
             this.setState({
                 busy: false, taskStage: 'select', task: opened, courses: list.courses || [],
@@ -475,7 +482,7 @@ export class CanvasImport extends React.Component {
                     连接 Canvas
                 </button>
                 : <p className="helper-note">这所学校还没有开通官方授权连接；可以先用下面的本地方式导入。</p>}
-            <p className="helper-note">本站不接收个人访问令牌，也不会保存它；只能用学校的官方授权页面。</p>
+            <p className="helper-note">公共学生入口不接收个人访问令牌；请使用学校官方授权或本地导入。站长一次性导入是受限的独立入口。</p>
             <button type="button" className="canvas-import-secondary" onClick={() => this.setState({ localOpen: !this.state.localOpen })}>
                 无法连接？查看本地 Token 导入方式
             </button>
@@ -564,19 +571,29 @@ export class CanvasImport extends React.Component {
     }
 
     renderTaskToken() {
-        const { task, taskStage, taskToken, courses, selected, busy, error } = this.state;
+        const { task, taskStage, taskToken, canvasAddress, courses, selected, busy, error, resumeJobId } = this.state;
         if (taskStage === 'paste') {
             return <div className="canvas-import-step canvas-task">
-                <p className="canvas-import-lead">一次性 Token 导入</p>
-                <TaskCredentialSteps/>
-                {this.renderSchoolPicker()}
+                <p className="canvas-import-lead">从 Canvas 导入课程</p>
+                <p className="helper-note">粘贴你当前看到的正常 Canvas 页面地址即可，路径、参数和片段会由服务器安全归一化到学校实例。</p>
                 <label className="canvas-task-token">
-                    <span>Canvas Token（个人访问令牌）</span>
+                    <span>学校 Canvas 地址</span>
+                    <input
+                        type="url"
+                        autoComplete="url"
+                        aria-label="学校 Canvas 地址"
+                        placeholder="https://canvas.cityu.edu.hk/courses"
+                        value={canvasAddress}
+                        onChange={event => this.setState({ canvasAddress: event.target.value })}
+                    />
+                </label>
+                <label className="canvas-task-token">
+                    <span>本次 Access Token</span>
                     <input
                         type="password"
                         autoComplete="off"
                         spellCheck={false}
-                        aria-label="Canvas Token"
+                        aria-label="本次 Access Token"
                         placeholder="粘贴仅用于本次导入的 Token"
                         value={taskToken}
                         onChange={event => this.setState({ taskToken: event.target.value })}
@@ -586,10 +603,14 @@ export class CanvasImport extends React.Component {
                     这个 Token 只用于读取你选择的课程资料；服务器读完文件后会立即销毁它，
                     之后的解析与索引不再使用它。
                 </p>
+                <details className="canvas-token-help">
+                    <summary>如何获取 Token</summary>
+                    <TaskCredentialSteps/>
+                </details>
                 {error && <p className="error-text">{error}</p>}
                 <div className="row" style={{ gap: 10, marginTop: 14 }}>
-                    <button type="button" className="btn primary" disabled={busy || !taskToken} onClick={() => this.openTask()}>
-                        确认学校账号
+                    <button type="button" className="btn primary" disabled={busy || !taskToken || !canvasAddress} onClick={() => this.openTask()}>
+                        {resumeJobId ? '重新验证并继续导入' : '确认并选择课程'}
                     </button>
                     <button type="button" className="btn" onClick={() => this.setState({ step: 'connect', error: '' })}>
                         返回
@@ -598,6 +619,11 @@ export class CanvasImport extends React.Component {
             </div>;
         }
         const readable = courses.filter(course => course.readable);
+        const byTerm = readable.reduce((groups, course) => {
+            const term = course.term || '未标注学期';
+            groups[term] = [...(groups[term] || []), course];
+            return groups;
+        }, {});
         return <div className="canvas-import-step canvas-task">
             <p className="canvas-import-lead">选择要导入的课程</p>
             <p className="helper-note">
@@ -612,10 +638,15 @@ export class CanvasImport extends React.Component {
             {busy && <p className="helper-note">正在读取课程…</p>}
             {!busy && !readable.length && <div className="empty-state">这所学校账号下暂时没有可导入的课程。</div>}
             <div className="canvas-import-courses">
-                {readable.map(course => <label key={course.id} className="canvas-import-course">
-                    <input type="checkbox" checked={selected.includes(course.id)} onChange={() => this.toggleCourse(course.id)}/>
-                    <span><strong>{course.name}</strong><small>{course.courseCode}{course.term ? ' · ' + course.term : ''}</small></span>
-                </label>)}
+                {Object.entries(byTerm).map(([term, termCourses]) => <section className="canvas-import-term" key={term}>
+                    <h4>{term}</h4>
+                    {termCourses.map(course => <label key={course.id} className="canvas-import-course">
+                        <input type="checkbox" checked={selected.includes(course.id)} onChange={() => this.toggleCourse(course.id)}/>
+                        <span><strong>{course.courseCode ? `${course.courseCode} · ` : ''}{course.name}</strong><small>
+                            {course.fileCount ?? '—'} 个文件 · {course.expectedBytes != null ? this.formatBytes(course.expectedBytes) : '大小待读取'} · {course.accessibility || '可读取'} · {course.importStatus || '未导入'}
+                        </small></span>
+                    </label>)}
+                </section>)}
             </div>
             {readable.length > 0 && <button type="button" className="btn primary" disabled={busy || !selected.length} onClick={() => this.start()}>
                 开始导入{selected.length ? `（${selected.length} 门课程）` : ''}
@@ -696,7 +727,7 @@ export class CanvasImport extends React.Component {
                     && <button type="button" className="btn" onClick={() => this.forgetTask('task_cancelled')}>
                         立即销毁 Token
                     </button>}
-                {job.needsCredential && <button type="button" className="btn primary" onClick={() => this.setState({ step: 'taskToken', taskStage: 'paste', error: '' })}>
+                {job.needsCredential && <button type="button" className="btn primary" onClick={() => this.setState({ step: 'taskToken', taskStage: 'paste', resumeJobId: job.jobId, error: '' })}>
                     重新粘贴 Token
                 </button>}
                 <button type="button" className="btn primary" onClick={() => { this.props.close?.(); this.props.onFinished?.(); }}>完成</button>
@@ -715,5 +746,12 @@ export class CanvasImport extends React.Component {
             {step === 'select' && this.renderSelect()}
             {step === 'job' && this.renderJob()}
         </div>;
+    }
+
+    formatBytes(value) {
+        const bytes = Number(value || 0);
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     }
 }

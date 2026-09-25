@@ -108,6 +108,13 @@ class School:
                 return httpx.Response(self.courses_status, json={"errors": [{"message": "no"}]})
             completed = dict(request.url.params).get("enrollment_state") == "completed"
             return httpx.Response(200, json=COURSES_COMPLETED if completed else COURSES_ACTIVE)
+        if path == "/api/v1/courses/560/files":
+            return httpx.Response(200, json=[
+                {"id": 1, "display_name": "notes.pdf", "size": 1024, "url": "https://files.example/1"},
+                {"id": 2, "display_name": "slides.pdf", "size": 2048, "url": "https://files.example/2"},
+            ])
+        if path == "/api/v1/courses/240/files":
+            return httpx.Response(200, json=[])
         if path == "/login/oauth2/token/revoke" or path == "/login/oauth2/token":
             return httpx.Response(200, json={})
         return httpx.Response(404, json={"errors": [{"message": "not found"}]})
@@ -237,6 +244,11 @@ def test_every_route_requires_a_session(tmp_path) -> None:
         ("get", "/api/integrations/canvas/courses?connection_id=x", None),
         ("get", "/api/integrations/canvas/imports/job-1", None),
         ("post", "/api/integrations/canvas/imports", body),
+        (
+            "post",
+            "/api/integrations/canvas/imports/job-1/credential",
+            {"institution_key": "cityu", "personal_access_token": PASTED},
+        ),
         ("post", "/api/integrations/canvas/imports/job-1/cancel", None),
         ("delete", "/api/integrations/canvas/connections/x", None),
     ):
@@ -921,6 +933,122 @@ def test_a_pasted_credential_is_held_transiently_and_written_down_nowhere(tmp_pa
     assert PASTED not in state.text
 
 
+def test_owner_pat_accepts_a_normal_canvas_page_without_a_developer_key(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name in (
+        "CANVAS_CITYU_CLIENT_ID",
+        "CANVAS_CITYU_CLIENT_SECRET",
+        "CANVAS_CITYU_DG_CLIENT_ID",
+        "CANVAS_CITYU_DG_CLIENT_SECRET",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    harness = build(tmp_path, School(), task_credential=True)
+
+    response = harness.client.post(
+        "/api/integrations/canvas/task-credentials",
+        headers=AUTH,
+        json={
+            "canvas_base_url": "https://canvas.cityu.edu.hk/profile/settings",
+            "personal_access_token": PASTED,
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["origin"] == CITYU
+    assert ("GET", "/api/v1/users/self/profile") in harness.school.requests
+
+
+def test_cancelling_an_import_destroys_its_transient_credential(tmp_path, keys) -> None:
+    harness = build(tmp_path, School(), task_credential=True)
+    opened = open_task_credential(harness)
+    started = harness.client.post(
+        "/api/integrations/canvas/imports",
+        headers=AUTH,
+        json={
+            "connection_id": opened["connectionId"],
+            "course_ids": ["560"],
+            "credential_ref": opened["credentialRef"],
+        },
+    )
+    assert started.status_code == 202, started.text
+
+    cancelled = harness.client.post(
+        f"/api/integrations/canvas/imports/{started.json()['jobId']}/cancel",
+        headers=AUTH,
+    )
+
+    assert cancelled.status_code == 200, cancelled.text
+    assert harness.app.state.canvas_task_credentials.state(opened["credentialRef"]) == "DESTROYED"
+
+
+def test_a_lost_task_credential_can_resume_the_same_frozen_import(tmp_path, keys) -> None:
+    harness = build(tmp_path, School(), task_credential=True)
+    opened = open_task_credential(harness)
+    started = harness.client.post(
+        "/api/integrations/canvas/imports",
+        headers=AUTH,
+        json={
+            "connection_id": opened["connectionId"],
+            "course_ids": ["560"],
+            "credential_ref": opened["credentialRef"],
+        },
+    )
+    job_id = started.json()["jobId"]
+    harness.client.post(
+        f"/api/integrations/canvas/task-credentials/{opened['credentialRef']}/forget",
+        headers=AUTH,
+        json={"reason": "restart_fixture"},
+    )
+    before = harness.client.get(f"/api/integrations/canvas/imports/{job_id}", headers=AUTH)
+    assert before.json()["needsCredential"] is True
+
+    resumed = harness.client.post(
+        f"/api/integrations/canvas/imports/{job_id}/credential",
+        headers=AUTH,
+        json={"institution_key": "cityu", "personal_access_token": PASTED},
+    )
+
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["jobId"] == job_id
+    assert resumed.json()["credentialState"] == "PRESENT_TRANSIENTLY"
+    assert resumed.json()["credentialRef"] != opened["credentialRef"]
+    after = harness.client.get(f"/api/integrations/canvas/imports/{job_id}", headers=AUTH)
+    assert after.json()["needsCredential"] is False
+
+
+def test_resume_refuses_a_malformed_replacement_credential_as_a_typed_4xx(
+    tmp_path, keys
+) -> None:
+    harness = build(tmp_path, School(), task_credential=True)
+    opened = open_task_credential(harness)
+    started = harness.client.post(
+        "/api/integrations/canvas/imports",
+        headers=AUTH,
+        json={
+            "connection_id": opened["connectionId"],
+            "course_ids": ["560"],
+            "credential_ref": opened["credentialRef"],
+        },
+    )
+    job_id = started.json()["jobId"]
+    harness.client.post(
+        f"/api/integrations/canvas/task-credentials/{opened['credentialRef']}/forget",
+        headers=AUTH,
+        json={"reason": "restart_fixture"},
+    )
+
+    response = harness.client.post(
+        f"/api/integrations/canvas/imports/{job_id}/credential",
+        headers=AUTH,
+        json={"institution_key": "cityu", "personal_access_token": "has spaces"},
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["error"]["code"] == "TASK_CREDENTIAL_REFUSED"
+    assert "single value" in response.json()["error"]["message"]
+
+
 def test_the_task_credential_reads_courses_and_stops_being_usable_once_forgotten(
     tmp_path, keys
 ) -> None:
@@ -951,7 +1079,6 @@ def test_the_task_credential_reads_courses_and_stops_being_usable_once_forgotten
         # listing the student's readable courses costs.
         "readCalls": 2,
     }
-
     after = harness.client.get(
         f"/api/integrations/canvas/courses?connection_id={connection_id}&credential_ref={ref}",
         headers=AUTH,
@@ -979,6 +1106,29 @@ def test_the_task_credential_reads_courses_and_stops_being_usable_once_forgotten
             )
         ]
     assert states == ["PRESENT_TRANSIENTLY", "DESTROYED"]
+
+
+def test_task_course_selection_includes_real_file_summary_when_requested(tmp_path, keys) -> None:
+    harness = build(tmp_path, School(), task_credential=True)
+    opened = open_task_credential(harness)
+
+    response = harness.client.get(
+        "/api/integrations/canvas/courses",
+        headers=AUTH,
+        params={
+            "connection_id": opened["connectionId"],
+            "credential_ref": opened["credentialRef"],
+            "include_file_summary": "true",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    by_id = {course["id"]: course for course in response.json()["courses"]}
+    assert by_id["560"]["fileCount"] == 2
+    assert by_id["560"]["expectedBytes"] == 3072
+    assert by_id["560"]["accessibility"] == "READABLE"
+    assert by_id["560"]["importStatus"] == "NOT_IMPORTED"
+    assert by_id["240"]["fileCount"] == 0
 
 
 def test_an_import_that_borrows_a_task_credential_says_so_and_reports_its_state(

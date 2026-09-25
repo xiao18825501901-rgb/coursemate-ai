@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
-from .http_safety import normalize_origin
+from .http_safety import normalize_canvas_page_origin, normalize_origin
 
 NOT_CONFIGURED = "NOT_CONFIGURED"
 AVAILABLE = "AVAILABLE"
@@ -96,9 +96,9 @@ class InstitutionConnectionRegistry:
             raise UnknownInstitutionError(f"unknown institution {key!r}") from error
 
     def by_origin(self, origin: str) -> Institution:
-        """Resolve a caller-supplied origin, refusing anything not registered."""
+        """Resolve a caller-supplied Canvas page URL, refusing anything not registered."""
         try:
-            normalized = normalize_origin(origin)
+            normalized = normalize_canvas_page_origin(origin)
         except ValueError as error:
             raise UnknownInstitutionError(str(error)) from error
         try:

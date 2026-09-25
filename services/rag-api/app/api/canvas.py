@@ -41,6 +41,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth import AuthenticatedUser, require_user
 from app.canvas.adapter import (
+    API_RESPONSE_NOT_JSON,
     EXPIRED_TOKEN,
     FORBIDDEN,
     NOT_FOUND,
@@ -105,6 +106,7 @@ CANVAS_UNAVAILABLE_CODES = {
     FORBIDDEN: (status.HTTP_403_FORBIDDEN, "CANVAS_FORBIDDEN"),
     NOT_FOUND: (status.HTTP_404_NOT_FOUND, "CANVAS_NOT_FOUND"),
     RATE_LIMIT: (status.HTTP_429_TOO_MANY_REQUESTS, "CANVAS_RATE_LIMITED"),
+    API_RESPONSE_NOT_JSON: (status.HTTP_502_BAD_GATEWAY, "API_RESPONSE_NOT_JSON"),
 }
 
 
@@ -599,14 +601,9 @@ def open_task_credential(
     _require_task_credential_owner(request, user)
     registry = _registry(request)
     institution = _task_institution(request, registry, payload)
-    if institution.state != "AVAILABLE":
-        # An unconfigured school has no origin to validate URLs against; the read would be
-        # refused a moment later by the adapter, and saying so here is clearer.
-        raise ApiError(
-            status.HTTP_409_CONFLICT,
-            "CANVAS_INSTITUTION_UNAVAILABLE",
-            "That school is not open for connections on this deployment.",
-        )
+    # A personal access token is already a credential for this student's own Canvas account.
+    # It does not depend on an institution-issued OAuth Developer Key; the registry entry is
+    # still required so the token can only be sent to an allow-listed origin.
     try:
         canvas_user_id, canvas_name = _identity(
             request, institution.origin, registry, payload.personal_access_token
@@ -880,6 +877,7 @@ def list_canvas_courses(
     user: Annotated[AuthenticatedUser, Depends(require_user)],
     connection_id: Annotated[str, Query(min_length=1, max_length=64)],
     credential_ref: Annotated[str, Query(max_length=64)] = "",
+    include_file_summary: bool = False,
 ) -> dict[str, Any]:
     """The student's own readable courses, for the import selection screen.
 
@@ -894,18 +892,53 @@ def list_canvas_courses(
         courses = adapter.student_courses()
     except CanvasReadError as error:
         raise _canvas_http_error(error) from error
+    import_status: dict[str, str] = {}
+    if include_file_summary:
+        with _database(request).connect() as connection:
+            rows = connection.execute(
+                "SELECT course_ids_json,status FROM canvas_import_jobs "
+                "WHERE owner_user_id=? AND connection_id=? ORDER BY created_at DESC",
+                (user.user_id, connection_id),
+            ).fetchall()
+        for row in rows:
+            for course_id in json.loads(str(row["course_ids_json"])):
+                import_status.setdefault(str(course_id), str(row["status"]))
+    public_courses = []
+    for course in courses:
+        public = {
+            "id": course.id,
+            "name": course.name,
+            "courseCode": course.course_code,
+            "term": course.term,
+            "workflowState": course.workflow_state,
+            "readable": course.is_readable_history,
+        }
+        if include_file_summary:
+            try:
+                files = adapter.course_files(course.id) if course.is_readable_history else []
+                public.update(
+                    {
+                        "fileCount": len(files),
+                        "expectedBytes": sum(max(0, item.size) for item in files),
+                        "accessibility": (
+                            "READABLE" if course.is_readable_history else "NOT_READABLE"
+                        ),
+                    }
+                )
+            except CanvasReadError as error:
+                if error.category == EXPIRED_TOKEN:
+                    raise _canvas_http_error(error) from error
+                public.update(
+                    {
+                        "fileCount": None,
+                        "expectedBytes": None,
+                        "accessibility": error.category,
+                    }
+                )
+            public["importStatus"] = import_status.get(course.id, "NOT_IMPORTED")
+        public_courses.append(public)
     return {
-        "courses": [
-            {
-                "id": course.id,
-                "name": course.name,
-                "courseCode": course.course_code,
-                "term": course.term,
-                "workflowState": course.workflow_state,
-                "readable": course.is_readable_history,
-            }
-            for course in courses
-        ]
+        "courses": public_courses
     }
 
 
@@ -1015,6 +1048,96 @@ def import_status(
     }
 
 
+@router.post("/imports/{job_id}/credential")
+def resume_import_credential(
+    job_id: str,
+    payload: TaskCredentialRequest,
+    request: Request,
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+) -> dict[str, Any]:
+    """Replace a lost task credential without changing the frozen course selection."""
+
+    _require_tables(request)
+    _require_task_credential_owner(request, user)
+    with _database(request).connect() as connection:
+        repository = CanvasJobRepository(connection)
+        row = repository.snapshot(job_id)
+        if row is None or str(row["owner_user_id"]) != user.user_id:
+            raise ApiError(status.HTTP_404_NOT_FOUND, "JOB_NOT_FOUND", "That import was not found.")
+        if str(row["credential_kind"]) != CREDENTIAL_KIND_TRANSIENT_TASK:
+            raise ApiError(
+                409,
+                "CANVAS_CREDENTIAL_KIND_MISMATCH",
+                "That import does not use a task credential.",
+            )
+        if str(row["status"]) in {"COMPLETED", "COMPLETED_WITH_WARNINGS", "FAILED", "CANCELLED"}:
+            raise ApiError(409, "CANVAS_IMPORT_NOT_RESUMABLE", "That import cannot be resumed.")
+        stored = CanvasConnectionRepository(connection).get(
+            str(row["connection_id"]), subject=user.user_id
+        )
+    if stored is None:
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND,
+            "CONNECTION_NOT_FOUND",
+            "That Canvas connection was not found.",
+        )
+    institution = _task_institution(request, _registry(request), payload)
+    if institution.origin != str(row["institution_origin"]):
+        raise ApiError(
+            409,
+            "CANVAS_INSTITUTION_MISMATCH",
+            "Use the same Canvas school as the frozen import.",
+        )
+    try:
+        canvas_user_id, canvas_name = _identity(
+            request, institution.origin, _registry(request), payload.personal_access_token
+        )
+    except CanvasReadError as error:
+        raise _canvas_http_error(error) from error
+    if canvas_user_id != stored.canvas_user_id:
+        raise ApiError(
+            409,
+            "CANVAS_ACCOUNT_MISMATCH",
+            "Use the same Canvas account as the frozen import.",
+        )
+    try:
+        credential = _task_credential_store(request).open_task(
+            subject=user.user_id,
+            connection_id=stored.connection_id,
+            institution_key=institution.key,
+            institution_origin=institution.origin,
+            token=payload.personal_access_token,
+            canvas_user_id=canvas_user_id,
+            canvas_display_name=canvas_name,
+        )
+    except CredentialRefused as error:
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "TASK_CREDENTIAL_REFUSED",
+            str(error),
+        ) from error
+    with _database(request).connect() as connection:
+        rebound = CanvasJobRepository(connection).resume_with_transient_credential(
+            job_id, credential.credential_ref
+        )
+    if not rebound:
+        _task_credential_store(request).destroy(credential.credential_ref, reason="resume_refused")
+        raise ApiError(409, "CANVAS_IMPORT_NOT_RESUMABLE", "That import cannot be resumed.")
+    _record_credential_event(
+        request,
+        credential=credential,
+        state=PRESENT_TRANSIENTLY,
+        reason="resume_after_credential_loss",
+        job_id=job_id,
+    )
+    return {
+        "jobId": job_id,
+        "credentialRef": credential.credential_ref,
+        "credentialState": PRESENT_TRANSIENTLY,
+        "status": QUEUED,
+    }
+
+
 @router.post("/imports/{job_id}/cancel")
 def cancel_import(
     job_id: str,
@@ -1031,6 +1154,20 @@ def cancel_import(
         current = str(row["status"])
         if current in TERMINAL_STATES:
             return {"jobId": job_id, "status": current, "cancelled": False}
+        credential_ref = str(row["credential_ref"] or "")
+        if str(row["credential_kind"]) == CREDENTIAL_KIND_TRANSIENT_TASK and credential_ref:
+            destroyed = _task_credential_store(request).destroy(
+                credential_ref, reason="task_cancelled"
+            )
+            if destroyed is not None:
+                repository.set_credential_state(job_id, DESTROYED)
+                _record_credential_event(
+                    request,
+                    credential=destroyed,
+                    state=DESTROYED,
+                    reason="task_cancelled",
+                    job_id=job_id,
+                )
         repository.set_status(job_id, "CANCELLED")
     return {"jobId": job_id, "status": "CANCELLED", "cancelled": True}
 
@@ -1060,4 +1197,3 @@ def disconnect(
     with _database(request).connect() as connection:
         CanvasConnectionRepository(connection).mark_revoked(connection_id, subject=user.user_id)
     return {"connectionId": connection_id, "revoked": True, "revokedAtSchool": revoked_remote}
-

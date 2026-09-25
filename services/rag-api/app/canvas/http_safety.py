@@ -57,6 +57,45 @@ def normalize_origin(value: str) -> str:
     return f"{ALLOWED_SCHEME}://{parts.hostname.lower()}"
 
 
+def normalize_canvas_page_origin(value: str) -> str:
+    """Reduce an ordinary Canvas page URL to its HTTPS origin.
+
+    Students copy the address currently visible in the browser, not a hand-edited API root.
+    Paths, queries and fragments are therefore intentionally discarded. The security-bearing
+    parts are not: non-HTTPS schemes, userinfo, unusual ports, localhost and non-public IP
+    literals are refused before the registry is consulted.
+    """
+
+    if not isinstance(value, str) or not value.strip():
+        raise UnsafeUrlError("Canvas address is empty")
+    entered = value.strip()
+    if CONTROL_CHARACTERS.search(entered):
+        raise UnsafeUrlError("Canvas address contains control characters")
+    if "://" not in entered:
+        entered = f"https://{entered}"
+    parts = urlsplit(entered)
+    if parts.scheme.lower() != ALLOWED_SCHEME:
+        raise UnsafeUrlError(f"Canvas address must use {ALLOWED_SCHEME}")
+    if parts.username or parts.password:
+        raise UnsafeUrlError("Canvas address must not carry userinfo")
+    host = (parts.hostname or "").lower()
+    if not host or host == "localhost" or host.endswith(".localhost") or host.endswith("."):
+        raise UnsafeUrlError("Canvas address has an invalid host")
+    try:
+        port = parts.port
+    except ValueError as error:
+        raise UnsafeUrlError(f"Canvas address port is invalid: {error}") from error
+    if port not in (None, DEFAULT_HTTPS_PORT):
+        raise UnsafeUrlError("Canvas address must use the standard HTTPS port")
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    if literal is not None and not is_public_address(str(literal)):
+        raise UnsafeUrlError("Canvas address must not target a private or reserved network")
+    return f"{ALLOWED_SCHEME}://{host}"
+
+
 def validate_api_url(
     url: str,
     *,

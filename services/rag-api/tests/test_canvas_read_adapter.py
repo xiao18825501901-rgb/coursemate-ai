@@ -32,6 +32,7 @@ from app.canvas import (
     validate_download_target,
 )
 from app.canvas.adapter import FORBIDDEN, INVALID_RESPONSE
+from app.canvas.http_safety import normalize_canvas_page_origin
 
 CITYU = "https://canvas.cityu.edu.hk"
 CITYU_DG = "https://cityu-dg.instructure.com"
@@ -358,14 +359,22 @@ def test_expired_token_and_not_found_are_distinct() -> None:
     assert missing.value.category == "NOT_FOUND"
 
 
-def test_non_json_body_is_reported_as_invalid_response() -> None:
+def test_non_json_body_is_reported_as_api_response_not_json() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text="<html>login</html>")
 
     client = adapter(handler)
     with pytest.raises(CanvasReadError) as error:
         client.course_files("560")
-    assert error.value.category == "INVALID_RESPONSE"
+    assert error.value.category == "API_RESPONSE_NOT_JSON"
+
+
+def test_profile_html_is_reported_as_api_response_not_json() -> None:
+    client = adapter(lambda request: httpx.Response(200, text="<html>sign in</html>"))
+    with pytest.raises(CanvasReadError) as error:
+        client.profile()
+    assert error.value.category == "API_RESPONSE_NOT_JSON"
+    assert "content-type" in error.value.detail.lower()
 
 
 # ------------------------------------------------------------------ downloads
@@ -583,15 +592,20 @@ def test_a_non_numeric_file_id_cannot_be_smuggled_into_the_path() -> None:
 
 
 def test_file_metadata_that_is_not_an_object_is_an_invalid_response() -> None:
-    for payload in ([{"url": f"{CITYU}/x"}], "not json at all"):
+    for payload, content_type, expected in (
+        ([{"url": f"{CITYU}/x"}], "application/json", INVALID_RESPONSE),
+        ("not json at all", "text/plain", "API_RESPONSE_NOT_JSON"),
+    ):
         client = adapter(
-            lambda request, payload=payload: httpx.Response(
-                200, content=payload if isinstance(payload, str) else json.dumps(payload).encode()
+            lambda request, payload=payload, content_type=content_type: httpx.Response(
+                200,
+                content=payload if isinstance(payload, str) else json.dumps(payload).encode(),
+                headers={"content-type": content_type},
             )
         )
         with pytest.raises(CanvasReadError) as raised:
             client.course_file_download_url("560", "9")
-        assert raised.value.category == INVALID_RESPONSE
+        assert raised.value.category == expected
 
 
 # ------------------------------------------------------------------ url rules
@@ -609,6 +623,36 @@ def test_origin_normalisation_rules() -> None:
     ):
         with pytest.raises(ValueError):
             normalize_origin(bad)
+
+
+@pytest.mark.parametrize(
+    ("entered", "expected"),
+    [
+        ("https://cityu-dg.instructure.com/courses", CITYU_DG),
+        ("cityu-dg.instructure.com/courses/487/wiki", CITYU_DG),
+        ("https://canvas.cityu.edu.hk/profile/settings", CITYU),
+        ("https://canvas.cityu.edu.hk/courses/123/files/456?x=1#abc", CITYU),
+    ],
+)
+def test_canvas_page_url_normalises_to_its_safe_origin(entered: str, expected: str) -> None:
+    assert normalize_canvas_page_origin(entered) == expected
+
+
+@pytest.mark.parametrize(
+    "entered",
+    [
+        "file:///etc/passwd",
+        "ftp://canvas.cityu.edu.hk/courses",
+        "https://user@canvas.cityu.edu.hk/courses",
+        "https://localhost/courses",
+        "https://127.0.0.1/courses",
+        "https://169.254.169.254/latest/meta-data",
+        "https://canvas.cityu.edu.hk/\x00",
+    ],
+)
+def test_canvas_page_url_rejects_non_web_or_internal_targets(entered: str) -> None:
+    with pytest.raises(ValueError):
+        normalize_canvas_page_origin(entered)
 
 
 def test_public_address_classification() -> None:

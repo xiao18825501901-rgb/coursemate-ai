@@ -6,8 +6,8 @@
  * has. Every call carries the sign-in token in the `Authorization` header and never in a URL.
  *
  * Two rules the UI must not break, and which this module keeps in one place so it cannot:
- *   * there is no personal-access-token input anywhere — the only way to reach a school is the
- *     school's own OAuth page, opened by a full-page navigation to `connectUrl()`;
+ *   * the normal student path uses the school's OAuth page or the local bridge. The only web
+ *     personal-access-token input is the explicitly enabled owner task-credential flow below;
  *   * a connection that is not `connectable` must be rendered as "not open yet" with the local
  *     upload fallback, so `reasonFor()` turns the server's reason code into a sentence rather
  *     than leaving a button that fails on click.
@@ -34,13 +34,30 @@ async function call(path, options = {}) {
     credentials: "include",
     cache: "no-store",
   });
+  if (response.status === 204) return null;
+  const contentType = String(response.headers?.get?.("content-type") || "")
+    .split(";", 1)[0]
+    .trim()
+    .toLowerCase();
+  const isJson = contentType === "application/json" || contentType.endsWith("+json");
+  if (!isJson) {
+    const failure = new Error("学校接口返回了网页而不是数据，请稍后重试并提供请求编号。");
+    failure.status = response.status;
+    failure.code = "API_RESPONSE_NOT_JSON";
+    failure.details = { contentType: contentType || "missing" };
+    throw failure;
+  }
+  let body = null;
+  try {
+    body = await response.json();
+  } catch {
+    const failure = new Error("学校接口返回的数据格式无效，请稍后重试。");
+    failure.status = response.status;
+    failure.code = "API_RESPONSE_NOT_JSON";
+    failure.details = { contentType };
+    throw failure;
+  }
   if (!response.ok) {
-    let body = null;
-    try {
-      body = await response.json();
-    } catch {
-      /* a non-JSON error body is still an error */
-    }
     const error = body && body.error;
     const message =
       (error && error.message) || `连接学校服务失败（${response.status}）`;
@@ -50,8 +67,7 @@ async function call(path, options = {}) {
     failure.details = (error && error.details) || {};
     throw failure;
   }
-  if (response.status === 204) return null;
-  return response.json();
+  return body;
 }
 
 /** Which schools can be connected right now, and why not when they cannot. */
@@ -79,6 +95,21 @@ export const startImport = (connectionId, courseIds, saveConnection = false, cre
   });
 
 export const importStatus = (jobId) => call(`/imports/${encodeURIComponent(jobId)}`);
+
+/** Attach a newly pasted credential to the same frozen import after restart/expiry. */
+export const resumeTaskCredential = (
+  jobId,
+  personalAccessToken,
+  { institutionKey = "", canvasBaseUrl = "" } = {},
+) =>
+  call(`/imports/${encodeURIComponent(jobId)}/credential`, {
+    method: "POST",
+    body: JSON.stringify({
+      personal_access_token: personalAccessToken,
+      institution_key: institutionKey,
+      canvas_base_url: canvasBaseUrl,
+    }),
+  });
 
 export const cancelImport = (jobId) =>
   call(`/imports/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
@@ -224,8 +255,8 @@ export const LOCAL_STATUS_LABELS = {
  *
  * What is different from the OAuth path, and what the screen has to say out loud:
  *   * the token reaches the server, which is the opposite of the local bridge's rule. The page
- *     therefore says so on the step where it is pasted, and the public connect screen keeps its
- *     own sentence that this site does not accept personal access tokens;
+ *     therefore says so on the step where it is pasted, and the public connect screen separately
+ *     says that its normal student path does not accept personal access tokens;
  *   * the server holds it in memory for this one task and destroys it once the Canvas reads are
  *     finished, before any file is parsed or indexed;
  *   * no institution has approved this path for students. It is the owner's testing route, and
@@ -317,5 +348,6 @@ export const forgetTaskCredential = (credentialRef, reason = "user_disconnected"
 export const taskCourses = (connectionId, credentialRef) =>
   call(
     `/courses?connection_id=${encodeURIComponent(connectionId)}` +
-      `&credential_ref=${encodeURIComponent(credentialRef)}`
+      `&credential_ref=${encodeURIComponent(credentialRef)}` +
+      `&include_file_summary=true`
   );

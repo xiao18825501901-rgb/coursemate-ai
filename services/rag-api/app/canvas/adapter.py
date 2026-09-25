@@ -85,6 +85,7 @@ RATE_LIMIT = "RATE_LIMIT"
 SERVER_ERROR = "SERVER_ERROR"
 NETWORK = "NETWORK"
 INVALID_RESPONSE = "INVALID_RESPONSE"
+API_RESPONSE_NOT_JSON = "API_RESPONSE_NOT_JSON"
 
 STATUS_CATEGORIES = {
     401: EXPIRED_TOKEN,
@@ -283,13 +284,30 @@ class CanvasReadAdapter:
             category, f"Canvas answered {status}", status=status, retry_after=retry_after
         )
 
+    @staticmethod
+    def _json_payload(response: httpx.Response) -> Any:
+        """Decode a Canvas API response only when its media type promises JSON."""
+
+        media_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        if media_type != "application/json" and not media_type.endswith("+json"):
+            raise CanvasReadError(
+                API_RESPONSE_NOT_JSON,
+                f"Canvas API content-type was {media_type or 'missing'}, not JSON",
+                status=response.status_code,
+            )
+        try:
+            return response.json()
+        except ValueError as error:
+            raise CanvasReadError(
+                API_RESPONSE_NOT_JSON,
+                "Canvas API declared JSON but returned an invalid body",
+                status=response.status_code,
+            ) from error
+
     def _pages(self, path: str, params: Sequence[tuple[str, str]] | None = None) -> _Page:
         """One page, with the next link validated against the same institution origin."""
         response = self._request(GET, path, params)
-        try:
-            payload = response.json()
-        except ValueError as error:
-            raise CanvasReadError(INVALID_RESPONSE, f"Canvas returned non-JSON: {error}") from error
+        payload = self._json_payload(response)
         if not isinstance(payload, list):
             raise CanvasReadError(INVALID_RESPONSE, "expected a list from a paged endpoint")
         next_url = parse_next_link(response.headers.get("Link"))
@@ -327,7 +345,7 @@ class CanvasReadAdapter:
     # ------------------------------------------------------------------- read API
     def profile(self) -> CanvasProfile:
         response = self._request(GET, "/api/v1/users/self/profile")
-        payload = response.json()
+        payload = self._json_payload(response)
         if not isinstance(payload, dict):
             raise CanvasReadError(INVALID_RESPONSE, "profile was not an object")
         return CanvasProfile(
@@ -431,10 +449,7 @@ class CanvasReadAdapter:
         if not str(course_id).isdigit() or not str(file_id).isdigit():
             raise CanvasReadError(INVALID_RESPONSE, "course and file ids must be numeric")
         response = self._request(GET, f"/api/v1/courses/{course_id}/files/{file_id}")
-        try:
-            payload = response.json()
-        except ValueError as error:
-            raise CanvasReadError(INVALID_RESPONSE, "file metadata was not JSON") from error
+        payload = self._json_payload(response)
         if not isinstance(payload, dict):
             raise CanvasReadError(INVALID_RESPONSE, "file metadata was not an object")
         url = payload.get("url")
