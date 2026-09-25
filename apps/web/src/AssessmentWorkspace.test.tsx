@@ -92,6 +92,25 @@ describe('AssessmentWorkspace', () => {
     expect(await screen.findByText('原始分：78 / 100')).toBeVisible();
   });
 
+  it('shows a clearly provisional total when question grading awaits review', async () => {
+    vi.mocked(getAssessment).mockResolvedValue({ status: 'SUBMITTED', session: 's1' });
+    vi.mocked(getAssessmentSession).mockResolvedValue({
+      id: 's1',
+      status: 'SUBMITTED',
+      questions: questions.map((question, index) => ({
+        ...question,
+        review: { awarded_marks: index + 1, submitted_answer: 'answer' },
+      })),
+      raw_score: null,
+      grade: { label: null },
+      node_id: 'n1',
+    });
+    render(<AssessmentWorkspace course={{ code: 'CS3481' }} node={{ title: 'DBSCAN' }} toast={vi.fn()} onExit={vi.fn()} />);
+
+    expect(await screen.findByText('暂计：15 / 100（待复核，不是正式 Raw Score）')).toBeVisible();
+    expect(screen.queryByText(/原始分：/)).not.toBeInTheDocument();
+  });
+
   it('collects one answer per frozen question and submits the stable item ids', async () => {
     vi.mocked(getAssessment).mockResolvedValue({ status: 'IN_PROGRESS', session: 's1' });
     vi.mocked(submitAssessment).mockResolvedValue({ status: 'GRADED' });
