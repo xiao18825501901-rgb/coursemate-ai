@@ -13,6 +13,7 @@ from typing import Annotated, Any, Final, Literal
 
 from pydantic import Field, StringConstraints, model_validator
 
+from app.errors import ApiError
 from app.learning.models import Contract, Identifier, Text
 from app.learning.provider import ProviderCallFailure
 from app.learning.question_blueprint import Hex64
@@ -117,9 +118,17 @@ class PracticeProviderRun(Contract):
 
 
 def _provider_failure(failure: ProviderCallFailure, prefix: str) -> PracticeInteractionError:
-    cause = failure.cause
+    return _provider_cause(failure.cause, prefix)
+
+
+def _provider_cause(cause: Exception, prefix: str) -> PracticeInteractionError:
     code = getattr(cause, "code", "")
-    if code in {"MODEL_LIVE_BLOCKED", "MODEL_ENDPOINT_INVALID"}:
+    if code in {
+        "DAILY_MODEL_CALL_QUOTA",
+        "MODEL_COST_BUDGET",
+        "MODEL_ENDPOINT_INVALID",
+        "MODEL_LIVE_BLOCKED",
+    }:
         return PracticeInteractionError(
             f"{prefix}_PROVIDER_BLOCKED", "The verified DeepSeek provider is unavailable."
         )
@@ -148,6 +157,8 @@ def generate_practice_feedback(
         )
     except ProviderCallFailure as failure:
         raise _provider_failure(failure, "PRACTICE_FEEDBACK") from failure
+    except ApiError as error:
+        raise _provider_cause(error, "PRACTICE_FEEDBACK") from error
     except (OSError, ValueError) as error:
         raise PracticeInteractionError(
             "PRACTICE_FEEDBACK_INVALID",
@@ -198,6 +209,8 @@ def generate_practice_hint(
         run = PracticeProviderRun.model_validate(raw_run)
     except ProviderCallFailure as failure:
         raise _provider_failure(failure, "PRACTICE_HINT") from failure
+    except ApiError as error:
+        raise _provider_cause(error, "PRACTICE_HINT") from error
     except (OSError, ValueError) as error:
         raise PracticeInteractionError(
             "PRACTICE_HINT_INVALID", "The practice hint failed its structured contract."

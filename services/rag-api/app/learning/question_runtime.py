@@ -386,6 +386,12 @@ class QuestionEngineRuntime:
                     input_hash,
                 ),
             ).rowcount
+            if inserted == 1:
+                connection.execute(
+                    "INSERT INTO practice_operation_metering_guards("
+                    "workspace_id,operation_id,guard_version) VALUES(?,?,'metered-practice.v1')",
+                    (workspace_id, operation_id),
+                )
             row = connection.execute(
                 "SELECT * FROM practice_interaction_operations "
                 "WHERE workspace_id=? AND operation_id=?",
@@ -459,7 +465,13 @@ class QuestionEngineRuntime:
         if replay is not None:
             return replay
         try:
-            output, run = generate_practice_hint(self.provider, context=context)
+            output, run = generate_practice_hint(
+                self._provider_for_operation(
+                    workspace_id=workspace_id,
+                    operation_id=operation_id,
+                ),
+                context=context,
+            )
             event_id = f"ph_{uuid4().hex}"
             result = {
                 "id": event_id,
@@ -600,7 +612,13 @@ class QuestionEngineRuntime:
         if replay is not None:
             return replay
         try:
-            output, run = generate_practice_feedback(self.provider, context=provider_context)
+            output, run = generate_practice_feedback(
+                self._provider_for_operation(
+                    workspace_id=workspace_id,
+                    operation_id=operation_id,
+                ),
+                context=provider_context,
+            )
             expected = {str(item["criterion_id"]) for item in context["rubric"]}
             actual = {item.criterion_id for item in output.criteria}
             if actual != expected:

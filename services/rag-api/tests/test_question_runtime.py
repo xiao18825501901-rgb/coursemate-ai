@@ -252,6 +252,7 @@ def test_practice_hint_and_attempt_are_owner_scoped_idempotent_and_not_grades(
     question_id = generated["question_revision_id"]
 
     calls: list[str] = []
+    metered_calls: list[tuple[str, str, str]] = []
     original_generate = provider.generate
 
     def counted_generate(schema: Any, **kwargs: Any) -> Any:
@@ -259,6 +260,17 @@ def test_practice_hint_and_attempt_are_owner_scoped_idempotent_and_not_grades(
         return original_generate(schema, **kwargs)
 
     provider.generate = counted_generate  # type: ignore[method-assign]
+
+    def metered_generate(
+        workspace_id: str,
+        operation_id: str,
+        schema: Any,
+        **kwargs: Any,
+    ) -> Any:
+        metered_calls.append((workspace_id, operation_id, kwargs["role"]))
+        return provider.generate(schema, **kwargs)
+
+    runtime.metered_generate = metered_generate
     hint = runtime.generate_hint(
         owner_user_id=OWNER,
         workspace_id=WORKSPACE,
@@ -291,6 +303,10 @@ def test_practice_hint_and_attempt_are_owner_scoped_idempotent_and_not_grades(
     assert hint == replayed_hint
     assert attempt == replayed_attempt
     assert calls == ["PracticeHintOutput", "PracticeFeedbackOutput"]
+    assert metered_calls == [
+        (WORKSPACE, "practice-hint-operation", "PRACTICE_HINT"),
+        (WORKSPACE, "practice-attempt-operation", "PRACTICE_FEEDBACK"),
+    ]
     assert hint["assistance"] == "HINT"
     assert "Synthetic candidate answer" not in hint["hint"]
     assert attempt["assistance"] == "HINT"
@@ -313,9 +329,17 @@ def test_practice_hint_and_attempt_are_owner_scoped_idempotent_and_not_grades(
         coverage_count = connection.execute(
             "SELECT COUNT(*) FROM learning_coverage"
         ).fetchone()[0]
+        guards = connection.execute(
+            "SELECT operation_id,guard_version FROM practice_operation_metering_guards "
+            "ORDER BY operation_id"
+        ).fetchall()
     assert stored_hint["owner_user_id"] == OWNER
     assert stored_attempt["owner_user_id"] == OWNER
     assert stored_attempt["assistance"] == "HINT"
+    assert [tuple(row) for row in guards] == [
+        ("practice-attempt-operation", "metered-practice.v1"),
+        ("practice-hint-operation", "metered-practice.v1"),
+    ]
     assert grade_count == evidence_count == coverage_count == 0
 
 
@@ -381,6 +405,41 @@ def test_failed_practice_operation_is_not_billed_again_on_replay(tmp_path: Path)
                 workspace_id=WORKSPACE,
                 question_revision_id=generated["question_revision_id"],
                 operation_id="blocked-practice-hint",
+            )
+        assert raised.value.code == "PRACTICE_HINT_PROVIDER_BLOCKED"
+    assert calls == 1
+
+
+def test_metered_practice_refusal_is_terminal_and_not_retried(tmp_path: Path) -> None:
+    database, config = database_with_objective(tmp_path)
+    runtime = QuestionEngineRuntime(
+        database=database,
+        provider=LearningProvider(config),
+        semantic_decisions=decisions(database),
+    )
+    generated = runtime.generate_one(
+        owner_user_id=OWNER,
+        workspace_id=WORKSPACE,
+        course_id=COURSE,
+        private_course_id=PRIVATE_COURSE,
+        node_id=NODE,
+        operation_id="metered-refusal-question",
+    )
+    calls = 0
+
+    def refused_generate(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        raise ApiError(429, "DAILY_MODEL_CALL_QUOTA", "synthetic quota refusal")
+
+    runtime.metered_generate = refused_generate
+    for _ in range(2):
+        with pytest.raises(QuestionEngineRuntimeError) as raised:
+            runtime.generate_hint(
+                owner_user_id=OWNER,
+                workspace_id=WORKSPACE,
+                question_revision_id=generated["question_revision_id"],
+                operation_id="metered-refusal-hint",
             )
         assert raised.value.code == "PRACTICE_HINT_PROVIDER_BLOCKED"
     assert calls == 1
