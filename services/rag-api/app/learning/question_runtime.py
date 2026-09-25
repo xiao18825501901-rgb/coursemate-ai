@@ -916,7 +916,7 @@ class QuestionEngineRuntime:
         difficulty_features: list[DifficultyFeature],
         question_type: QuestionType,
         expected_answer_form: AnswerForm,
-        marks: int,
+        marks: float,
         scoring_criteria: list[str],
         misconception_targets: list[str],
         generation_policy_version: str,
@@ -1248,6 +1248,40 @@ class QuestionEngineRuntime:
         )
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            configured = connection.execute(
+                "SELECT 1 FROM assessment_configurations WHERE id=? AND workspace_id=? "
+                "AND status='FROZEN'",
+                (preparation_key, workspace_id),
+            ).fetchone()
+            if configured is not None:
+                config_values = (
+                    preparation_key,
+                    workspace_id,
+                    slot.slot_key,
+                    slot.ordinal,
+                    question_revision_id,
+                    blueprint.question_family_id,
+                    blueprint.blueprint_id,
+                    objective.item_id,
+                )
+                connection.execute(
+                    "INSERT OR IGNORE INTO assessment_configuration_questions("
+                    "configuration_id,workspace_id,slot_id,ordinal,question_revision_id,"
+                    "family_id,blueprint_id,objective_id) VALUES(?,?,?,?,?,?,?,?)",
+                    config_values,
+                )
+                row = connection.execute(
+                    "SELECT configuration_id,workspace_id,slot_id,ordinal,question_revision_id,"
+                    "family_id,blueprint_id,objective_id FROM assessment_configuration_questions "
+                    "WHERE configuration_id=? AND slot_id=?",
+                    (preparation_key, slot.slot_key),
+                ).fetchone()
+                if row is None or tuple(row) != config_values:
+                    raise QuestionEngineRuntimeError(
+                        "ASSESSMENT_SLOT_CONFLICT",
+                        "The configured Assessment slot is already bound to different input.",
+                    )
+                return
             connection.execute(
                 "INSERT OR IGNORE INTO assessment_preparation_questions("
                 "preparation_job_id,workspace_id,ordinal,slot_key,marks,objective_id,"
@@ -1276,10 +1310,11 @@ class QuestionEngineRuntime:
         private_course_id: str,
         node_id: str,
         preparation_key: str,
+        slots: tuple[AssessmentQuestionSlot, ...] | None = None,
         operation_id: str | None = None,
         should_cancel: Callable[[], bool] | None = None,
     ) -> list[dict[str, Any]]:
-        """Prepare five complementary READY revisions for the existing AssessmentService."""
+        """Prepare complementary READY revisions for one frozen configuration."""
 
         if not 8 <= len(preparation_key.strip()) <= 100:
             raise QuestionEngineRuntimeError(
@@ -1327,7 +1362,7 @@ class QuestionEngineRuntime:
                 )
 
             prepared: list[dict[str, Any]] = []
-            for slot in default_assessment_question_slots():
+            for slot in (slots or default_assessment_question_slots()):
                 self._check_cancelled(should_cancel)
                 objective = objectives[(slot.ordinal - 1) % len(objectives)]
                 evidence = build_evidence_pack(

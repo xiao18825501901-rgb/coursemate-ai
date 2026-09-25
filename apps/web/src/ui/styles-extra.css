@@ -141,6 +141,16 @@
 .assessment-picker-list .node-picker-row{justify-content:flex-start;gap:10px;text-align:left;padding:12px 14px;border:1px solid var(--line,#e4e9ed);border-radius:8px}
 .assessment-picker-list .muted{margin-left:auto}
 .assessment-preparing,.assessment-start{padding:18px 0}
+.assessment-setup{max-width:980px;margin:0 auto;padding:8px 0 24px}
+.assessment-setup-intro{margin-bottom:18px}
+.assessment-setup-intro h2{margin:0 0 6px}
+.assessment-slot-list{display:flex;flex-direction:column;gap:8px}
+.assessment-slot-row{display:grid;grid-template-columns:72px minmax(170px,1fr) minmax(170px,1fr) 86px 34px;align-items:end;gap:12px;padding:12px 14px;border:1px solid var(--line,#e4e9ed);border-radius:10px;background:var(--surface,#f6f8fa)}
+.assessment-slot-row label{display:flex;flex-direction:column;gap:5px;color:var(--muted,#7b8b96);font-size:12px}
+.assessment-slot-row select{width:100%;min-height:38px;border:1px solid var(--line,#d6dee4);border-radius:7px;background:var(--bg,#fff);color:var(--ink,#283f4c);padding:6px 9px}
+.assessment-slot-marks{align-self:center;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted,#7b8b96)}
+.assessment-setup-actions{display:flex;align-items:center;gap:12px;margin-top:16px}
+.assessment-setup-actions .btn.primary{margin-left:auto}
 .assessment-summary{display:flex;align-items:center;gap:14px;margin-bottom:14px;padding:12px 14px;border:1px solid var(--line,#e4e9ed);border-radius:8px;background:var(--surface,#f6f8fa)}
 .assessment-option-readonly{display:block;padding:8px 10px;border:1px solid #d6dee4;border-radius:6px;margin-top:6px}
 .assessment-rubric{margin:6px 0;padding-left:18px;color:var(--muted,#7b8b96)}
@@ -150,7 +160,7 @@
 .step-explain-link{color:var(--blue,#16759b);font-size:12px;cursor:pointer}
 .node-popover .start-assessment{color:var(--accent,#aa2059);font-weight:600}
 .assessment-question header small{display:block}
-@media(max-width:800px){.assessment-topbar{height:48px;padding:0 12px}.assessment-body{padding:14px 14px 20px}.assessment-composer{padding:10px 12px 14px}}
+@media(max-width:800px){.assessment-topbar{height:48px;padding:0 12px}.assessment-body{padding:14px 14px 20px}.assessment-composer{padding:10px 12px 14px}.assessment-slot-row{grid-template-columns:48px 1fr 34px}.assessment-slot-row label{grid-column:2}.assessment-slot-marks{grid-column:2;text-align:left}.assessment-slot-row .icon-btn{grid-column:3;grid-row:1}.assessment-setup-actions{align-items:stretch;flex-direction:column}.assessment-setup-actions .btn.primary{margin-left:0}}
 
 /* Canvas private import: the two entry points and the wizard they open.
    Both entries are real buttons with an underline, so they read as links, are reachable with

@@ -498,6 +498,18 @@ def start_assessment(
     )
 
 
+@router.get("/workspaces/{workspace_id}/assessments/setup/{node_id}")
+def assessment_setup(
+    workspace_id: str,
+    node_id: str,
+    request: Request,
+    user: User,
+) -> dict[str, Any]:
+    return cast(LearningOrchestrator, request.app.state.learning).assessment_setup(
+        workspace_id, user.user_id, node_id
+    )
+
+
 @router.get("/workspaces/{workspace_id}/assessments/{session_id}")
 def assessment(
     workspace_id: str,

@@ -4,10 +4,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // @ts-ignore delivered JSX component
 import { AssessmentWorkspace } from './ui/pages.jsx';
 // @ts-ignore delivered JS API
-import { getAssessment, getAssessmentSession, loadAssessmentDraft, startAssessment, submitAssessment } from './ui/api.js';
+import { getAssessment, getAssessmentSetup, getAssessmentSession, loadAssessmentDraft, startAssessment, submitAssessment } from './ui/api.js';
 
 vi.mock('./ui/api.js', () => ({
   getAssessment: vi.fn(),
+  getAssessmentSetup: vi.fn(),
   startAssessment: vi.fn(),
   getAssessmentSession: vi.fn(),
   submitAssessment: vi.fn(),
@@ -28,10 +29,34 @@ const questions = [
   { id: 'b5', ordinal: 5, marks: 30, question_type: 'EXPLANATION', prompt: '解释原理', options: [], verification_method: 'AI_REVIEWED' },
 ];
 
+const setup = {
+  schema_version: 'assessment-setup.v1', minimum_questions: 5, maximum_questions: 30,
+  supported_types: [
+    { id: 'MCQ_SINGLE', label: '单项选择' },
+    { id: 'NUMERIC', label: '数值计算' },
+    { id: 'SHORT_TEXT', label: '简短回答' },
+    { id: 'EXPLANATION', label: '分析与解释' },
+    { id: 'CODE', label: '代码应用' },
+  ],
+  task_forms: [
+    { id: 'concept', label: '概念识别' }, { id: 'definition', label: '定义与条件' },
+    { id: 'calculation', label: '计算与推导' }, { id: 'analysis', label: '分析与解释' },
+    { id: 'evaluation', label: '找错与评价' }, { id: 'code', label: '代码应用' },
+  ],
+  default_slots: [
+    { slot_id: 's1', question_type: 'MCQ_SINGLE', task_form: 'concept' },
+    { slot_id: 's2', question_type: 'SHORT_TEXT', task_form: 'definition' },
+    { slot_id: 's3', question_type: 'EXPLANATION', task_form: 'calculation' },
+    { slot_id: 's4', question_type: 'EXPLANATION', task_form: 'analysis' },
+    { slot_id: 's5', question_type: 'EXPLANATION', task_form: 'evaluation' },
+  ],
+};
+
 describe('AssessmentWorkspace', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getAssessment).mockResolvedValue({ status: 'NOT_ASSESSED', session: null });
+    vi.mocked(getAssessmentSetup).mockResolvedValue(setup);
     vi.mocked(getAssessmentSession).mockResolvedValue({
       id: 's1',
       status: 'IN_PROGRESS',
@@ -46,11 +71,13 @@ describe('AssessmentWorkspace', () => {
 
   it('renders a fullscreen workspace with course, node, status and exit', async () => {
     render(<AssessmentWorkspace course={{ code: 'CS3481' }} node={{ title: 'DBSCAN' }} toast={vi.fn()} onExit={vi.fn()} />);
-    expect(screen.getByRole('dialog', { name: '五题测评工作区' })).toBeVisible();
+    expect(screen.getByRole('dialog', { name: '测评工作区' })).toBeVisible();
     expect(screen.getByText('CS3481')).toBeVisible();
     expect(screen.getByText(/DBSCAN/)).toBeVisible();
     expect(screen.getByRole('button', { name: '退出' })).toBeVisible();
-    expect(await screen.findByRole('button', { name: '开始测评（5 题）' })).toBeVisible();
+    expect(await screen.findByRole('button', { name: '确认配置并开始测评' })).toBeVisible();
+    expect(screen.getAllByLabelText(/第 \d+ 题题型/)).toHaveLength(5);
+    expect(screen.queryByText('计算 2 + 3')).not.toBeInTheDocument();
   });
 
   it('shows all five questions with marks and per-question answer controls', async () => {
@@ -188,9 +215,21 @@ describe('AssessmentWorkspace', () => {
       .mockResolvedValueOnce({ id: 's1', status: 'IN_PROGRESS' });
     render(<AssessmentWorkspace course={{ id: 'cs3481', code: 'CS3481' }} node={{ id: 'n1', title: 'DBSCAN' }} toast={vi.fn()} onExit={vi.fn()} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: '开始测评（5 题）' }));
+    fireEvent.click(await screen.findByRole('button', { name: '确认配置并开始测评' }));
 
     expect(await screen.findByLabelText('第 1 题答案')).toBeVisible();
     expect(startAssessment).toHaveBeenCalledTimes(2);
+  });
+
+  it('adds a sixth stable slot and sends only the content-free configuration', async () => {
+    render(<AssessmentWorkspace course={{ id: 'cs3481', code: 'CS3481' }} node={{ id: 'n1', title: 'DBSCAN' }} toast={vi.fn()} onExit={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '添加题目' }));
+    expect(screen.getAllByLabelText(/第 \d+ 题题型/)).toHaveLength(6);
+    expect(screen.getAllByText('16.66 分')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: '确认配置并开始测评' }));
+    await vi.waitFor(() => expect(startAssessment).toHaveBeenCalled());
+    const payload = vi.mocked(startAssessment).mock.calls[0]![2] as { slots: unknown[] };
+    expect(payload.slots).toHaveLength(6);
+    expect(JSON.stringify(payload)).not.toMatch(/prompt|options|answer|question_revision/i);
   });
 });

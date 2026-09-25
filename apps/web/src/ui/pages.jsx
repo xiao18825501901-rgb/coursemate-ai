@@ -2,7 +2,7 @@ import { BRAND } from "../brand";
 import { RichText } from './richtext.jsx';
 import { DirectoryPicker } from './DirectoryPicker.jsx';
 import React from 'react';
-import { request, send, remove, download, key, streamEvents, listPairs, getPair, createPair, renamePair, deletePair, bindPair, createExercise, revealExercise, requestExerciseHint, submitPracticeAttempt, createExplanation, getExplanation, postExplanationMessage, cancelExplanation, searchPeople, listShares, getShare, createShare, joinShare, getAssessment, startAssessment, getAssessmentSession, submitAssessment, abandonAssessment, saveAssessmentDraft, loadAssessmentDraft, cancelPreparation, resumePreparation, createAssessmentExplanation, submitFeedback } from './api.js';
+import { request, send, remove, download, key, streamEvents, listPairs, getPair, createPair, renamePair, deletePair, bindPair, createExercise, revealExercise, requestExerciseHint, submitPracticeAttempt, createExplanation, getExplanation, postExplanationMessage, cancelExplanation, searchPeople, listShares, getShare, createShare, joinShare, getAssessment, getAssessmentSetup, startAssessment, getAssessmentSession, submitAssessment, abandonAssessment, saveAssessmentDraft, loadAssessmentDraft, cancelPreparation, resumePreparation, createAssessmentExplanation, submitFeedback } from './api.js';
 import { dateKey, zonedParts, wallTimeToISO, formatBytes, formatTime, goto } from './utils.js';
 import { citationVerdict } from './citationSupport.js';
 import { referenceVerificationNote } from './referenceVerification.js';
@@ -953,6 +953,27 @@ export function assessmentPromptWithoutRepeatedOptions(prompt, options) {
         return text;
     return lines.slice(0, tail[0].index).join('\n').trimEnd();
 }
+
+function assessmentMarks(questionCount) {
+    if (questionCount === 5)
+        return [10, 15, 20, 25, 30];
+    const base = Math.floor(10000 / questionCount), remainder = 10000 % questionCount;
+    return Array.from({ length: questionCount }, (_, index) => (base + (index < remainder ? 1 : 0)) / 100);
+}
+
+function defaultTaskForm(questionType) {
+    return { MCQ_SINGLE: 'concept', NUMERIC: 'calculation', SHORT_TEXT: 'definition', EXPLANATION: 'analysis', CODE: 'code' }[questionType] || 'analysis';
+}
+
+const ASSESSMENT_TYPE_LABEL = { MCQ_SINGLE: '单项选择', NUMERIC: '数值计算', SHORT_TEXT: '简短回答', EXPLANATION: '分析与解释', CODE: '代码应用' };
+
+function validTaskForms(questionType, forms) {
+    if (questionType === 'CODE')
+        return forms.filter(form => form.id === 'code');
+    if (questionType === 'EXPLANATION')
+        return forms.filter(form => ['calculation', 'analysis', 'evaluation'].includes(form.id));
+    return forms.filter(form => form.id === defaultTaskForm(questionType));
+}
 export function provisionalAssessmentScore(questions) {
     const awarded = (questions || []).map(question => question?.review?.awarded_marks);
     if (!awarded.length || awarded.some(value => typeof value !== 'number' || !Number.isFinite(value)))
@@ -979,7 +1000,7 @@ function assessmentDraftFromAnswers(questions, answers) {
     return questions.map((question, index) => `${index + 1}. ${answers[question.id] || ''}`).join('\n');
 }
 export class AssessmentWorkspace extends React.Component {
-    state = { view: null, summary: null, busy: false, error: '', preparing: null, answers: {}, attachments: [], windows: {}, explanations: {} };
+    state = { view: null, summary: null, setup: null, slots: [], configurationId: null, busy: false, error: '', preparing: null, answers: {}, attachments: [], windows: {}, explanations: {} };
     winZ = 0;
     winCount = 0;
     componentDidMount() { this.loadSummary(); this.keyHandler = e => { if (e.key === 'Escape')
@@ -990,6 +1011,16 @@ export class AssessmentWorkspace extends React.Component {
         this.setState({ summary });
         if (['IN_PROGRESS', 'SUBMITTED', 'NEEDS_REVIEW', 'GRADED'].includes(summary.status) && summary.session)
             await this.open(summary.session);
+        else
+            await this.loadSetup();
+    }
+    catch (e) {
+        this.setState({ error: e.message });
+    } }
+    async loadSetup() { try {
+        const setup = await getAssessmentSetup(this.props.course.id, this.props.node.id);
+        const slots = (setup.default_slots || []).map(slot => ({ ...slot }));
+        this.setState({ setup, slots, configurationId: null, preparing: null, error: '' });
     }
     catch (e) {
         this.setState({ error: e.message });
@@ -1011,8 +1042,13 @@ export class AssessmentWorkspace extends React.Component {
     finally {
         this.setState({ busy: false });
     } }
-    async start() { this.setState({ busy: true, error: '', preparing: null }); try {
-        const started = await startAssessment(this.props.course.id, this.props.node.id);
+    configurationPayload() { return {
+        configuration_id: this.state.configurationId,
+        slots: this.state.slots.map(slot => ({ slot_id: slot.slot_id, question_type: slot.question_type, task_form: slot.task_form })),
+    }; }
+    async start() { if (!this.state.setup || this.state.slots.length < this.state.setup.minimum_questions)
+        return; this.setState({ busy: true, error: '', preparing: null }); try {
+        const started = await startAssessment(this.props.course.id, this.props.node.id, this.configurationPayload());
         await this.handleStart(started);
     }
     catch (e) {
@@ -1022,9 +1058,9 @@ export class AssessmentWorkspace extends React.Component {
         this.setState({ busy: false });
     } }
     async handleStart(started) { if (started.preparation_job_id) {
-        this.setState({ preparing: started });
+        this.setState({ preparing: started, configurationId: started.configuration_id || this.state.configurationId });
         if (started.status === 'READY' || (started.status === 'BLOCKED' && started.can_start_from_ready_pool)) {
-            const retry = await startAssessment(this.props.course.id, this.props.node.id);
+            const retry = await startAssessment(this.props.course.id, this.props.node.id, { ...this.configurationPayload(), configuration_id: started.configuration_id || this.state.configurationId });
             if (retry.preparation_job_id)
                 return this.setState({ preparing: retry });
             await this.open(retry.id);
@@ -1032,8 +1068,8 @@ export class AssessmentWorkspace extends React.Component {
         return;
     }
         await this.open(started.id); }
-    async retryPreparation() { const retry = await resumePreparation(this.props.course.id, this.props.node.id); this.setState({ preparing: retry }); if (retry.status === 'READY') {
-        const started = await startAssessment(this.props.course.id, this.props.node.id);
+    async retryPreparation() { const retry = this.state.configurationId ? await startAssessment(this.props.course.id, this.props.node.id, this.configurationPayload()) : await resumePreparation(this.props.course.id, this.props.node.id); this.setState({ preparing: retry, configurationId: retry.configuration_id || this.state.configurationId }); if (retry.status === 'READY') {
+        const started = await startAssessment(this.props.course.id, this.props.node.id, this.configurationPayload());
         if (!started.preparation_job_id)
             await this.open(started.id);
     } }
@@ -1115,12 +1151,19 @@ export class AssessmentWorkspace extends React.Component {
             return '测评进行中'; if (view.status === 'SUBMITTED')
             return '待复核'; if (view.status === 'GRADED')
             return '已评阅'; return view.status; }
-    renderPreparing() { const p = this.state.preparing; return <div className="assessment-preparing"><p>{p.error_message || '题池不足，正在准备五道测评题。'}（已找到 {p.eligible_families || 0} 个不同题族）</p>{p.status === 'BLOCKED' && <p className="error-text">准备受阻：{p.error_code || '缺少预算或提供方'}。未生成任何题目。</p>}<div className="row" style={{ marginTop: 12 }}><button className="btn" disabled={this.state.busy} onClick={() => this.retryPreparation()}>重试准备</button>{p.status === 'PREPARING' && <button className="btn" onClick={() => this.cancelPreparation()}>取消准备</button>}</div></div>; }
-    renderStart() { return <div className="assessment-start"><p className="helper-note">固定五题、总 100 分。参考解与评分依据在提交前不会显示。</p><button className="btn primary" disabled={this.state.busy} onClick={() => this.start()}>{this.state.busy ? '正在准备…' : '开始测评（5 题）'}</button></div>; }
-    renderQuestion(q, i, editable = false) { const value = this.state.answers[q.id] || ''; const prompt = assessmentPromptWithoutRepeatedOptions(q.prompt, q.options); return <article className="assessment-question" key={q.id}><header><strong>第 {i + 1} 题</strong><small>{q.question_type}{q.marks ? ' · ' + q.marks + ' 分' : ''}{q.verification_method === 'AI_REVIEWED' ? ' · AI参考自测' : ''}</small></header><p className="assessment-prompt">{prompt}</p>{q.options && q.options.length ? <div className="assessment-options">{q.options.map((option, j) => editable ? <label key={j} className={'assessment-option ' + (value === String(j) ? 'selected' : '')}><input type="radio" name={'assessment-' + q.id} value={j} checked={value === String(j)} aria-label={`第 ${i + 1} 题选项 ${j + 1}：${option}`} onChange={e => this.setState(s => ({ answers: { ...s.answers, [q.id]: e.target.value } }))}/><span>{option}</span></label> : <span key={j} className="assessment-option-readonly">{option}</span>)}</div> : null}{editable && (!q.options || !q.options.length) ? <textarea aria-label={`第 ${i + 1} 题答案`} value={value} maxLength="12000" placeholder="填写本题答案…" onChange={e => this.setState(s => ({ answers: { ...s.answers, [q.id]: e.target.value } }))}/> : null}</article>; }
+    renderPreparing() { const p = this.state.preparing; return <div className="assessment-preparing"><p>{p.error_message || `题池不足，正在准备 ${p.question_count || this.state.slots.length} 道测评题。`}（已找到 {p.eligible_families || 0} 个不同题族）</p>{p.status === 'BLOCKED' && <p className="error-text">准备受阻：{p.error_code || '模型或证据暂不可用'}。已完成的兼容槽位会保留，重试只补缺项。</p>}<div className="row" style={{ marginTop: 12 }}><button className="btn" disabled={this.state.busy} onClick={() => this.retryPreparation()}>继续准备</button>{p.status === 'PREPARING' && <button className="btn" onClick={() => this.cancelPreparation()}>取消准备</button>}</div></div>; }
+    changeSlot(index, questionType) { this.setState(state => ({ slots: state.slots.map((slot, current) => current === index ? { ...slot, question_type: questionType, task_form: defaultTaskForm(questionType) } : slot), configurationId: null })); }
+    changeTaskForm(index, taskForm) { this.setState(state => ({ slots: state.slots.map((slot, current) => current === index ? { ...slot, task_form: taskForm } : slot), configurationId: null })); }
+    addSlot() { const setup = this.state.setup; if (!setup || this.state.slots.length >= setup.maximum_questions)
+        return; this.setState(state => ({ slots: [...state.slots, { slot_id: 'slot-' + key(), question_type: 'EXPLANATION', task_form: 'analysis' }], configurationId: null })); }
+    removeSlot(index) { const minimum = this.state.setup?.minimum_questions || 5; if (this.state.slots.length <= minimum)
+        return; this.setState(state => ({ slots: state.slots.filter((_, current) => current !== index), configurationId: null })); }
+    renderSetup() { const { setup, slots } = this.state; if (!setup)
+        return <div className="assessment-start"><p>正在加载测评配置…</p></div>; const marks = assessmentMarks(slots.length); return <div className="assessment-setup"><div className="assessment-setup-intro"><h2>配置本次测评</h2><p>{this.props.course.code} · {this.props.node.title}</p><p className="helper-note">只配置题数、题型和能力形式；确认前不会生成、预取或显示任何具体题目。最少 {setup.minimum_questions} 题，总分 100。</p></div><div className="assessment-slot-list">{slots.map((slot, index) => { const forms = validTaskForms(slot.question_type, setup.task_forms || []); return <div className="assessment-slot-row" key={slot.slot_id}><strong>第 {index + 1} 题</strong><label><span>题型</span><select aria-label={`第 ${index + 1} 题题型`} value={slot.question_type} onChange={event => this.changeSlot(index, event.target.value)}>{(setup.supported_types || []).map(type => <option key={type.id} value={type.id}>{type.label}</option>)}</select></label><label><span>能力形式</span><select aria-label={`第 ${index + 1} 题能力形式`} value={slot.task_form} onChange={event => this.changeTaskForm(index, event.target.value)}>{forms.map(form => <option key={form.id} value={form.id}>{form.label}</option>)}</select></label><span className="assessment-slot-marks">{marks[index].toFixed(2)} 分</span><button type="button" className="icon-btn" aria-label={`删除第 ${index + 1} 题`} disabled={slots.length <= setup.minimum_questions} onClick={() => this.removeSlot(index)}>−</button></div>; })}</div><div className="assessment-setup-actions"><button type="button" className="btn" disabled={slots.length >= setup.maximum_questions} onClick={() => this.addSlot()}>添加题目</button><span className="helper-note">共 {slots.length} 题 · 100.00 分</span><button type="button" className="btn primary" disabled={this.state.busy} onClick={() => this.start()}>{this.state.busy ? '正在冻结配置…' : '确认配置并开始测评'}</button></div></div>; }
+    renderQuestion(q, i, editable = false) { const value = this.state.answers[q.id] || ''; const prompt = assessmentPromptWithoutRepeatedOptions(q.prompt, q.options); return <article className="assessment-question" key={q.id}><header><strong>第 {i + 1} 题</strong><small>{ASSESSMENT_TYPE_LABEL[q.question_type] || q.question_type}{q.marks ? ' · ' + q.marks + ' 分' : ''}{q.verification_method === 'AI_REVIEWED' ? ' · AI参考自测' : ''}</small></header><p className="assessment-prompt">{prompt}</p>{q.options && q.options.length ? <div className="assessment-options">{q.options.map((option, j) => editable ? <label key={j} className={'assessment-option ' + (value === String(j) ? 'selected' : '')}><input type="radio" name={'assessment-' + q.id} value={j} checked={value === String(j)} aria-label={`第 ${i + 1} 题选项 ${j + 1}：${option}`} onChange={e => this.setState(s => ({ answers: { ...s.answers, [q.id]: e.target.value } }))}/><span>{option}</span></label> : <span key={j} className="assessment-option-readonly">{option}</span>)}</div> : null}{editable && (!q.options || !q.options.length) ? <textarea aria-label={`第 ${i + 1} 题答案`} value={value} maxLength="12000" placeholder="填写本题答案…" onChange={e => this.setState(s => ({ answers: { ...s.answers, [q.id]: e.target.value } }))}/> : null}</article>; }
     renderReview(q, i) { const review = q.review; if (!review)
         return null; const refNote = referenceVerificationNote(review.reference_verification); return <div className="assessment-review"><p className="helper-note">你的答案：{review.submitted_answer ?? '（未作答）'}</p><p className="helper-note">得分：{review.awarded_marks ?? '—'} / {q.marks}</p>{review.rubric?.length ? <ul className="assessment-rubric">{review.rubric.map(c => <li key={c.criterion_id}>{c.dimension}：{c.description}</li>)}</ul> : null}{review.feedback ? <p className="helper-note">{review.feedback}</p> : null}{review.reference_solution ? <div className="reference-solution"><strong>参考解（分步）</strong>{review.reference_solution.answer ? <p>{review.reference_solution.answer}</p> : null}{(review.reference_solution.steps || []).map(step => <div className="reference-step" key={step.step_id}><span>{step.ordinal}. {step.operation} → {step.result}</span><button className="step-explain-link" onClick={() => this.openStepExplanation(q, step)}>详解</button></div>)}{(review.reference_solution.source_refs || []).length ? <p className="muted">来源：{review.reference_solution.source_refs.join(', ')}</p> : null}{refNote ? <p className={`reference-verification ${refNote.kind}`} role="note">{refNote.note}</p> : null}</div> : null}</div>; }
-    render() { const { view, busy, error } = this.state; const active = view && view.status === 'IN_PROGRESS'; const done = view && (view.status === 'GRADED' || view.status === 'SUBMITTED'); const provisionalScore = view?.status === 'SUBMITTED' ? provisionalAssessmentScore(view.questions) : null; return <div className="assessment-overlay" role="dialog" aria-label="五题测评工作区"><div className="assessment-workspace"><header className="assessment-topbar"><div><strong>{this.props.course.code}</strong> · {this.props.node.title}</div><span className="muted">{this.statusLabel()}</span><button className="btn" onClick={this.props.onExit}>退出</button></header><div className="assessment-body">{error && <p className="error-text" role="alert">{error}</p>}{this.state.preparing && this.renderPreparing()}{!view && !this.state.preparing && this.renderStart()}{active && <div className="assessment-questions">{view.questions.map((q, i) => this.renderQuestion(q, i, true))}</div>}{done && <><div className="assessment-summary"><strong>{view.status === 'GRADED' ? '已评阅' : '待复核'}</strong>{typeof view.raw_score === 'number' ? <span>原始分：{view.raw_score} / 100</span> : provisionalScore !== null ? <span>暂计：{provisionalScore} / 100（待复核，不是正式 Raw Score）</span> : null}{view.grade?.label ? <span>映射：{view.grade.label}</span> : null}</div><div className="assessment-questions">{view.questions.map((q, i) => <div key={q.id}>{this.renderQuestion(q, i)}{this.renderReview(q, i)}</div>)}</div><div className="row" style={{ marginTop: 16 }}><button className="btn" onClick={() => this.setState({ view: null, preparing: null })}>返回概览</button><button className="btn primary" onClick={() => this.start()}>再测一次</button></div></>}</div>{active && <footer className="assessment-composer"><div className="assessment-hint">答案按题保存；选择题请选择一项，其他题请在题目下方填写。也可上传图片或文档。</div><div className="row"><label className="attach-button" role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault();
+    render() { const { view, busy, error } = this.state; const active = view && view.status === 'IN_PROGRESS'; const done = view && (view.status === 'GRADED' || view.status === 'SUBMITTED'); const provisionalScore = view?.status === 'SUBMITTED' ? provisionalAssessmentScore(view.questions) : null; return <div className="assessment-overlay" role="dialog" aria-label="测评工作区"><div className="assessment-workspace"><header className="assessment-topbar"><div><strong>{this.props.course.code}</strong> · {this.props.node.title}</div><span className="muted">{this.statusLabel()}</span><button className="btn" onClick={this.props.onExit}>退出</button></header><div className="assessment-body">{error && <p className="error-text" role="alert">{error}</p>}{this.state.preparing && this.renderPreparing()}{!view && !this.state.preparing && this.renderSetup()}{active && <div className="assessment-questions">{view.questions.map((q, i) => this.renderQuestion(q, i, true))}</div>}{done && <><div className="assessment-summary"><strong>{view.status === 'GRADED' ? '已评阅' : '待复核'}</strong>{typeof view.raw_score === 'number' ? <span>原始分：{view.raw_score} / 100</span> : provisionalScore !== null ? <span>暂计：{provisionalScore} / 100（待复核，不是正式 Raw Score）</span> : null}{view.grade?.label ? <span>映射：{view.grade.label}</span> : null}</div><div className="assessment-questions">{view.questions.map((q, i) => <div key={q.id}>{this.renderQuestion(q, i)}{this.renderReview(q, i)}</div>)}</div><div className="row" style={{ marginTop: 16 }}><button className="btn" onClick={() => this.setState({ view: null, preparing: null }, () => this.loadSetup())}>返回配置</button><button className="btn primary" onClick={() => this.setState({ view: null, preparing: null }, () => this.loadSetup())}>重新配置测评</button></div></>}</div>{active && <footer className="assessment-composer"><div className="assessment-hint">答案按题保存；选择题请选择一项，其他题请在题目下方填写。也可上传图片或文档。</div><div className="row"><label className="attach-button" role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault();
         e.currentTarget.querySelector('input')?.click(); } }}><Icon name="file"/><input type="file" hidden accept=".pdf,.txt,.md,.csv,.ipynb,.png,.jpg,.jpeg,.webp,.docx,.pptx" onChange={e => this.attach(e)}/></label>{this.state.attachments.length > 0 && <span className="muted">{this.state.attachments.length} 个附件</span>}</div><div className="row" style={{ marginTop: 8 }}><button className="btn" disabled={busy} onClick={() => this.saveDraft()}>保存草稿</button><button className="btn" disabled={busy} onClick={() => this.abandon()}>放弃</button><button className="btn primary" disabled={busy} onClick={() => this.submit()}>{busy ? '正在提交并批改…' : '提交答案'}</button></div></footer>}{this.renderWindows()}</div></div>; }
 }
 export class ExplanationWindow extends React.Component {

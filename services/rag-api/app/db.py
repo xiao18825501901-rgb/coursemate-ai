@@ -35,6 +35,7 @@ V3_MIGRATIONS = (
     "037_practice_question_interactions.sql",
     "038_assessment_question_slots.sql",
     "039_practice_operation_reconciliation.sql",
+    "040_configurable_assessments.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -50,9 +51,10 @@ V3_REPLAY_SUPERSEDED_BY = {
     "021_model_call_budget_reservations.sql": 39,
     "027_assessment_preparation_reference.sql": 38,
     "038_assessment_question_slots.sql": 39,
+    "040_configurable_assessments.sql": 40,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 39
+LATEST_V3_SCHEMA_VERSION = 40
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (

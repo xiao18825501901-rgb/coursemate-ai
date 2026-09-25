@@ -177,6 +177,79 @@ def start_assessment(
     return response.json()
 
 
+@pytest.mark.parametrize("question_count", [5, 6, 8, 10, 12])
+def test_configurable_assessment_freezes_exact_slots_without_setup_leak(
+    tmp_path: Path,
+    question_count: int,
+) -> None:
+    with client_at(tmp_path) as client:
+        workspace, node = setup_workspace(client)
+        # Each fixture batch contributes one SHORT_TEXT family. Seed enough compatible
+        # *families*, not merely enough total rows: a numerically large but type-incompatible
+        # pool must remain BLOCKED by the runtime.
+        for batch in range(1, 1 + ((question_count + 2) // 3)):
+            seed_assessment_pool(client, node, prefix=f"batch-{batch}-")
+
+        setup = client.get(
+            f"/api/learning/workspaces/{workspace['id']}/assessments/setup/{node['id']}"
+        )
+        assert setup.status_code == 200, setup.text
+        setup_body = setup.json()
+        assert setup_body["minimum_questions"] == 5
+        assert setup_body["maximum_questions"] >= 12
+        assert len(setup_body["default_slots"]) == 5
+        setup_wire = json.dumps(setup_body).lower()
+        for forbidden in ("prompt", "options", "answer", "question_revision_id"):
+            assert forbidden not in setup_wire
+
+        types = (["MCQ_SINGLE", "NUMERIC", "SHORT_TEXT"] * 4)[:question_count]
+        task_forms = (["concept", "calculation", "definition"] * 4)[:question_count]
+        response = client.post(
+            f"/api/learning/workspaces/{workspace['id']}/assessments",
+            json={
+                "operation_id": f"configured-{question_count}-question-start",
+                "revision": current_revision(client, workspace["id"]),
+                "node_id": node["id"],
+                "slots": [
+                    {
+                        "slot_id": f"slot-{index}",
+                        "question_type": question_type,
+                        "task_form": task_form,
+                    }
+                    for index, (question_type, task_form) in enumerate(
+                        zip(types, task_forms, strict=True), start=1
+                    )
+                ],
+            },
+        )
+        assert response.status_code == 200, response.text
+        assessment = response.json()
+        assert assessment["status"] == "IN_PROGRESS"
+        assert len(assessment["questions"]) == question_count
+        assert [question["question_type"] for question in assessment["questions"]] == types
+        marks = [float(question["marks"]) for question in assessment["questions"]]
+        assert round(sum(marks), 2) == 100.00
+        quotient, remainder = divmod(10_000, question_count)
+        expected_basis_points = [
+            quotient + (1 if ordinal < remainder else 0)
+            for ordinal in range(question_count)
+        ]
+        if question_count == 5:
+            expected_basis_points = [1000, 1500, 2000, 2500, 3000]
+        assert marks == [value / 100 for value in expected_basis_points]
+        with client.app.state.database.connect() as connection:
+            configuration = connection.execute(
+                "SELECT status,content_hash FROM assessment_configurations"
+            ).fetchone()
+            slots = connection.execute(
+                "SELECT ordinal,marks_basis_points FROM assessment_configuration_slots "
+                "ORDER BY ordinal"
+            ).fetchall()
+        assert configuration["status"] == "FROZEN"
+        assert len(configuration["content_hash"]) == 64
+        assert [int(row["marks_basis_points"]) for row in slots] == expected_basis_points
+
+
 def submit_assessment(
     client: Any,
     workspace_id: str,

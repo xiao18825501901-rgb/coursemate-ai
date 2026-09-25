@@ -104,9 +104,10 @@ export const getClassification = (courseId) => request(`/courses/${courseId}/cla
 export const setClassification = (courseId, templateId) => send(`/courses/${courseId}/classification`, { template_id: templateId });
 // People directory search.
 export const searchPeople = (q) => request('/people?q=' + encodeURIComponent(q));
-// Five-question assessment unified flow (fullscreen workspace).
+// Configurable assessment unified flow (fullscreen workspace).
 export const getAssessment = (courseId, nodeId) => request(`/courses/${courseId}/knowledge/${nodeId}/assessment`);
-export const startAssessment = (courseId, nodeId) => send(`/courses/${courseId}/knowledge/${nodeId}/assessment/session`, { request_id: key() });
+export const getAssessmentSetup = (courseId, nodeId) => request(`/courses/${courseId}/knowledge/${nodeId}/assessment/setup`);
+export const startAssessment = (courseId, nodeId, configuration = {}) => send(`/courses/${courseId}/knowledge/${nodeId}/assessment/session`, { ...configuration, request_id: key() });
 export const getAssessmentSession = (courseId, sessionId) => request(`/courses/${courseId}/knowledge/assessment/${sessionId}`);
 export const submitAssessment = (courseId, sessionId, payload) => send(`/courses/${courseId}/knowledge/assessment/${sessionId}/submit`, { ...payload, request_id: key() });
 export const abandonAssessment = (courseId, sessionId) => send(`/courses/${courseId}/knowledge/assessment/${sessionId}/abandon`, { request_id: key() });

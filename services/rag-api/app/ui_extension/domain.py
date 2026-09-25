@@ -54,6 +54,7 @@ from app.learning.models import (
     AssessmentDraftInput,
     AssessmentExplanationInput,
     AssessmentPreparationStartInput,
+    AssessmentSlotSelection,
     AssessmentStartInput,
     AssessmentSubmitInput,
 )
@@ -1743,11 +1744,30 @@ class V3DomainAdapter:
         self._course_row(course_id, subject)
         workspace = self._workspace_for_node(course_id, subject)
         revision = self._workspace_revision(workspace["id"])
+        try:
+            slots = [AssessmentSlotSelection(**item) for item in (payload.get("slots") or [])]
+        except (TypeError, ValidationError) as error:
+            raise ApiError(422, "ASSESSMENT_CONFIGURATION_INVALID", "The Assessment configuration is invalid.") from error
         return self.learning.start_assessment(
             workspace["id"],
             subject,
-            AssessmentStartInput(operation_id=str(payload["request_id"]), revision=revision, node_id=node_id),
+            AssessmentStartInput(
+                operation_id=str(payload["request_id"]),
+                revision=revision,
+                node_id=node_id,
+                configuration_id=payload.get("configuration_id"),
+                slots=slots,
+            ),
         )
+
+    def _assessment_setup(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.learning is None:
+            raise ApiError(503, "V3_DISABLED", "The V3 learning engine is disabled.")
+        course_id = str(payload["course"])
+        node_id = str(payload["node"])
+        self._course_row(course_id, subject)
+        workspace = self._workspace_for_node(course_id, subject)
+        return self.learning.assessment_setup(workspace["id"], subject, node_id)
 
     def _assessment_view(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
         if self.learning is None:
@@ -2018,6 +2038,7 @@ class V3DomainAdapter:
             "knowledge.exercise.state",
             "knowledge.begin_learning",
             "knowledge.assessment.start",
+            "knowledge.assessment.setup",
             "knowledge.assessment.view",
             "knowledge.assessment.submit",
             "knowledge.assessment.abandon",
@@ -2113,6 +2134,8 @@ class V3DomainAdapter:
             return self._record_problem(subject, payload)
         if operation == "knowledge.assessment.start":
             return self._assessment_start(subject, payload)
+        if operation == "knowledge.assessment.setup":
+            return self._assessment_setup(subject, payload)
         if operation == "knowledge.assessment.view":
             return self._assessment_view(subject, payload)
         if operation == "knowledge.assessment.submit":

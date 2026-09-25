@@ -359,8 +359,32 @@ class OfficialKnowledgeDraftBundleOutput(Contract):
     spec: OfficialTeachingSpecDraftOutput
 
 
+class AssessmentSlotSelection(Contract):
+    """One learner-selected slot in a pre-generation assessment configuration.
+
+    It deliberately contains no question id, prompt, option, answer, source
+    excerpt, or pool metadata.  The configuration screen therefore cannot leak
+    future exam content.
+    """
+
+    slot_id: Identifier
+    question_type: Literal["MCQ_SINGLE", "NUMERIC", "SHORT_TEXT", "EXPLANATION", "CODE"]
+    task_form: Literal["concept", "definition", "calculation", "analysis", "evaluation", "code"]
+
+
 class AssessmentStartInput(OperationInput):
     node_id: Identifier
+    configuration_id: Identifier | None = None
+    slots: list[AssessmentSlotSelection] = Field(default_factory=list, min_length=0, max_length=30)
+
+    @model_validator(mode="after")
+    def valid_configuration(self) -> "AssessmentStartInput":
+        if self.slots and len(self.slots) < 5:
+            raise ValueError("An Assessment configuration needs at least five slots")
+        ids = [slot.slot_id for slot in self.slots]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Assessment configuration slot ids must be unique")
+        return self
 
 
 class AssessmentAnswer(Contract):
@@ -382,14 +406,14 @@ class AssessmentSubmitInput(OperationInput):
     the five stable blueprint ids server-side without breaking old clients.
     """
 
-    answers: list[AssessmentAnswer] = Field(default_factory=list, max_length=5)
+    answers: list[AssessmentAnswer] = Field(default_factory=list, max_length=30)
     unified_answer: str | None = Field(default=None, max_length=60_000)
     attachments: list[AssessmentAttachment] = Field(default_factory=list, max_length=12)
     transcription: str | None = Field(default=None, max_length=30_000)
     submission_revision: int | None = Field(default=None, ge=1)
     submission_hash: str | None = Field(default=None, max_length=64)
     draft: bool = False
-    confirm_unanswered: list[Identifier] = Field(default_factory=list, max_length=5)
+    confirm_unanswered: list[Identifier] = Field(default_factory=list, max_length=30)
 
     @model_validator(mode="after")
     def valid_submission(self) -> "AssessmentSubmitInput":
@@ -516,7 +540,7 @@ class AssessmentQuestionGrade(Contract):
 
 class AssessmentGradeProposal(Contract):
     schema_version: Literal["v3.2"]
-    questions: list[AssessmentQuestionGrade] = Field(min_length=1, max_length=5)
+    questions: list[AssessmentQuestionGrade] = Field(min_length=1, max_length=30)
     uncertainties: list[Text] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")

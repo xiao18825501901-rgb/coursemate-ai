@@ -223,9 +223,46 @@ class LearningOrchestrator:
         request: AssessmentStartInput,
     ) -> dict[str, Any]:
         workspace = workspace_for(self.db, workspace_id, owner)
+        configuration_id: str | None = None
+        needs_config_preparation = False
         with self.db.connect() as db:
             node = self.assessments._atomic_node(db, workspace, request.node_id)
-            families = self.assessments.distinct_families(db, workspace, node)
+            if request.slots or request.configuration_id:
+                configuration, _ = self.assessments.freeze_configuration(
+                    db,
+                    workspace,
+                    node,
+                    request.slots,
+                    requested_id=request.configuration_id,
+                )
+                configuration_id = str(configuration["id"])
+                try:
+                    self.assessments.select_configuration(
+                        db, workspace, node, configuration_id
+                    )
+                except ApiError as error:
+                    if error.code not in {
+                        "ASSESSMENT_CONFIGURATION_POOL_INSUFFICIENT",
+                        "ASSESSMENT_CONFIGURATION_POOL_INCOMPLETE",
+                    }:
+                        raise
+                    needs_config_preparation = True
+            if configuration_id is not None and not needs_config_preparation:
+                families = {
+                    str(row["family_id"])
+                    for row in self.assessments.select_configuration(
+                        db, workspace, node, configuration_id
+                    )[0]
+                }
+            else:
+                families = self.assessments.distinct_families(db, workspace, node)
+        if needs_config_preparation and configuration_id is not None:
+            return self.prepare_configured_pool(
+                workspace_id,
+                owner,
+                request,
+                configuration_id=configuration_id,
+            )
         if len(families) < 5:
             return self.prepare_pool(workspace_id, owner, request)
 
@@ -234,7 +271,9 @@ class LearningOrchestrator:
             workspace: sqlite3.Row,
             _: Any,
         ) -> dict[str, Any]:
-            result = self.assessments.start(db, workspace, request.node_id)
+            result = self.assessments.start(
+                db, workspace, request.node_id, configuration_id=configuration_id
+            )
             self.cursor(
                 db,
                 workspace_id,
@@ -251,7 +290,111 @@ class LearningOrchestrator:
             "assessment.start",
             lambda workspace: None,
             save,
-            resource_identity={"node_id": request.node_id},
+            resource_identity={"node_id": request.node_id, "configuration_id": configuration_id},
+        )
+
+    def assessment_setup(
+        self,
+        workspace_id: str,
+        owner: str,
+        node_id: str,
+    ) -> dict[str, Any]:
+        workspace = workspace_for(self.db, workspace_id, owner)
+        with self.db.connect() as db:
+            return self.assessments.setup(db, workspace, node_id)
+
+    def prepare_configured_pool(
+        self,
+        workspace_id: str,
+        owner: str,
+        request: AssessmentStartInput,
+        *,
+        configuration_id: str,
+    ) -> dict[str, Any]:
+        """Prepare only the slots missing from one immutable configuration."""
+
+        workspace = workspace_for(self.db, workspace_id, owner)
+        with self.db.connect() as db:
+            node = self.assessments._atomic_node(db, workspace, request.node_id)
+            slots = self.assessments.configuration_slots(db, configuration_id)
+            preparation_id = "assessment-config-prep-" + configuration_id[-32:]
+            db.execute(
+                "INSERT OR IGNORE INTO assessment_configuration_preparations("
+                "id,configuration_id,workspace_id,status) VALUES(?,?,?,'PREPARING')",
+                (preparation_id, configuration_id, workspace["id"]),
+            )
+            row = db.execute(
+                "SELECT * FROM assessment_configuration_preparations WHERE configuration_id=?",
+                (configuration_id,),
+            ).fetchone()
+            if row is not None and str(row["status"]) == "READY":
+                return {
+                    "status": "READY",
+                    "preparation_job_id": str(row["id"]),
+                    "configuration_id": configuration_id,
+                    "question_count": len(slots),
+                    "eligible_families": len(self.assessments.distinct_families(db, workspace, node)),
+                }
+
+        def prepare(current_workspace: sqlite3.Row) -> tuple[str, str | None]:
+            try:
+                self.question_engine.generate_assessment_set(
+                    owner_user_id=str(current_workspace["owner_user_id"]),
+                    workspace_id=str(current_workspace["id"]),
+                    course_id=str(current_workspace["course_id"]),
+                    private_course_id=str(current_workspace["private_course_id"]),
+                    node_id=str(node["id"]),
+                    preparation_key=configuration_id,
+                    slots=slots,
+                    operation_id=request.operation_id,
+                )
+            except QuestionEngineRuntimeError as error:
+                return "BLOCKED", error.code
+            return "OK", None
+
+        def save(
+            db: sqlite3.Connection,
+            current_workspace: sqlite3.Row,
+            prepared: tuple[str, str | None],
+        ) -> dict[str, Any]:
+            status, code = prepared
+            ready = False
+            try:
+                selected, _ = self.assessments.select_configuration(
+                    db, current_workspace, node, configuration_id
+                )
+                ready = len(selected) == len(slots)
+            except ApiError:
+                ready = False
+            final_status = "READY" if ready else "BLOCKED"
+            message = None if ready else (
+                "Compatible READY questions remain incomplete; saved slots will be reused on recovery."
+            )
+            db.execute(
+                "UPDATE assessment_configuration_preparations SET status=?,error_code=?,"
+                "error_message=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),"
+                "completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE configuration_id=?",
+                (final_status, None if ready else code, message, configuration_id),
+            )
+            return {
+                "status": final_status,
+                "preparation_job_id": preparation_id,
+                "configuration_id": configuration_id,
+                "question_count": len(slots),
+                "eligible_families": len(self.assessments.distinct_families(db, current_workspace, node)),
+                "error_code": None if ready else code,
+                "error_message": message,
+                "can_start_from_ready_pool": ready,
+            }
+
+        return self.operate(
+            workspace_id,
+            owner,
+            request,
+            "assessment.prepare_configured_pool",
+            prepare,
+            save,
+            resource_identity={"node_id": request.node_id, "configuration_id": configuration_id},
         )
 
     def prepare_pool(

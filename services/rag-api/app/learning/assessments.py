@@ -26,8 +26,15 @@ from app.learning.models import (
     AssessmentGradeProposal,
     AssessmentPreparationOutput,
     AssessmentReferenceSolutionOutput,
+    AssessmentSlotSelection,
     AssessmentSolutionStep,
     GradePolicyDraftInput,
+)
+from app.learning.assessment_question_slots import (
+    AssessmentQuestionSlot,
+    assessment_setup_contract,
+    default_assessment_question_slots,
+    slots_from_selections,
 )
 from app.learning.workspaces import workspace_for
 
@@ -150,6 +157,162 @@ class AssessmentService:
         node: sqlite3.Row,
     ) -> set[str]:
         return {str(row["family_id"]) for row in self._eligible_pool(connection, workspace, node)}
+
+    def setup(
+        self,
+        connection: sqlite3.Connection,
+        workspace: sqlite3.Row,
+        node_id: str,
+    ) -> dict[str, Any]:
+        """Return only configuration metadata; never read the question pool."""
+
+        node = self._atomic_node(connection, workspace, node_id)
+        contract = assessment_setup_contract()
+        contract.update(
+            {
+                "course_id": str(workspace["course_id"]),
+                "node_id": node_id,
+                "spec_version": int(node["spec_version"]),
+            }
+        )
+        return contract
+
+    def freeze_configuration(
+        self,
+        connection: sqlite3.Connection,
+        workspace: sqlite3.Row,
+        node: sqlite3.Row,
+        selections: list[Any],
+        *,
+        requested_id: str | None = None,
+    ) -> tuple[sqlite3.Row, tuple[AssessmentQuestionSlot, ...]]:
+        """Persist an immutable, content-free configuration revision."""
+
+        if requested_id:
+            row = connection.execute(
+                "SELECT * FROM assessment_configurations WHERE id=? AND workspace_id=? "
+                "AND owner_user_id=? AND node_id=? AND status='FROZEN'",
+                (requested_id, workspace["id"], workspace["owner_user_id"], node["id"]),
+            ).fetchone()
+            if row is None:
+                raise ApiError(404, "ASSESSMENT_CONFIGURATION_NOT_FOUND", "The Assessment configuration was not found.")
+            saved = connection.execute(
+                "SELECT slot_id,question_type,task_form FROM assessment_configuration_slots "
+                "WHERE configuration_id=? ORDER BY ordinal",
+                (requested_id,),
+            ).fetchall()
+            if selections and [
+                (item.slot_id, item.question_type, item.task_form) for item in selections
+            ] != [
+                (str(item["slot_id"]), str(item["question_type"]), str(item["task_form"]))
+                for item in saved
+            ]:
+                raise ApiError(409, "ASSESSMENT_CONFIGURATION_CONFLICT", "The frozen Assessment configuration cannot be changed.")
+            compiled = slots_from_selections([AssessmentSlotSelection(**dict(item)) for item in saved])
+            return cast(sqlite3.Row, row), compiled
+
+        if not selections:
+            raise ApiError(422, "ASSESSMENT_CONFIGURATION_REQUIRED", "Choose at least five Assessment slots before starting.")
+        try:
+            compiled = slots_from_selections(selections)
+        except (KeyError, TypeError, ValueError) as error:
+            raise ApiError(422, "ASSESSMENT_CONFIGURATION_INVALID", str(error)) from error
+        payload = {
+            "workspace_id": str(workspace["id"]),
+            "course_id": str(workspace["course_id"]),
+            "node_id": str(node["id"]),
+            "spec_version": int(node["spec_version"]),
+            "slots": [selection.model_dump(mode="json") for selection in selections],
+            "marks_basis_points": [slot.marks_basis_points for slot in compiled],
+            "quality_policy": "highest-no-application-usd-cap",
+        }
+        content_hash = digest(payload)
+        existing = connection.execute(
+            "SELECT * FROM assessment_configurations WHERE workspace_id=? AND content_hash=?",
+            (workspace["id"], content_hash),
+        ).fetchone()
+        if existing is not None:
+            return cast(sqlite3.Row, existing), compiled
+        series_id = "assessment-" + hashlib.sha256(
+            f"{workspace['id']}|{node['id']}".encode()
+        ).hexdigest()[:32]
+        revision = int(connection.execute(
+            "SELECT COALESCE(MAX(revision),0)+1 FROM assessment_configurations WHERE series_id=?",
+            (series_id,),
+        ).fetchone()[0])
+        config_id = "assessment-config-" + content_hash[:32]
+        connection.execute(
+            "INSERT INTO assessment_configurations("
+            "id,series_id,revision,workspace_id,owner_user_id,course_id,node_id,spec_version,"
+            "status,content_hash) VALUES(?,?,?,?,?,?,?,?, 'DRAFT',?)",
+            (config_id, series_id, revision, workspace["id"], workspace["owner_user_id"],
+             workspace["course_id"], node["id"], node["spec_version"], content_hash),
+        )
+        for selection, slot in zip(selections, compiled, strict=True):
+            connection.execute(
+                "INSERT INTO assessment_configuration_slots("
+                "configuration_id,slot_id,ordinal,question_type,task_form,objective_text,marks_basis_points) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (config_id, selection.slot_id, slot.ordinal, selection.question_type,
+                 selection.task_form, slot.scoring_focus, slot.marks_basis_points),
+            )
+        connection.execute("UPDATE assessment_configurations SET status='FROZEN' WHERE id=?", (config_id,))
+        row = connection.execute("SELECT * FROM assessment_configurations WHERE id=?", (config_id,)).fetchone()
+        return cast(sqlite3.Row, row), compiled
+
+    def configuration_slots(
+        self,
+        connection: sqlite3.Connection,
+        configuration_id: str,
+    ) -> tuple[AssessmentQuestionSlot, ...]:
+        rows = connection.execute(
+            "SELECT slot_id,question_type,task_form FROM assessment_configuration_slots "
+            "WHERE configuration_id=? ORDER BY ordinal",
+            (configuration_id,),
+        ).fetchall()
+        if not rows:
+            raise ApiError(409, "ASSESSMENT_CONFIGURATION_EMPTY", "The frozen Assessment configuration has no slots.")
+        return slots_from_selections([AssessmentSlotSelection(**dict(row)) for row in rows])
+
+    def select_configuration(
+        self,
+        connection: sqlite3.Connection,
+        workspace: sqlite3.Row,
+        node: sqlite3.Row,
+        configuration_id: str,
+    ) -> tuple[list[sqlite3.Row], tuple[AssessmentQuestionSlot, ...]]:
+        slots = self.configuration_slots(connection, configuration_id)
+        eligible = self._eligible_pool(connection, workspace, node)
+        by_id = {str(row["id"]): row for row in eligible}
+        bound = connection.execute(
+            "SELECT slot_id,ordinal,question_revision_id FROM assessment_configuration_questions "
+            "WHERE configuration_id=? ORDER BY ordinal",
+            (configuration_id,),
+        ).fetchall()
+        if bound:
+            if len(bound) != len(slots):
+                raise ApiError(409, "ASSESSMENT_CONFIGURATION_POOL_INCOMPLETE", "The configured question set is incomplete.")
+            chosen = [by_id.get(str(row["question_revision_id"])) for row in bound]
+            if any(row is None for row in chosen):
+                raise ApiError(409, "ASSESSMENT_CONFIGURATION_POOL_STALE", "A configured question is no longer eligible.")
+            for slot, question in zip(slots, chosen, strict=True):
+                if str(cast(sqlite3.Row, question)["question_type"]) != slot.question_type:
+                    raise ApiError(409, "ASSESSMENT_CONFIGURATION_TYPE_MISMATCH", "A configured question no longer matches its slot type.")
+            return [cast(sqlite3.Row, row) for row in chosen], slots
+
+        chosen: list[sqlite3.Row] = []
+        families: set[str] = set()
+        for slot in slots:
+            match = next((
+                row for row in eligible
+                if str(row["question_type"]) == slot.question_type
+                and str(row["family_id"]) not in families
+            ), None)
+            if match is None:
+                raise ApiError(409, "ASSESSMENT_CONFIGURATION_POOL_INSUFFICIENT", f"No compatible READY question is available for slot {slot.ordinal}.")
+            chosen.append(match)
+            families.add(str(match["family_id"]))
+        return chosen, slots
 
     def select(
         self,
@@ -395,6 +558,7 @@ class AssessmentService:
         connection: sqlite3.Connection,
         workspace: sqlite3.Row,
         node_id: str,
+        configuration_id: str | None = None,
     ) -> dict[str, Any]:
         node = self._atomic_node(connection, workspace, node_id)
         if connection.execute(
@@ -407,7 +571,13 @@ class AssessmentService:
                 "ASSESSMENT_ALREADY_ACTIVE",
                 "Resume or abandon the active Assessment before starting another.",
             )
-        selected = self.select(connection, workspace, node)
+        if configuration_id:
+            selected, configured_slots = self.select_configuration(
+                connection, workspace, node, configuration_id
+            )
+        else:
+            selected = self.select(connection, workspace, node)
+            configured_slots = default_assessment_question_slots()
         policy, mapping_status = self._grade_policy(
             connection,
             str(workspace["course_id"]),
@@ -423,8 +593,10 @@ class AssessmentService:
         blueprint_id = identifier()
         selection_policy = {
             "algorithm": "HYBRID_UNSEEN_FAMILY_V1",
-            "question_count": 5,
-            "marks": list(MARK_SCHEME),
+            "question_count": len(configured_slots),
+            "marks": [slot.marks for slot in configured_slots],
+            "marks_basis_points": [slot.marks_basis_points for slot in configured_slots],
+            "configuration_id": configuration_id,
             "source_order": list(SOURCE_ORDER),
             "excludes_answer_exposed_problem_revisions": True,
             "excludes_answer_exposed_problem_families": True,
@@ -435,7 +607,8 @@ class AssessmentService:
                 "ordinal": ordinal,
                 "question_revision_id": question["id"],
                 "family_id": question["family_id"],
-                "marks": MARK_SCHEME[ordinal - 1],
+                "marks": configured_slots[ordinal - 1].marks,
+                "marks_basis_points": configured_slots[ordinal - 1].marks_basis_points,
                 "source_kind": question["source_kind"],
                 "verification_method": question["verification_method"],
             }
@@ -471,8 +644,8 @@ class AssessmentService:
         for frozen in frozen_items:
             connection.execute(
                 "INSERT INTO assessment_blueprint_items("
-                "id,blueprint_id,ordinal,question_revision_id,family_id,marks,"
-                "source_kind,verification_method) VALUES(?,?,?,?,?,?,?,?)",
+                "id,blueprint_id,ordinal,question_revision_id,family_id,marks,marks_basis_points,"
+                "source_kind,verification_method) VALUES(?,?,?,?,?,?,?,?,?)",
                 (
                     identifier(),
                     blueprint_id,
@@ -480,6 +653,7 @@ class AssessmentService:
                     frozen["question_revision_id"],
                     frozen["family_id"],
                     frozen["marks"],
+                    frozen["marks_basis_points"],
                     frozen["source_kind"],
                     frozen["verification_method"],
                 ),
@@ -868,7 +1042,8 @@ class AssessmentService:
     @staticmethod
     def _parse_unified_markers(text: str) -> dict[int, str]:
         pattern = re.compile(
-            r"(?:^|\n)\s*(?:第\s*([1-5])\s*[题问]|([1-5])\s*[.)、:：]|[Qq]\s*([1-5])\s*[:：.])"
+            r"(?:^|\n)\s*(?:第\s*([1-9]|[12][0-9]|30)\s*[题问]|"
+            r"([1-9]|[12][0-9]|30)\s*[.)、:：]|[Qq]\s*([1-9]|[12][0-9]|30)\s*[:：.])"
         )
         matches = list(pattern.finditer(text))
         result: dict[int, str] = {}
@@ -910,7 +1085,7 @@ class AssessmentService:
             if ordinal in by_ordinal:
                 mapped[ordinal] = answer
         unanswered: list[int] = []
-        for ordinal in range(1, 6):
+        for ordinal in sorted(by_ordinal):
             if ordinal in mapped:
                 continue
             row = by_ordinal[ordinal]
@@ -927,7 +1102,7 @@ class AssessmentService:
             )
         return [
             AssessmentAnswer(blueprint_item_id=str(by_ordinal[ordinal]["id"]), answer=mapped[ordinal])
-            for ordinal in range(1, 6)
+            for ordinal in sorted(by_ordinal)
         ]
 
     # ---------------------------------------------------- submission revisions

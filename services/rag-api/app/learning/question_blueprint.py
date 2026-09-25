@@ -113,7 +113,7 @@ class QuestionBlueprint(Contract):
     empirical_difficulty: None = None
     question_type: QuestionType
     expected_answer_form: AnswerForm
-    marks: int = Field(ge=1, le=100)
+    marks: float = Field(ge=0.01, le=100)
     scoring_criteria: list[Text] = Field(min_length=1)
     assumptions: list[Text] = Field(default_factory=list)
     conditions: list[Text] = Field(default_factory=list)

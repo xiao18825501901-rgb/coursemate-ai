@@ -1217,7 +1217,17 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         await course(user,cid,request)
         if not domain: raise HTTPException(501,'正式测评沿用 V3 评分引擎；本更新包不伪造 GPA。')
         body=await request.json()
-        return await remote('knowledge.assessment.start',user,{'course':cid,'node':node_id,'request_id':str(body.get('request_id',''))},request)
+        return await remote('knowledge.assessment.start',user,{
+            'course':cid,'node':node_id,'request_id':str(body.get('request_id','')),
+            'configuration_id':body.get('configuration_id'),
+            'slots':body.get('slots') or [],
+        },request)
+
+    @r.get('/courses/{cid}/knowledge/{node_id}/assessment/setup')
+    async def assessment_setup(cid:str,node_id:str,user:User,request:Request):
+        await course(user,cid,request)
+        if not domain: raise HTTPException(501,'正式测评沿用 V3 评分引擎；本更新包不伪造 GPA。')
+        return await remote('knowledge.assessment.setup',user,{'course':cid,'node':node_id},request)
 
     @r.get('/courses/{cid}/knowledge/assessment/{session_id}')
     async def assessment_view(cid:str,session_id:str,user:User,request:Request):
