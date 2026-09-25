@@ -11,7 +11,9 @@ the test is offline and non-billable.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
+from types import MethodType
 from typing import Any
 
 import httpx
@@ -31,8 +33,10 @@ from app.jev.gateway import JevGateway
 from app.jev.models import JevAnswer, JevResult
 from app.jev.receipt_store import SqlReceiptStore
 from app.jev.service import SemanticDecisionService
+from app.learning.models import AssessmentAnswer, AssessmentStartInput, AssessmentSubmitInput
 from app.learning.orchestrator import LearningOrchestrator
 from app.learning.provider import LearningProvider
+from app.learning.question_runtime import _PROTOTYPES
 from app.learning.testing import fixture_output
 from app.rag.retrieval import HybridRetriever
 from app.repositories.chunks import ChunkRepository
@@ -115,6 +119,8 @@ class FakeHttpJevTransport:
             verdict = {
                 "question.ambiguity.v1": "CLEAR",
                 "question.answer_agreement.v1": "AGREE",
+                "question.mcq_distractor_quality.v1": "ACCEPTABLE",
+                "question.rule_violation_quality.v1": "SUPPORTED",
             }[key]
             return httpx.Response(
                 200,
@@ -294,3 +300,186 @@ def test_real_question_orchestrator_completes_over_fake_http_upstreams(
             ("question.ambiguity.v1", "on", "ok"),
             ("question.answer_agreement.v1", "on", "ok"),
         ]
+
+
+def test_real_c3_c4_c5_orchestration_completes_over_fake_http_upstreams(
+    tmp_path: Path,
+) -> None:
+    database, base_config = database_with_objective(tmp_path)
+    live_config = base_config.model_copy(
+        update={
+            "app_env": "development",
+            "rag_provider_mode": "openai",
+            "v3_model": "deepseek-flash",
+            "v3_model_api_key": SecretStr("fake-http-only"),
+            "v3_model_base_url": "https://api.deepseek.com",
+            "v3_max_output_tokens": 4000,
+            "v3_model_timeout_seconds": 60,
+            "v3_daily_model_calls_per_user": 20,
+            "v3_daily_model_calls_per_user_course": 20,
+        }
+    )
+    deepseek_requests: list[dict[str, Any]] = []
+
+    def deepseek_handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        envelope = json.loads(body["input"])
+        output = fixture_output(
+            str(body["text"]["format"]["name"]),
+            envelope["authorized_context"],
+        )
+        deepseek_requests.append(body)
+        return httpx.Response(200, json=_responses_payload(output, len(deepseek_requests)))
+
+    provider = LearningProvider(live_config)
+    provider.client = OpenAI(
+        api_key="fake-http-only",
+        base_url="https://api.deepseek.com",
+        max_retries=0,
+        timeout=60,
+        http_client=httpx.Client(transport=httpx.MockTransport(deepseek_handler)),
+    )
+    jev_transport = FakeHttpJevTransport()
+    decisions = SemanticDecisionService(
+        JevGateway(
+            transport=jev_transport,
+            catalog=load_catalog(),
+                modes={
+                    "exercise.prototype.v1": "off",
+                    "assessment.criterion_review.v1": "off",
+                    "source.supports_claim.v1": "off",
+                    "question.ambiguity.v1": "on",
+                "question.answer_agreement.v1": "on",
+                "question.mcq_distractor_quality.v1": "on",
+                "question.rule_violation_quality.v1": "on",
+            },
+            receipt_store=SqlReceiptStore(database),
+        )
+    )
+    orchestrator = LearningOrchestrator(
+        database,
+        live_config,
+        HybridRetriever(ChunkRepository(database), FixedEmbeddingProvider()),
+        jev=decisions,
+    )
+    orchestrator.provider = provider
+    orchestrator.question_engine.provider = provider
+
+    initial = orchestrator.state(WORKSPACE, OWNER)
+    prepared = orchestrator.start_assessment(
+        WORKSPACE,
+        OWNER,
+        AssessmentStartInput(
+            operation_id="p5-fake-http-c5-prepare-0001",
+            revision=initial["revision"],
+            node_id=NODE,
+        ),
+    )
+    assert prepared["status"] == "READY"
+    assert prepared["eligible_families"] == 5
+
+    after_preparation = orchestrator.state(WORKSPACE, OWNER)
+    assessment = orchestrator.start_assessment(
+        WORKSPACE,
+        OWNER,
+        AssessmentStartInput(
+            operation_id="p5-fake-http-c5-start-0001",
+            revision=after_preparation["revision"],
+            node_id=NODE,
+        ),
+    )
+    assert [item["marks"] for item in assessment["questions"]] == [10, 15, 20, 25, 30]
+    assert [item["question_type"] for item in assessment["questions"]] == [
+        "MCQ_SINGLE",
+        "SHORT_TEXT",
+        "EXPLANATION",
+        "EXPLANATION",
+        "EXPLANATION",
+    ]
+    assert all("answer_key" not in item for item in assessment["questions"])
+
+    with database.connect() as connection:
+        private_rows = connection.execute(
+            "SELECT item.id,question.answer_json FROM assessment_blueprint_items AS item "
+            "JOIN assessment_question_revisions AS question "
+            "ON question.id=item.question_revision_id "
+            "WHERE item.blueprint_id=? ORDER BY item.ordinal",
+            (assessment["blueprint_id"],),
+        ).fetchall()
+    answers = [
+        AssessmentAnswer(
+            blueprint_item_id=str(row["id"]),
+            answer=str(json.loads(row["answer_json"])["reference_answer"]),
+        )
+        for row in private_rows
+    ]
+    graded = orchestrator.submit_assessment(
+        WORKSPACE,
+        OWNER,
+        assessment["id"],
+        AssessmentSubmitInput(
+            operation_id="p5-fake-http-c5-submit-0001",
+            revision=orchestrator.state(WORKSPACE, OWNER)["revision"],
+            answers=answers,
+        ),
+    )
+    assert graded["status"] == "GRADED"
+    assert all(item["review"]["reference_solution"] for item in graded["questions"])
+
+    runtime = orchestrator.question_engine
+    original_select = runtime._select_prototype
+
+    def force_rule_prototype(self: Any, **_kwargs: Any) -> Any:
+        return _PROTOTYPES["rule_violation_analysis"]
+
+    runtime._select_prototype = MethodType(force_rule_prototype, runtime)
+    try:
+        rule = runtime.generate_one(
+            owner_user_id=OWNER,
+            workspace_id=WORKSPACE,
+            course_id=COURSE,
+            private_course_id=PRIVATE_COURSE,
+            node_id=NODE,
+            operation_id="p5-fake-http-c4-rule-0001",
+        )
+    finally:
+        runtime._select_prototype = original_select
+    assert rule["status"] == "READY"
+    assert rule["prototype_id"] == "rule_violation_analysis"
+    assert "rule_violation_analysis" not in rule["public"]
+
+    assert len(deepseek_requests) == 13
+    assert jev_transport.calls.count("question.ambiguity.v1") == 6
+    assert jev_transport.calls.count("question.answer_agreement.v1") == 6
+    assert jev_transport.calls.count("question.mcq_distractor_quality.v1") == 1
+    assert jev_transport.calls.count("question.rule_violation_quality.v1") == 1
+    assert len(jev_transport.calls) == 14, dict(Counter(jev_transport.calls))
+    with database.connect() as connection:
+        reservations = connection.execute(
+            "SELECT role,status FROM learning_model_call_reservations ORDER BY rowid"
+        ).fetchall()
+        model_runs = connection.execute(
+            "SELECT role,status FROM learning_model_run_evidence ORDER BY rowid"
+        ).fetchall()
+        c3_private = json.loads(
+            connection.execute(
+                "SELECT question.answer_json FROM assessment_preparation_questions AS slot "
+                "JOIN assessment_question_revisions AS question "
+                "ON question.id=slot.question_revision_id "
+                "WHERE slot.preparation_job_id=? AND slot.ordinal=1",
+                (prepared["preparation_job_id"],),
+            ).fetchone()[0]
+        )
+        rule_private = json.loads(
+            connection.execute(
+                "SELECT question.answer_json FROM assessment_question_revisions AS question "
+                "WHERE question.id=?",
+                (rule["question_revision_id"],),
+            ).fetchone()[0]
+        )
+    assert len(reservations) == 13
+    assert len(model_runs) == 13
+    assert all(tuple(row)[1] == "COMPLETED" for row in reservations)
+    assert all(tuple(row)[1] == "COMPLETED" for row in model_runs)
+    assert c3_private["distractor_rationales"]
+    assert rule_private["rule_violation_analysis"]
