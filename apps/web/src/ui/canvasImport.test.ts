@@ -80,7 +80,9 @@ describe("Canvas import client", () => {
       "Bearer session-token",
     );
     expect(first.url).not.toContain("session-token");
-    expect(first.options.credentials).toBe("include");
+    // Cross-origin production calls authenticate with the bearer token. Sending browser cookies
+    // would require credentialed CORS and is both unnecessary and rejected by the RAG service.
+    expect(first.options.credentials).toBe("omit");
   });
 
   it("reads courses for one connection and encodes the id", async () => {

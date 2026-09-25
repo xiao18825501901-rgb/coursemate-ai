@@ -44,7 +44,10 @@ async function call(path, options = {}) {
   const response = await fetch(API_ROOT + path, {
     ...options,
     headers: { ...headers, ...options.headers },
-    credentials: "include",
+    // Clerk's bearer token is the sole credential. The production Canvas endpoint is on the RAG
+    // origin, whose CORS policy intentionally disallows browser cookies; `include` would make the
+    // browser reject an otherwise-valid response before this client can read it.
+    credentials: "omit",
     cache: "no-store",
   });
   if (response.status === 204) return null;
