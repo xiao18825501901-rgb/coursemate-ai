@@ -337,6 +337,26 @@ def test_c2_recovery_accepts_only_the_frozen_completed_rejected_response(
     assert len(loaded["output"].criteria[0].feedback) == 512
     assert loaded["provider_run"].provider_response_id == "recovered"
 
+    source_state = (run_dir / "run-state.json").read_bytes()
+    (run_dir / "failed-safe-state-before-c2-recovery.json").write_bytes(source_state)
+    stopped = json.loads(source_state)
+    stopped.update(
+        {
+            "status": "RECOVERY_FAILED_SAFE",
+            "recovery_error_code": "P5_C2_RECOVERY_SOURCE_CLASSIFICATION_MISMATCH",
+            "recovery_new_network_calls": 0,
+            "deepseek_calls": 5,
+            "jev_calls": 2,
+            "transport_ledger": {"event_count": 4},
+        }
+    )
+    (run_dir / "run-state.json").write_text(json.dumps(stopped), encoding="utf-8")
+
+    resumed_after_pre_network_stop = recovery._load_recovery_evidence(run_dir)
+
+    assert resumed_after_pre_network_stop["resuming_after_pre_network_stop"] is True
+    assert resumed_after_pre_network_stop["state_bytes"] == source_state
+
 
 def test_mounted_ui_environment_uses_the_same_frozen_price_and_output_bounds(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path

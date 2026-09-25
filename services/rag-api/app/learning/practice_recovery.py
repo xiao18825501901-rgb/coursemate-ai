@@ -83,6 +83,7 @@ def _classification(
     reservations: tuple[str, ...],
     runs: tuple[str, ...],
     disposition: str | None,
+    completed_result_evidence: bool = False,
 ) -> Classification:
     states = set(reservations) | set(runs)
     if status == "COMPLETED":
@@ -94,7 +95,11 @@ def _classification(
     # the upstream outcome is neither failed nor unknown: it is a completed call
     # whose result was not published.  Preserve that distinction so an operator
     # can link a zero-network recovery instead of paying for an unnecessary retry.
-    if "COMPLETED" in states or "LEGACY_COMPLETED" in states:
+    if (
+        "COMPLETED" in states
+        or "LEGACY_COMPLETED" in states
+        or completed_result_evidence
+    ):
         return "UPSTREAM_COMPLETED_NO_RESULT"
     if status == "FAILED":
         return "FAILED"
@@ -121,21 +126,29 @@ def _inspect_row(
         "WHERE workspace_id=? AND operation_id=?",
         (workspace_id, operation_id),
     ).fetchone()
-    reservations = tuple(
-        str(item["status"])
-        for item in connection.execute(
-            "SELECT status FROM learning_model_call_reservations "
-            "WHERE workspace_id=? AND operation_id=? ORDER BY created_at,id",
-            (workspace_id, operation_id),
-        ).fetchall()
+    reservation_rows = connection.execute(
+        "SELECT status,input_tokens,output_tokens,finished_at "
+        "FROM learning_model_call_reservations "
+        "WHERE workspace_id=? AND operation_id=? ORDER BY created_at,id",
+        (workspace_id, operation_id),
+    ).fetchall()
+    reservations = tuple(str(item["status"]) for item in reservation_rows)
+    completed_result_evidence = any(
+        item["finished_at"] is not None
+        and (int(item["input_tokens"] or 0) > 0 or int(item["output_tokens"] or 0) > 0)
+        for item in reservation_rows
     )
-    runs = tuple(
-        str(item["status"])
-        for item in connection.execute(
-            "SELECT status FROM learning_model_run_evidence "
-            "WHERE workspace_id=? AND operation_id=? ORDER BY started_at,id",
-            (workspace_id, operation_id),
-        ).fetchall()
+    run_rows = connection.execute(
+        "SELECT status,input_tokens,output_tokens,finished_at "
+        "FROM learning_model_run_evidence "
+        "WHERE workspace_id=? AND operation_id=? ORDER BY started_at,id",
+        (workspace_id, operation_id),
+    ).fetchall()
+    runs = tuple(str(item["status"]) for item in run_rows)
+    completed_result_evidence = completed_result_evidence or any(
+        item["finished_at"] is not None
+        and (int(item["input_tokens"] or 0) > 0 or int(item["output_tokens"] or 0) > 0)
+        for item in run_rows
     )
     reconciliation = connection.execute(
         "SELECT rowid,* FROM practice_operation_reconciliations "
@@ -165,6 +178,7 @@ def _inspect_row(
             reservations=reservations,
             runs=runs,
             disposition=disposition,
+            completed_result_evidence=completed_result_evidence,
         ),
         within_active_window=age is not None and age <= active_window_seconds,
         age_seconds=age,

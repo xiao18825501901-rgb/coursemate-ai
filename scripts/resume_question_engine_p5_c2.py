@@ -57,14 +57,34 @@ def _load_recovery_evidence(run_dir: Path) -> dict[str, Any]:
     state_path = run_dir / "run-state.json"
     checkpoint_path = run_dir / "first-ready-checkpoint.json"
     ledger_path = run_dir / "private-transport-ledger.json"
-    state_bytes = state_path.read_bytes()
-    state = json.loads(state_bytes)
+    current_state_bytes = state_path.read_bytes()
+    current_state = json.loads(current_state_bytes)
     checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
     ledger_payload = json.loads(ledger_path.read_text(encoding="utf-8"))
-    if state.get("status") != "FAILED_SAFE" or state.get("error_code") != SOURCE_ERROR:
+    resuming_after_pre_network_stop = False
+    if current_state.get("status") == "FAILED_SAFE":
+        state_bytes = current_state_bytes
+        state = current_state
+    elif (
+        current_state.get("status") == "RECOVERY_FAILED_SAFE"
+        and current_state.get("recovery_error_code")
+        == "P5_C2_RECOVERY_SOURCE_CLASSIFICATION_MISMATCH"
+        and current_state.get("recovery_new_network_calls") == 0
+        and current_state.get("deepseek_calls") == 5
+        and current_state.get("jev_calls") == 2
+        and current_state.get("transport_ledger", {}).get("event_count")
+        == len(ledger_payload.get("events") or [])
+    ):
+        snapshot_path = run_dir / "failed-safe-state-before-c2-recovery.json"
+        state_bytes = snapshot_path.read_bytes()
+        state = json.loads(state_bytes)
+        resuming_after_pre_network_stop = True
+    else:
         raise ValueError(
             "The run is not the expected stopped C2 contract-validation state."
         )
+    if state.get("status") != "FAILED_SAFE" or state.get("error_code") != SOURCE_ERROR:
+        raise ValueError("The frozen source state is not the original C2 failure.")
     if checkpoint.get("status") != "FIRST_READY_QUESTION_SAVED":
         raise ValueError("The immutable first READY checkpoint is missing.")
     audit = state.get("call_budget_audit")
@@ -158,6 +178,7 @@ def _load_recovery_evidence(run_dir: Path) -> dict[str, Any]:
         "provider_run": run,
         "deepseek_roles": [str(item) for item in deepseek_roles],
         "jev_definitions": [str(item) for item in jev_definitions],
+        "resuming_after_pre_network_stop": resuming_after_pre_network_stop,
     }
 
 
@@ -206,8 +227,10 @@ def _resume(args: argparse.Namespace, evidence: dict[str, Any]) -> int:
     state_path = run_dir / "run-state.json"
     snapshot_path = run_dir / "failed-safe-state-before-c2-recovery.json"
     if snapshot_path.exists():
-        raise RuntimeError("P5_C2_RECOVERY_ALREADY_STARTED")
-    snapshot_path.write_bytes(evidence["state_bytes"])
+        if snapshot_path.read_bytes() != evidence["state_bytes"]:
+            raise RuntimeError("P5_C2_RECOVERY_SOURCE_SNAPSHOT_CHANGED")
+    else:
+        snapshot_path.write_bytes(evidence["state_bytes"])
     snapshot_sha = hashlib.sha256(evidence["state_bytes"]).hexdigest()
     ledger = base.DurableTransportLedger.open_existing(evidence["ledger_path"])
     owner = "p5-synthetic-owner"

@@ -257,7 +257,7 @@ def test_failed_local_contract_with_completed_upstream_can_link_zero_network_rec
             "INSERT INTO learning_model_call_reservations("
             "id,workspace_id,operation_id,owner_user_id,course_id,role,"
             "reserved_output_tokens,status,input_tokens,output_tokens,finished_at) "
-            "VALUES('reservation-completed-contract',?,?,?,?,?,100,'COMPLETED',100,50,?)",
+            "VALUES('reservation-completed-contract',?,?,?,?,?,100,'FAILED',100,50,?)",
             (
                 WORKSPACE,
                 "failed-contract-source",
