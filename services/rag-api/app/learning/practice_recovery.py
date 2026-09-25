@@ -84,15 +84,20 @@ def _classification(
     runs: tuple[str, ...],
     disposition: str | None,
 ) -> Classification:
+    states = set(reservations) | set(runs)
     if status == "COMPLETED":
         return "COMPLETED"
-    if status == "FAILED":
-        return "FAILED"
     if disposition is not None:
         return f"RECONCILED_{disposition}"  # type: ignore[return-value]
-    states = set(reservations) | set(runs)
+    # A provider response can be fully received and metered before a later local
+    # schema check fails.  In that case the application operation is FAILED, but
+    # the upstream outcome is neither failed nor unknown: it is a completed call
+    # whose result was not published.  Preserve that distinction so an operator
+    # can link a zero-network recovery instead of paying for an unnecessary retry.
     if "COMPLETED" in states or "LEGACY_COMPLETED" in states:
         return "UPSTREAM_COMPLETED_NO_RESULT"
+    if status == "FAILED":
+        return "FAILED"
     if "RESERVED" in states or "UNKNOWN" in states:
         return "UPSTREAM_UNKNOWN"
     if states and states <= {"FAILED", "BLOCKED"}:
@@ -259,8 +264,15 @@ def reconcile_practice_operation(
         current = rows[0]
         if current.reconciliation_id is not None:
             raise PracticeRecoveryError("practice operation is already reconciled")
-        if current.status != "CLAIMED":
-            raise PracticeRecoveryError("only a CLAIMED operation can be reconciled")
+        recoverable_failed_result = (
+            current.status == "FAILED"
+            and current.classification == "UPSTREAM_COMPLETED_NO_RESULT"
+        )
+        if current.status != "CLAIMED" and not recoverable_failed_result:
+            raise PracticeRecoveryError(
+                "only a CLAIMED operation or a FAILED operation with a completed "
+                "upstream result can be reconciled"
+            )
         if current.classification != expected_classification:
             raise PracticeRecoveryError(
                 "classification changed: "

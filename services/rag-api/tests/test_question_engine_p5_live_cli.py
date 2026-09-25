@@ -18,10 +18,20 @@ import pytest
 
 ROOT = Path(__file__).parents[3]
 RUNNER = ROOT / "scripts" / "run_question_engine_p5_live.py"
+RECOVERY_RUNNER = ROOT / "scripts" / "resume_question_engine_p5_c2.py"
 
 
 def load_runner() -> ModuleType:
     spec = importlib.util.spec_from_file_location("p5_runner", RUNNER)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_recovery_runner() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("p5_recovery_runner", RECOVERY_RUNNER)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -185,6 +195,147 @@ def test_jev_transport_persists_intent_before_complete_result(tmp_path: Path) ->
         "RESPONSE_COMPLETE",
     ]
     assert payload["events"][1]["answers"]["question.ambiguity.v1"]["choice"] == "CLEAR"
+
+
+def test_existing_transport_ledger_is_appended_without_replacing_evidence(
+    tmp_path: Path,
+) -> None:
+    runner = load_runner()
+    path = tmp_path / "private-ledger.json"
+    ledger = runner.DurableTransportLedger.create(path)
+    ledger.record("deepseek", {"phase": "SEND_INTENT", "role": "QUESTION_AUTHOR"})
+    original_hash = __import__("hashlib").sha256(path.read_bytes()).hexdigest()
+
+    reopened = runner.DurableTransportLedger.open_existing(path)
+    reopened.record(
+        "deepseek", {"phase": "RESPONSE_COMPLETE", "role": "QUESTION_AUTHOR"}
+    )
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert [event["sequence"] for event in payload["events"]] == [1, 2]
+    assert payload["events"][0]["phase"] == "SEND_INTENT"
+    assert original_hash != __import__("hashlib").sha256(path.read_bytes()).hexdigest()
+
+
+def test_c2_recovery_accepts_only_the_frozen_completed_rejected_response(
+    tmp_path: Path,
+) -> None:
+    recovery = load_recovery_runner()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "run-state.json").write_text(
+        json.dumps(
+            {
+                "status": "FAILED_SAFE",
+                "error_code": "C2_ASSISTED_ATTEMPT_HTTP_409",
+                "call_budget_audit": {
+                    "deepseek_attempted_roles": [
+                        "QUESTION_AUTHOR",
+                        "QUESTION_BLIND_SOLVER",
+                        "PRACTICE_FEEDBACK",
+                        "PRACTICE_HINT",
+                        "PRACTICE_FEEDBACK",
+                    ],
+                    "jev_attempted_definitions": [
+                        "question.ambiguity.v1",
+                        "question.answer_agreement.v1",
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "first-ready-checkpoint.json").write_text(
+        json.dumps(
+            {
+                "status": "FIRST_READY_QUESTION_SAVED",
+                "question_revision_id": "question-1",
+            }
+        ),
+        encoding="utf-8",
+    )
+    response = json.dumps(
+        {
+            "verdict": "PARTIAL",
+            "feedback": "Useful overall feedback.",
+            "strengths": ["Correct conclusion."],
+            "gaps": ["Missing comparison."],
+            "next_step": "Show the comparison.",
+            "criteria": [
+                {
+                    "criterion_id": "criterion_1",
+                    "met": False,
+                    "feedback": "x" * 512,
+                }
+            ],
+        }
+    )
+    events = [
+        {
+            "sequence": 1,
+            "recorded_at": "2026-09-25T00:00:00Z",
+            "source": "deepseek",
+            "phase": "RESPONSE_COMPLETE",
+            "role": "PRACTICE_FEEDBACK",
+            "input_hash": "a" * 64,
+            "provider_response_id": "first",
+            "output_text": response,
+            "provider": "DEEPSEEK_API",
+            "model": "deepseek-flash",
+            "protocol": "responses",
+            "input_tokens": 1,
+            "output_tokens": 1,
+        },
+        {
+            "sequence": 2,
+            "recorded_at": "2026-09-25T00:00:01Z",
+            "source": "deepseek",
+            "phase": "SEND_INTENT",
+            "role": "PRACTICE_FEEDBACK",
+            "input_hash": "b" * 64,
+        },
+        {
+            "sequence": 3,
+            "recorded_at": "2026-09-25T00:00:02Z",
+            "source": "deepseek",
+            "phase": "RESPONSE_COMPLETE",
+            "role": "PRACTICE_FEEDBACK",
+            "input_hash": "b" * 64,
+            "provider_response_id": "recovered",
+            "output_text": response,
+            "provider": "DEEPSEEK_API",
+            "model": "deepseek-flash",
+            "protocol": "responses",
+            "input_tokens": 100,
+            "output_tokens": 50,
+        },
+        {
+            "sequence": 4,
+            "recorded_at": "2026-09-25T00:00:02Z",
+            "source": "deepseek",
+            "phase": "CONTRACT_REJECTED",
+            "role": "PRACTICE_FEEDBACK",
+            "input_hash": "b" * 64,
+            "provider_response_id": "recovered",
+            "reason": "ValidationError",
+        },
+    ]
+    (run_dir / "private-transport-ledger.json").write_text(
+        json.dumps(
+            {
+                "format_version": "coursejesus.p5.private-transport-ledger.v1",
+                "classification": "PRIVATE_PROVIDER_RESULT_EVIDENCE",
+                "events": events,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = recovery._load_recovery_evidence(run_dir)
+
+    assert loaded["checkpoint"]["question_revision_id"] == "question-1"
+    assert len(loaded["output"].criteria[0].feedback) == 512
+    assert loaded["provider_run"].provider_response_id == "recovered"
 
 
 def test_mounted_ui_environment_uses_the_same_frozen_price_and_output_bounds(

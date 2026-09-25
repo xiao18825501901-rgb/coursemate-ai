@@ -274,6 +274,26 @@ class DurableTransportLedger:
         ledger._flush()
         return ledger
 
+    @classmethod
+    def open_existing(cls, path: Path) -> DurableTransportLedger:
+        """Continue one stopped run without replacing its paid-call evidence."""
+
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if (
+            not isinstance(payload, dict)
+            or payload.get("format_version")
+            != "coursejesus.p5.private-transport-ledger.v1"
+            or not isinstance(payload.get("events"), list)
+        ):
+            raise ValueError("The existing private transport ledger is invalid.")
+        events = payload["events"]
+        if any(
+            not isinstance(event, dict) or event.get("sequence") != index
+            for index, event in enumerate(events, start=1)
+        ):
+            raise ValueError("The existing private transport ledger sequence is invalid.")
+        return cls(path=path, events=[dict(event) for event in events])
+
     def _flush(self) -> None:
         _write_json(
             self.path,

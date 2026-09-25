@@ -241,6 +241,65 @@ def test_reconciliation_refuses_to_reclassify_or_overwrite_evidence(tmp_path: Pa
     assert "first evidence" not in json.dumps(dict(row))
 
 
+def test_failed_local_contract_with_completed_upstream_can_link_zero_network_recovery(
+    tmp_path: Path,
+) -> None:
+    database, runtime, question_revision_id = _orphaned_hint(
+        tmp_path, "failed-contract-source"
+    )
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE practice_interaction_operations SET status='FAILED',"
+            "error_code='PRACTICE_FEEDBACK_INVALID' WHERE operation_id=?",
+            ("failed-contract-source",),
+        )
+        connection.execute(
+            "INSERT INTO learning_model_call_reservations("
+            "id,workspace_id,operation_id,owner_user_id,course_id,role,"
+            "reserved_output_tokens,status,input_tokens,output_tokens,finished_at) "
+            "VALUES('reservation-completed-contract',?,?,?,?,?,100,'COMPLETED',100,50,?)",
+            (
+                WORKSPACE,
+                "failed-contract-source",
+                OWNER,
+                COURSE,
+                "PRACTICE_FEEDBACK",
+                "2026-09-25T00:00:00Z",
+            ),
+        )
+        connection.commit()
+        observed = inspect_practice_operations(
+            connection,
+            workspace_id=WORKSPACE,
+            operation_id="failed-contract-source",
+        )[0]
+        assert observed.classification == "UPSTREAM_COMPLETED_NO_RESULT"
+        reconciled = reconcile_practice_operation(
+            connection,
+            workspace_id=WORKSPACE,
+            operation_id="failed-contract-source",
+            expected_classification="UPSTREAM_COMPLETED_NO_RESULT",
+            disposition="UPSTREAM_COMPLETED_NO_RESULT",
+            operator_ref="incident-P5-completed-contract",
+            evidence=b"durable response and usage hash",
+            writers_drained=True,
+        )
+    assert reconciled.classification == "RECONCILED_UPSTREAM_COMPLETED_NO_RESULT"
+
+    replacement = runtime.generate_hint(
+        owner_user_id=OWNER,
+        workspace_id=WORKSPACE,
+        question_revision_id=question_revision_id,
+        operation_id="failed-contract-recovery",
+    )
+    assert replacement["hint"]
+    with database.connect() as connection:
+        link = connection.execute(
+            "SELECT prior_operation_id,new_operation_id FROM practice_operation_retry_links"
+        ).fetchone()
+    assert tuple(link) == ("failed-contract-source", "failed-contract-recovery")
+
+
 def test_operator_cli_is_read_only_by_default_and_requires_explicit_apply(tmp_path: Path) -> None:
     database, _, _ = _orphaned_hint(tmp_path, "orphan-cli-operation")
     root = Path(__file__).resolve().parents[3]

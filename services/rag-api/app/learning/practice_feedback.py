@@ -28,6 +28,10 @@ FEEDBACK_PROMPT_PATH: Final = PROMPT_DIRECTORY / "practice_feedback_v1.md"
 HINT_PROMPT_PATH: Final = PROMPT_DIRECTORY / "practice_hint_v1.md"
 
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+CriterionText = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=1_000),
+]
 
 
 class PracticeInteractionError(RuntimeError):
@@ -41,7 +45,10 @@ class PracticeInteractionError(RuntimeError):
 class CriterionFeedback(Contract):
     criterion_id: Identifier
     met: bool
-    feedback: ShortText
+    # A criterion explanation often needs one complete rule chain. Keep list
+    # labels and next actions at 500 characters, but give this single diagnostic
+    # field enough room to finish a sentence without accepting unbounded output.
+    feedback: CriterionText
 
 
 class PracticeFeedbackOutput(Contract):
