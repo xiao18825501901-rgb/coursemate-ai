@@ -3,7 +3,7 @@
 Date: 2026-09-25
 Application candidate: `978e3f714ee9a1a39a34e1969c82615346a60f82`
 Test-harness checkpoint: `c36782e69a51becd1fd690f782b0ae458115c987`
-Verdict: **BOUNDED LIVE C1-C5 WORKFLOW PASSED; OWNER CONTENT REVIEW PENDING; PRODUCTION NOT PASSED**
+Verdict: **BOUNDED LIVE C1-C5 AND OWNER CONTENT REVIEW PASSED; PRODUCTION CUTOVER AUTHORIZED BUT NOT YET PASSED**
 
 This report separates real transports, automated business acceptance, human content judgment and
 production acceptance. New controlled operations produced exact READY revisions for C1-C5, all
@@ -82,8 +82,8 @@ USD `0.0350511`. This estimate does not overwrite Attempt 2: its possible call a
 | `LIVE_JEV_BASE_SIGNALS` | **PASS** | ambiguity and answer-agreement receipts are `on`, `ok`, `jev-latest` for every generated revision |
 | `LIVE_JEV_SPECIALIZED_SIGNALS` | **PASS** | MCQ distractor and rule-violation receipts are `on`, `ok`, `jev-latest` |
 | `CONTENT_AUTOMATED_CHECKS` | **PASS** | exact revisions, private mappings, answer visibility, persistence and database integrity verified |
-| `HUMAN_CONTENT_REVIEW` | **PENDING / MATERIAL AVAILABLE** | only the Owner may judge the exact private review card |
-| `PRODUCTION_ACCEPTANCE` | **BLOCKED** | Owner review and production deployment/signed-in acceptance remain required |
+| `HUMAN_CONTENT_REVIEW` | **PASS** | Owner signed the exact manifest `fc917044...3d7ad4` at `2026-09-25T11:26:39.9319867Z` |
+| `PRODUCTION_ACCEPTANCE` | **IN PROGRESS / NOT YET PASSED** | deployment and signed-in acceptance remain required |
 
 ## Evidence
 
@@ -101,6 +101,6 @@ USD `0.0350511`. This estimate does not overwrite Attempt 2: its possible call a
 - State SHA-256: `ea5bd59a...3675f6`, `6fe5a0dc...75fc5`, `d1cf6b0f...572ed`
 - Reconciliation SHA-256: `8e0b9add...6c70b`, `852770a5...ca35`
 
-The old UNKNOWN was never overwritten or retried. The new review material is complete; the next
-gate is an Owner decision on the exact manifest, not another model run. Production deployment must
-not begin until that decision is recorded as PASS.
+The old UNKNOWN was never overwritten or retried. The Owner has approved the exact review manifest.
+No additional model run is required for this bundle; the remaining gates are backup, migration,
+deployment and signed-in production acceptance.

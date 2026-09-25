@@ -91,8 +91,9 @@
   "acceptance": {
     "liveProviderContract": "PASSED_FOR_BOUNDED_SYNTHETIC_WORKFLOW",
     "questionEngineLiveEndToEnd": "PASSED_FOR_C1_C5_BOUNDED_SYNTHETIC_WORKFLOW",
-    "humanContentReview": "PENDING_REVIEW_MATERIAL_AVAILABLE",
-    "productionAcceptance": "BLOCKED_ON_OWNER_REVIEW_AND_PRODUCTION_VALIDATION",
+    "humanContentReview": "OWNER_PASS_RECORDED",
+    "ownerReviewDecisionPath": "docs/coursejesus/evidence/p5/owner-review-decision.json",
+    "productionAcceptance": "AUTHORIZED_CUTOVER_IN_PROGRESS_NOT_YET_PASSED",
     "furtherPaidAttempts": "NOT_REQUIRED_FOR_CURRENT_REVIEW_BUNDLE"
   }
 }

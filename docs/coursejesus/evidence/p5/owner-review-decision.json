@@ -1,0 +1,11 @@
+{
+  "formatVersion": 1,
+  "decidedAt": "2026-09-25T11:26:39.9319867Z",
+  "reviewerRole": "PROJECT_OWNER",
+  "decision": "PASS",
+  "applicationSha": "978e3f714ee9a1a39a34e1969c82615346a60f82",
+  "reviewCardSha256": "0335ba2079a5f046c584947c4c6d38091aafed04ec7a43723746aa5ad0dcb862",
+  "reviewManifestSha256": "fc91704466ef1b1082d7833dc9965e9a587d462da89cdd88118b18a4993d7ad4",
+  "authorization": "Owner approved the exact manifest and authorized production cutover.",
+  "productionAcceptance": "NOT_YET_DETERMINED"
+}

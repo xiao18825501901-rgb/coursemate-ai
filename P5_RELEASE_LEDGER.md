@@ -17,12 +17,12 @@ green. Exact review material exists; Owner human review and production release r
 | Frozen candidate | Current application `978e3f7`; backend 1,854 + 2 platform skips, Web 117 and Agent 92 green; TypeScript green; production-shaped local build and PAT scan green | no source-level blocker known; `c36782e` is test-harness-only | preserve exact application SHA separately from the test/document HEAD | exact candidate remains reproducible |
 | Four Jev gates | ambiguity, answer agreement, MCQ distractor quality and rule-violation definitions each have real `on + ok + jev-latest` receipts | human judgment is still independent | do not rerun; retain exact receipts and input hashes | **closed for bounded live workflow** |
 | C1–C5 live Question Engine | exact C1/C2 revisions, five-slot C5 assessment and C4 revision completed; 21 DeepSeek + 18 Jev real transports; zero automatic retry | production has not run these exact journeys | hold for Owner review, then deploy only this reviewed candidate | **closed for bounded live workflow** |
-| Human review | private 1,080-line review card plus manifest SHA `fc917044...3d7ad4` exists | Owner decision is PENDING | Owner reviews exact local card and signs PASS/REVISE/REJECT | authorized human signs exact card/revision hashes |
+| Human review | Owner PASS recorded at `2026-09-25T11:26:39.9319867Z` against private 1,080-line card and manifest SHA `fc917044...3d7ad4` | none | retain the signed decision and proceed through production gates | **closed** |
 | Unknown paid result | reconciliation `8e0b9add...6c70b`; corrective metering and replay refusal tests | provider offers no proven query result for the possible call | retain UNKNOWN and never reuse old id | provider evidence reconciles it, or UNKNOWN remains permanently explicit |
 | Recovery unit | fresh backup manifest `2b3f0f...f4b63`; release descriptor `af57a54a...c870c`; isolated restore green | no final post-quality cutover backup | take a new drained final backup only after quality gates pass | final backup is restored once and coupled to exact release/deploy/config |
 | Schema migration | actual production schema 25 copy migrated through 39; old rows unchanged; integrity/FK/invariants green | no production migration was run | repeat against final drained backup at cutover | live migration and matched single-instance startup pass |
 | Old-runtime rollback | actual release `4ef5064` started against disposable schema-39 copy; before/after fingerprint identical | not every new P5 feature is available under old config | retain degraded-feature warning | old runtime/schema compatibility remains verified and rollback plan protects new writes |
-| Production release | last verified serving release remains `4ef5064`, Qwen and schema 25; no current production write was made in this recovery | Owner review, fresh backup/migration and production journeys remain | do not deploy before Owner PASS | all preceding gates plus signed-in production journeys pass |
+| Production release | last verified serving release remains `4ef5064`, Qwen and schema 25; Owner review now passed | fresh backup/migration and production journeys remain | execute the authorized controlled cutover | all preceding gates plus signed-in production journeys pass |
 | Campus expansion | frozen 1,921-file batch, growth fail-closed, zero published | 1,715 rights decisions pending | keep paused; no rescans | withheld content remains unpublished |
 
 ## Current production reality
@@ -44,7 +44,7 @@ green. Exact review material exists; Owner human review and production release r
 | `LIVE_DEEPSEEK_QUESTION_ENGINE` | **PASS — BOUNDED SYNTHETIC C1-C5** |
 | `LIVE_JEV_BASE_SIGNALS` | **PASS — REAL ON RECEIPTS** |
 | `LIVE_JEV_SPECIALIZED_SIGNALS` | **PASS — REAL MCQ + RULE RECEIPTS** |
-| `HUMAN_CONTENT_REVIEW` | **PENDING / MATERIAL AVAILABLE** |
+| `HUMAN_CONTENT_REVIEW` | **PASS — OWNER-SIGNED MANIFEST** |
 | `PRODUCTION_SNAPSHOT_RESTORED` | **PASS** |
 | `MIGRATION38_RUNTIME_VERIFIED` | **PASS VIA TARGET SCHEMA 39** |
 | `ROLLBACK_RUNTIME_VERIFIED` | **PASS IN ISOLATION** |

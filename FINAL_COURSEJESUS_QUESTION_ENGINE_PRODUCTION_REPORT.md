@@ -4,13 +4,13 @@ Date: 2026-09-25
 Branch: `fix/codex-dsh-audit-20260919`
 Frozen application candidate: `978e3f714ee9a1a39a34e1969c82615346a60f82`
 Test-harness checkpoint: `c36782e69a51becd1fd690f782b0ae458115c987`
-Production acceptance: **NOT ACCEPTED / NOT DEPLOYED — OWNER CONTENT REVIEW PENDING**
+Production acceptance: **NOT YET ACCEPTED / CUTOVER AUTHORIZED**
 
 P5 source correction, local regression and a bounded real DeepSeek/Jev C1-C5 workflow are complete.
 The workflow produced exact READY revisions and all four required Jev gates returned real `on + ok`
-receipts. Production is still unchanged because automated evidence cannot replace the Owner's content
-decision, and no new candidate backup, migration, deployment or signed-in production acceptance has
-run after that decision.
+receipts, and the Owner has approved the exact content manifest. Production is still unchanged
+because no new candidate backup, migration, deployment or signed-in production acceptance has run
+after that decision.
 
 ## Current status matrix
 
@@ -21,12 +21,12 @@ run after that decision.
 | `LIVE_DEEPSEEK_QUESTION_ENGINE` | **PASS — BOUNDED SYNTHETIC C1-C5** | 21 completed transports, full response/usage persisted before parsing, zero automatic retry |
 | `LIVE_JEV_BASE_SIGNALS` | **PASS** | ambiguity and answer-agreement receipts are real `on + ok + jev-latest` for the generated revisions |
 | `LIVE_JEV_SPECIALIZED_SIGNALS` | **PASS** | real MCQ distractor-quality and rule-violation-quality receipts |
-| `HUMAN_CONTENT_REVIEW` | **PENDING / MATERIAL AVAILABLE** | exact 1,080-line private review card exists; only the Owner may sign PASS/REVISE/REJECT |
+| `HUMAN_CONTENT_REVIEW` | **PASS** | Owner approved manifest `fc917044...3d7ad4` at `2026-09-25T11:26:39.9319867Z` |
 | `PRODUCTION_SNAPSHOT_RESTORED` | **PASS — EARLIER REHEARSAL** | three-database/file snapshot restored in isolation with checksums, integrity and FK checks green |
 | `MIGRATION38_RUNTIME_VERIFIED` | **PASS VIA TARGET SCHEMA 39 — EARLIER REHEARSAL** | actual schema-25 snapshot migrated through schema 39; old rows stayed unchanged |
 | `ROLLBACK_RUNTIME_VERIFIED` | **PASS IN ISOLATION — EARLIER REHEARSAL** | old runtime served health against a disposable schema-39 copy without changing its fingerprint |
 | `UNCERTAIN_OPERATION_RECOVERY` | **SOURCE + LOCAL PASS** | old UNKNOWN is immutable; same id was not retried; new ids and reconciliation links are durable |
-| `PRODUCTION_DEPLOYED` | **NO** | blocked by Owner review and the subsequent cutover gates |
+| `PRODUCTION_DEPLOYED` | **NO** | the subsequent backup, migration and cutover gates are in progress |
 | `SIGNED_IN_STUDENT_ACCEPTANCE` | **NOT RUN** | local synthetic identity is not production Clerk evidence |
 | `POST_RELEASE_BACKUP_AND_MONITORING` | **NOT RUN** | no P5 release has occurred |
 | `CAMPUS_EXPANSION_PAUSED` | **PASS / ENFORCED** | no Canvas roots were scanned and no withheld campus content was published |
@@ -106,13 +106,11 @@ Private content is deliberately not committed. The exact card is:
 
 - Review-card SHA-256: `0335ba2079a5f046c584947c4c6d38091aafed04ec7a43723746aa5ad0dcb862`
 - Manifest SHA-256: `fc91704466ef1b1082d7833dc9965e9a587d462da89cdd88118b18a4993d7ad4`
-- Current decision: **PENDING**
+- Current decision: **PASS**
 
-Only the Owner can sign this exact bundle PASS, REVISE or REJECT. Until then, production deployment
-must remain stopped. PASS unlocks the already planned sequence: fresh consistent backup → restore
-verification → schema migration → immutable backend/front-end deployment → real Clerk student flows
-→ two-user isolation → post-release backup and monitoring. REVISE/REJECT returns only the specified
-content to the bounded generation workflow; it does not overwrite the existing evidence.
+The Owner signed this exact bundle PASS. The authorized sequence is now: fresh consistent backup →
+restore verification → schema migration → immutable backend/front-end deployment → real Clerk
+student flows → two-user isolation → post-release backup and monitoring.
 
 ## Evidence index
 
@@ -126,5 +124,5 @@ content to the bounded generation workflow; it does not overwrite the existing e
 - `docs/coursejesus/evidence/p5/recovery-local-verification.json`
 - `docs/coursejesus/evidence/p5/production-rehearsal-summary.json`
 
-The accurate disposition at this checkpoint is: **bounded live-model acceptance passed; human
-content review pending; production unchanged and not accepted**.
+The accurate disposition at this checkpoint is: **bounded live-model and human content acceptance
+passed; production cutover authorized but not yet accepted**.

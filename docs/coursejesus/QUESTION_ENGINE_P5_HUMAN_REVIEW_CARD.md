@@ -1,14 +1,15 @@
 # CourseJesus Question Engine P5 human review card
 
-Card status: **PENDING OWNER DECISION — REVIEW MATERIAL AVAILABLE**
+Card status: **OWNER PASS RECORDED — PRODUCTION CUTOVER AUTHORIZED**
 Card version: `p5-20260925-live-v2`
 Application candidate: `978e3f714ee9a1a39a34e1969c82615346a60f82`
 Test-harness checkpoint: `c36782e69a51becd1fd690f782b0ae458115c987`
 
 The bounded C1-C5 live workflow has produced exact reviewable content. Automated model, Jev,
 contract, persistence and UI-projection checks have passed, but they do not decide teaching quality.
-Only the project Owner may enter `PASS`, `REVISE` or `REJECT`. Production release remains blocked
-until that decision is recorded against this exact bundle.
+Only the project Owner may enter `PASS`, `REVISE` or `REJECT`. The Owner approved this exact
+bundle on 2026-09-25; production acceptance remains separate and requires the controlled cutover
+and signed-in verification.
 
 ## Controlled review bundle
 
@@ -34,14 +35,14 @@ MCQ distractor mapping and rule analysis. Do not publish it or add it to Git.
 
 | Case | Exact revision(s) | Automated evidence | Human decision |
 |---|---|---|---|
-| C1/C2 practice | `qe_2b66a37d422649c3b0157c202bab0c49`, re-practice `qe_1fdf1412e5c34304bbf60678a771a36a` | READY, hint non-leakage, feedback, reveal/detail, different family, Jev ambiguity/agreement | **PENDING** |
-| C3 MCQ | `qe_47e5e607352741fd9864f06867d52447` | private option mapping persisted; `question.mcq_distractor_quality.v1=on`, outcome `ok` | **PENDING** |
-| C4 rule | `qe_2fd0b9a365e8441c83859d544d335b8d` | private rule analysis persisted; `question.rule_violation_quality.v1=on`, outcome `ok` | **PENDING** |
-| C5 slot 1, 10 marks | `qe_47e5e607352741fd9864f06867d52447` | frozen assessment; reference verification complete | **PENDING** |
-| C5 slot 2, 15 marks | `qe_e9a097b438224c9493e967817cee3b33` | frozen assessment; reference verification complete | **PENDING** |
-| C5 slot 3, 20 marks | `qe_aacc5203bc274e05892ced0a57d33328` | frozen assessment; reference verification complete | **PENDING** |
-| C5 slot 4, 25 marks | `qe_35925afc03994be2916edead4de31ffc` | frozen assessment; reference verification complete | **PENDING** |
-| C5 slot 5, 30 marks | `qe_3197bbfaa1744489b18ad69574fa52b9` | frozen assessment; reference verification complete | **PENDING** |
+| C1/C2 practice | `qe_2b66a37d422649c3b0157c202bab0c49`, re-practice `qe_1fdf1412e5c34304bbf60678a771a36a` | READY, hint non-leakage, feedback, reveal/detail, different family, Jev ambiguity/agreement | **PASS** |
+| C3 MCQ | `qe_47e5e607352741fd9864f06867d52447` | private option mapping persisted; `question.mcq_distractor_quality.v1=on`, outcome `ok` | **PASS** |
+| C4 rule | `qe_2fd0b9a365e8441c83859d544d335b8d` | private rule analysis persisted; `question.rule_violation_quality.v1=on`, outcome `ok` | **PASS** |
+| C5 slot 1, 10 marks | `qe_47e5e607352741fd9864f06867d52447` | frozen assessment; reference verification complete | **PASS** |
+| C5 slot 2, 15 marks | `qe_e9a097b438224c9493e967817cee3b33` | frozen assessment; reference verification complete | **PASS** |
+| C5 slot 3, 20 marks | `qe_aacc5203bc274e05892ced0a57d33328` | frozen assessment; reference verification complete | **PASS** |
+| C5 slot 4, 25 marks | `qe_35925afc03994be2916edead4de31ffc` | frozen assessment; reference verification complete | **PASS** |
+| C5 slot 5, 30 marks | `qe_3197bbfaa1744489b18ad69574fa52b9` | frozen assessment; reference verification complete | **PASS** |
 
 ## Live-call boundary
 
@@ -63,8 +64,8 @@ plausible? Does the rule correction preserve the same problem and source rule? A
 feedback helpful without revealing the answer? Do the five slots complement rather than paraphrase
 one another?
 
-Human reviewer: `UNASSIGNED`
-Review timestamp: `NOT_REVIEWED`
+Human reviewer: `PROJECT_OWNER`
+Review timestamp: `2026-09-25T11:26:39.9319867Z`
 Review-manifest SHA-256: `fc91704466ef1b1082d7833dc9965e9a587d462da89cdd88118b18a4993d7ad4`
-Decision: **PENDING**
-Reason / requested revisions: `NOT_PROVIDED`
+Decision: **PASS**
+Reason / requested revisions: `NONE`
