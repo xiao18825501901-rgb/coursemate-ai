@@ -81,6 +81,7 @@ export default defineConfig({
         ...process.env,
         RAG_PROVIDER_MODE: "deterministic",
         APP_ENV: "test",
+        CMUI_ENV: "test",
         V3_ENABLED: "true",
         UI_EXTENSION_ENABLED: "true",
         CMUI_DATA_DIR: uiData,
