@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Final, Literal, cast
 from uuid import uuid4
 
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from app.db import Database
 from app.errors import ApiError
@@ -1388,6 +1388,7 @@ class QuestionEngineRuntime:
             AuthorGenerationError,
             BlindSolveError,
             QuestionPersistenceError,
+            ValidationError,
         ) as error:
             raise QuestionEngineRuntimeError(
                 getattr(error, "code", "QUESTION_ENGINE_FAILED"),
@@ -1530,6 +1531,7 @@ class QuestionEngineRuntime:
             AuthorGenerationError,
             BlindSolveError,
             QuestionPersistenceError,
+            ValidationError,
         ) as error:
             if operation_claimed:
                 self._fail_generation_operation(

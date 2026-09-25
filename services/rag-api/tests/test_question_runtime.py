@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -129,10 +130,12 @@ def test_generate_one_routes_author_and_blind_solver_through_metered_operation(
         calls.append((workspace_id, operation_id, str(kwargs["role"])))
         return provider.generate(schema, **kwargs)
 
+    semantic_decisions = decisions(database)
+    semantic_decisions.gateway.modes["exercise.prototype.v1"] = "off"
     runtime = QuestionEngineRuntime(
         database=database,
         provider=provider,
-        semantic_decisions=decisions(database),
+        semantic_decisions=semantic_decisions,
         metered_generate=metered_generate,
     )
 
@@ -170,6 +173,59 @@ def test_generate_one_routes_author_and_blind_solver_through_metered_operation(
         )
     assert replayed.value.code == "QUESTION_OPERATION_REPLAY"
     assert len(calls) == 2
+
+
+def test_invalid_blueprint_fails_the_parent_operation_before_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, config = database_with_objective(tmp_path)
+    provider = LearningProvider(config)
+    calls: list[str] = []
+
+    def metered_generate(*_args: Any, **kwargs: Any) -> tuple[Any, dict[str, Any]]:
+        calls.append(str(kwargs["role"]))
+        return provider.generate(_args[2], **kwargs)
+
+    runtime = QuestionEngineRuntime(
+        database=database,
+        provider=provider,
+        semantic_decisions=decisions(database),
+        metered_generate=metered_generate,
+    )
+    original_blueprint = runtime._blueprint
+
+    def invalid_blueprint(**kwargs: Any) -> Any:
+        kwargs["objective"] = replace(
+            kwargs["objective"], objective="Density clustering"
+        )
+        return original_blueprint(**kwargs)
+
+    monkeypatch.setattr(runtime, "_blueprint", invalid_blueprint)
+
+    with pytest.raises(QuestionEngineRuntimeError) as refused:
+        runtime.generate_one(
+            owner_user_id=OWNER,
+            workspace_id=WORKSPACE,
+            course_id=COURSE,
+            private_course_id=PRIVATE_COURSE,
+            node_id=NODE,
+            operation_id="invalid-blueprint-operation",
+        )
+
+    assert refused.value.code == "QUESTION_ENGINE_FAILED"
+    assert calls == []
+    with database.connect() as connection:
+        operation = connection.execute(
+            "SELECT status FROM learning_operations WHERE workspace_id=? AND id=?",
+            (WORKSPACE, "invalid-blueprint-operation"),
+        ).fetchone()
+        reservations = connection.execute(
+            "SELECT COUNT(*) FROM learning_model_call_reservations "
+            "WHERE workspace_id=? AND operation_id=?",
+            (WORKSPACE, "invalid-blueprint-operation"),
+        ).fetchone()[0]
+    assert operation["status"] == "FAILED"
+    assert reservations == 0
 
 
 def test_runtime_rule_violation_prototype_persists_an_exact_course_rule(

@@ -411,8 +411,8 @@ def _seed_synthetic_objective(application: Any, course_id: str, owner: str, run_
         "item_id": "p5-objective-density",
         "requirement": "REQUIRED",
         "objective": (
-            "Use the stated epsilon and MinPts rule to count A's neighbourhood and decide whether "
-            "A is a core point."
+            "Compute A's neighbourhood using the stated epsilon and MinPts rule, then distinguish "
+            "whether A is a core point."
         ),
         "acceptance": (
             "The answer must include the eligible distances, the neighbourhood count, and the "
