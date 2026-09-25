@@ -1,6 +1,7 @@
 {
-  "formatVersion": 1,
-  "candidateAfterCorrections": "a24fac535eda85358965f516964df0c40510e7a0",
+  "formatVersion": 2,
+  "candidateAfterCorrections": "978e3f714ee9a1a39a34e1969c82615346a60f82",
+  "testHarnessSha": "c36782e69a51becd1fd690f782b0ae458115c987",
   "productionAcceptance": false,
   "automaticRetry": false,
   "attempts": [
@@ -38,12 +39,60 @@
       "jevCalls": 0,
       "deepseekCharge": "ZERO_FOR_THIS_ATTEMPT",
       "reason": "The synthetic objective failed blueprint validation before any provider reservation or transport."
+    },
+    {
+      "startedAt": "2026-09-25T09:33:46.407298Z",
+      "finishedAt": "2026-09-25T09:55:55.555975Z",
+      "applicationShaAtStart": "d470137ab2415bebf59a7c6aad165b435c40fed7",
+      "recoveryApplicationSha": "1da21b70a84755238760e3d210b6b8e959864174",
+      "publicSummarySha256": "279e7b63bec5d00dd72749995ccfa1811580ef0eab39d06254647bd923decbf1",
+      "result": "LIVE_CALLS_COMPLETED_HUMAN_REVIEW_REQUIRED",
+      "questionRevisionIds": [
+        "qe_2b66a37d422649c3b0157c202bab0c49",
+        "qe_1fdf1412e5c34304bbf60678a771a36a"
+      ],
+      "deepseekCompletedTransports": 8,
+      "jevCalls": 4,
+      "automaticRetry": false,
+      "estimatedCostUsd": 0.0095247,
+      "linkedUnknownReconciliationSha256": "8e0b9addcc61a837906866e5b67bdd581567cd37fafd4c2a5d76ad398766c70b",
+      "recovery": {
+        "sourceOperationId": "p5-attempt-assisted-0001",
+        "newOperationId": "p5-attempt-assisted-recovery-0002",
+        "reusedCompletedResponse": true,
+        "additionalProviderCall": false
+      },
+      "reason": "C1/C2 reached READY, completed hint/feedback/reveal/detail/history/re-practice, and preserved the earlier UNKNOWN as a linked immutable record."
+    },
+    {
+      "startedAt": "2026-09-25T10:26:00Z",
+      "finishedAt": "2026-09-25T10:27:05Z",
+      "applicationSha": "978e3f714ee9a1a39a34e1969c82615346a60f82",
+      "publicSummarySha256": "f1c280652ece5ec7e5272b2fb732b63ea380d0689dd70a5f0543b2f65a0b011f",
+      "privateReviewSha256": "1f7d1e5ebad4e72d3bb87e073233adf62430f234114d67fd345b8ffe0fa4a7c4",
+      "transportLedgerSha256": "419013f4e3cf29d6384e6eac64c1806d38ffcd055cb337c0eae4b58b3404566a",
+      "result": "LIVE_CALLS_COMPLETED_HUMAN_REVIEW_REQUIRED",
+      "assessmentSessionId": "4f89fe55378d44109c12ae39c121ce4e",
+      "assessmentQuestionRevisionIds": [
+        "qe_47e5e607352741fd9864f06867d52447",
+        "qe_e9a097b438224c9493e967817cee3b33",
+        "qe_aacc5203bc274e05892ced0a57d33328",
+        "qe_35925afc03994be2916edead4de31ffc",
+        "qe_3197bbfaa1744489b18ad69574fa52b9"
+      ],
+      "ruleQuestionRevisionId": "qe_2fd0b9a365e8441c83859d544d335b8d",
+      "deepseekCompletedTransports": 13,
+      "jevCalls": 14,
+      "automaticRetry": false,
+      "estimatedCostUsd": 0.0255264,
+      "reason": "C3 MCQ, C4 rule analysis and the frozen 10/15/20/25/30 C5 assessment completed with all four required Jev definitions on and outcome ok."
     }
   ],
   "acceptance": {
-    "liveProviderContract": "NOT_PASSED",
-    "questionEngineLiveEndToEnd": "NOT_PASSED",
-    "humanContentReview": "PENDING_EMPTY",
-    "furtherPaidAttempts": "STOPPED"
+    "liveProviderContract": "PASSED_FOR_BOUNDED_SYNTHETIC_WORKFLOW",
+    "questionEngineLiveEndToEnd": "PASSED_FOR_C1_C5_BOUNDED_SYNTHETIC_WORKFLOW",
+    "humanContentReview": "PENDING_REVIEW_MATERIAL_AVAILABLE",
+    "productionAcceptance": "BLOCKED_ON_OWNER_REVIEW_AND_PRODUCTION_VALIDATION",
+    "furtherPaidAttempts": "NOT_REQUIRED_FOR_CURRENT_REVIEW_BUNDLE"
   }
 }

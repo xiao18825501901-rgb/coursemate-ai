@@ -1,0 +1,89 @@
+{
+  "formatVersion": 1,
+  "verifiedAt": "2026-09-25",
+  "applicationSha": "978e3f714ee9a1a39a34e1969c82615346a60f82",
+  "testHarnessSha": "c36782e69a51becd1fd690f782b0ae458115c987",
+  "baselineApplicationSha": "a24fac535eda85358965f516964df0c40510e7a0",
+  "networkCalls": 0,
+  "staticPreflight": {
+    "status": "STATIC_PREFLIGHT_PASSED",
+    "schemaVersion": 39,
+    "blueprintSchema": "question-blueprint.v1",
+    "blueprintHash": "3eb1117b73c417823b439f93e90432f6206c7b64b5488fd76cef4cb6a6b84938",
+    "evidencePackHash": "c847fe85fa8eba237cb545d09ca73095ed2389c9619066185596e6f3d96bb0b6",
+    "productBaselineUsd": "0.20",
+    "mediumQuestionEngineEstimateUsd": "0.046674",
+    "operatorWorkflowCeilingUsd": "0.07440000",
+    "runDirectoryCreated": false
+  },
+  "targetedTests": {
+    "passed": 76,
+    "failed": 0,
+    "commandScope": [
+      "test_deepseek_provider_roles.py",
+      "test_question_runtime.py",
+      "test_question_blueprint.py",
+      "test_assessment_question_slots.py",
+      "test_question_engine_p5_live_cli.py",
+      "test_p5_recovery_fake_http_contract.py",
+      "test_jev_gateway.py"
+    ]
+  },
+  "fakeHttpContract": {
+    "provider": "real LearningProvider with OpenAI Responses SDK and httpx.MockTransport",
+    "orchestration": "real LearningOrchestrator and QuestionEngineRuntime",
+    "jev": "real Jev gateway and receipt store with fake HTTP transport",
+    "result": "AUTHOR_BLIND_TWO_REQUIRED_JEV_READY",
+    "billable": false
+  },
+  "releaseRegression": {
+    "backend": {
+      "passed": 1854,
+      "skipped": 2,
+      "failed": 0,
+      "note": "Run against the frozen application candidate before the test-harness-only environment checkpoint."
+    },
+    "web": { "passed": 117, "failed": 0 },
+    "agent": { "passed": 92, "failed": 0 },
+    "browser": {
+      "uiRefresh": { "passed": 23, "failed": 0 },
+      "core": { "passed": 4, "failed": 0 },
+      "v3Learning": { "passed": 3, "failed": 0 },
+      "jevOffline": {
+        "passed": 12,
+        "skipped": 5,
+        "failed": 0,
+        "note": "Live-only promoted-definition and tool-intent journeys stayed disabled; no credential was used."
+      }
+    },
+    "productionShapeBuild": {
+      "web": "PASSED",
+      "agent": "PASSED",
+      "webBundleCredentialScan": "PASSED"
+    },
+    "testEnvironmentRegression": {
+      "beforeFix": "2_FAILED_OF_2",
+      "afterFix": "2_PASSED_OF_2",
+      "rootCause": "The host used APP_ENV=test while the mounted UI extension reads CMUI_ENV; the extension therefore retained the development model-run rate limit.",
+      "jevOfflineAfterFix": "12_PASSED_5_LIVE_ONLY_SKIPPED",
+      "uiRefreshAfterFix": "23_PASSED"
+    }
+  },
+  "boundedLiveWorkflow": {
+    "deepseekCompletedTransports": 21,
+    "jevCalls": 18,
+    "inputTokens": 54441,
+    "outputTokens": 15599,
+    "estimatedNewWorkflowCostUsd": "0.0350511",
+    "automaticRetries": 0,
+    "c1c2PublicSummarySha256": "279e7b63bec5d00dd72749995ccfa1811580ef0eab39d06254647bd923decbf1",
+    "c3c5PublicSummarySha256": "f1c280652ece5ec7e5272b2fb732b63ea380d0689dd70a5f0543b2f65a0b011f",
+    "ownerReviewManifestSha256": "fc91704466ef1b1082d7833dc9965e9a587d462da89cdd88118b18a4993d7ad4"
+  },
+  "boundaries": {
+    "liveDeepSeek": "VERIFIED_FOR_BOUNDED_SYNTHETIC_C1_C5",
+    "liveJev": "VERIFIED_FOR_FOUR_REQUIRED_GATES_ON_BOUNDED_SYNTHETIC_C1_C5",
+    "humanReview": "PENDING_REVIEW_MATERIAL_AVAILABLE",
+    "productionDeployment": "NOT_STARTED"
+  }
+}

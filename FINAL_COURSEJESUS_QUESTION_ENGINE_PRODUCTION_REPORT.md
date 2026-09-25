@@ -2,85 +2,129 @@
 
 Date: 2026-09-25
 Branch: `fix/codex-dsh-audit-20260919`
-Application candidate: `a24fac535eda85358965f516964df0c40510e7a0`
-Production acceptance: **NOT ACCEPTED / NOT DEPLOYED**
+Frozen application candidate: `978e3f714ee9a1a39a34e1969c82615346a60f82`
+Test-harness checkpoint: `c36782e69a51becd1fd690f782b0ae458115c987`
+Production acceptance: **NOT ACCEPTED / NOT DEPLOYED — OWNER CONTENT REVIEW PENDING**
 
-The source, local regression, real production snapshot migration and old-runtime rollback rehearsal
-are complete. The live DeepSeek Question Engine chain did not complete, the four required live Jev
-receipts were not produced, and there is no exact live content for a human reviewer. Those are
-mandatory release gates, so the production release was correctly withheld.
+P5 source correction, local regression and a bounded real DeepSeek/Jev C1-C5 workflow are complete.
+The workflow produced exact READY revisions and all four required Jev gates returned real `on + ok`
+receipts. Production is still unchanged because automated evidence cannot replace the Owner's content
+decision, and no new candidate backup, migration, deployment or signed-in production acceptance has
+run after that decision.
 
-## Final status matrix
+## Current status matrix
 
 | Layer | Status | Evidence |
 |---|---|---|
-| `SOURCE_IMPLEMENTED` | **PASS** | P5 runner, metered practice calls, immutable uncertain-operation reconciliation, migration 039 and release metadata are committed; final test-isolation fix at `a24fac5` |
-| `LOCAL_VERIFIED` | **PASS** | 1838 passed / 2 environmental skips / 0 failed; Web 115; Agent 92; typechecks pass; browser 15 + 23 + 4 + 3 + 12 pass, with 5 honest JEV configuration skips |
-| `LIVE_DEEPSEEK_QUESTION_ENGINE` | **NOT PASSED** | no live author→blind→READY result; one possible author transport has outcome/usage/charge UNKNOWN |
-| `LIVE_JEV_BASE_SIGNALS` | **PARTIAL, NOT ACCEPTED** | three real calls occurred only for retrieval/source/prototype definitions; required ambiguity/agreement positive receipts absent |
-| `LIVE_JEV_SPECIALIZED_SIGNALS` | **NOT VERIFIED** | required MCQ/rule positive live receipts absent |
-| `HUMAN_CONTENT_REVIEW` | **PENDING / EMPTY** | no live question revision exists for review |
-| `PRODUCTION_SNAPSHOT_RESTORED` | **PASS** | fresh three-database/file backup restored in isolation; checksums, integrity and FK checks pass |
-| `MIGRATION38_RUNTIME_VERIFIED` | **PASS via target schema 39** | actual schema 25 snapshot migrated through 38 to 39; old rows unchanged; invariants green |
-| `ROLLBACK_RUNTIME_VERIFIED` | **PASS IN ISOLATION** | actual old release initialized and served health against migrated snapshot; before/after fingerprints identical |
-| `UNCERTAIN_OPERATION_RECOVERY` | **SOURCE + LOCAL PASS** | unknown call preserved, same id never retried, new attempts require linked IDs; no provider status API invented |
-| `PRODUCTION_DEPLOYED` | **NO** | live quality and human gates failed/not run |
-| `SIGNED_IN_STUDENT_ACCEPTANCE` | **NOT RUN** | no P5 production release; local synthetic identity is not production login evidence |
-| `POST_RELEASE_BACKUP_AND_MONITORING` | **NOT RUN** | no release occurred; fresh pre-release backup and healthy monitor are recorded separately |
+| `SOURCE_IMPLEMENTED` | **PASS** | canonical blueprint construction, zero-network preflight, durable transport ledger, explicit no-retry policy and completed-response recovery are committed in application `978e3f7` |
+| `LOCAL_VERIFIED` | **PASS** | backend 1,854 pass + 2 platform skips; Web 117; Agent 92; typechecks and production-shaped builds pass |
+| `LIVE_DEEPSEEK_QUESTION_ENGINE` | **PASS — BOUNDED SYNTHETIC C1-C5** | 21 completed transports, full response/usage persisted before parsing, zero automatic retry |
+| `LIVE_JEV_BASE_SIGNALS` | **PASS** | ambiguity and answer-agreement receipts are real `on + ok + jev-latest` for the generated revisions |
+| `LIVE_JEV_SPECIALIZED_SIGNALS` | **PASS** | real MCQ distractor-quality and rule-violation-quality receipts |
+| `HUMAN_CONTENT_REVIEW` | **PENDING / MATERIAL AVAILABLE** | exact 1,080-line private review card exists; only the Owner may sign PASS/REVISE/REJECT |
+| `PRODUCTION_SNAPSHOT_RESTORED` | **PASS — EARLIER REHEARSAL** | three-database/file snapshot restored in isolation with checksums, integrity and FK checks green |
+| `MIGRATION38_RUNTIME_VERIFIED` | **PASS VIA TARGET SCHEMA 39 — EARLIER REHEARSAL** | actual schema-25 snapshot migrated through schema 39; old rows stayed unchanged |
+| `ROLLBACK_RUNTIME_VERIFIED` | **PASS IN ISOLATION — EARLIER REHEARSAL** | old runtime served health against a disposable schema-39 copy without changing its fingerprint |
+| `UNCERTAIN_OPERATION_RECOVERY` | **SOURCE + LOCAL PASS** | old UNKNOWN is immutable; same id was not retried; new ids and reconciliation links are durable |
+| `PRODUCTION_DEPLOYED` | **NO** | blocked by Owner review and the subsequent cutover gates |
+| `SIGNED_IN_STUDENT_ACCEPTANCE` | **NOT RUN** | local synthetic identity is not production Clerk evidence |
+| `POST_RELEASE_BACKUP_AND_MONITORING` | **NOT RUN** | no P5 release has occurred |
 | `CAMPUS_EXPANSION_PAUSED` | **PASS / ENFORCED** | no Canvas roots were scanned and no withheld campus content was published |
 
-## Verification on the frozen candidate
+## Three original attempts: corrected interpretation
 
-- Backend: 1,838 passed, 2 skipped, 0 failed in 1,095.270 s. The skips are Windows-only
-  symlink privilege and POSIX permission-bit checks, not hidden passes.
-- Web: 115 passed across 25 files; Agent: 92 passed across 12 files.
-- TypeScript: Web and Agent both pass.
-- Browser: Codex audit 15/15; refreshed UI 23/23; base 4/4; V3 3/3; JEV 12 passed and
-  5 intentionally skipped because real promoted TypeSafe modes were absent.
-- Production-shaped local build: preflight, Vite build, 7-file PAT scan and 16-artifact verifier
-  pass at `a24fac5`. The local `pk_live_`-shaped value proves only the build gate shape, not a Clerk
-  account or deploy.
-- Focused Ruff, Python compilation and runner-isolated mypy pass. Repository-wide Ruff and strict
-  mypy retain pre-existing debt (strict mypy: 1,032 errors in 30 files); no global-clean claim is made.
+1. Attempt `20260925T060137Z` was blocked locally by missing mounted-UI price inputs. DeepSeek sent
+   zero requests; two unrelated Jev shadow calls had already happened. It was not a content-quality
+   result.
+2. Attempt `20260925T061320Z` may have sent one author request outside the durable ledger. Its
+   outcome, usage and charge remain `UNKNOWN` under reconciliation SHA-256
+   `8e0b9addcc61a837906866e5b67bdd581567cd37fafd4c2a5d76ad398766c70b`. It was not retried or
+   rewritten and contains insufficient evidence for a quality judgment.
+3. Attempt `20260925T063014Z` failed local `objective_text` blueprint validation before DeepSeek or
+   Jev transport. It was a field-construction defect, not a model result.
 
-The first full run on `4305955` had 17 failures because the P5 environment contract test leaked
-DeepSeek settings into later UI tests. Each failure passed alone; the exact two-test sequence
-reproduced the leak. `a24fac5` wraps all 15 environment keys in a bounded restoration context; the
-sequence then passed 4/4, the related suite 32/32, and the complete frozen regression passed. The
-original failing XML remains preserved under `work/p5-final-regression/pytest.xml`.
+Detailed paths, constructor sources and correction proof are in
+`docs/coursejesus/P5_RECOVERY_ROOT_CAUSES.md`.
 
-## Production rehearsal
+## New bounded live evidence
 
-Production remains release `4ef50642...`, schema 25 and Qwen `qwen3.8-max`; no candidate or model
-switch was made. A fresh verified backup captured all three databases and file stores and restored
-successfully. Its disposable copy migrated 25→39 with unchanged old data. The actual old release
-then started against a separate migrated copy with unchanged before/after fingerprints. The
-monitor's backup permission defect was repaired without changing the serving release, and its final
-result is healthy.
+### C1/C2 practice
 
-## Live-quality stop condition
+- Revisions: `qe_2b66a37d422649c3b0157c202bab0c49` and
+  `qe_1fdf1412e5c34304bbf60678a771a36a`.
+- Result: READY, answer hidden before reveal, bounded hint, independent and assisted feedback,
+  detail, refresh restore and different-family re-practice completed.
+- Transports: 8 DeepSeek and 4 Jev; 16,061 input + 3,922 output tokens; estimated USD `0.0095247`.
+- A 512-character completed feedback response was rejected by the old 500-character local parser.
+  Recovery id `p5-attempt-assisted-recovery-0002` reused that durably saved response from
+  `p5-attempt-assisted-0001` with zero additional paid calls.
 
-Three bounded attempts were preserved. Attempt 1 made two unrelated Jev shadow calls then failed
-the UI budget gate. Attempt 2 made one prototype Jev call and may have sent one unmetered DeepSeek
-author request; its result and charge remain `UNKNOWN`. Attempt 3 was rejected before all
-transports. No automatic retry or fourth paid attempt was made.
+### C3-C5 assessment and rule path
 
-Because no READY revision exists, the human review card is necessarily empty. Deployment would
-violate the required ordering `live model → human content → migration/rollback → release`; therefore
-the correct final disposition is **release blocked at the live-quality gate, production unchanged**.
+- Assessment: `4f89fe55378d44109c12ae39c121ce4e`, frozen at 10/15/20/25/30 marks.
+- Five assessment revisions:
+  `qe_47e5e607352741fd9864f06867d52447`,
+  `qe_e9a097b438224c9493e967817cee3b33`,
+  `qe_aacc5203bc274e05892ced0a57d33328`,
+  `qe_35925afc03994be2916edead4de31ffc`,
+  `qe_3197bbfaa1744489b18ad69574fa52b9`.
+- Rule revision: `qe_2fd0b9a365e8441c83859d544d335b8d`.
+- Result: MCQ mapping and rule analysis stayed private; learner answers stayed hidden before submit;
+  assessment freeze, submit, grade and database integrity checks passed.
+- Transports: 13 DeepSeek and 14 Jev; 38,380 input + 11,677 output tokens; estimated USD
+  `0.0255264`.
+
+Across both new slices: 21 completed DeepSeek transports, 18 Jev calls, no automatic retry and
+estimated new-workflow cost USD `0.0350511`. This does not settle the old UNKNOWN amount.
+
+## Verification on the frozen application
+
+- Backend: 1,854 passed, 2 platform skips, 0 failed. The skips cover Windows symlink privilege and
+  POSIX permission-bit behaviour.
+- Web: 117/117; Agent: 92/92; both TypeScript checks passed.
+- Browser: refreshed shell 23/23; core 4/4; V3 learning 3/3; structured Jev offline 12/12 runnable
+  with 5 intentional live-only skips.
+- Production-shaped Web and Agent builds passed; the built Web scan found no token field and kept
+  the required credential notice.
+- The structured Jev suite first exposed a test-only 429: the host set `APP_ENV=test`, while the
+  mounted UI extension reads `CMUI_ENV`. Test checkpoint `c36782e` added the missing isolated test
+  variable and a 2-case guard. It changes no application runtime source or production rate limit.
+
+## Current production reality
+
+Last verified production remains immutable release `4ef5064`, Qwen `qwen3.8-max`, schema 25. The
+new CourseJesus P5 application is not deployed, production databases were not migrated during this
+recovery, and no production model/provider switch was made. The earlier backup/migration/rollback
+rehearsal is reusable evidence, but it does not replace a fresh consistent cutover backup after
+Owner review.
+
+## Human review gate
+
+Private content is deliberately not committed. The exact card is:
+
+`D:\CourseMate_COMPLETE_ARCHIVE_20260918\01_SOURCE_REPOSITORY\work\p5-owner-review-20260925T103415Z\OWNER_REVIEW_CARD_PRIVATE.md`
+
+- Review-card SHA-256: `0335ba2079a5f046c584947c4c6d38091aafed04ec7a43723746aa5ad0dcb862`
+- Manifest SHA-256: `fc91704466ef1b1082d7833dc9965e9a587d462da89cdd88118b18a4993d7ad4`
+- Current decision: **PENDING**
+
+Only the Owner can sign this exact bundle PASS, REVISE or REJECT. Until then, production deployment
+must remain stopped. PASS unlocks the already planned sequence: fresh consistent backup → restore
+verification → schema migration → immutable backend/front-end deployment → real Clerk student flows
+→ two-user isolation → post-release backup and monitoring. REVISE/REJECT returns only the specified
+content to the bounded generation workflow; it does not overwrite the existing evidence.
 
 ## Evidence index
 
+- `P5_RELEASE_LEDGER.md`
+- `docs/coursejesus/P5_RECOVERY_ROOT_CAUSES.md`
 - `docs/coursejesus/QUESTION_ENGINE_P5_LIVE_ACCEPTANCE.md`
 - `docs/coursejesus/QUESTION_ENGINE_P5_HUMAN_REVIEW_CARD.md`
 - `docs/coursejesus/QUESTION_ENGINE_P5_PRODUCTION_MIGRATION.md`
 - `docs/coursejesus/QUESTION_ENGINE_P5_RECOVERY_AND_ROLLBACK.md`
 - `docs/coursejesus/evidence/p5/live-attempt-summary.json`
+- `docs/coursejesus/evidence/p5/recovery-local-verification.json`
 - `docs/coursejesus/evidence/p5/production-rehearsal-summary.json`
-- `docs/coursejesus/evidence/p5/local-verification-summary.json`
-- `docs/coursejesus/evidence/p5/pytest-a24fac5-summary.xml`
 
-To resume later, explicitly authorize/resume one new bounded real-model run. It must use a new
-operation id linked to the unknown attempt and must complete C1–C5 before presenting the populated
-review card to an authorized human. Only after that decision may a new final consistent backup and
-production cutover begin.
+The accurate disposition at this checkpoint is: **bounded live-model acceptance passed; human
+content review pending; production unchanged and not accepted**.
