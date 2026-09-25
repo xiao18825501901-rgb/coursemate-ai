@@ -11,12 +11,12 @@ otherwise.
 
 | Fact | Value | Where it comes from |
 |---|---|---|
-| Latest V3 schema version | **38** | `LATEST_V3_SCHEMA_VERSION` in `app/db.py` |
+| Latest V3 schema version | **39** | `LATEST_V3_SCHEMA_VERSION` in `app/db.py` |
 | Latest V2 schema version | 10 | `LATEST_V2_SCHEMA_VERSION` |
-| Registered V3 migrations | **28** (`011_learning_workspaces.sql` … `038_assessment_question_slots.sql`) | the explicit `V3_MIGRATIONS` tuple |
-| Migration files on disk | 32 | `services/rag-api/migrations/*.sql` |
-| Migrations added by the CourseJesus work | `029` through `038`; the newest is `038_assessment_question_slots.sql` | migration files |
-| Production release / schema | `4ef5064`, schema **25** | read-only production observation recorded in `COURSEJESUS_EXECUTION_STATE.md` |
+| Registered V3 migrations | **29** (`011_learning_workspaces.sql` … `039_practice_operation_reconciliation.sql`) | the explicit `V3_MIGRATIONS` tuple |
+| Migration files on disk | 33 | `services/rag-api/migrations/*.sql` |
+| Migrations added by the CourseJesus work | `029` through `039`; the newest is `039_practice_operation_reconciliation.sql` | migration files |
+| Production release / schema | `4ef5064`, schema **25** | fresh read-only SSH observation on 2026-09-25; P5 migrations are not deployed |
 
 Two rules this repository already follows, and which the numbers above depend on:
 
@@ -26,7 +26,7 @@ Two rules this repository already follows, and which the numbers above depend on
   cannot look complete.
 * Registered migrations are normally replayed for idempotent schema-object repair. A historical
   table rebuild that a later migration has made unsafe is skipped only after that later version is
-  recorded. Migration 027 → 038 is the first explicit case; see
+  recorded. Migration 027 → 038 and migration 038 → 039 are the explicit cases; see
   `docs/decisions/ADR-003-skip-superseded-table-rebuilds-on-replay.md`.
 
 ## 2. What this work adds to the database
@@ -43,6 +43,7 @@ Two rules this repository already follows, and which the numbers above depend on
 | `036_question_engine_provenance.sql` | `question_engine_provenance` | binds existing question/rubric/reference rows to exact evidence and validation receipts |
 | `037_practice_question_interactions.sql` | operation ledger, hint events, practice attempts | owner-scoped diagnostic practice evidence; never grades, coverage, or `LEARNED` |
 | `038_assessment_question_slots.sql` | `assessment_preparation_questions`; rebuilds the two existing model-call ledgers without losing rows | immutable mapping from five complementary preparation intents to exact READY revisions; adds the two Question Engine call roles and permits separately identified repeated roles within one operation; creates no parallel assessment or grade state |
+| `039_practice_operation_reconciliation.sql` | practice metering guards, reconciliation decisions and immutable retry links; rebuilds the model-call ledgers without losing rows | permits metered hint/feedback calls to reference either a learning operation or a practice operation; replaces a single-parent foreign key with union-integrity triggers; preserves unknown upstream outcomes and forbids reusing an old operation id |
 
 These migrations are additive: they do not drop or rewrite an existing column. Migrations 036
 through 038 deliberately reference existing Question/Workspace rows so ownership and lifecycle constraints
@@ -51,16 +52,18 @@ to verification against the exact release candidate.
 
 ## 3. Applying them (forward)
 
-1. **Back up first, consistently.** `ops/backup_v2.py` creates a verified backup of both databases
-   and the uploads with a `coursemate-v2-<stamp>` name, and `ops/restore_v2.py` verifies and restores
-   one into a new isolated directory. A backup that has not been restored once is not evidence, so
-   the release sequence rehearses the restore before touching production.
+1. **Back up first, consistently.** `ops/backup_v2.py` creates a verified unit containing the RAG,
+   Agent and UI databases, original uploads, UI/assessment attachments, share snapshots and a
+   strictly whitelisted non-secret `release-config.json`; `ops/restore_v2.py` verifies and restores
+   it to a new isolated directory. Credentials remain external and are represented only by
+   `credentialRecovery=EXTERNAL_NOT_INCLUDED`. A backup that has not been restored once is not
+   evidence, so the release sequence rehearses the restore before touching production.
 2. **Rehearse on an isolated copy.** `scripts/rehearse_v3_migration.py` applies the migrations to a
    copy and reports what it did; the release sequence runs it before the real window.
 3. **Apply during the bounded window.** `ops/production_switch_four_changes.sh` stops the two
    services, switches the release symlink, starts them, and verifies health; it refuses to proceed if
    either service was unhealthy to begin with.
-4. **Verify afterwards.** Schema version equals 38, the tables above exist, and the course,
+4. **Verify afterwards.** Schema version equals 39, the tables above exist, and the course,
    document, node, assessment and user identifiers from before the migration are unchanged.
 
 ## 4. Rolling back
