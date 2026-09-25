@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Final, Literal, cast
@@ -270,6 +271,98 @@ class QuestionEngineRuntime:
             workspace_id=workspace_id,
             operation_id=operation_id,
         )
+
+    def _claim_generation_operation(
+        self,
+        *,
+        workspace_id: str,
+        operation_id: str,
+        request_hash: str,
+    ) -> None:
+        """Create the durable operation parent required by the model-call ledger."""
+
+        try:
+            with self.database.connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                existing = connection.execute(
+                    "SELECT request_hash,status FROM learning_operations "
+                    "WHERE workspace_id=? AND id=?",
+                    (workspace_id, operation_id),
+                ).fetchone()
+                if existing is not None:
+                    code = (
+                        "QUESTION_OPERATION_CONFLICT"
+                        if str(existing["request_hash"]) != request_hash
+                        else "QUESTION_OPERATION_REPLAY"
+                    )
+                    raise QuestionEngineRuntimeError(
+                        code,
+                        "The question-generation operation id has already been claimed.",
+                    )
+                connection.execute(
+                    "INSERT INTO learning_operations("
+                    "workspace_id,id,request_hash,kind,status) "
+                    "VALUES(?,?,?,'QUESTION_GENERATION','RUNNING')",
+                    (workspace_id, operation_id, request_hash),
+                )
+        except sqlite3.IntegrityError as error:
+            raise QuestionEngineRuntimeError(
+                "QUESTION_OPERATION_CONFLICT",
+                "Another learning operation is already active for this workspace.",
+            ) from error
+
+    def _finish_generation_operation(
+        self,
+        *,
+        workspace_id: str,
+        operation_id: str,
+        question_revision_id: str,
+    ) -> None:
+        result = json.dumps(
+            {
+                "question_revision_id": question_revision_id,
+                "status": "READY",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        with self.database.connect() as connection:
+            updated = connection.execute(
+                "UPDATE learning_operations SET status='COMPLETED',result_json=? "
+                "WHERE workspace_id=? AND id=? AND status='RUNNING'",
+                (result, workspace_id, operation_id),
+            ).rowcount
+        if updated != 1:
+            raise QuestionEngineRuntimeError(
+                "QUESTION_OPERATION_LOST",
+                "The question-generation operation could not be finalized safely.",
+            )
+
+    def _fail_generation_operation(
+        self,
+        *,
+        workspace_id: str,
+        operation_id: str,
+    ) -> None:
+        with self.database.connect() as connection:
+            reservation_states = {
+                str(row["status"])
+                for row in connection.execute(
+                    "SELECT status FROM learning_model_call_reservations "
+                    "WHERE workspace_id=? AND operation_id=?",
+                    (workspace_id, operation_id),
+                ).fetchall()
+            }
+            status = (
+                "UNKNOWN"
+                if reservation_states & {"RESERVED", "UNKNOWN"}
+                else "FAILED"
+            )
+            connection.execute(
+                "UPDATE learning_operations SET status=? "
+                "WHERE workspace_id=? AND id=? AND status='RUNNING'",
+                (status, workspace_id, operation_id),
+            )
 
     def _recent_exposures(self, workspace_id: str, node_id: str) -> list[str]:
         with self.database.connect() as connection:
@@ -1362,6 +1455,7 @@ class QuestionEngineRuntime:
             raise QuestionEngineRuntimeError(
                 "QUESTION_OPERATION_REQUIRED", "A stable exercise operation id is required."
             )
+        operation_claimed = False
         try:
             self._check_cancelled(should_cancel)
             workspace = workspace_for(self.database, workspace_id, owner_user_id)
@@ -1373,6 +1467,19 @@ class QuestionEngineRuntime:
                     "QUESTION_WORKSPACE_MISMATCH",
                     "The exercise request does not match the learner workspace.",
                 )
+            if self.metered_generate is not None:
+                self._claim_generation_operation(
+                    workspace_id=workspace_id,
+                    operation_id=operation_id,
+                    request_hash=_hash(
+                        "question-generation.v1",
+                        owner_user_id,
+                        course_id,
+                        private_course_id,
+                        node_id,
+                    ),
+                )
+                operation_claimed = True
             with self.database.connect() as connection:
                 objective = resolve_objective(connection, node_id=node_id)
             evidence = build_evidence_pack(
@@ -1408,8 +1515,14 @@ class QuestionEngineRuntime:
                 evidence=evidence,
                 blueprint=blueprint,
                 should_cancel=should_cancel,
+                model_operation_id=operation_id,
             )
         except QuestionEngineRuntimeError:
+            if operation_claimed:
+                self._fail_generation_operation(
+                    workspace_id=workspace_id,
+                    operation_id=operation_id,
+                )
             raise
         except (
             ObjectiveResolutionError,
@@ -1418,11 +1531,21 @@ class QuestionEngineRuntime:
             BlindSolveError,
             QuestionPersistenceError,
         ) as error:
+            if operation_claimed:
+                self._fail_generation_operation(
+                    workspace_id=workspace_id,
+                    operation_id=operation_id,
+                )
             raise QuestionEngineRuntimeError(
                 getattr(error, "code", "QUESTION_ENGINE_FAILED"),
                 "The exercise could not be prepared from the current verified course evidence.",
             ) from error
         except ApiError as error:
+            if operation_claimed:
+                self._fail_generation_operation(
+                    workspace_id=workspace_id,
+                    operation_id=operation_id,
+                )
             raise QuestionEngineRuntimeError(error.code, error.message) from error
 
         usage = [
@@ -1452,4 +1575,10 @@ class QuestionEngineRuntime:
             references=self._references(evidence),
             usage=usage,
         )
+        if operation_claimed:
+            self._finish_generation_operation(
+                workspace_id=workspace_id,
+                operation_id=operation_id,
+                question_revision_id=persisted.question_revision_id,
+            )
         return generated.model_dump(mode="json")

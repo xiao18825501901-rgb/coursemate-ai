@@ -100,6 +100,7 @@ def test_required_jev_modes_are_exactly_the_four_p5_gates() -> None:
     assert runner.NON_REQUIRED_JEV_MODES_OFF == {
         "retrieval.support.v1": "off",
         "source.select_span.v1": "off",
+        "exercise.prototype.v1": "off",
     }
     assert runner.C1_C2_PLAN.deepseek_calls == 8
     assert runner.C1_C2_PLAN.jev_calls == 4

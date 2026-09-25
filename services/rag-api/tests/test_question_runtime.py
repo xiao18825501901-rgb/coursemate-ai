@@ -113,6 +113,65 @@ def test_runtime_generates_ready_private_exercise_for_exact_workspace_node(
     assert question["owner_user_id"] == OWNER
 
 
+def test_generate_one_routes_author_and_blind_solver_through_metered_operation(
+    tmp_path: Path,
+) -> None:
+    database, config = database_with_objective(tmp_path)
+    provider = LearningProvider(config)
+    calls: list[tuple[str, str, str]] = []
+
+    def metered_generate(
+        workspace_id: str,
+        operation_id: str,
+        schema: type[Any],
+        **kwargs: Any,
+    ) -> tuple[Any, dict[str, Any]]:
+        calls.append((workspace_id, operation_id, str(kwargs["role"])))
+        return provider.generate(schema, **kwargs)
+
+    runtime = QuestionEngineRuntime(
+        database=database,
+        provider=provider,
+        semantic_decisions=decisions(database),
+        metered_generate=metered_generate,
+    )
+
+    runtime.generate_one(
+        owner_user_id=OWNER,
+        workspace_id=WORKSPACE,
+        course_id=COURSE,
+        private_course_id=PRIVATE_COURSE,
+        node_id=NODE,
+        operation_id="metered-do-one-question-0001",
+    )
+
+    assert calls == [
+        (WORKSPACE, "metered-do-one-question-0001", "QUESTION_AUTHOR"),
+        (WORKSPACE, "metered-do-one-question-0001", "QUESTION_BLIND_SOLVER"),
+    ]
+    with database.connect() as connection:
+        operation = connection.execute(
+            "SELECT kind,status,result_json FROM learning_operations "
+            "WHERE workspace_id=? AND id=?",
+            (WORKSPACE, "metered-do-one-question-0001"),
+        ).fetchone()
+    assert operation["kind"] == "QUESTION_GENERATION"
+    assert operation["status"] == "COMPLETED"
+    assert json.loads(operation["result_json"])["status"] == "READY"
+
+    with pytest.raises(QuestionEngineRuntimeError) as replayed:
+        runtime.generate_one(
+            owner_user_id=OWNER,
+            workspace_id=WORKSPACE,
+            course_id=COURSE,
+            private_course_id=PRIVATE_COURSE,
+            node_id=NODE,
+            operation_id="metered-do-one-question-0001",
+        )
+    assert replayed.value.code == "QUESTION_OPERATION_REPLAY"
+    assert len(calls) == 2
+
+
 def test_runtime_rule_violation_prototype_persists_an_exact_course_rule(
     tmp_path: Path,
 ) -> None:

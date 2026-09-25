@@ -51,7 +51,7 @@ REQUIRED_JEV_MODES: dict[str, str] = {
     "question.rule_violation_quality.v1": "on",
 }
 
-# These two optional retrieval/citation signals default to ``shadow`` in the
+# These optional selection/retrieval/citation signals default to ``shadow`` in the
 # catalogue, which still performs a paid transport call.  C1/C2 does not use
 # their suggestions, so the acceptance harness turns them off explicitly.  It
 # leaves production defaults untouched and keeps the four P5 publication gates
@@ -59,6 +59,7 @@ REQUIRED_JEV_MODES: dict[str, str] = {
 NON_REQUIRED_JEV_MODES_OFF: dict[str, str] = {
     "retrieval.support.v1": "off",
     "source.select_span.v1": "off",
+    "exercise.prototype.v1": "off",
 }
 
 C1_C2_PLAN = LivePlan(

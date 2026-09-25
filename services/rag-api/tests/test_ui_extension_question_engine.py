@@ -16,6 +16,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi import Request
+from fastapi.testclient import TestClient
+
 from app.config import Settings
 from app.jev.catalog import load_catalog
 from app.jev.errors import JevNotConfiguredError
@@ -24,8 +27,6 @@ from app.jev.models import JevAnswer, JevResult
 from app.jev.receipt_store import SqlReceiptStore
 from app.jev.service import SemanticDecisionService
 from app.learning.workspaces import join_course
-from fastapi import Request
-from fastapi.testclient import TestClient
 
 UI = "/ui-extension/api/ui/v1"
 SUBJECT = "user-a"
@@ -193,6 +194,31 @@ def test_mounted_do_one_question_uses_ready_revision_and_keeps_answer_private(
     run = wait_terminal(test_client, started.json()["id"])
     assert run["status"] == "completed", run
     assert legacy.exercise_calls == 0
+
+    with test_client.app.state.database.connect() as connection:
+        operation = connection.execute(
+            "SELECT status FROM learning_operations WHERE id=?",
+            (started.json()["id"],),
+        ).fetchone()
+        reservations = connection.execute(
+            "SELECT role,status FROM learning_model_call_reservations "
+            "WHERE operation_id=? ORDER BY rowid",
+            (started.json()["id"],),
+        ).fetchall()
+        model_runs = connection.execute(
+            "SELECT role,status FROM learning_model_run_evidence "
+            "WHERE operation_id=? ORDER BY rowid",
+            (started.json()["id"],),
+        ).fetchall()
+    assert operation["status"] == "COMPLETED"
+    assert [tuple(row) for row in reservations] == [
+        ("QUESTION_AUTHOR", "COMPLETED"),
+        ("QUESTION_BLIND_SOLVER", "COMPLETED"),
+    ]
+    assert [tuple(row) for row in model_runs] == [
+        ("QUESTION_AUTHOR", "COMPLETED"),
+        ("QUESTION_BLIND_SOLVER", "COMPLETED"),
+    ]
 
     ui_database = test_client.app.state.ui_extension_app.state.db
     exercise = ui_database.one(
