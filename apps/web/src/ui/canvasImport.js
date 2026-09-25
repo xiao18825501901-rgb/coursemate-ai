@@ -13,7 +13,20 @@
  *     than leaving a button that fails on click.
  */
 
-const API_ROOT = "/api/integrations/canvas";
+/**
+ * Canvas routes are served by the RAG API, not by the static frontend host.
+ *
+ * Keeping the relative fallback is useful for the integrated/local deployment, while a
+ * production build receives `VITE_RAG_API_URL` and must address that origin explicitly. If this
+ * regresses to a relative URL on Netlify, the SPA fallback answers with `index.html` and the user
+ * sees the otherwise-misleading "not JSON" failure instead of ever reaching the Canvas service.
+ */
+export function canvasApiRoot(ragBase = import.meta.env.VITE_RAG_API_URL || "") {
+  const base = String(ragBase || "").trim().replace(/\/+$/, "");
+  return `${base}/api/integrations/canvas`;
+}
+
+const API_ROOT = canvasApiRoot();
 
 let tokenGetter = async () => null;
 

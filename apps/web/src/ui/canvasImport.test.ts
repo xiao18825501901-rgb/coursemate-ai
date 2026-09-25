@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   cancelImport,
+  canvasApiRoot,
   connectUrl,
   connectableInstitutions,
   connections,
@@ -64,6 +65,13 @@ afterEach(() => {
 });
 
 describe("Canvas import client", () => {
+  it("targets the configured RAG origin instead of the frontend SPA fallback", () => {
+    expect(canvasApiRoot("https://rag.47-237-179-69.sslip.io/"))
+      .toBe("https://rag.47-237-179-69.sslip.io/api/integrations/canvas");
+    expect(canvasApiRoot(""))
+      .toBe("/api/integrations/canvas");
+  });
+
   it("asks for the institution list with the session token in a header", async () => {
     await institutions();
     const first = callAt(0);
