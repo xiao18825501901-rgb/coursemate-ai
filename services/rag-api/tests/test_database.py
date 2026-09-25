@@ -413,6 +413,67 @@ def test_v3_restart_preserves_repeated_question_engine_and_practice_model_roles(
     ]
 
 
+def test_v3_restart_does_not_backfill_a_second_reservation_for_recorded_run(
+    tmp_path: Path,
+) -> None:
+    """Migration replay must not double-count a call already present in both ledgers."""
+    settings = Settings(
+        database_path=tmp_path / "rag.sqlite3",
+        upload_dir=tmp_path / "uploads",
+        app_env="test",
+        v3_enabled=True,
+    )
+    database = Database(settings)
+    database.initialize()
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO courses(id,name,owner_user_id,course_type,visibility,"
+            "publication_status) VALUES('course-main','Main',NULL,'official','public',"
+            "'published')"
+        )
+        connection.execute(
+            "INSERT INTO courses(id,name,owner_user_id,course_type,visibility,"
+            "publication_status) VALUES('course-private','Private','owner','user','private',"
+            "'private')"
+        )
+        connection.execute(
+            "INSERT INTO learning_workspaces(id,owner_user_id,course_id,private_course_id) "
+            "VALUES('workspace','owner','course-main','course-private')"
+        )
+        connection.execute(
+            "INSERT INTO learning_operations(workspace_id,id,request_hash,kind,status) "
+            "VALUES('workspace','operation','hash','ASSESSMENT_PREPARATION','COMPLETED')"
+        )
+        connection.execute(
+            "INSERT INTO learning_model_call_reservations("
+            "id,workspace_id,operation_id,owner_user_id,course_id,role,"
+            "reserved_output_tokens,status,input_tokens,output_tokens,created_at,finished_at) "
+            "VALUES('reservation','workspace','operation','owner','course-main',"
+            "'QUESTION_AUTHOR',4000,'COMPLETED',20,40,"
+            "'2026-09-25T00:00:00Z','2026-09-25T00:00:01Z')"
+        )
+        connection.execute(
+            "INSERT INTO learning_model_run_evidence("
+            "id,workspace_id,operation_id,role,model_id,provider_label,protocol,"
+            "region_label,template_version,schema_version,input_hash,started_at,"
+            "finished_at,latency_ms,input_tokens,output_tokens,status) "
+            "VALUES('run-evidence','workspace','operation','QUESTION_AUTHOR','deepseek-chat',"
+            "'DEEPSEEK','responses','GLOBAL','question-author.v3',"
+            "'question-author-output.v3',NULL,'2026-09-25T00:00:00Z',"
+            "'2026-09-25T00:00:01Z',1000,20,40,'COMPLETED')"
+        )
+
+    database.initialize()
+
+    with database.connect() as connection:
+        rows = connection.execute(
+            "SELECT id,input_tokens,output_tokens FROM learning_model_call_reservations "
+            "WHERE workspace_id='workspace' AND operation_id='operation' "
+            "AND role='QUESTION_AUTHOR' ORDER BY id"
+        ).fetchall()
+    assert [tuple(row) for row in rows] == [("reservation", 20, 40)]
+
+
 def test_model_ledgers_reject_unknown_learning_and_practice_operations(tmp_path: Path) -> None:
     settings = Settings(
         database_path=tmp_path / "rag.sqlite3",

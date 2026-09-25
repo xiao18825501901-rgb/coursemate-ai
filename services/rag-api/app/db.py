@@ -42,6 +42,12 @@ V3_MIGRATIONS = (
 # Keep historical SQL immutable and skip only a superseded rebuild after its
 # superseding version has committed its ledger row.
 V3_REPLAY_SUPERSEDED_BY = {
+    # Migration 021's legacy evidence backfill is safe while 021 is first
+    # applied (or deliberately restored after its ledger row is removed), but
+    # must not replay on a schema-39 database. Migration 039 intentionally
+    # allows repeated roles, so the old UNIQUE guard no longer prevents the
+    # backfill from duplicating already-metered calls on every restart.
+    "021_model_call_budget_reservations.sql": 39,
     "027_assessment_preparation_reference.sql": 38,
     "038_assessment_question_slots.sql": 39,
 }
@@ -490,9 +496,11 @@ class Database:
                     ).fetchall()
                 }
                 for name in V3_MIGRATIONS:
+                    version = int(name.split("_", 1)[0])
                     superseding_version = V3_REPLAY_SUPERSEDED_BY.get(name)
                     if (
-                        superseding_version is not None
+                        version in applied_versions
+                        and superseding_version is not None
                         and superseding_version in applied_versions
                     ):
                         continue
@@ -501,7 +509,7 @@ class Database:
                             encoding="utf-8"
                         )
                     )
-                    applied_versions.add(int(name.split("_", 1)[0]))
+                    applied_versions.add(version)
                 # Migration 023 is a conditional ALTER: SQLite cannot ADD COLUMN
                 # IF NOT EXISTS, so the column and its partial index are applied
                 # here under a table_info guard (ledger entry lives in the SQL file).

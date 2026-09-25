@@ -27,13 +27,23 @@ to understand a future schema would make that history false.
 ## Decision
 
 Keep historical SQL unchanged and maintain an explicit `V3_REPLAY_SUPERSEDED_BY` map in
-`app/db.py`. A mapped historical migration is skipped during replay only when its superseding
-migration version is already recorded in `schema_migrations`.
+`app/db.py`. A mapped historical migration is skipped during replay only when its own version and
+its superseding migration version are already recorded in `schema_migrations`. If an operator
+deliberately removes the historical version row while repairing a missing historical table, that
+migration can still run.
 
 For the current schema, migration 027 is superseded by 038 and migration 038 is superseded by 039.
 Fresh initialization and any pre-39 upgrade still execute the required historical sequence. An
 already-39 database skips both older replay-unsafe rebuilds, replays 039 and retains the complete
 role set and repeated reservations. All other migration replay behavior is unchanged.
+
+Migration 021 is also skipped on an already-39 database. Its one-time legacy evidence backfill
+relied on the original `(workspace_id, operation_id, role)` uniqueness constraint. Migration 039
+correctly removed that constraint to support multiple metered calls with the same role. Replaying
+021 after that change would add an `evidence-*` reservation beside a reservation already written
+before the request, double-counting one provider call after every process restart. The 021 SQL and
+the 039 reconciliation schema remain unchanged; only the replay scheduler prevents this obsolete
+backfill from rerunning once both versions are recorded.
 
 ## Alternatives considered
 
@@ -58,7 +68,8 @@ role set and repeated reservations. All other migration replay behavior is uncha
 
 ## Consequences
 
-- Schema-39 databases with repeated Question Engine and metered practice roles restart safely.
+- Schema-39 databases with repeated Question Engine and metered practice roles restart safely and
+  do not duplicate reservations that already have matching run evidence.
 - Fresh and pre-39 migration order remains unchanged.
 - A future table rebuild that supersedes an older replay-unsafe rebuild must add an explicit map
   entry and a restart regression; it must not silently edit historical SQL.
