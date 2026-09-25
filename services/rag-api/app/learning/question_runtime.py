@@ -1125,24 +1125,28 @@ class QuestionEngineRuntime:
             ).fetchall()
         if not rows:
             return None
-        if len(rows) != 1:
-            raise QuestionEngineRuntimeError(
-                "ASSESSMENT_SLOT_CONFLICT",
-                "The assessment slot is bound to more than one question revision.",
-            )
-        row = rows[0]
-        current = (
-            str(row["blueprint_hash"]) == blueprint.identity()
+        # Provenance is append-only: a candidate that reached NEEDS_REVIEW or
+        # REJECTED must remain available for audit, but it is not a reusable
+        # Assessment slot.  Recovery may author a later immutable revision for
+        # the same stable slot.  Select only the exact current READY revision;
+        # no such row means the caller should generate the missing slot.
+        current_rows = [
+            row
+            for row in rows
+            if str(row["blueprint_hash"]) == blueprint.identity()
             and str(row["evidence_pack_hash"]) == evidence.identity()
             and str(row["publication_status"]) == "READY"
             and str(row["validation_status"]) == "VALIDATED"
             and str(row["verification_method"]) == "AI_REVIEWED"
-        )
-        if not current:
+        ]
+        if not current_rows:
+            return None
+        if len(current_rows) != 1:
             raise QuestionEngineRuntimeError(
-                "ASSESSMENT_SLOT_STALE",
-                "The saved assessment slot no longer matches its current verified inputs.",
+                "ASSESSMENT_SLOT_CONFLICT",
+                "The assessment slot is bound to more than one current READY question revision.",
             )
+        row = current_rows[0]
         try:
             author_run = json.loads(str(row["author_run_json"]))
             blind_run = json.loads(str(row["blind_run_json"]))

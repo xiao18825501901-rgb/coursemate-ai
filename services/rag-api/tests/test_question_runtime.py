@@ -21,6 +21,8 @@ from test_question_persistence import (
     PRIVATE_COURSE,
     WORKSPACE,
     database_with_objective,
+    persist,
+    pipeline,
 )
 
 from app.errors import ApiError
@@ -35,6 +37,28 @@ from app.learning.question_runtime import (
     QuestionEngineRuntime,
     QuestionEngineRuntimeError,
 )
+
+
+def test_non_ready_assessment_candidate_does_not_permanently_block_slot_recovery(
+    tmp_path: Path,
+) -> None:
+    """Immutable failed evidence stays auditable but must not masquerade as a reusable slot."""
+
+    values = pipeline(tmp_path)
+    receipt_id = values["report"].semantic_signals[0].receipt_id
+    with values["database"].connect() as connection:
+        connection.execute("DELETE FROM jev_decision_receipts WHERE id=?", (receipt_id,))
+    failed = persist(values)
+    assert failed.status == "NEEDS_REVIEW"
+
+    runtime = object.__new__(QuestionEngineRuntime)
+    runtime.database = values["database"]
+    assert runtime._existing_assessment_slot(
+        owner_user_id=OWNER,
+        workspace_id=WORKSPACE,
+        blueprint=values["blueprint"],
+        evidence=values["evidence"],
+    ) is None
 
 
 def decisions(
