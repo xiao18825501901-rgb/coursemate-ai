@@ -34,17 +34,19 @@ V3_MIGRATIONS = (
     "036_question_engine_provenance.sql",
     "037_practice_question_interactions.sql",
     "038_assessment_question_slots.sql",
+    "039_practice_operation_reconciliation.sql",
 )
-# Migration 038 widens both model-call ledgers after 027. Replaying 027 on an
-# already-038 database would temporarily narrow the role enum and restore the
-# obsolete one-reservation-per-role constraint before 038 can rebuild it. Keep
-# the immutable historical SQL files unchanged and skip only that superseded
-# rebuild after the superseding migration has committed its ledger row.
+# Migrations 038 and 039 successively widen both model-call ledgers. Replaying
+# either older rebuild on a database that already has the newer role set would
+# temporarily narrow the enum before the current migration could repair it.
+# Keep historical SQL immutable and skip only a superseded rebuild after its
+# superseding version has committed its ledger row.
 V3_REPLAY_SUPERSEDED_BY = {
     "027_assessment_preparation_reference.sql": 38,
+    "038_assessment_question_slots.sql": 39,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 38
+LATEST_V3_SCHEMA_VERSION = 39
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (

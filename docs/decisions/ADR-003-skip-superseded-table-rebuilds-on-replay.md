@@ -17,8 +17,9 @@ Some SQLite schema changes, however, require a table rebuild.
 Migration 027 rebuilt the two model-call ledgers with the roles and uniqueness rule that existed at
 that time. Migration 038 later superseded those exact rebuilds: it added the Question Engine roles
 and removed the one-reservation-per-role constraint so five author and five blind-solver calls can be
-recorded in one operation. Replaying 027 on an already-38 database restored the obsolete constraint
-before 038 could run, and copying legitimate repeated-role rows failed during normal restart.
+recorded in one operation. Migration 039 then added the two diagnostic-practice roles to the same
+ledgers. Replaying either 027 or 038 on an already-39 database would temporarily restore an obsolete
+role constraint before 039 could run, and copying legitimate newer rows would fail during restart.
 
 Historical migration files are immutable evidence of the upgrade that originally ran. Editing 027
 to understand a future schema would make that history false.
@@ -29,9 +30,10 @@ Keep historical SQL unchanged and maintain an explicit `V3_REPLAY_SUPERSEDED_BY`
 `app/db.py`. A mapped historical migration is skipped during replay only when its superseding
 migration version is already recorded in `schema_migrations`.
 
-For the current schema, migration 027 is superseded by 038. Fresh initialization and any pre-38
-upgrade still execute 027 followed by 038. An already-38 database skips 027, replays 038 and retains
-the widened roles and repeated reservations. All other migration replay behavior is unchanged.
+For the current schema, migration 027 is superseded by 038 and migration 038 is superseded by 039.
+Fresh initialization and any pre-39 upgrade still execute the required historical sequence. An
+already-39 database skips both older replay-unsafe rebuilds, replays 039 and retains the complete
+role set and repeated reservations. All other migration replay behavior is unchanged.
 
 ## Alternatives considered
 
@@ -56,8 +58,8 @@ the widened roles and repeated reservations. All other migration replay behavior
 
 ## Consequences
 
-- Schema-38 databases with repeated Question Engine roles restart safely.
-- Fresh and pre-38 migration order remains unchanged.
+- Schema-39 databases with repeated Question Engine and metered practice roles restart safely.
+- Fresh and pre-39 migration order remains unchanged.
 - A future table rebuild that supersedes an older replay-unsafe rebuild must add an explicit map
   entry and a restart regression; it must not silently edit historical SQL.
 - The exact-candidate gate must continue testing fresh initialization, upgrade, second

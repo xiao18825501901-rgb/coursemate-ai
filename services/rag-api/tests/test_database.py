@@ -346,8 +346,10 @@ def test_v3_readiness_requires_latest_v3_migration(tmp_path: Path) -> None:
     assert database.is_ready() is False
 
 
-def test_v3_restart_preserves_repeated_question_engine_model_roles(tmp_path: Path) -> None:
-    """Migration 038 supersedes 027's one-reservation-per-role constraint."""
+def test_v3_restart_preserves_repeated_question_engine_and_practice_model_roles(
+    tmp_path: Path,
+) -> None:
+    """The latest ledger keeps repeated generation roles and metered practice roles."""
     settings = Settings(
         database_path=tmp_path / "rag.sqlite3",
         upload_dir=tmp_path / "uploads",
@@ -384,6 +386,15 @@ def test_v3_restart_preserves_repeated_question_engine_model_roles(tmp_path: Pat
                 "100,'COMPLETED','2026-09-25T00:00:00Z')",
                 (f"reservation-{ordinal}",),
             )
+        for role in ("PRACTICE_HINT", "PRACTICE_FEEDBACK"):
+            connection.execute(
+                "INSERT INTO learning_model_call_reservations("
+                "id,workspace_id,operation_id,owner_user_id,course_id,role,"
+                "reserved_output_tokens,status,finished_at) "
+                "VALUES(?, 'workspace','operation','owner','course-main',?,"
+                "100,'COMPLETED','2026-09-25T00:00:00Z')",
+                (f"reservation-{role.casefold()}", role),
+            )
 
     database.initialize()
 
@@ -396,7 +407,32 @@ def test_v3_restart_preserves_repeated_question_engine_model_roles(tmp_path: Pat
     assert [tuple(row) for row in reservations] == [
         ("reservation-1", "QUESTION_AUTHOR"),
         ("reservation-2", "QUESTION_AUTHOR"),
+        ("reservation-practice_feedback", "PRACTICE_FEEDBACK"),
+        ("reservation-practice_hint", "PRACTICE_HINT"),
     ]
+
+
+def test_v3_has_an_immutable_practice_operation_reconciliation_ledger(tmp_path: Path) -> None:
+    settings = Settings(
+        database_path=tmp_path / "rag.sqlite3",
+        upload_dir=tmp_path / "uploads",
+        app_env="test",
+        v3_enabled=True,
+    )
+    database = Database(settings)
+    database.initialize()
+
+    with database.connect() as connection:
+        objects = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table','trigger')"
+            )
+        }
+
+    assert "practice_operation_reconciliations" in objects
+    assert "immutable_practice_reconciliation_update" in objects
+    assert "immutable_practice_reconciliation_delete" in objects
 
 
 def test_deployment_path_environment_aliases_are_honored(
