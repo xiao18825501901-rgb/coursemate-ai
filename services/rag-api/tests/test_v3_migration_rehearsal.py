@@ -68,6 +68,79 @@ def _seed_model_evidence_before_migration_21(path: Path) -> None:
         connection.execute("DELETE FROM schema_migrations WHERE version=21")
 
 
+def _seed_repeated_role_calls_with_matching_ledger_rows(path: Path) -> None:
+    """One operation may legitimately call the same model role more than once."""
+
+    with sqlite3.connect(path) as connection:
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute(
+            "INSERT INTO courses(id,name,course_type,visibility,publication_status) "
+            "VALUES('course','Course','official','public','published')"
+        )
+        connection.execute(
+            "INSERT INTO courses(id,name,owner_user_id,course_type,visibility,"
+            "publication_status) VALUES('private','Private','owner','user','private','private')"
+        )
+        connection.execute(
+            "INSERT INTO learning_workspaces(id,owner_user_id,course_id,private_course_id) "
+            "VALUES('workspace','owner','course','private')"
+        )
+        connection.execute(
+            "INSERT INTO learning_operations(workspace_id,id,request_hash,kind,status) "
+            "VALUES('workspace','operation','request-hash','ASSESSMENT','COMPLETED')"
+        )
+        calls = (("first", 17, 31), ("second", 23, 47))
+        for suffix, input_tokens, output_tokens in calls:
+            connection.execute(
+                "INSERT INTO learning_model_call_reservations("
+                "id,workspace_id,operation_id,owner_user_id,course_id,role,"
+                "reserved_output_tokens,status,input_tokens,output_tokens,finished_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    f"reservation-{suffix}",
+                    "workspace",
+                    "operation",
+                    "owner",
+                    "course",
+                    "QUESTION_AUTHOR",
+                    500,
+                    "COMPLETED",
+                    input_tokens,
+                    output_tokens,
+                    "2026-09-25T00:00:02Z",
+                ),
+            )
+        # Reverse the insertion order to prove pairing is a multiset comparison,
+        # not an accidental row-order match.
+        for suffix, input_tokens, output_tokens in reversed(calls):
+            connection.execute(
+                "INSERT INTO learning_model_run_evidence("
+                "id,workspace_id,operation_id,role,model_id,provider_label,protocol,"
+                "region_label,template_version,schema_version,input_hash,started_at,"
+                "finished_at,latency_ms,input_tokens,output_tokens,status) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    f"evidence-{suffix}",
+                    "workspace",
+                    "operation",
+                    "QUESTION_AUTHOR",
+                    "deepseek-flash",
+                    "DEEPSEEK",
+                    "chat-completions",
+                    "GLOBAL",
+                    "question-author.v3",
+                    "question-author-output.v3",
+                    None,
+                    "2026-09-25T00:00:00Z",
+                    "2026-09-25T00:00:02Z",
+                    2_000,
+                    input_tokens,
+                    output_tokens,
+                    "COMPLETED",
+                ),
+            )
+
+
 def _downgrade_to_migration_24_with_legacy_course(path: Path) -> None:
     """Create the production-shaped 24 -> 25 boundary that exposed the gate bug."""
     with sqlite3.connect(path) as connection:
@@ -172,6 +245,48 @@ def test_rehearsal_proves_model_budget_backfill_and_governance_objects(
     assert invariants["model_reservation_scope_mismatches"] == 0
     assert invariants["model_reservation_evidence_mismatches"] == 0
     assert invariants["missing_governance_schema_objects"] == []
+
+
+def test_rehearsal_accepts_repeated_role_calls_when_every_call_is_metered(
+    tmp_path: Path,
+) -> None:
+    module = _load_rehearsal_module()
+    module.WORK_ROOT = tmp_path / "work"
+    source = tmp_path / "source.sqlite3"
+    target = module.WORK_ROOT / "rehearsal"
+    _initialized_v3_database(source, tmp_path / "uploads")
+    _seed_repeated_role_calls_with_matching_ledger_rows(source)
+
+    result = module.rehearse(source, target)
+
+    invariants = result["v3_invariants"]
+    assert result["v3_invariants_ok"] is True
+    assert invariants["duplicate_model_run_roles"] == 1
+    assert invariants["model_reservation_evidence_mismatches"] == 0
+
+
+def test_rehearsal_rejects_repeated_role_calls_with_one_token_mismatch(
+    tmp_path: Path,
+) -> None:
+    module = _load_rehearsal_module()
+    module.WORK_ROOT = tmp_path / "work"
+    source = tmp_path / "source.sqlite3"
+    target = module.WORK_ROOT / "rehearsal"
+    _initialized_v3_database(source, tmp_path / "uploads")
+    _seed_repeated_role_calls_with_matching_ledger_rows(source)
+    with sqlite3.connect(source) as connection:
+        connection.execute(
+            "UPDATE learning_model_call_reservations SET output_tokens=48 "
+            "WHERE id='reservation-second'"
+        )
+
+    with pytest.raises(RuntimeError, match="Migration rehearsal failed"):
+        module.rehearse(source, target)
+
+    evidence = json.loads(
+        target.joinpath("migration-evidence.json").read_text(encoding="utf-8")
+    )
+    assert evidence["v3_invariants"]["model_reservation_evidence_mismatches"] == 1
 
 
 def test_rehearsal_rejects_a_missing_required_governance_object(

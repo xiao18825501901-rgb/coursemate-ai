@@ -5,13 +5,14 @@ import json
 import re
 import sqlite3
 import sys
+from collections import Counter, defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORK_ROOT = ROOT / "work"
 sys.path.insert(0, str(ROOT / "services/rag-api"))
-from app.config import Settings  # noqa: E402 - repository-local service bootstrap
-from app.db import LATEST_V3_SCHEMA_VERSION, Database  # noqa: E402
+from app.config import Settings
+from app.db import LATEST_V3_SCHEMA_VERSION, Database
 
 TABLES = (
     "courses",
@@ -98,6 +99,44 @@ def fingerprints(
     return result
 
 
+def model_call_ledger_invariants(
+    connection: sqlite3.Connection,
+) -> tuple[int, int]:
+    """Compare completed model calls as per-operation multisets.
+
+    Assessment preparation legitimately makes several author or blind-solver
+    calls under one business operation.  The ledger schema therefore permits
+    repeated ``(workspace_id, operation_id, role)`` keys.  Joining only on those
+    three fields forms a Cartesian product and reports false token mismatches.
+    Compare the status/token tuples as multisets instead; a missing, extra, or
+    altered paid call still fails the rehearsal.
+    """
+
+    evidence: dict[tuple[str, str, str], Counter[tuple[str, int, int]]] = defaultdict(Counter)
+    reservations: dict[tuple[str, str, str], Counter[tuple[str, int, int]]] = defaultdict(Counter)
+    for workspace_id, operation_id, role, status, input_tokens, output_tokens in connection.execute(
+        "SELECT workspace_id,operation_id,role,status,input_tokens,output_tokens "
+        "FROM learning_model_run_evidence"
+    ):
+        normalized_status = "COMPLETED" if status == "LEGACY_COMPLETED" else status
+        evidence[(workspace_id, operation_id, role)][
+            (normalized_status, input_tokens, output_tokens)
+        ] += 1
+    for workspace_id, operation_id, role, status, input_tokens, output_tokens in connection.execute(
+        "SELECT workspace_id,operation_id,role,status,input_tokens,output_tokens "
+        "FROM learning_model_call_reservations WHERE status!='RESERVED'"
+    ):
+        reservations[(workspace_id, operation_id, role)][
+            (status, input_tokens, output_tokens)
+        ] += 1
+    repeated_groups = sum(sum(rows.values()) > 1 for rows in evidence.values())
+    mismatched_groups = sum(
+        evidence.get(key, Counter()) != reservations.get(key, Counter())
+        for key in evidence.keys() | reservations.keys()
+    )
+    return repeated_groups, mismatched_groups
+
+
 def rehearse(source: Path, target: Path) -> dict[str, object]:
     source, target = source.resolve(), target.resolve()
     if not source.is_file() or target.exists() or not target.is_relative_to(WORK_ROOT):
@@ -137,6 +176,9 @@ def rehearse(source: Path, target: Path) -> dict[str, object]:
                 "SELECT version FROM schema_migrations ORDER BY version"
             )
         ]
+        repeated_model_run_roles, model_ledger_mismatch_groups = (
+            model_call_ledger_invariants(copied)
+        )
         v3_invariants = {
             "document_versions": copied.execute(
                 "SELECT COUNT(*) FROM document_versions"
@@ -361,11 +403,7 @@ def rehearse(source: Path, target: Path) -> dict[str, object]:
             "learning_model_call_reservations": copied.execute(
                 "SELECT COUNT(*) FROM learning_model_call_reservations"
             ).fetchone()[0],
-            "duplicate_model_run_roles": copied.execute(
-                "SELECT COUNT(*) FROM (SELECT workspace_id,operation_id,role "
-                "FROM learning_model_run_evidence GROUP BY workspace_id,operation_id,role "
-                "HAVING COUNT(*)>1)"
-            ).fetchone()[0],
+            "duplicate_model_run_roles": repeated_model_run_roles,
             "model_runs_without_budget_reservations": copied.execute(
                 "SELECT COUNT(*) FROM learning_model_run_evidence AS evidence "
                 "LEFT JOIN learning_model_call_reservations AS reservation "
@@ -395,17 +433,7 @@ def rehearse(source: Path, target: Path) -> dict[str, object]:
                 "OR reservation.owner_user_id!=workspace.owner_user_id "
                 "OR reservation.course_id!=workspace.course_id"
             ).fetchone()[0],
-            "model_reservation_evidence_mismatches": copied.execute(
-                "SELECT COUNT(*) FROM learning_model_run_evidence AS evidence "
-                "JOIN learning_model_call_reservations AS reservation "
-                "ON reservation.workspace_id=evidence.workspace_id "
-                "AND reservation.operation_id=evidence.operation_id "
-                "AND reservation.role=evidence.role WHERE "
-                "reservation.status!=(CASE evidence.status "
-                "WHEN 'LEGACY_COMPLETED' THEN 'COMPLETED' ELSE evidence.status END) "
-                "OR reservation.input_tokens!=evidence.input_tokens "
-                "OR reservation.output_tokens!=evidence.output_tokens"
-            ).fetchone()[0],
+            "model_reservation_evidence_mismatches": model_ledger_mismatch_groups,
             "missing_governance_schema_objects": missing_governance_schema_objects,
         }
     invariants_ok = (
@@ -427,7 +455,6 @@ def rehearse(source: Path, target: Path) -> dict[str, object]:
         and v3_invariants["publication_requests_without_snapshots"] == 0
         and v3_invariants["publication_releases_without_snapshots"] == 0
         and v3_invariants["publication_resources_without_snapshots"] == 0
-        and v3_invariants["duplicate_model_run_roles"] == 0
         and v3_invariants["model_runs_without_budget_reservations"] == 0
         and v3_invariants["finalized_model_reservations_without_evidence"] == 0
         and v3_invariants["model_reservation_scope_mismatches"] == 0
