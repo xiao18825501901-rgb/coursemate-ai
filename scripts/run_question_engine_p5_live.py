@@ -13,6 +13,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import time
@@ -50,10 +51,20 @@ REQUIRED_JEV_MODES: dict[str, str] = {
     "question.rule_violation_quality.v1": "on",
 }
 
+# These two optional retrieval/citation signals default to ``shadow`` in the
+# catalogue, which still performs a paid transport call.  C1/C2 does not use
+# their suggestions, so the acceptance harness turns them off explicitly.  It
+# leaves production defaults untouched and keeps the four P5 publication gates
+# above in real ``on`` mode.
+NON_REQUIRED_JEV_MODES_OFF: dict[str, str] = {
+    "retrieval.support.v1": "off",
+    "source.select_span.v1": "off",
+}
+
 C1_C2_PLAN = LivePlan(
     name="question-engine-p5-c1-c2",
     deepseek_calls=8,
-    jev_calls=6,
+    jev_calls=4,
     input_tokens_per_call=15_000,
     output_tokens_per_call=4_000,
     cases=(
@@ -97,6 +108,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--allow-billable", action="store_true")
     parser.add_argument("--preflight-only", action="store_true")
+    parser.add_argument("--prior-run-state", type=Path)
     return parser.parse_args(argv)
 
 
@@ -115,6 +127,66 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
         encoding="utf-8",
     )
     temporary.replace(path)
+
+
+def _prior_attempt_summary(path: Path | None) -> dict[str, Any] | None:
+    if path is None:
+        return None
+    raw = path.read_bytes()
+    payload = json.loads(raw)
+    if not isinstance(payload, dict) or payload.get("status") != "FAILED_SAFE":
+        raise ValueError("Prior run state must be a FAILED_SAFE P5 state object.")
+    audit = payload.get("call_budget_audit")
+    if not isinstance(audit, dict):
+        raise TypeError("Prior run state is missing its call budget audit.")
+    return {
+        "state_sha256": hashlib.sha256(raw).hexdigest(),
+        "application_sha": payload.get("application_sha"),
+        "started_at": payload.get("started_at"),
+        "finished_at": payload.get("finished_at"),
+        "status": payload.get("status"),
+        "error_class": payload.get("error_class"),
+        "error_code": payload.get("error_code"),
+        "deepseek_calls": payload.get("deepseek_calls"),
+        "jev_calls": payload.get("jev_calls"),
+        "call_budget_audit": audit,
+    }
+
+
+def _configure_process_environment(
+    args: argparse.Namespace,
+    *,
+    run_dir: Path,
+    deepseek_key: str,
+    jev_key: str,
+    conservative_ceiling: float,
+) -> None:
+    """Configure both V3 and mounted UI providers from the same frozen bounds."""
+
+    os.environ["TYPESAFE_API_KEY"] = jev_key
+    os.environ["CMUI_DATA_DIR"] = str(run_dir / "ui-extension")
+    os.environ["CMUI_ENV"] = "development"
+    os.environ["CMUI_PROVIDER_MODE"] = "deepseek"
+    os.environ["CMUI_ALLOW_BILLABLE"] = "true"
+    os.environ["CMUI_DEEPSEEK_API_KEY"] = deepseek_key
+    os.environ["CMUI_DEEPSEEK_BASE_URL"] = args.base_url
+    os.environ["CMUI_DEEPSEEK_MODEL"] = args.model
+    os.environ["CMUI_DEEPSEEK_PROTOCOL"] = "responses"
+    os.environ["CMUI_MODEL_TIMEOUT"] = str(args.timeout)
+    os.environ["CMUI_ANSWER_TOKENS"] = str(args.max_output_tokens)
+    os.environ["CMUI_OPERATION_USD_BASELINE"] = f"{conservative_ceiling:.8f}"
+    os.environ["CMUI_OPERATION_INPUT_USD_PER_MILLION"] = str(
+        args.input_price_per_million
+    )
+    os.environ["CMUI_OPERATION_OUTPUT_USD_PER_MILLION"] = str(
+        args.output_price_per_million
+    )
+    os.environ["CMUI_AUTO_VERIFY_NEW_USERS"] = "false"
+
+
+def _safe_error_code(error: Exception) -> str:
+    value = str(error)
+    return value if re.fullmatch(r"[A-Z][A-Z0-9_]{2,127}", value) else "UNCLASSIFIED"
 
 
 @dataclass(slots=True)
@@ -238,6 +310,11 @@ def _validate(args: argparse.Namespace) -> tuple[float | None, list[str]]:
             errors.append("Missing protected credential environment variable(s): " + ", ".join(missing))
         if args.run_dir.exists():
             errors.append("Refusing to overwrite an existing run directory.")
+        if args.prior_run_state is not None:
+            try:
+                _prior_attempt_summary(args.prior_run_state)
+            except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+                errors.append(f"Invalid --prior-run-state: {error}")
     return ceiling, errors
 
 
@@ -421,6 +498,9 @@ def _run_c1_c2(args: argparse.Namespace, ceiling: float) -> int:
         "required_jev_modes": REQUIRED_JEV_MODES,
         "private_material_location": str(run_dir / "private-review.json"),
     }
+    prior_attempt = _prior_attempt_summary(args.prior_run_state)
+    if prior_attempt is not None:
+        state["prior_attempt"] = prior_attempt
     _write_json(state_path, state)
 
     class P5AuthVerifier:
@@ -437,19 +517,18 @@ def _run_c1_c2(args: argparse.Namespace, ceiling: float) -> int:
 
     deepseek_key = os.environ[args.deepseek_key_env]
     jev_key = os.environ[args.jev_key_env]
-    os.environ["TYPESAFE_API_KEY"] = jev_key
-    os.environ["CMUI_DATA_DIR"] = str(run_dir / "ui-extension")
-    os.environ["CMUI_ENV"] = "development"
-    os.environ["CMUI_PROVIDER_MODE"] = "deepseek"
-    os.environ["CMUI_ALLOW_BILLABLE"] = "true"
-    os.environ["CMUI_DEEPSEEK_API_KEY"] = deepseek_key
-    os.environ["CMUI_DEEPSEEK_BASE_URL"] = args.base_url
-    os.environ["CMUI_DEEPSEEK_MODEL"] = args.model
-    os.environ["CMUI_DEEPSEEK_PROTOCOL"] = "responses"
-    os.environ["CMUI_MODEL_TIMEOUT"] = str(args.timeout)
-    os.environ["CMUI_AUTO_VERIFY_NEW_USERS"] = "false"
+    _configure_process_environment(
+        args,
+        run_dir=run_dir,
+        deepseek_key=deepseek_key,
+        jev_key=jev_key,
+        conservative_ceiling=ceiling,
+    )
 
-    modes = ",".join(f"{key}={value}" for key, value in REQUIRED_JEV_MODES.items())
+    modes = ",".join(
+        f"{key}={value}"
+        for key, value in (REQUIRED_JEV_MODES | NON_REQUIRED_JEV_MODES_OFF).items()
+    )
     settings = Settings(
         _env_file=None,
         database_path=run_dir / "rag.sqlite3",
@@ -808,6 +887,13 @@ def _run_c1_c2(args: argparse.Namespace, ceiling: float) -> int:
                 "refresh_history_restored": True,
                 "different_family_repractice": True,
                 "human_content_review": "PENDING",
+                "prior_attempt": prior_attempt,
+                "cumulative_attempted_calls": {
+                    "deepseek": len(budget.deepseek_roles)
+                    + int((prior_attempt or {}).get("deepseek_calls") or 0),
+                    "jev": len(budget.jev_definitions)
+                    + int((prior_attempt or {}).get("jev_calls") or 0),
+                },
             }
             _write_json(run_dir / "public-summary.json", public_summary)
 
@@ -827,6 +913,7 @@ def _run_c1_c2(args: argparse.Namespace, ceiling: float) -> int:
             status="FAILED_SAFE",
             finished_at=_now(),
             error_class=type(error).__name__,
+            error_code=_safe_error_code(error),
             deepseek_calls=len(budget.deepseek_roles),
             jev_calls=len(budget.jev_definitions),
             call_budget_audit=budget.audit_snapshot(),

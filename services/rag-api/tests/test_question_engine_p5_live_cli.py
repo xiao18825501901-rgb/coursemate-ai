@@ -7,6 +7,8 @@ constructed and no network request can occur in this module.
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -43,7 +45,7 @@ def test_preflight_is_default_and_lists_the_finite_c1_c2_plan(tmp_path: Path) ->
     assert result.returncode == 0, result.stderr
     assert "PREFLIGHT_ONLY" in result.stdout
     assert "DeepSeek calls: at most 8" in result.stdout
-    assert "Jev calls: at most 6" in result.stdout
+    assert "Jev calls: at most 4" in result.stdout
     assert "C1" in result.stdout and "C2" in result.stdout
     assert not (tmp_path / "unused").exists()
 
@@ -95,8 +97,12 @@ def test_required_jev_modes_are_exactly_the_four_p5_gates() -> None:
         "question.mcq_distractor_quality.v1": "on",
         "question.rule_violation_quality.v1": "on",
     }
+    assert runner.NON_REQUIRED_JEV_MODES_OFF == {
+        "retrieval.support.v1": "off",
+        "source.select_span.v1": "off",
+    }
     assert runner.C1_C2_PLAN.deepseek_calls == 8
-    assert runner.C1_C2_PLAN.jev_calls == 6
+    assert runner.C1_C2_PLAN.jev_calls == 4
 
 
 def test_cost_ceiling_is_computed_from_finite_call_and_token_caps() -> None:
@@ -131,3 +137,87 @@ def test_call_budgets_refuse_before_an_extra_provider_attempt() -> None:
         "jev_limit": 1,
         "jev_attempted_definitions": ["question.ambiguity.v1"],
     }
+
+
+def test_mounted_ui_environment_uses_the_same_frozen_price_and_output_bounds(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    runner = load_runner()
+    args = runner.parse_args(
+        [
+            "--run-dir",
+            str(tmp_path / "run"),
+            "--input-price-per-million",
+            "0.3",
+            "--output-price-per-million",
+            "1.2",
+            "--max-output-tokens",
+            "4000",
+        ]
+    )
+    for name in (
+        "TYPESAFE_API_KEY",
+        "CMUI_OPERATION_USD_BASELINE",
+        "CMUI_OPERATION_INPUT_USD_PER_MILLION",
+        "CMUI_OPERATION_OUTPUT_USD_PER_MILLION",
+        "CMUI_ANSWER_TOKENS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    runner._configure_process_environment(
+        args,
+        run_dir=(tmp_path / "run").resolve(),
+        deepseek_key="test-deepseek",
+        jev_key="test-jev",
+        conservative_ceiling=0.0744,
+    )
+
+    assert os.environ["CMUI_OPERATION_USD_BASELINE"] == "0.07440000"
+    assert os.environ["CMUI_OPERATION_INPUT_USD_PER_MILLION"] == "0.3"
+    assert os.environ["CMUI_OPERATION_OUTPUT_USD_PER_MILLION"] == "1.2"
+    assert os.environ["CMUI_ANSWER_TOKENS"] == "4000"
+
+    from app.cm_update.budget import evaluate_operation_budget
+    from app.cm_update.config import Settings as UiSettings
+    from app.cm_update.provider import DeepSeekProvider
+
+    ui_settings = UiSettings()
+    ui_settings.validate()
+    estimate = DeepSeekProvider(ui_settings).estimate_question_engine()
+    decision = evaluate_operation_budget(
+        "medium", ui_settings.operation_usd_baseline, estimate.usd
+    )
+    assert decision.application_usd_cap is not None
+    assert estimate.output_tokens == 8_000
+
+
+def test_prior_failed_attempt_is_hash_linked_without_private_material(tmp_path: Path) -> None:
+    runner = load_runner()
+    state = tmp_path / "run-state.json"
+    state.write_text(
+        json.dumps(
+            {
+                "status": "FAILED_SAFE",
+                "application_sha": "abc123",
+                "deepseek_calls": 0,
+                "jev_calls": 2,
+                "call_budget_audit": {
+                    "deepseek_attempted_roles": [],
+                    "jev_attempted_definitions": [
+                        "retrieval.support.v1",
+                        "source.select_span.v1",
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = runner._prior_attempt_summary(state)
+
+    assert summary is not None
+    assert summary["status"] == "FAILED_SAFE"
+    assert summary["jev_calls"] == 2
+    assert summary["state_sha256"] == __import__("hashlib").sha256(
+        state.read_bytes()
+    ).hexdigest()
