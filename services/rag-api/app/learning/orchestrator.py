@@ -316,15 +316,36 @@ class LearningOrchestrator:
             prepared: tuple[str, str | None, list[dict[str, Any]]],
         ) -> dict[str, Any]:
             status, code, questions = prepared
+            can_start_from_ready_pool = False
             if status == "BLOCKED":
+                # A bounded provider failure can happen after its final useful
+                # revision has already committed.  Re-run the exact pool
+                # compatibility selector before projecting BLOCKED: five current,
+                # distinct, rubric-backed READY families are enough to proceed,
+                # even though the provider's final call failed.  The error stays
+                # in the response for audit; it is not relabelled as success.
+                try:
+                    self.assessments.select(db, workspace, node)
+                except ApiError:
+                    pass
+                else:
+                    can_start_from_ready_pool = True
+                # Preserve the provider failure and its charge evidence.  The
+                # browser may immediately issue a fresh, model-free start when
+                # the exact selector above proves the existing READY pool works;
+                # the failed preparation itself is never rewritten as READY.
                 self.assessments.mark_preparation_job(
                     db,
                     job["id"],
                     "BLOCKED",
                     error_code=code,
                     error_message=(
-                        "Question Engine preparation did not reach five READY slots; "
-                        "completed slots remain reusable."
+                        "Question Engine preparation stopped after a provider failure; "
+                        + (
+                            "the compatible READY pool can start an assessment without another model call."
+                            if can_start_from_ready_pool
+                            else "completed slots remain reusable but the compatible pool is still incomplete."
+                        )
                     ),
                 )
             else:
@@ -358,6 +379,7 @@ class LearningOrchestrator:
                 ),
                 "error_code": row["error_code"],
                 "error_message": row["error_message"],
+                "can_start_from_ready_pool": can_start_from_ready_pool,
             }
 
         try:

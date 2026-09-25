@@ -17,6 +17,8 @@ def seed_assessment_pool(
     *,
     prefix: str = "",
     include_open: bool = False,
+    item_id: str = "principle",
+    private_owner: str = "a",
 ) -> dict[str, str]:
     model_question = (
         "EXPLANATION",
@@ -111,6 +113,8 @@ def seed_assessment_pool(
             verification,
             submitted_answer,
         ) in questions:
+            if owner == "a":
+                owner = private_owner
             content = json.dumps(
                 {"prompt": prompt, "options": options, "answer": answer},
                 sort_keys=True,
@@ -141,9 +145,9 @@ def seed_assessment_pool(
                 "INSERT INTO assessment_rubric_criteria("
                 "question_revision_id,criterion_id,node_id,spec_version,item_id,"
                 "dimension,max_fraction,description,deterministic_rule_json) "
-                "VALUES(?, 'correctness', ?, 1, 'principle', 'CALCULATION', 100, "
+                "VALUES(?, 'correctness', ?, 1, ?, 'CALCULATION', 100, "
                 "'Produces the correct result.', '{}')",
-                (question_id, node["id"]),
+                (question_id, node["id"], item_id),
             )
             answers[question_id] = submitted_answer
     return answers

@@ -31,6 +31,7 @@ from uuid import uuid4
 import httpx
 from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse, Response
+from pydantic import ValidationError
 
 from app.config import Settings
 from app.course_access import require_course_access
@@ -1762,21 +1763,42 @@ class V3DomainAdapter:
         course_id = str(payload["course"])
         self._course_row(course_id, subject)
         workspace = self._workspace_for_node(course_id, subject)
-        answers = [AssessmentAnswer(**item) for item in (payload.get("answers") or [])]
-        request = AssessmentSubmitInput(
-            operation_id=str(payload["request_id"]),
-            revision=0,
-            answers=answers,
-            unified_answer=payload.get("unified_answer"),
-            attachments=[
-                AssessmentAttachment(**item) for item in (payload.get("attachments") or [])
-            ],
-            transcription=payload.get("transcription"),
-            submission_revision=payload.get("submission_revision"),
-            submission_hash=payload.get("submission_hash"),
-            draft=bool(payload.get("draft", False)),
-            confirm_unanswered=payload.get("confirm_unanswered") or [],
-        )
+        try:
+            answers = [AssessmentAnswer(**item) for item in (payload.get("answers") or [])]
+            request = AssessmentSubmitInput(
+                operation_id=str(payload["request_id"]),
+                revision=0,
+                answers=answers,
+                unified_answer=payload.get("unified_answer"),
+                attachments=[
+                    AssessmentAttachment(**item) for item in (payload.get("attachments") or [])
+                ],
+                transcription=payload.get("transcription"),
+                submission_revision=payload.get("submission_revision"),
+                submission_hash=payload.get("submission_hash"),
+                draft=bool(payload.get("draft", False)),
+                confirm_unanswered=payload.get("confirm_unanswered") or [],
+            )
+        except (TypeError, ValidationError) as error:
+            # This adapter is an HTTP trust boundary.  Pydantic exceptions used
+            # to escape here as an unhandled 500 before an answer was persisted
+            # or grading began.  Keep field locations/types for diagnostics but
+            # never echo submitted answer text back in the public error.
+            fields = []
+            if isinstance(error, ValidationError):
+                fields = [
+                    {
+                        "path": ".".join(str(part) for part in issue.get("loc", ())),
+                        "type": str(issue.get("type", "validation_error")),
+                    }
+                    for issue in error.errors(include_input=False, include_url=False)
+                ]
+            raise ApiError(
+                422,
+                "ASSESSMENT_SUBMISSION_INVALID",
+                "Provide one answer for every frozen question, or explicitly confirm unanswered items.",
+                details={"fields": fields},
+            ) from error
         # The optimistic revision is read right before the call. On a concurrent
         # edit the V3 engine raises REVISION_CONFLICT; retry once with the fresh
         # revision rather than silently overwriting someone else's state.

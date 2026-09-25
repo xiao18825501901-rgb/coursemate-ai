@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
+from test_assessment_runtime import seed_assessment_pool
 
 from app.config import Settings
 from app.jev.catalog import load_catalog
@@ -415,6 +416,70 @@ def test_run_response_never_exposes_plan_text(client: TestClient) -> None:
             assert set(data.keys()) <= {"characters"}, "prompt_ready must carry only a length"
         else:
             assert "generated_prompt" not in json.dumps(data, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------- exercises
+
+
+def test_integrated_assessment_rejects_bad_payload_without_500_then_grades_five_answers(
+    client: TestClient,
+) -> None:
+    """Exercise the same mounted UI route that produced the GE2324 production 500."""
+
+    prepare_exercise_course(client)
+    expected = seed_assessment_pool(
+        client,
+        {"id": "node-x"},
+        prefix="integrated-submit-",
+        item_id="objective-node-x",
+        private_owner="user-a",
+    )
+
+    started = client.post(
+        f"{UI}/courses/cs3481/knowledge/node-x/assessment/session",
+        headers=auth("token-a"),
+        json={"request_id": "integrated-assessment-start"},
+    )
+    assert started.status_code == 201, started.text
+    view = started.json()
+    assert view["status"] == "IN_PROGRESS"
+    assert len(view["questions"]) == 5
+
+    invalid = client.post(
+        f"{UI}/courses/cs3481/knowledge/assessment/{view['id']}/submit",
+        headers=auth("token-a"),
+        json={
+            "request_id": "integrated-assessment-invalid",
+            "answers": [],
+            "unified_answer": "",
+            "attachments": [],
+            "confirm_unanswered": [],
+        },
+    )
+    assert invalid.status_code == 422, invalid.text
+    invalid_body = invalid.json()
+    assert "answer" in str(invalid_body.get("detail", "")).lower()
+
+    submitted = client.post(
+        f"{UI}/courses/cs3481/knowledge/assessment/{view['id']}/submit",
+        headers=auth("token-a"),
+        json={
+            "request_id": "integrated-assessment-submit",
+            "answers": [
+                {
+                    "blueprint_item_id": question["id"],
+                    "answer": expected[question["question_revision_id"]],
+                }
+                for question in view["questions"]
+            ],
+        },
+    )
+    assert submitted.status_code == 200, submitted.text
+    result = submitted.json()
+    assert result["status"] == "GRADED"
+    assert result["raw_score"] == 100
+    assert all(question["review"]["submitted_answer"] is not None for question in result["questions"])
+    assert all(question["review"]["answer"] for question in result["questions"])
 
 
 # ---------------------------------------------------------------- exercises

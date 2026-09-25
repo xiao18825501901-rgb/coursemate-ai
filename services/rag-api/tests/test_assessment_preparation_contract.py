@@ -22,6 +22,7 @@ from test_question_runtime import decisions
 
 from app.errors import ApiError
 from app.learning.models import AssessmentAnswer, AssessmentSubmitInput
+from app.learning.question_runtime import QuestionEngineRuntimeError
 
 
 def _node_projection(client: Any, workspace_id: str, node_id: str) -> dict[str, Any]:
@@ -145,6 +146,52 @@ def test_pool_preparation_idempotent_and_marks_verification_channels(
         assert session.status_code == 200, session.text
         assert session.json()["status"] == "IN_PROGRESS"
         assert len(session.json()["questions"]) == 5
+
+
+def test_blocked_preparation_recovers_when_the_compatible_ready_pool_reaches_five(
+    tmp_path: Path,
+) -> None:
+    """A late provider failure must not strand five already-compatible questions."""
+
+    with client_at(tmp_path) as client:
+        workspace, node = setup_workspace(client)
+        learning = client.app.state.learning
+
+        def completes_pool_then_reports_blocked(**_kwargs: Any) -> list[dict[str, Any]]:
+            seed_assessment_pool(client, node, prefix="late-ready-")
+            raise QuestionEngineRuntimeError(
+                "AUTHOR_PROVIDER_BLOCKED",
+                "Synthetic final provider call failed after five compatible rows were ready.",
+            )
+
+        learning.question_engine.generate_assessment_set = completes_pool_then_reports_blocked
+        base = f"/api/learning/workspaces/{workspace['id']}"
+        prepared = client.post(
+            base + "/assessments",
+            json={
+                "operation_id": "late-ready-preparation",
+                "revision": current_revision(client, workspace["id"]),
+                "node_id": node["id"],
+            },
+        )
+
+        assert prepared.status_code == 200, prepared.text
+        assert prepared.json()["status"] == "BLOCKED"
+        assert prepared.json()["eligible_families"] == 5
+        assert prepared.json()["can_start_from_ready_pool"] is True
+        assert prepared.json()["error_code"] == "AUTHOR_PROVIDER_BLOCKED"
+
+        started = client.post(
+            base + "/assessments",
+            json={
+                "operation_id": "late-ready-start",
+                "revision": current_revision(client, workspace["id"]),
+                "node_id": node["id"],
+            },
+        )
+        assert started.status_code == 200, started.text
+        assert started.json()["status"] == "IN_PROGRESS"
+        assert len(started.json()["questions"]) == 5
 
 
 def test_model_only_never_becomes_validated(tmp_path: Path) -> None:
