@@ -12,6 +12,20 @@
 # VITE_AGENT_API_URL, VITE_UI_API_BASE and VITE_V3_ENABLED in the Netlify UI.
 # Never place Clerk secret keys here.
 
+# Final domain convergence: keep the old host assigned to this site so Netlify
+# can issue a permanent, path/query-preserving redirect to the new primary.
+[[redirects]]
+  from = "https://qqttai.com/*"
+  to = "https://coursejesus.com/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "http://qqttai.com/*"
+  to = "https://coursejesus.com/:splat"
+  status = 301
+  force = true
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Document routing (first match wins, top to bottom).
 #
