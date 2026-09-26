@@ -77,6 +77,36 @@ describe("Agent API", () => {
     expect(response.headers["x-powered-by"]).toBeUndefined();
   });
 
+  it("allows both migration origins and withholds CORS approval from unknown origins", async () => {
+    const app = createApp({
+      repository,
+      agentService: new AgentService(new FakeModelClient([]), new ToolExecutor(repository), {
+        model: "test-model",
+        maxToolRounds: 4,
+      }),
+      webOrigin: "https://qqttai.com",
+      webAllowedOrigins: ["https://qqttai.com", "https://coursejesus.com"],
+      authStrategy,
+      modelRateLimiter: allowModelRequests,
+      readinessCheck: () => true,
+    });
+
+    const preflight = (origin: string) => request(app)
+      .options("/health")
+      .set("Origin", origin)
+      .set("Access-Control-Request-Method", "GET");
+
+    const oldOrigin = await preflight("https://qqttai.com");
+    const newOrigin = await preflight("https://coursejesus.com");
+    const unknownOrigin = await preflight("https://evil.example");
+
+    expect(oldOrigin.status).toBe(204);
+    expect(oldOrigin.headers["access-control-allow-origin"]).toBe("https://qqttai.com");
+    expect(newOrigin.status).toBe(204);
+    expect(newOrigin.headers["access-control-allow-origin"]).toBe("https://coursejesus.com");
+    expect(unknownOrigin.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
   it("returns 503 without leaking details when persistent state is unavailable", async () => {
     const app = createApp({
       repository,

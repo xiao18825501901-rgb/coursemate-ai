@@ -20,6 +20,7 @@ export interface AppDependencies {
   repository: TaskRepository;
   agentService: AgentService;
   webOrigin: string;
+  webAllowedOrigins?: string[];
   authStrategy: AuthStrategy;
   modelRateLimiter: ModelRateLimiter;
   readinessCheck: () => boolean;
@@ -68,7 +69,7 @@ export function createApp(dependencies: AppDependencies): express.Express {
   });
   application.use(
     cors({
-      origin: dependencies.webOrigin,
+      origin: dependencies.webAllowedOrigins ?? [dependencies.webOrigin],
       methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
       allowedHeaders: ["Authorization", "Content-Type"],
       credentials: false,

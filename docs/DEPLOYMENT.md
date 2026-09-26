@@ -24,7 +24,7 @@ The root netlify.toml and render.yaml are ready for this topology. Render Starte
 2. Review both paid Starter services and disk charges before applying.
 3. Enter `OPENAI_API_KEY` for both services when prompted. The name is retained for SDK compatibility even when the secret was issued by an OpenAI-compatible provider.
 4. Enter `CLERK_SECRET_KEY` for both services and `CLERK_PUBLISHABLE_KEY` for Agent. Optionally set `CLERK_JWT_KEY` on both for networkless verification. Set the RAG-only `ADMIN_USER_IDS` allowlist.
-5. Temporarily set `WEB_ORIGIN` on both services to the anticipated Netlify URL or a controlled placeholder. Update it to the exact production origin after Netlify supplies the final URL.
+5. Set `WEB_ORIGIN` on both services to the primary/canonical browser origin. During a controlled domain migration, set `WEB_ALLOWED_ORIGINS` to the exact old and new HTTPS origins. For the mounted UI extension, set its separate `CMUI_ALLOWED_ORIGINS` allowlist as well.
 6. Apply the Blueprint and wait for both health checks to pass. Both services fail closed if Clerk verification configuration is absent.
 7. Record the public origins, for example https://coursemate-rag-api.onrender.com and https://coursemate-agent-api.onrender.com.
 8. Verify:
@@ -82,9 +82,17 @@ VITE variables are embedded into the browser bundle and therefore may contain on
 
 After Netlify returns the production URL:
 
-1. Set WEB_ORIGIN on both Render services to that exact origin, without a trailing slash.
-2. Redeploy/restart both services.
-3. Reload the Netlify site and verify course/task API calls have no CORS errors.
+1. Keep `WEB_ORIGIN` as one exact primary/canonical origin, without a trailing slash. Never put a comma-separated list in `WEB_ORIGIN`.
+2. During the `qqttai.com` to `coursejesus.com` migration, use these non-secret values:
+
+       WEB_ORIGIN=https://qqttai.com
+       WEB_ALLOWED_ORIGINS=https://qqttai.com,https://coursejesus.com
+       CMUI_ALLOWED_ORIGINS=https://qqttai.com,https://coursejesus.com
+
+   `CMUI_ALLOWED_ORIGINS` is RAG UI-extension-specific and is not needed by Agent. `WEB_ALLOWED_ORIGINS` controls host API CORS and Clerk authorized parties in both backends. If `WEB_ALLOWED_ORIGINS` is absent or empty, both backends fall back to `[WEB_ORIGIN]`.
+3. Restart the RAG and Agent services after changing their environment. No frontend rebuild is required when the API hostnames and Vite variables remain unchanged.
+4. Run `node scripts/check_domain_migration_readiness.mjs` with the three non-secret origin variables to validate local configuration. Add `--network` plus explicit `RAG_BASE_URL` and `AGENT_BASE_URL` only when public read-only checks are separately authorized.
+5. Reload both browser origins and verify course/task API calls have no CORS or Clerk authorized-party errors.
 
 ## Production acceptance
 
@@ -113,7 +121,7 @@ Run in a real browser:
 ## Security controls and limits
 
 - Both APIs independently verify Clerk session tokens and derive the user ID only from verified claims.
-- `WEB_ORIGIN` is the sole allowed cross-origin browser origin; `Authorization` is explicitly allowed.
+- `WEB_ORIGIN` is the primary/canonical browser origin. `WEB_ALLOWED_ORIGINS` is the exact browser CORS and Clerk authorized-parties allowlist; empty means the historical single-origin fallback. `CMUI_ALLOWED_ORIGINS` remains the separate mounted UI-extension allowlist. Wildcard origins are never used, and `Authorization` is explicitly allowed.
 - Agent chat and RAG QA use SQLite-backed, per-user minute windows. Defaults are 10 requests/minute and can be tuned with `AGENT_CHAT_REQUESTS_PER_MINUTE` and `RAG_QA_REQUESTS_PER_MINUTE`.
 - Shared course reads are authenticated. Course creation, upload, and ingestion-job inspection are admin-only through `ADMIN_USER_IDS`.
 - SQLite requires one Render instance per service. Rate limits are intentionally single-instance and are not a substitute for Clerk signup controls, monitoring, budget alerts, or a future distributed gateway.

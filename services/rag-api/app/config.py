@@ -1,5 +1,8 @@
+import ipaddress
+from contextlib import suppress
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -32,6 +35,7 @@ class Settings(BaseSettings):
     rag_embedding_model: str = ""
     rag_provider_mode: Literal["openai", "deterministic"] = "openai"
     web_origin: str = "http://localhost:5173"
+    web_allowed_origins: str = ""
     clerk_secret_key: SecretStr | None = None
     clerk_jwt_key: SecretStr | None = None
     admin_user_ids: str = ""
@@ -166,7 +170,41 @@ class Settings(BaseSettings):
         self.rag_embedding_api_key = self.rag_embedding_api_key or self.openai_api_key
         self.rag_embedding_base_url = self.rag_embedding_base_url or self.openai_base_url
         self.rag_embedding_model = self.rag_embedding_model or self.openai_embedding_model
+        self.web_origin = self.web_origin.strip()
+        for origin in self.web_allowed_origin_tuple:
+            self._validate_browser_origin(origin)
         return self
+
+    def _validate_browser_origin(self, origin: str) -> None:
+        parsed = urlsplit(origin)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError(f"Browser origin must be an exact HTTP(S) origin: {origin!r}")
+        hostname = parsed.hostname or ""
+        is_loopback = hostname == "localhost" or hostname.endswith(".localhost")
+        if not is_loopback:
+            with suppress(ValueError):
+                is_loopback = ipaddress.ip_address(hostname).is_loopback
+        if self.app_env == "production" and parsed.scheme != "https" and not is_loopback:
+            raise ValueError("Production browser origins must use HTTPS.")
+
+    @property
+    def web_allowed_origin_tuple(self) -> tuple[str, ...]:
+        origins: list[str] = []
+        for item in self.web_allowed_origins.split(","):
+            origin = item.strip()
+            if origin and origin not in origins:
+                origins.append(origin)
+        if self.web_origin not in origins:
+            origins.append(self.web_origin)
+        return tuple(origins)
 
     @property
     def admin_user_id_set(self) -> frozenset[str]:

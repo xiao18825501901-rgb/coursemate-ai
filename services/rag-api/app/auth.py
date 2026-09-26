@@ -25,7 +25,7 @@ class ClerkAuthVerifier:
             jwt_key=settings.clerk_jwt_key.get_secret_value()
             if settings.clerk_jwt_key
             else None,
-            authorized_parties=[settings.web_origin],
+            authorized_parties=list(settings.web_allowed_origin_tuple),
             accepts_token=["session_token"],
         )
         self.configured = bool(settings.clerk_secret_key or settings.clerk_jwt_key)

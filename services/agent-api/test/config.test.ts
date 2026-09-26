@@ -57,6 +57,45 @@ describe("Agent security configuration", () => {
     expect(config.host).toBe("127.0.0.1");
   });
 
+  it.each([undefined, ""])(
+    "falls back to the canonical web origin when the allowlist is %s",
+    (allowedOrigins) => {
+      const config = loadConfig({
+        CLERK_PUBLISHABLE_KEY: "pk_test_example",
+        CLERK_SECRET_KEY: "sk_test_example",
+        WEB_ORIGIN: "https://qqttai.com",
+        ...(allowedOrigins === undefined ? {} : { WEB_ALLOWED_ORIGINS: allowedOrigins }),
+      });
+
+      expect(config.webAllowedOrigins).toEqual(["https://qqttai.com"]);
+    },
+  );
+
+  it("parses, deduplicates, and retains the canonical web origin", () => {
+    const config = loadConfig({
+      CLERK_PUBLISHABLE_KEY: "pk_test_example",
+      CLERK_SECRET_KEY: "sk_test_example",
+      WEB_ORIGIN: "https://qqttai.com",
+      WEB_ALLOWED_ORIGINS:
+        " https://coursejesus.com,, https://coursejesus.com ",
+    });
+
+    expect(config.webAllowedOrigins).toEqual([
+      "https://coursejesus.com",
+      "https://qqttai.com",
+    ]);
+  });
+
+  it("rejects non-HTTPS public origins in production", () => {
+    expect(() => loadConfig({
+      NODE_ENV: "production",
+      CLERK_PUBLISHABLE_KEY: "pk_test_example",
+      CLERK_SECRET_KEY: "sk_test_example",
+      WEB_ORIGIN: "https://qqttai.com",
+      WEB_ALLOWED_ORIGINS: "https://qqttai.com,http://public.example",
+    })).toThrow(/HTTPS/);
+  });
+
   it("allows an explicit Agent bind host", () => {
     const config = loadConfig({
       CLERK_PUBLISHABLE_KEY: "pk_test_example",

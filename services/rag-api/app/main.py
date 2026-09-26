@@ -182,7 +182,7 @@ def create_app(
         teaching_profiles=teaching_profile_service,
         jev=application.state.jev_service,
     )
-    cors_origins = [resolved_settings.web_origin]
+    cors_origins = list(resolved_settings.web_allowed_origin_tuple)
     cors_methods = ["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"]
     if resolved_settings.ui_extension_enabled:
         from app.ui_extension.mount import ui_allowed_origins

@@ -70,12 +70,13 @@ const application = createApp({
   repository,
   agentService,
   webOrigin: config.webOrigin,
+  webAllowedOrigins: config.webAllowedOrigins,
   authStrategy: config.authTestUserId === undefined
     ? createClerkAuthStrategy({
         publishableKey: config.clerkPublishableKey,
         secretKey: config.clerkSecretKey,
         ...(config.clerkJwtKey === undefined ? {} : { jwtKey: config.clerkJwtKey }),
-        authorizedParties: [config.webOrigin],
+        authorizedParties: config.webAllowedOrigins,
       })
     : createTestAuthStrategy(config.authTestUserId),
   modelRateLimiter: new SqliteModelRateLimiter(database.connection, {

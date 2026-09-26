@@ -116,7 +116,7 @@ Returns 200 with a final message and tool execution trace:
 The API may return 502 for an unavailable/model failure. Direct task CRUD remains available independently.
 ## Operational controls
 
-The Agent accepts JSON bodies up to 64 KiB and applies 120 requests per minute per client. Both APIs allow only the configured WEB_ORIGIN through CORS. Agent responses use Helmet headers; RAG adds nosniff, DENY framing, and no-referrer headers.
+The Agent accepts JSON bodies up to 64 KiB and applies 120 requests per minute per client. Both APIs allow only exact origins from `WEB_ALLOWED_ORIGINS` through CORS and Clerk authorized-party checks, falling back to the single canonical `WEB_ORIGIN` when that list is empty. The mounted RAG UI extension keeps its additional `CMUI_ALLOWED_ORIGINS` policy. Agent responses use Helmet headers; RAG adds nosniff, DENY framing, and no-referrer headers.
 
 ## V2 RAG resource additions
 

@@ -16,6 +16,7 @@ export interface AgentConfig {
   host: string;
   port: number;
   webOrigin: string;
+  webAllowedOrigins: string[];
   openaiApiKey: string;
   openaiBaseUrl: string | undefined;
   openaiChatModel: string;
@@ -101,6 +102,48 @@ function boundedInteger(value: string | undefined, fallback: number, min: number
     throw new Error(`Expected an integer between ${min} and ${max}.`);
   }
   return parsed;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname === "::1") {
+    return true;
+  }
+  return /^127(?:\.[0-9]{1,3}){3}$/.test(hostname);
+}
+
+function parseWebAllowedOrigins(
+  webOrigin: string,
+  configuredOrigins: string | undefined,
+  production: boolean,
+): string[] {
+  const origins: string[] = [];
+  for (const raw of (configuredOrigins ?? "").split(",")) {
+    const origin = raw.trim();
+    if (origin && !origins.includes(origin)) origins.push(origin);
+  }
+  if (!origins.includes(webOrigin)) origins.push(webOrigin);
+  for (const origin of origins) {
+    let parsed: URL;
+    try {
+      parsed = new URL(origin);
+    } catch {
+      throw new Error(`Browser origin must be an exact HTTP(S) origin: ${origin}`);
+    }
+    if (
+      (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+      parsed.origin !== origin ||
+      parsed.username !== "" ||
+      parsed.password !== "" ||
+      parsed.search !== "" ||
+      parsed.hash !== ""
+    ) {
+      throw new Error(`Browser origin must be an exact HTTP(S) origin: ${origin}`);
+    }
+    if (production && parsed.protocol !== "https:" && !isLoopbackHostname(parsed.hostname)) {
+      throw new Error("Production browser origins must use HTTPS.");
+    }
+  }
+  return origins;
 }
 
 function isAllowedJevToolIntentUrl(value: string): boolean {
@@ -193,12 +236,20 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AgentC
     10_000,
   );
 
+  const webOrigin = (environment.WEB_ORIGIN ?? "http://localhost:5173").trim();
+  const webAllowedOrigins = parseWebAllowedOrigins(
+    webOrigin,
+    environment.WEB_ALLOWED_ORIGINS,
+    environment.NODE_ENV === "production",
+  );
+
   return {
     databasePath:
       configuredPath === ":memory:" ? configuredPath : path.resolve(process.cwd(), configuredPath),
     host: environment.AGENT_HOST?.trim() || "127.0.0.1",
     port: boundedInteger(environment.AGENT_PORT ?? environment.PORT, 8001, 1, 65_535),
-    webOrigin: environment.WEB_ORIGIN ?? "http://localhost:5173",
+    webOrigin,
+    webAllowedOrigins,
     openaiApiKey,
     openaiBaseUrl,
     openaiChatModel,
