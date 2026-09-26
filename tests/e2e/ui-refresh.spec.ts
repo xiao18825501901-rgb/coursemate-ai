@@ -121,7 +121,7 @@ test("refreshing a deep shell route keeps the same view, and back returns home",
   await expect(page.getByRole("heading", { level: 1, name: "控制面板" })).toBeVisible();
 });
 
-test("shows an empty dashboard on first sign-in and adds courses from All Courses", async ({
+test("shows both dashboard actions in order and adds courses from All Courses", async ({
   page,
 }) => {
   await page.goto("/app");
@@ -130,13 +130,21 @@ test("shows an empty dashboard on first sign-in and adds courses from All Course
   await nav.getByRole("button", { name: "控制面板", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1, name: "控制面板" })).toBeVisible();
   await expect(page.locator(".course-card")).toHaveCount(0);
-  await expect(page.locator(".add-course-card")).toBeVisible();
+  const actionCards = page.locator(".dashboard-grid > .add-course-card");
+  await expect(actionCards).toHaveCount(2);
+  await expect(actionCards.nth(0)).toContainText("从 Canvas 导入");
+  await expect(actionCards.nth(1)).toContainText("创建自己的课程");
 
   await nav.getByRole("button", { name: "课程", exact: true }).click();
   const drawer = page.getByRole("dialog", { name: "课程面板" });
   await expect(drawer).toBeVisible();
   await drawer.getByRole("button", { name: /所有课程/ }).click();
   await expect(page.getByRole("heading", { level: 1, name: "所有课程" })).toBeVisible();
+  const bannerActions = page.locator(".course-banner-actions");
+  await expect(bannerActions.getByRole("button", { name: "创建课程" })).toHaveClass(/primary/);
+  const canvasAction = bannerActions.getByRole("button", { name: "从 Canvas 导入" });
+  await expect(canvasAction).toHaveClass(/primary/);
+  await expect(canvasAction).toHaveCSS("text-decoration-line", "none");
 
   const row = page.getByRole("row", { name: /CS3481/ });
   await expect(row).toBeVisible();

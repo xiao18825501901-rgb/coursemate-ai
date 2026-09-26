@@ -162,16 +162,8 @@
 .assessment-question header small{display:block}
 @media(max-width:800px){.assessment-topbar{height:48px;padding:0 12px}.assessment-body{padding:14px 14px 20px}.assessment-composer{padding:10px 12px 14px}.assessment-slot-row{grid-template-columns:48px 1fr 34px}.assessment-slot-row label{grid-column:2}.assessment-slot-marks{grid-column:2;text-align:left}.assessment-slot-row .icon-btn{grid-column:3;grid-row:1}.assessment-setup-actions{align-items:stretch;flex-direction:column}.assessment-setup-actions .btn.primary{margin-left:0}}
 
-/* Canvas private import: the two entry points and the wizard they open.
-   Both entries are real buttons with an underline, so they read as links, are reachable with
-   Tab and activated with Enter or Space, and stay visible in both themes. */
-.canvas-import-link{display:inline-flex;align-items:center;gap:7px;padding:2px 0;background:none;border:0;color:var(--accent,#aa2059);font-size:13px;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
-.canvas-import-link .ico{width:16px;height:16px}
-.canvas-import-link:hover{text-decoration-thickness:2px}
-.canvas-import-link:focus-visible{outline:2px solid var(--accent,#aa2059);outline-offset:3px;border-radius:3px}
-.add-course-canvas-row{display:flex;flex-direction:column;gap:6px;align-items:flex-start;margin-top:14px;padding-top:14px;border-top:1px dashed var(--line,#d9e0e5)}
-.add-course-canvas-row small{color:var(--muted,#7b8b96);font-size:11px}
-.canvas-import-link-banner{margin-top:12px}
+/* Canvas private import wizard. Its public entry points now use the existing
+   primary button and dashed action-card systems instead of link-like controls. */
 .canvas-import{min-height:120px}
 .canvas-import-step{display:flex;flex-direction:column;gap:10px}
 .canvas-import-lead{margin:0;font-size:15px;font-weight:600}
@@ -214,7 +206,6 @@
 .canvas-task-token input:focus-visible{outline:2px solid var(--accent,#aa2059);outline-offset:2px}
 .modal:has(.canvas-import){width:640px;max-width:94vw}
 @media(max-width:420px){
-  .canvas-import-link{font-size:12px}
   .canvas-import-courses{max-height:none}
   .canvas-import-actions .btn{width:100%}
   .modal:has(.canvas-import){width:96vw}
@@ -235,3 +226,17 @@
 .global-nav .brand .brand-mark{width:28px;height:28px}
 .login-brand .brand-mark,.login-page .brand-mark{width:56px;height:56px;border-radius:12px}
 .help-art .brand-mark{width:72px;height:72px;border-radius:16px}
+
+/* 2026-09-27 minimal signed-out entry and first-class Canvas actions. */
+.login-page{background:var(--surface);padding:20px}
+.login-card{width:min(520px,calc(100vw - 40px));padding:40px;background:var(--bg);display:flex;flex-direction:column;align-items:center;text-align:center;gap:28px}
+.login-brand{margin:0;justify-content:center}
+.login-card>.login-tagline{margin:0;color:var(--ink);font-size:clamp(18px,2.4vw,24px);line-height:1.35;font-weight:500}
+.login-card>.btn{min-height:48px;margin:0;width:100%}
+.login-card>.error-text{align-self:stretch;margin:-12px 0 0;text-align:left}
+.course-banner-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+@media(max-width:620px){
+  .login-card{padding:24px}
+  .course-banner-actions{width:100%;align-items:stretch;flex-direction:column}
+  .course-banner-actions .btn{width:100%}
+}

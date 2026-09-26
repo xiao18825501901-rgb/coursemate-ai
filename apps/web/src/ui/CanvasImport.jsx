@@ -76,12 +76,6 @@ import {
 const POLL_MS = 1500;
 const FINISHED = ['COMPLETED', 'COMPLETED_WITH_WARNINGS', 'NEEDS_REAUTH', 'FAILED', 'CANCELLED'];
 
-export function CanvasImportLink({ onClick, className = '' }) {
-    return <button type="button" className={('canvas-import-link ' + className).trim()} onClick={onClick}>
-        <Icon name="upload"/><span className="canvas-import-link-label">从 Canvas 导入</span>
-    </button>;
-}
-
 /** The steps a user follows in Canvas, shown only under the local-token entry. */
 export function LocalTokenSteps() {
     return <div className="canvas-import-token">
