@@ -21,7 +21,7 @@ from app.canvas.registry import InstitutionConnectionRegistry
 
 TICKET_PREFIX = "coursejesus-canvas-bridge:v1:"
 TICKET_KIND = "coursejesus.canvas-bridge-ticket"
-TRUSTED_API_ORIGINS = frozenset({"https://rag.coursejesus.com", "https://rag.qqttai.com"})
+TRUSTED_API_ORIGINS = frozenset({"https://rag.47-237-179-69.sslip.io"})
 TRUSTED_CANVAS_ORIGINS = {
     "cityu": "https://canvas.cityu.edu.hk",
     "cityu-dg": "https://cityu-dg.instructure.com",
