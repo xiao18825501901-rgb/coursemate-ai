@@ -7,13 +7,13 @@ This is the route set a *local* tool talks to, so two things matter more here th
    instead of having the value quietly ignored. Combined with there being no column for one
    (`033_canvas_local_bridge.sql`), "the token never reaches CourseJesus" is a property of the code
    rather than a promise in a document.
-2. **A session belongs to one user and one school.** The user's own authentication is required on
-   every route, the session's owner must match it, and the school is the one recorded when the
-   session was opened — a bridge cannot point a session at another school by sending a different
-   origin.
+2. **A session belongs to one user and one school.** The signed-in browser creates it. The portable
+   client can claim the high-entropy, single-use code once, then must present a separately rotated
+   random credential whose digest is stored on that same owner-bound session. The school origin is
+   frozen when the browser opens the session.
 
-The bridge authenticates exactly like the web app does (the user's own token), which is why these
-routes use the same `require_user` dependency as the rest of the API.
+The legacy authenticated bridge routes remain available. Portable-client routes use the rotated
+bridge credential and never accept a Clerk token or Canvas credential.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Annotated, Any, cast
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, Request, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth import AuthenticatedUser, require_user
@@ -90,6 +90,16 @@ class SelectionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     canvas_course_ids: list[str] = Field(min_length=1, max_length=200)
+
+
+BRIDGE_AUTH_SCHEME = "CourseJesusBridge"
+
+
+def _bridge_credential(authorization: str) -> str:
+    scheme, separator, value = authorization.partition(" ")
+    if not separator or scheme.casefold() != BRIDGE_AUTH_SCHEME.casefold() or not value.strip():
+        raise ApiError(401, "LOCAL_BRIDGE_UNAUTHENTICATED", "A local bridge credential is required.")
+    return value.strip()
 
 
 def _settings(request: Request) -> Settings:
@@ -225,6 +235,113 @@ def claim(
             claimed_by=payload.host_label,
         )
     return session.as_dict()
+
+
+@router.post("/bridge/claim")
+def claim_portable_client(payload: ClaimRequest, request: Request) -> dict[str, Any]:
+    """Claim with the browser-generated code; Canvas credentials are not accepted here."""
+    with local_service(request) as service:
+        session, bridge_token = service.claim_client(
+            code=payload.code,
+            canvas_user_id=payload.canvas_user_id,
+            canvas_display_name=payload.canvas_display_name,
+            claimed_by=payload.host_label,
+        )
+    return {**session.as_dict(), "bridgeToken": bridge_token, "authScheme": BRIDGE_AUTH_SCHEME}
+
+
+@router.post("/bridge/{session_id}/discovery")
+def portable_record_discovery(
+    session_id: str,
+    payload: DiscoveryRequest,
+    request: Request,
+    authorization: Annotated[str, Header()],
+) -> dict[str, Any]:
+    with local_service(request) as service:
+        user_id = service.authenticate_client(
+            session_id=session_id, bridge_token=_bridge_credential(authorization)
+        )
+        session = service.record_discovery(
+            user_id=user_id,
+            session_id=session_id,
+            courses=[
+                DiscoveredCourse(
+                    canvas_course_id=item.canvas_course_id,
+                    name=item.name,
+                    course_code=item.course_code,
+                    term=item.term,
+                    enrollment_state=item.enrollment_state,
+                    workflow_state=item.workflow_state,
+                    file_count=item.file_count,
+                    size_bytes=item.size_bytes,
+                )
+                for item in payload.courses
+            ],
+        )
+    return session.as_dict()
+
+
+@router.get("/bridge/{session_id}/selection")
+def portable_read_selection(
+    session_id: str,
+    request: Request,
+    authorization: Annotated[str, Header()],
+) -> dict[str, Any]:
+    with local_service(request) as service:
+        user_id = service.authenticate_client(
+            session_id=session_id, bridge_token=_bridge_credential(authorization)
+        )
+        payload = service.status(user_id=user_id, session_id=session_id)
+    return {
+        "sessionId": payload["sessionId"],
+        "status": payload["status"],
+        "selectedCourseIds": payload["selectedCourseIds"],
+    }
+
+
+@router.post("/bridge/{session_id}/files", status_code=status.HTTP_201_CREATED)
+async def portable_upload_file(
+    session_id: str,
+    request: Request,
+    authorization: Annotated[str, Header()],
+    canvas_course_id: Annotated[str, Form(min_length=1, max_length=64)],
+    canvas_file_id: Annotated[str, Form(min_length=1, max_length=64)],
+    display_name: Annotated[str, Form(min_length=1, max_length=200)],
+    file: Annotated[UploadFile, File()],
+    declared_size: Annotated[int, Form(ge=0)] = 0,
+    declared_sha256: Annotated[str, Form(max_length=64)] = "",
+    source_updated_at: Annotated[str, Form(max_length=40)] = "",
+) -> dict[str, Any]:
+    content = await file.read()
+    with local_service(request) as service:
+        user_id = service.authenticate_client(
+            session_id=session_id, bridge_token=_bridge_credential(authorization)
+        )
+        record = service.upload_file(
+            user_id=user_id,
+            session_id=session_id,
+            canvas_course_id=canvas_course_id,
+            canvas_file_id=canvas_file_id,
+            display_name=display_name,
+            content=content,
+            declared_size=declared_size,
+            declared_sha256=declared_sha256,
+            source_updated_at=source_updated_at,
+        )
+    return record.as_dict()
+
+
+@router.post("/bridge/{session_id}/finish")
+def portable_finish(
+    session_id: str,
+    request: Request,
+    authorization: Annotated[str, Header()],
+) -> dict[str, Any]:
+    with local_service(request) as service:
+        user_id = service.authenticate_client(
+            session_id=session_id, bridge_token=_bridge_credential(authorization)
+        )
+        return service.finish(user_id=user_id, session_id=session_id)
 
 
 @router.post("/{session_id}/discovery")

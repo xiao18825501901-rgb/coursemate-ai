@@ -229,24 +229,69 @@ export const TOKEN_STEPS = [
   "打开 Settings（设置）。",
   "在 Approved Integrations（已批准的集成）里点 + New Access Token（新建访问令牌）。",
   "Purpose 填 local import；Expires 选一个短期限；点 Generate Token。",
-  "复制 Token，只在本地终端里粘贴，不要粘贴到任何网页。",
+  "复制 Token，只在本地导入助手窗口里粘贴，不要粘贴到任何网页。",
 ];
 
 export const TOKEN_WARNING =
   "为了保护你的 Canvas 凭据，请不要把这个 Token 粘贴到 CourseJesus 网页。" +
-  "本地导入工具会通过隐藏输入读取 Token，并保存在你电脑的系统凭据库里。";
+  "本地导入工具只会在当前进程内存中使用 Token，关闭工具后不会保留。";
 
-/** The command the user runs locally once a session is open. The code is a ticket, not a secret. */
-export function bridgeCommand(code) {
-  return `canvas-study-assistant bridge --code ${code}`;
+export const BRIDGE_RELEASE_MANIFEST_PATH = "/downloads/canvas-bridge/manifest.json";
+
+/** Load the release metadata before rendering a download link; a missing artifact is not a link. */
+export async function loadBridgeReleaseManifest(fetchImpl = fetch) {
+  const response = await fetchImpl(BRIDGE_RELEASE_MANIFEST_PATH, {
+    credentials: "same-origin",
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error("Windows 本地导入工具尚未包含在当前网站版本中。");
+  const body = await response.json();
+  if (
+    !body || body.available !== true || body.platform !== "windows" || body.architecture !== "x64" ||
+    typeof body.publicPath !== "string" || !body.publicPath.startsWith("/downloads/canvas-bridge/") ||
+    typeof body.sha256 !== "string" || !/^[0-9a-f]{64}$/i.test(body.sha256)
+  ) {
+    throw new Error("Windows 本地导入工具的发布清单无效。");
+  }
+  return body;
+}
+
+function base64UrlUtf8(value) {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/**
+ * Build the opaque connection text consumed by the portable client.
+ * It contains a short-lived one-time session code, never a Canvas credential.
+ */
+export function localBridgeTicket(opened, ragBase = import.meta.env.VITE_RAG_API_URL || "") {
+  const apiOrigin = new URL(canvasApiRoot(ragBase), window.location.origin).origin;
+  const payload = {
+    kind: "coursejesus.canvas-bridge-ticket",
+    version: 1,
+    apiOrigin,
+    sessionId: opened.sessionId,
+    code: opened.code,
+    institutionKey: opened.institutionKey,
+    institutionOrigin: opened.institutionOrigin,
+    expiresAt: opened.expiresAt || "",
+  };
+  return `coursejesus-canvas-bridge:v1:${base64UrlUtf8(JSON.stringify(payload))}`;
+}
+
+/** Kept only for an advanced installed-client invocation; the ordinary path is double-click. */
+export function bridgeCommand(ticket) {
+  return `CourseJesus-Canvas-Bridge.exe --ticket "${ticket}"`;
 }
 
 export const BRIDGE_STEPS = [
-  "在同一台电脑上打开终端，运行下面的命令。",
-  "工具会隐藏输入你的 Canvas Token（Personal Access Token），并保存到系统凭据库。",
-  "工具用 Token 在你本机读取你本人的课程列表，把课程名发回这一页。",
-  "在这一页选择要导入的课程，工具才开始下载并上传文件。",
-  "Token 不会离开你的电脑；CourseJesus 只收到课程信息、文件和导入回执。",
+  "下载 Windows x64 便携包并全部解压，不能直接在 ZIP 内运行。",
+  "双击 CourseJesus-Canvas-Bridge.exe；不需要安装 Python、WSL 或修改 PATH。",
+  "助手打开后，回到本页点“生成新的连接信息”，复制并粘贴到助手。",
+  "只在助手里输入 Canvas Token；连接后回本页选择课程再开始导入。",
 ];
 
 export const LOCAL_STATUS_LABELS = {

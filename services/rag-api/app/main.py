@@ -220,6 +220,7 @@ def create_app(
             request.url.path.startswith("/api/learning")
             or request.url.path.startswith("/api/admin")
             or request.url.path.startswith("/api/shared-overlays")
+            or request.url.path.startswith("/api/integrations/canvas/local-sessions")
             or "publication-requests" in request.url.path
         ):
             response.headers["Cache-Control"] = "private, no-store"

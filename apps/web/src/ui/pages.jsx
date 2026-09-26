@@ -7,8 +7,9 @@ import { dateKey, zonedParts, wallTimeToISO, formatBytes, formatTime, goto } fro
 import { citationVerdict } from './citationSupport.js';
 import { referenceVerificationNote } from './referenceVerification.js';
 import { Icon, IconButton, Avatar } from './icons.jsx';
+import { FileUploadQueue, runUploadItems, uploadItemsFrom } from './FileUploadQueue.jsx';
 export class CourseFiles extends React.Component {
-    state = { files: [], q: '', folder: '', error: '', loading: true, menu: null };
+    state = { files: [], q: '', folder: '', error: '', loading: true, menu: null, uploadQueue: [], uploading: false };
     componentDidMount() { this.load(); }
     async load() { try {
         const files = await request(`/courses/${this.props.course.id}/files`);
@@ -17,16 +18,39 @@ export class CourseFiles extends React.Component {
     catch (e) {
         this.setState({ error: e.message, loading: false });
     } }
-    async upload(e) { const input = e.currentTarget; const file = input.files[0]; if (!file)
-        return; const body = new FormData(); body.append('file', file); body.append('folder', this.state.folder); this.setState({ loading: true }); try {
-        const result = await request(`/courses/${this.props.course.id}/files`, { method: 'POST', body });
-        await this.load();
-        this.props.toast(result.duplicate ? '这份文件已经存在' : result.status === 'indexed' ? '文件已保存并完成文字索引' : '文件已保存，请查看解析提示');
+    updateUpload = (clientItemId, patch) => this.setState(state => ({
+        uploadQueue: state.uploadQueue.map(item => item.clientItemId === clientItemId ? { ...item, ...patch } : item),
+    }));
+    async selectUploads(e) {
+        const input = e.currentTarget;
+        const added = uploadItemsFrom(input.files);
+        input.value = '';
+        if (!added.length) return;
+        this.setState(state => ({ uploadQueue: [...state.uploadQueue, ...added] }), () => this.runUploads(added));
     }
-    catch (e) {
-        this.props.toast(e.message);
-        this.setState({ loading: false });
-    } input.value = ''; }
+    async runUploads(items) {
+        if (!items.length || this.state.uploading) return;
+        this.setState({ uploading: true, error: '' });
+        const outcome = await runUploadItems(items, async item => {
+            const body = new FormData();
+            body.append('file', item.file);
+            body.append('folder', this.state.folder);
+            return request(`/courses/${this.props.course.id}/files`, { method: 'POST', body });
+        }, this.updateUpload, 2);
+        await this.load();
+        this.setState({ uploading: false });
+        this.props.toast(outcome.failed ? '部分文件上传失败，可在队列中只重试失败项' : '所选文件已处理完成');
+    }
+    retryUpload(clientItemId) {
+        const item = this.state.uploadQueue.find(row => row.clientItemId === clientItemId && row.status === 'failed');
+        if (item) this.runUploads([item]);
+    }
+    retryFailed() {
+        this.runUploads(this.state.uploadQueue.filter(item => item.status === 'failed'));
+    }
+    removeUpload(clientItemId) {
+        this.setState(state => ({ uploadQueue: state.uploadQueue.filter(item => item.clientItemId !== clientItemId) }));
+    }
     preview(file) { this.props.modal(file.name, <Preview course={this.props.course} file={file} toast={this.props.toast}/>); }
     async save(file) { try {
         const url = await download(this.props.course.id, file);
@@ -41,11 +65,11 @@ export class CourseFiles extends React.Component {
         this.props.toast(e.message);
     } }
     render() {
-        const { files, q, folder, menu } = this.state;
+        const { files, q, folder, menu, uploadQueue, uploading } = this.state;
         const prefix = folder ? folder + '/' : '';
         const folders = q ? [] : [...new Set(files.map(f => f.folder).filter(f => f.startsWith(prefix) && f !== folder).map(f => f.slice(prefix.length).split('/')[0]))];
         const rows = files.filter(f => q ? f.name.toLowerCase().includes(q.toLowerCase()) : f.folder === folder);
-        return <div className="course-scroll"><div className="section-heading"><h1>文件</h1><label className="btn" role="button" tabIndex={0} aria-label="添加我的资料" onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();e.currentTarget.querySelector("input")?.click();}}}><Icon name="plus"/>添加我的资料<input type="file" style={{ display: 'none' }} onChange={e => this.upload(e)} accept=".pdf,.txt,.md,.csv,.ipynb,.docx,.pptx,.png,.jpg,.jpeg,.webp"/></label></div><form className="file-search" onSubmit={e => e.preventDefault()}><div className="search-field"><Icon name="search"/><input aria-label="搜索文件" placeholder="搜索文件…" value={q} onChange={e => this.setState({ q: e.target.value })}/></div><button className="btn">搜索</button></form><div className="file-path"><button onClick={() => this.setState({ folder: '', q: '' })}>{this.props.course.code} {this.props.course.name}</button>{folder && <><Icon name="arrow"/><span>{folder}</span></>}</div>{this.state.error && <p className="error-text">{this.state.error}</p>}<table className="file-table"><thead><tr><th>名称</th><th>大小</th><th>动作</th></tr></thead><tbody>{folders.map(f => <tr key={f}><td><button className="file-name-btn" onClick={() => this.setState({ folder: prefix + f })}><Icon name="folder"/><span>{f}</span></button></td><td className="file-size">—</td><td /></tr>)}{rows.map(f => <tr key={f.id}><td><button className={'file-name-btn ' + (f.mime === 'application/pdf' ? 'pdf' : '')} onClick={() => this.preview(f)}><Icon name="file"/><span>{f.name}{f.scope === 'private' && <small className="private-note">仅自己</small>}</span></button>{f.error && <p className="helper-note file-note">{f.error}</p>}</td><td className="file-size">{formatBytes(f.size)}</td><td className="file-action"><IconButton name="more" title={'文件操作 ' + f.name} onClick={() => this.setState({ menu: menu === f.id ? null : f.id })}/>{menu === f.id && <div className="dropdown"><button onClick={() => this.save(f)}><Icon name="download"/>下载</button>{f.scope === 'private' && <button onClick={async () => { if (!window.confirm('删除自己的这份文件及其本地索引？'))
+        return <div className="course-scroll"><div className="section-heading"><h1>文件</h1><label className="btn" role="button" tabIndex={uploading ? -1 : 0} aria-label="添加我的资料" onKeyDown={e=>{if(!uploading&&(e.key==="Enter"||e.key===" ")){e.preventDefault();e.currentTarget.querySelector("input")?.click();}}}><Icon name="plus"/>{uploading ? '正在上传…' : '添加我的资料'}<input type="file" multiple disabled={uploading} style={{ display: 'none' }} onChange={e => this.selectUploads(e)} accept=".pdf,.txt,.md,.csv,.ipynb,.docx,.pptx,.png,.jpg,.jpeg,.webp"/></label></div><FileUploadQueue items={uploadQueue} busy={uploading} onRetry={id => this.retryUpload(id)} onRemove={id => this.removeUpload(id)}/>{uploadQueue.some(item => item.status === 'failed') && <button type="button" className="btn small upload-retry-all" disabled={uploading} onClick={() => this.retryFailed()}>重试全部失败项</button>}<form className="file-search" onSubmit={e => e.preventDefault()}><div className="search-field"><Icon name="search"/><input aria-label="搜索文件" placeholder="搜索文件…" value={q} onChange={e => this.setState({ q: e.target.value })}/></div><button className="btn">搜索</button></form><div className="file-path"><button onClick={() => this.setState({ folder: '', q: '' })}>{this.props.course.code} {this.props.course.name}</button>{folder && <><Icon name="arrow"/><span>{folder}</span></>}</div>{this.state.error && <p className="error-text">{this.state.error}</p>}<table className="file-table"><thead><tr><th>名称</th><th>大小</th><th>动作</th></tr></thead><tbody>{folders.map(f => <tr key={f}><td><button className="file-name-btn" onClick={() => this.setState({ folder: prefix + f })}><Icon name="folder"/><span>{f}</span></button></td><td className="file-size">—</td><td /></tr>)}{rows.map(f => <tr key={f.id}><td><button className={'file-name-btn ' + (f.mime === 'application/pdf' ? 'pdf' : '')} onClick={() => this.preview(f)}><Icon name="file"/><span>{f.name}{f.scope === 'private' && <small className="private-note">仅自己</small>}</span></button>{f.error && <p className="helper-note file-note">{f.error}</p>}</td><td className="file-size">{formatBytes(f.size)}</td><td className="file-action"><IconButton name="more" title={'文件操作 ' + f.name} onClick={() => this.setState({ menu: menu === f.id ? null : f.id })}/>{menu === f.id && <div className="dropdown"><button onClick={() => this.save(f)}><Icon name="download"/>下载</button>{f.scope === 'private' && <button onClick={async () => { if (!window.confirm('删除自己的这份文件及其本地索引？'))
             return; try {
             await remove(`/courses/${this.props.course.id}/files/${f.id}`);
             await this.load();

@@ -560,19 +560,28 @@ class V3DomainAdapter:
         content = payload.get("content")
         if not isinstance(content, (bytes, bytearray)) or not content:
             raise ApiError(422, "EMPTY_UPLOAD", "The uploaded file is empty.")
-        accepted = self.ingestion.queue_document(
-            course_id=workspace["private_course_id"],
-            filename=str(payload.get("name") or ""),
-            media_type=str(payload.get("mime") or "application/octet-stream"),
-            content=bytes(content),
-            owner_user_id=subject,
-            is_admin=False,
-        )
-        # Ingestion runs here, synchronously and bounded, so the response reports the
-        # real post-ingestion status rather than the 'pending' row handed back by
-        # `queue_document`. Re-read afterwards instead of trusting that stale copy.
-        self.ingestion.process_document(accepted.document.id, accepted.job.id)
-        document = self._document_row(accepted.document.id)
+        duplicate = False
+        try:
+            accepted = self.ingestion.queue_document(
+                course_id=workspace["private_course_id"],
+                filename=str(payload.get("name") or ""),
+                media_type=str(payload.get("mime") or "application/octet-stream"),
+                content=bytes(content),
+                owner_user_id=subject,
+                is_admin=False,
+            )
+        except ApiError as error:
+            if error.code != "DUPLICATE_DOCUMENT":
+                raise
+            document_id = str(error.details.get("documentId") or "")
+            document = self._document_row(document_id)
+            duplicate = True
+        else:
+            # Ingestion runs here, synchronously and bounded, so the response reports the
+            # real post-ingestion status rather than the 'pending' row handed back by
+            # `queue_document`. Re-read afterwards instead of trusting that stale copy.
+            self.ingestion.process_document(accepted.document.id, accepted.job.id)
+            document = self._document_row(accepted.document.id)
         if document is None:
             raise ApiError(500, "UPLOAD_LOST", "The uploaded file could not be confirmed.")
         version = current_document_version(self.database, document["id"], subject)
@@ -586,6 +595,7 @@ class V3DomainAdapter:
             "scope": "private",
             "status": _file_status(document["status"], path is not None),
             "version_id": version["id"],
+            "duplicate": duplicate,
             "error": document["error_message"],
         }
 

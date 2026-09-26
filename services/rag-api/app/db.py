@@ -36,6 +36,7 @@ V3_MIGRATIONS = (
     "038_assessment_question_slots.sql",
     "039_practice_operation_reconciliation.sql",
     "040_configurable_assessments.sql",
+    "041_canvas_local_bridge_client.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -54,7 +55,7 @@ V3_REPLAY_SUPERSEDED_BY = {
     "040_configurable_assessments.sql": 40,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 40
+LATEST_V3_SCHEMA_VERSION = 41
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (
@@ -585,6 +586,19 @@ class Database:
                     connection.execute(
                         "CREATE INDEX IF NOT EXISTS idx_canvas_jobs_credential "
                         "ON canvas_import_jobs(credential_ref)"
+                    )
+                # Migration 041 adds the digest of the portable bridge's rotated session
+                # credential. Like migrations 023/025/035 above, the ALTER is guarded here
+                # because SQLite has no ADD COLUMN IF NOT EXISTS and every migration script is
+                # intentionally safe to replay during initialization.
+                local_session_columns = {
+                    row["name"]
+                    for row in connection.execute("PRAGMA table_info(canvas_local_sessions)")
+                }
+                if local_session_columns and "bridge_token_hash" not in local_session_columns:
+                    connection.execute(
+                        "ALTER TABLE canvas_local_sessions ADD COLUMN "
+                        "bridge_token_hash TEXT NOT NULL DEFAULT ''"
                     )
 
     def is_ready(self) -> bool:

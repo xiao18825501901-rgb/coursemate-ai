@@ -16,6 +16,8 @@ import {
     localBridgeCapability,
     localSession,
     LOCAL_STATUS_LABELS,
+    loadBridgeReleaseManifest,
+    localBridgeTicket,
     openLocalSession,
     outcomeFromSearch,
     OUTCOME_MESSAGES,
@@ -49,8 +51,8 @@ import {
  *   * **OAuth** is the path for every user: the school's own authorisation page, opened as a
  *     full-page navigation. It is the primary button.
  *   * **The local bridge** is the fallback for a school that has not issued a Developer Key yet.
- *     The user runs a tool on their own machine; a Personal Access Token is read there through a
- *     hidden prompt and kept by the operating system. It sits behind a secondary entry, and the page
+ *     The user runs a tool on their own machine; a Personal Access Token is read by its password
+ *     field and kept only in that process memory. It sits behind a secondary entry, and the page
  *     says plainly what not to do.
  *
  * Three things this screen must never do, because the server refuses them anyway but a UI that
@@ -113,7 +115,9 @@ export class CanvasImport extends React.Component {
         step: 'loading', institutions: [], credentialsReady: null, connections: [],
         connection: null, courses: [], selected: [], saveConnection: false,
         job: null, error: '', busy: false, localOpen: false, otherSchool: '',
-        bridge: null, bridgeCode: '', bridgeCourses: [], bridgeSelected: [],
+        bridge: null, bridgeCourses: [], bridgeSelected: [],
+        bridgeTicket: '', bridgeInstitutionKey: '', bridgeRelease: null,
+        bridgeReleaseError: '', bridgeNow: Date.now(),
         // The one-off task credential: what the server offers this account, the pasted value while
         // it is being submitted, the reference the server returned and the stage of the flow.
         taskCredential: { available: false, reason: 'TASK_CREDENTIAL_DISABLED', ownerOnly: true },
@@ -122,17 +126,31 @@ export class CanvasImport extends React.Component {
     };
     poll = null;
     bridgePoll = null;
+    bridgeClock = null;
 
     async componentDidMount() {
         setCanvasTokenGetter(() => window.CourseMateAuth?.getToken?.() || null);
         const outcome = outcomeFromSearch(window.location.search);
         if (outcome) this.props.toast?.(OUTCOME_MESSAGES[outcome]);
+        this.loadBridgeRelease();
+        this.bridgeClock = setInterval(() => this.setState({ bridgeNow: Date.now() }), 1_000);
         await this.load();
+    }
+
+    async loadBridgeRelease() {
+        try {
+            const bridgeRelease = await loadBridgeReleaseManifest();
+            this.setState({ bridgeRelease, bridgeReleaseError: '' });
+        }
+        catch (error) {
+            this.setState({ bridgeRelease: null, bridgeReleaseError: error.message });
+        }
     }
 
     componentWillUnmount() {
         if (this.poll) clearTimeout(this.poll);
         if (this.bridgePoll) clearTimeout(this.bridgePoll);
+        if (this.bridgeClock) clearInterval(this.bridgeClock);
     }
 
     async load() {
@@ -198,6 +216,19 @@ export class CanvasImport extends React.Component {
             this.setState({ error: '请先选择一所学校。' });
             return;
         }
+        this.setState({
+            step: 'bridge', bridgeInstitutionKey: key, bridge: null, bridgeTicket: '',
+            bridgeCourses: [], bridgeSelected: [], error: '',
+        });
+    }
+
+    async generateBridge() {
+        const { bridgeInstitutionKey } = this.state;
+        if (!bridgeInstitutionKey) {
+            this.setState({ error: '请返回并重新选择学校。' });
+            return;
+        }
+        if (this.bridgePoll) clearTimeout(this.bridgePoll);
         this.setState({ busy: true, error: '' });
         try {
             const capability = await localBridgeCapability();
@@ -205,10 +236,10 @@ export class CanvasImport extends React.Component {
                 this.setState({ busy: false, error: '本地导入工具在当前部署里没有开启。' });
                 return;
             }
-            const opened = await openLocalSession(key);
+            const opened = await openLocalSession(bridgeInstitutionKey);
             this.setState({
-                busy: false, step: 'bridge', bridge: opened, bridgeCode: opened.code,
-                bridgeCourses: [], bridgeSelected: [],
+                busy: false, step: 'bridge', bridge: opened,
+                bridgeCourses: [], bridgeSelected: [], bridgeTicket: localBridgeTicket(opened),
             });
             this.watchBridge(opened.sessionId);
         }
@@ -220,6 +251,7 @@ export class CanvasImport extends React.Component {
     async watchBridge(sessionId) {
         try {
             const status = await localSession(sessionId);
+            if (this.state.bridge?.sessionId !== sessionId) return;
             this.setState({ bridge: status, bridgeCourses: status.courses || [] });
             if (!FINISHED.includes(status.status) && status.status !== 'EXPIRED') {
                 this.bridgePoll = setTimeout(() => this.watchBridge(sessionId), POLL_MS);
@@ -253,7 +285,7 @@ export class CanvasImport extends React.Component {
         if (!bridge) return;
         try {
             await cancelLocalSession(bridge.sessionId);
-            this.setState({ step: 'connect', bridge: null, bridgeCode: '' });
+            this.setState({ step: 'connect', bridge: null, bridgeTicket: '' });
         }
         catch (error) {
             this.setState({ error: error.message });
@@ -497,18 +529,59 @@ export class CanvasImport extends React.Component {
     }
 
     renderBridge() {
-        const { bridge, bridgeCode, bridgeCourses, bridgeSelected, busy, error } = this.state;
-        const status = bridge?.status || 'OPEN';
+        const {
+            bridge, bridgeTicket, bridgeRelease, bridgeReleaseError,
+            bridgeCourses, bridgeSelected, busy, error,
+        } = this.state;
+        const status = bridge?.status || '';
         const selectable = status === 'CLAIMED';
+        const expiry = bridge?.expiresAt ? Date.parse(bridge.expiresAt) : Number.NaN;
+        const remaining = Number.isFinite(expiry) ? Math.max(0, expiry - this.state.bridgeNow) : null;
+        const expiryText = Number.isFinite(expiry) ? new Date(expiry).toLocaleString() : '';
+        const countdown = remaining == null ? '' : `${Math.floor(remaining / 60_000)}:${String(Math.floor((remaining % 60_000) / 1_000)).padStart(2, '0')}`;
+        const waitingExpired = status === 'OPEN' && remaining === 0;
         return <div className="canvas-import-step">
-            <p className="canvas-import-lead">用本地 Token 导入</p>
-            <p className="helper-note">{LOCAL_STATUS_LABELS[status] || status}</p>
+            <p className="canvas-import-lead">用本地导入助手连接 Canvas</p>
             {error && <p className="error-text">{error}</p>}
-            {status === 'OPEN' && <>
-                <p className="helper-note">在你的电脑上运行下面的命令，然后按提示隐藏输入 Canvas Token：</p>
-                <code className="canvas-import-code">{bridgeCommand(bridgeCode)}</code>
-                <p className="helper-note">这个连接码 {bridge?.expiresAt ? `在 ${bridge.expiresAt} 前有效，` : ''}只能使用一次，而且只属于你；它不含任何 Token。</p>
+            <ol className="canvas-import-token-steps">
+                {BRIDGE_STEPS.map(step => <li key={step}>{step}</li>)}
+            </ol>
+            {bridgeRelease
+                ? <a className="btn primary canvas-bridge-download" href={bridgeRelease.publicPath} download>
+                    下载 Windows 10/11 x64 便携包（v{bridgeRelease.version}）
+                </a>
+                : <p className="error-text">{bridgeReleaseError || '正在读取 Windows 工具发布信息…'}</p>}
+            {!bridge && <button type="button" className="btn" disabled={busy} onClick={() => this.generateBridge()}>
+                {busy ? '正在生成…' : '助手已打开，生成新的连接信息'}
+            </button>}
+            {bridge && <p className="helper-note">{LOCAL_STATUS_LABELS[waitingExpired ? 'EXPIRED' : status] || status}</p>}
+            {status === 'OPEN' && !waitingExpired && <>
+                <label className="canvas-bridge-ticket">
+                    <span>本次连接信息</span>
+                    <textarea readOnly rows={5} value={bridgeTicket}/>
+                </label>
+                <button
+                    type="button"
+                    className="btn"
+                    onClick={async () => {
+                        try {
+                            await navigator.clipboard.writeText(bridgeTicket);
+                            this.props.toast?.('连接信息已复制。');
+                        }
+                        catch {
+                            this.setState({ error: '浏览器未允许自动复制，请手动选中并复制连接信息。' });
+                        }
+                    }}
+                >复制连接信息</button>
+                <p className="helper-note">连接信息有效至本机时间 {expiryText}（剩余 {countdown}），只能使用一次；它不含 Canvas Token。</p>
+                <details className="canvas-token-help">
+                    <summary>高级用法：已解压工具的命令行入口</summary>
+                    <code className="canvas-import-code">{bridgeCommand(bridgeTicket)}</code>
+                </details>
             </>}
+            {(status === 'EXPIRED' || waitingExpired) && <button type="button" className="btn primary" disabled={busy} onClick={() => this.generateBridge()}>
+                连接信息已过期，重新生成
+            </button>}
             {selectable && <>
                 <p className="helper-note">工具已经读到你的课程。选择要导入的课程：</p>
                 <div className="canvas-import-courses">
@@ -539,10 +612,9 @@ export class CanvasImport extends React.Component {
                     {Object.entries(bridge?.counts || {}).map(([state, count]) => <li key={state}><span>{state}</span><strong>{count}</strong></li>)}
                 </ul>
             </>}
-            {status === 'EXPIRED' && <p className="helper-note">连接码已经过期，请回到上一步重新生成一个。</p>}
             <div className="row" style={{ gap: 10, marginTop: 14 }}>
-                {!FINISHED.includes(status) && <button type="button" className="btn" onClick={() => this.cancelBridge()}>取消导入</button>}
-                <button type="button" className="btn" onClick={() => this.setState({ step: 'connect', bridge: null })}>返回</button>
+                {bridge && !FINISHED.includes(status) && <button type="button" className="btn" onClick={() => this.cancelBridge()}>取消导入</button>}
+                <button type="button" className="btn" onClick={() => this.setState({ step: 'connect', bridge: null, bridgeTicket: '' })}>返回</button>
             </div>
         </div>;
     }

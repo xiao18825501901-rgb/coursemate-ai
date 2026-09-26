@@ -202,6 +202,10 @@
 .canvas-import-token-steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:5px;font-size:12px;line-height:1.6}
 .canvas-import-warning{margin:0;font-size:12px;line-height:1.6;color:var(--accent,#aa2059);font-weight:600}
 .canvas-import-code{display:block;padding:8px 10px;border:1px dashed var(--line,#d9e0e5);border-radius:7px;background:var(--surface,#fff);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;overflow-wrap:anywhere;user-select:all}
+.canvas-bridge-download{align-self:flex-start;text-decoration:none}
+.canvas-bridge-ticket{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700}
+.canvas-bridge-ticket textarea{width:100%;resize:vertical;min-height:88px;padding:9px 10px;border:1px solid var(--line,#d9e0e5);border-radius:8px;background:var(--surface,#fff);color:var(--ink,#17202a);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.45;overflow-wrap:anywhere}
+.canvas-bridge-ticket textarea:focus-visible{outline:2px solid var(--accent,#aa2059);outline-offset:2px}
 /* The one-off task credential: the only token field in the product, so it carries its own
    warning styling and its own state line. */
 .canvas-import-policy{margin:0;font-size:12px;line-height:1.6;color:var(--muted,#7b8b96)}
@@ -215,6 +219,16 @@
   .canvas-import-actions .btn{width:100%}
   .modal:has(.canvas-import){width:96vw}
 }
+
+/* Per-file upload state. The same queue is used while creating a course and while appending files. */
+.upload-queue{display:flex;flex-direction:column;gap:7px;margin:12px 0 10px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.upload-queue-summary{margin:0;color:var(--muted);font-size:11px}
+.upload-queue-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 10px;border:1px solid var(--line);border-radius:7px;background:var(--bg)}
+.upload-queue-item.uploading{border-color:#8eb7c7}.upload-queue-item.succeeded{border-color:#83b69b}.upload-queue-item.failed{border-color:#d193a3}
+.upload-queue-copy{display:flex;flex-direction:column;gap:2px;min-width:0}.upload-queue-copy strong{font-size:12px;font-weight:600;overflow-wrap:anywhere}.upload-queue-copy small{color:var(--muted);font-size:10px}.upload-queue-error{font-size:11px;color:#a22850;overflow-wrap:anywhere}
+.upload-queue-actions{display:flex;align-items:center;gap:6px;flex:none}.upload-retry-all{margin:0 0 12px}.upload-complete-actions{display:flex;align-items:center;justify-content:flex-end;gap:9px;flex-wrap:wrap}.upload-complete-actions .helper-note{margin-right:auto}
+.course-create-form fieldset{border:0;padding:0;margin:0}.course-create-form fieldset:disabled{opacity:.72}.course-file-picker input[type=file]{width:100%;padding:8px;background:var(--bg)}.course-file-picker small{display:block;margin-top:5px}
+@media(max-width:520px){.upload-queue-item{align-items:flex-start;flex-direction:column}.upload-queue-actions{width:100%;justify-content:flex-end}.upload-complete-actions{align-items:stretch;flex-direction:column}.upload-complete-actions .btn{width:100%}}
 
 /* The owner's mark, in the refreshed shell: square, never stretched, never shrunk by flex. */
 .brand-mark{display:block;width:32px;height:32px;border-radius:7px;object-fit:contain;flex:0 0 auto}

@@ -5,6 +5,7 @@ import { route, goto } from './utils.js';
 import { Icon, IconButton, Avatar } from './icons.jsx';
 import { CourseFiles, Discussion, Inbox, Calendar, Learn } from './pages.jsx';
 import { CanvasImport, CanvasImportLink } from './CanvasImport.jsx';
+import { FileUploadQueue, runUploadItems, uploadItemsFrom } from './FileUploadQueue.jsx';
 const COLORS = ['#38585b', '#756480', '#95657b', '#5b7793', '#a18b58', '#558b7a'];
 export const campusVerificationRequired = (config, course, verification) =>
     !!config?.student_verification_required_for_campus &&
@@ -136,7 +137,7 @@ export class App extends React.Component {
     catch (e) {
         this.toast(e.message);
     } }
-    createCourse = () => this.modal('创建你的课程', <CourseForm onSubmit={async (data) => { const result = await send('/courses', data); this.close(); await this.refresh(); goto(`course/${result.id}/files`); this.toast('课程已创建，可以添加你的资料'); }}/>);
+    createCourse = () => this.modal('创建你的课程', <CourseForm onCreate={async data => { const result = await send('/courses', data); await this.refresh(); return result; }} onFinish={course => { this.close(); goto(`course/${course.id}/files`); this.toast('课程与资料已保存'); }}/>);
     canvasImport = () => this.modal('从 Canvas 导入课程', <CanvasImport toast={this.toast} closeModal={this.close} close={this.close} localUpload={this.createCourse} onFinished={() => this.refresh()}/>);
     profile = () => this.modal('个人资料与偏好', <ProfileForm user={this.state.user} onSubmit={async (data) => { const user = await send('/me', data, 'PATCH'); this.setState({ user }); this.close(); this.toast('资料已保存到服务器'); }}/>);
     renderNav() { const { route: r, drawer, unread, user } = this.state; return <nav className="global-nav" aria-label="主导航"><button className="brand" onClick={() => goto('dashboard')} title={`${BRAND.name} 控制面板`}><img className="brand-mark" src={BRAND.logoPath} alt={BRAND.logoAlt} width={32} height={32} decoding="async"/><span>{BRAND.name}</span></button><div className="nav-items">{[['account', 'user', '账户'], ['dashboard', 'dashboard', '控制面板'], ['courses', 'courses', '课程'], ['calendar', 'calendar', '日历'], ['inbox', 'inbox', '收件箱'], ['help', 'help', '帮助']].map(([id, icon, label]) => <button key={id} className={'global-item ' + ((drawer === id || r.page === id || (id === 'courses' && r.page === 'course')) ? 'active' : '')} onClick={() => ['account', 'courses', 'help'].includes(id) ? this.setState({ drawer: drawer === id ? null : id }) : goto(id)}><Icon name={icon}/><span>{label}</span>{id === 'inbox' && unread > 0 && <span className="badge">{unread > 99 ? '99+' : unread}</span>}</button>)}</div><div className="nav-bottom"><span className="demo-mark">{this.state.config?.environment === 'production' ? 'LEARN' : '本地联调'}</span></div></nav>; }
@@ -163,14 +164,28 @@ export class App extends React.Component {
     }
 }
 class CourseForm extends React.Component {
-    state = { color: COLORS[0], busy: false, error: '' };
-    async submit(e) { e.preventDefault(); const f = new FormData(e.currentTarget); this.setState({ busy: true, error: '' }); try {
-        await this.props.onSubmit({ name: f.get('name'), code: f.get('code'), description: f.get('description'), color: this.state.color, requirements: f.get('requirements') });
+    state = { color: COLORS[0], busy: false, error: '', uploadQueue: [], course: null };
+    updateUpload = (clientItemId, patch) => this.setState(state => ({ uploadQueue: state.uploadQueue.map(item => item.clientItemId === clientItemId ? { ...item, ...patch } : item) }));
+    selectFiles(e) { const input = e.currentTarget; const added = uploadItemsFrom(input.files); input.value = ''; if (added.length) this.setState(state => ({ uploadQueue: [...state.uploadQueue, ...added] })); }
+    removeFile(clientItemId) { this.setState(state => ({ uploadQueue: state.uploadQueue.filter(item => item.clientItemId !== clientItemId) })); }
+    async uploadFiles(course, items) {
+        if (!items.length) return;
+        this.setState({ busy: true, error: '' });
+        await runUploadItems(items, async item => { const body = new FormData(); body.append('file', item.file); body.append('folder', ''); return request(`/courses/${course.id}/files`, { method: 'POST', body }); }, this.updateUpload, 2);
+        this.setState({ busy: false });
+    }
+    retryFile(clientItemId) { const item = this.state.uploadQueue.find(row => row.clientItemId === clientItemId && row.status === 'failed'); if (item && this.state.course) this.uploadFiles(this.state.course, [item]); }
+    retryFailed() { if (this.state.course) this.uploadFiles(this.state.course, this.state.uploadQueue.filter(item => item.status === 'failed')); }
+    async submit(e) { e.preventDefault(); if (this.state.course) return; const f = new FormData(e.currentTarget); this.setState({ busy: true, error: '' }); try {
+        const course = await this.props.onCreate({ name: f.get('name'), code: f.get('code'), description: f.get('description'), color: this.state.color, requirements: f.get('requirements') });
+        this.setState({ course });
+        if (!this.state.uploadQueue.length) { this.props.onFinish(course); return; }
+        await this.uploadFiles(course, this.state.uploadQueue);
     }
     catch (e) {
         this.setState({ error: e.message, busy: false });
     } }
-    render() { return <form onSubmit={e => this.submit(e)}><div className="field"><label htmlFor="course-name">课程名称</label><input id="course-name" name="name" required maxLength="100" placeholder="例如：机器学习基础"/></div><div className="field"><label htmlFor="course-code">课程编号（选填）</label><input id="course-code" name="code" maxLength="30" placeholder="例如：CS3501"/></div><div className="field"><label htmlFor="course-description">课程说明</label><textarea id="course-description" name="description" maxLength="500"/></div><div className="field"><label htmlFor="course-requirements">你希望怎样学？</label><textarea id="course-requirements" name="requirements" placeholder="例如：中文教学、保留英文术语，先讲直觉，再做例题。" maxLength="10000"/></div><div className="swatches">{COLORS.map(color => <button type="button" className={'swatch ' + (this.state.color === color ? 'selected' : '')} key={color} style={{ background: color }} onClick={() => this.setState({ color })} aria-label={'课程颜色 ' + color}/>)}</div><p className="helper-note" style={{ margin: '18px 0' }}><Icon name="lock"/> 新课程默认私人，创建后自动添加到你的控制面板。</p>{this.state.error && <p className="error-text">{this.state.error}</p>}<button className="btn primary" disabled={this.state.busy}>{this.state.busy ? '创建中…' : '创建课程'}</button></form>; }
+    render() { const { busy, course, uploadQueue } = this.state; const failed = uploadQueue.some(item => item.status === 'failed'); const createLabel = uploadQueue.length ? `创建课程并上传这 ${uploadQueue.length} 个文件` : '创建课程'; return <form className="course-create-form" onSubmit={e => this.submit(e)}><fieldset disabled={busy || !!course}><div className="field"><label htmlFor="course-name">课程名称</label><input id="course-name" name="name" required maxLength="100" placeholder="例如：机器学习基础"/></div><div className="field"><label htmlFor="course-code">课程编号（选填）</label><input id="course-code" name="code" maxLength="30" placeholder="例如：CS3501"/></div><div className="field"><label htmlFor="course-description">课程说明</label><textarea id="course-description" name="description" maxLength="500"/></div><div className="field"><label htmlFor="course-requirements">你希望怎样学？</label><textarea id="course-requirements" name="requirements" placeholder="例如：中文教学、保留英文术语，先讲直觉，再做例题。" maxLength="10000"/></div><div className="swatches">{COLORS.map(color => <button type="button" className={'swatch ' + (this.state.color === color ? 'selected' : '')} key={color} style={{ background: color }} onClick={() => this.setState({ color })} aria-label={'课程颜色 ' + color}/>)}</div></fieldset><div className="field course-file-picker"><label htmlFor="course-files">课程资料（选填，可多选）</label><input id="course-files" type="file" multiple disabled={busy || !!course} accept=".pdf,.txt,.md,.csv,.ipynb,.docx,.pptx,.png,.jpg,.jpeg,.webp" onChange={e => this.selectFiles(e)}/><small className="helper-note">支持 Ctrl/Shift/Ctrl+A 多选；每次同时上传 2 个；同名但内容不同的文件会作为独立资料处理。</small></div><FileUploadQueue items={uploadQueue} busy={busy} onRetry={id => this.retryFile(id)} onRemove={id => this.removeFile(id)}/><p className="helper-note" style={{ margin: '18px 0' }}><Icon name="lock"/> 新课程默认私人，创建后自动添加到你的控制面板。</p>{this.state.error && <p className="error-text">{this.state.error}</p>}{!course ? <button className="btn primary" disabled={busy}>{busy ? '创建并上传中…' : createLabel}</button> : <div className="upload-complete-actions"><span className="helper-note">课程只创建了一次；成功项不会因重试而再次索引。</span>{failed && <button type="button" className="btn" disabled={busy} onClick={() => this.retryFailed()}>重试全部失败项</button>}<button type="button" className="btn primary" disabled={busy} onClick={() => this.props.onFinish(course)}>进入课程文件</button></div>}</form>; }
 }
 class ProfileForm extends React.Component {
     state = { error: '', busy: false };

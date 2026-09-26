@@ -301,6 +301,7 @@ class LocalSessionRepository:
         canvas_display_name: str,
         claimed_by: str,
         claimed_at: str,
+        bridge_token_hash: str = "",
     ) -> int:
         """Mark the session claimed. Returns the number of rows changed.
 
@@ -309,7 +310,7 @@ class LocalSessionRepository:
         """
         cursor = self._connection.execute(
             "UPDATE canvas_local_sessions SET status=?, claimed_at=?, canvas_user_id=?, "
-            "canvas_display_name=?, claimed_by=?, updated_at=? "
+            "canvas_display_name=?, claimed_by=?, bridge_token_hash=?, updated_at=? "
             "WHERE id=? AND status=? AND claimed_at IS NULL",
             (
                 CLAIMED,
@@ -317,12 +318,19 @@ class LocalSessionRepository:
                 canvas_user_id,
                 canvas_display_name,
                 claimed_by,
+                bridge_token_hash,
                 claimed_at,
                 session_id,
                 OPEN,
             ),
         )
         return int(cursor.rowcount)
+
+    def bridge_token_hash(self, session_id: str) -> str:
+        row = self._connection.execute(
+            "SELECT bridge_token_hash FROM canvas_local_sessions WHERE id=?", (session_id,)
+        ).fetchone()
+        return "" if row is None else str(row["bridge_token_hash"] or "")
 
     def update(
         self,
@@ -571,6 +579,61 @@ class LocalBridgeService:
             # Two bridges raced; the database refused the second.
             raise ApiError(409, ALREADY_CLAIMED, "That local import code has already been used.")
         return self._must(session.id, user_id)
+
+    def claim_client(
+        self,
+        *,
+        code: str,
+        canvas_user_id: str,
+        canvas_display_name: str = "",
+        claimed_by: str = "",
+    ) -> tuple[LocalSession, str]:
+        """Claim from the portable client and rotate the one-time code to a session credential.
+
+        The high-entropy code is sufficient to identify the browser-opened, owner-bound session.
+        It is accepted exactly once. Every later client call uses a new random value whose digest is
+        stored separately; neither value is a Canvas credential.
+        """
+        if not code:
+            raise ApiError(400, NOT_FOUND, "A local import code is required.")
+        session = self._repository.by_code_hash(hash_code(code))
+        if session is None:
+            raise ApiError(404, NOT_FOUND, "That local import code is not valid.")
+        if session.claimed_at:
+            raise ApiError(409, ALREADY_CLAIMED, "That local import code has already been used.")
+        if self._expired(session):
+            self._repository.update(
+                session.id,
+                status=EXPIRED,
+                error_code=EXPIRED_CODE,
+                error_message="",
+                now=_stamp(self._clock()),
+            )
+            raise ApiError(410, EXPIRED_CODE, "That local import code has expired.")
+        if not canvas_user_id:
+            raise ApiError(400, NOT_FOUND, "The Canvas user id is required to claim a session.")
+        bridge_token = secrets.token_urlsafe(32)
+        changed = self._repository.claim(
+            session.id,
+            canvas_user_id=canvas_user_id,
+            canvas_display_name=canvas_display_name,
+            claimed_by=claimed_by[:120],
+            claimed_at=_stamp(self._clock()),
+            bridge_token_hash=hash_code(bridge_token),
+        )
+        if changed != 1:
+            raise ApiError(409, ALREADY_CLAIMED, "That local import code has already been used.")
+        return self._must(session.id, session.owner_user_id), bridge_token
+
+    def authenticate_client(self, *, session_id: str, bridge_token: str) -> str:
+        """Return the frozen owner id only for the credential issued by ``claim_client``."""
+        session = self._repository.get(session_id)
+        stored = self._repository.bridge_token_hash(session_id)
+        supplied = hash_code(bridge_token) if bridge_token else ""
+        if session is None or not stored or not secrets.compare_digest(stored, supplied):
+            raise ApiError(401, NOT_FOUND, "The local bridge session credential is not valid.")
+        self._live(session)
+        return session.owner_user_id
 
     # ------------------------------------------------------------------ discovery
     def record_discovery(
