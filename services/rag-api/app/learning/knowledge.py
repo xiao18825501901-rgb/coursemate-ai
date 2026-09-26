@@ -168,7 +168,13 @@ class KnowledgeService:
             "SELECT id,course_id,owner_user_id,title,description,major,kind,status,created_at "
             "FROM knowledge_nodes WHERE course_id=? AND ("
             "(owner_user_id=? AND status='PRIVATE') OR "
-            "(owner_user_id IS NULL AND status='PUBLISHED'))"
+            "(owner_user_id IS NULL AND status='PUBLISHED') OR "
+            "(owner_user_id IS NULL AND status='CANDIDATE' AND EXISTS("
+            "SELECT 1 FROM auto_course_tree_activations AS activation "
+            "JOIN knowledge_tree_memberships AS membership "
+            "ON membership.tree_version_id=activation.tree_version_id "
+            "WHERE activation.course_id=knowledge_nodes.course_id "
+            "AND activation.status='ACTIVE' AND membership.node_id=knowledge_nodes.id)))"
             + id_clause
             + " ORDER BY created_at,id",
             parameters,
@@ -191,13 +197,19 @@ class KnowledgeService:
         expected_status = "PRIVATE_ACTIVE" if node["owner_user_id"] else "PUBLISHED"
         row = connection.execute(
             "SELECT version FROM teaching_spec_metadata "
-            "WHERE node_id=? AND status=? "
+            "WHERE node_id=? AND (status=? OR (status='DRAFT' AND EXISTS("
+            "SELECT 1 FROM auto_course_tree_activations AS activation "
+            "JOIN knowledge_tree_memberships AS membership "
+            "ON membership.tree_version_id=activation.tree_version_id "
+            "WHERE activation.course_id=? AND activation.status='ACTIVE' "
+            "AND membership.node_id=teaching_spec_metadata.node_id "
+            "AND membership.teaching_spec_version=teaching_spec_metadata.version))) "
             + ("AND version=? " if requested is not None else "")
             + "ORDER BY version DESC LIMIT 1",
             (
-                (node["id"], expected_status, requested)
+                (node["id"], expected_status, node["course_id"], requested)
                 if requested is not None
-                else (node["id"], expected_status)
+                else (node["id"], expected_status, node["course_id"])
             ),
         ).fetchone()
         if row is None:
@@ -677,6 +689,21 @@ class KnowledgeService:
                 "members": [],
                 "prerequisites": [],
             }
+        auto_activation = connection.execute(
+            "SELECT label FROM auto_course_tree_activations "
+            "WHERE course_id=? AND tree_version_id=? AND status='ACTIVE'",
+            (workspace["course_id"], row["id"]),
+        ).fetchone()
+        active_auto_members = {
+            str(member["node_id"])
+            for member in connection.execute(
+                "SELECT membership.node_id FROM auto_course_tree_activations AS activation "
+                "JOIN knowledge_tree_memberships AS membership "
+                "ON membership.tree_version_id=activation.tree_version_id "
+                "WHERE activation.course_id=? AND activation.status='ACTIVE'",
+                (workspace["course_id"],),
+            )
+        }
         memberships = connection.execute(
             "SELECT membership.node_id,membership.parent_node_id,membership.ordinal,"
             "membership.teaching_spec_version,node.title,node.description,node.major,"
@@ -696,7 +723,14 @@ class KnowledgeService:
             reviewed_canonical = (
                 member["owner_user_id"] is None and member["node_status"] == "PUBLISHED"
             )
-            if not same_course or not (private_owner or reviewed_canonical):
+            active_machine_candidate = (
+                member["node_id"] in active_auto_members
+                and member["owner_user_id"] is None
+                and member["node_status"] == "CANDIDATE"
+            )
+            if not same_course or not (
+                private_owner or reviewed_canonical or active_machine_candidate
+            ):
                 raise ApiError(
                     409,
                     "TREE_SOURCE_UNAVAILABLE",
@@ -781,7 +815,11 @@ class KnowledgeService:
                 "description": member["description"],
                 "major": member["major"],
                 "kind": member["kind"],
-                "source": "PRIVATE" if member["owner_user_id"] else "CANONICAL",
+                "source": (
+                    "PRIVATE"
+                    if member["owner_user_id"]
+                    else ("AUTO_COURSE" if member["node_status"] == "CANDIDATE" else "CANONICAL")
+                ),
                 "state": {
                     "learning": states[member["node_id"]],
                     "assessment": assessment_states[member["node_id"]],
@@ -805,6 +843,12 @@ class KnowledgeService:
             "title": row["title"],
             "change_reason": row["change_reason"],
             "base_tree_version_id": row["base_tree_version_id"],
+            "machine_generated": auto_activation is not None or bool(active_auto_members),
+            "label": (
+                auto_activation["label"]
+                if auto_activation is not None
+                else ("AI整理 · 含未经人工审核的课程节点" if active_auto_members else None)
+            ),
             "members": members,
             "prerequisites": prerequisites,
         }
@@ -822,6 +866,12 @@ class KnowledgeService:
                 "AND owner_user_id=? AND tree_kind='PERSONALIZED' AND status='ACTIVE'",
                 (workspace_id, owner),
             ).fetchone()
+            automatic = connection.execute(
+                "SELECT tree.* FROM auto_course_tree_activations AS activation "
+                "JOIN knowledge_tree_versions AS tree ON tree.id=activation.tree_version_id "
+                "WHERE activation.course_id=? AND activation.status='ACTIVE'",
+                (workspace["course_id"],),
+            ).fetchone()
             official_payload = self._tree_payload(
                 connection,
                 workspace,
@@ -834,7 +884,17 @@ class KnowledgeService:
                 personal,
                 missing_status="NOT_CREATED",
             )
-            selected_payload = personal_payload if personal is not None else official_payload
+            automatic_payload = self._tree_payload(
+                connection,
+                workspace,
+                automatic,
+                missing_status="NOT_CREATED",
+            )
+            selected_payload = (
+                personal_payload
+                if personal is not None
+                else (official_payload if official is not None else automatic_payload)
+            )
             selected_states = {
                 member["node_id"]: member["state"]
                 for member in selected_payload["members"]
@@ -883,13 +943,23 @@ class KnowledgeService:
                         "major": node["major"],
                         "kind": node["kind"],
                         "status": node["status"],
-                        "source": "PRIVATE" if node["owner_user_id"] else "CANONICAL",
+                        "source": (
+                            "PRIVATE"
+                            if node["owner_user_id"]
+                            else ("AUTO_COURSE" if node["status"] == "CANDIDATE" else "CANONICAL")
+                        ),
                         "aliases": aliases,
                         "state": state,
                     }
                 )
-        selected = "PERSONALIZED" if personal is not None else (
-            "OFFICIAL" if official is not None else "NONE"
+        selected = (
+            "PERSONALIZED"
+            if personal is not None
+            else (
+                "OFFICIAL"
+                if official is not None
+                else ("AUTO_COURSE" if automatic is not None else "NONE")
+            )
         )
         return {
             "workspace_id": workspace_id,
@@ -897,6 +967,7 @@ class KnowledgeService:
             "revision": workspace["revision"],
             "selected_tree": selected,
             "official_tree": official_payload,
+            "auto_course_tree": automatic_payload,
             "personalized_tree": personal_payload,
             "registry": registry,
         }

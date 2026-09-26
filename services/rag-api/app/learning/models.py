@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=6000)]
 Identifier = Annotated[str, StringConstraints(pattern=r"^[a-zA-Z0-9_-]{1,100}$")]
-Major = Literal["CS", "SMART_MANUFACTURING", "MATERIALS", "ENERGY"]
+Major = Literal["CS", "SMART_MANUFACTURING", "MATERIALS", "ENERGY", "OTHER"]
 
 
 class Contract(BaseModel):
@@ -357,6 +357,117 @@ class OfficialKnowledgeDraftBundleOutput(Contract):
 
     node: OfficialNodeDraftOutput
     spec: OfficialTeachingSpecDraftOutput
+
+
+class AutoKnowledgeModuleDraft(Contract):
+    """One structural grouping in a machine-validated course map."""
+
+    key: Identifier
+    title: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=150)
+    ]
+    description: Text
+    major: Major = "OTHER"
+    parent_key: Identifier | None = None
+
+
+class AutoKnowledgeAtomicDraft(Contract):
+    """One learnable node, grounded in the frozen source snapshot."""
+
+    key: Identifier
+    parent_key: Identifier | None = None
+    title: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=150)
+    ]
+    description: Text
+    major: Major = "OTHER"
+    prerequisite_keys: list[Identifier] = Field(default_factory=list, max_length=20)
+    evidence_ids: list[Identifier] = Field(min_length=1, max_length=500)
+
+
+class AutoKnowledgeSectionDisposition(Contract):
+    """Explicit fate of one frozen source segment during map construction."""
+
+    evidence_id: Identifier
+    status: Literal["MAPPED", "DUPLICATE", "NON_TEACHING", "REVIEW_REQUIRED"]
+    reason: Text
+    node_keys: list[Identifier] = Field(default_factory=list, max_length=30)
+
+
+class AutoKnowledgeMapDraft(Contract):
+    """First model stage: hierarchy only, with source-bound atomic nodes."""
+
+    title: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
+    ]
+    # A provider sees only one bounded shard.  The persisted aggregate may be
+    # much larger, so these bounds protect memory without imposing a 20/30-node
+    # product limit on a real course.
+    modules: list[AutoKnowledgeModuleDraft] = Field(default_factory=list, max_length=500)
+    nodes: list[AutoKnowledgeAtomicDraft] = Field(default_factory=list, max_length=2000)
+    dispositions: list[AutoKnowledgeSectionDisposition] = Field(
+        default_factory=list, max_length=20_000
+    )
+
+    @model_validator(mode="after")
+    def valid_graph_keys(self) -> "AutoKnowledgeMapDraft":
+        keys = [item.key for item in self.modules] + [item.key for item in self.nodes]
+        if len(keys) != len(set(keys)):
+            raise ValueError("Automatic knowledge-map keys must be unique")
+        module_keys = {item.key for item in self.modules}
+        for module in self.modules:
+            if module.parent_key is not None and module.parent_key not in module_keys:
+                raise ValueError("A module parent must be another module")
+        for node in self.nodes:
+            if node.parent_key is not None and node.parent_key not in module_keys:
+                raise ValueError("An atomic node parent must be a module")
+            if any(
+                key not in {candidate.key for candidate in self.nodes}
+                for key in node.prerequisite_keys
+            ):
+                raise ValueError("Every prerequisite must be another atomic node")
+            if node.key in node.prerequisite_keys:
+                raise ValueError("An atomic node cannot require itself")
+        disposition_ids = [item.evidence_id for item in self.dispositions]
+        if len(disposition_ids) != len(set(disposition_ids)):
+            raise ValueError("Each source segment needs one final disposition")
+        for item in self.dispositions:
+            if any(
+                key not in {candidate.key for candidate in self.nodes}
+                for key in item.node_keys
+            ):
+                raise ValueError("A source disposition may reference only atomic nodes")
+            if item.status == "MAPPED" and not item.node_keys:
+                raise ValueError("A mapped source segment must name at least one atomic node")
+        return self
+
+
+class AutoKnowledgeNodeSpecDraft(Contract):
+    node_key: Identifier
+    change_reason: Text
+    items: list[TeachingItem] = Field(min_length=1, max_length=30)
+
+    @model_validator(mode="after")
+    def valid_items(self) -> "AutoKnowledgeNodeSpecDraft":
+        ids = [item.item_id for item in self.items]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Teaching item IDs must be unique within one node")
+        if not any(item.requirement == "REQUIRED" for item in self.items):
+            raise ValueError("Every atomic node needs at least one REQUIRED item")
+        return self
+
+
+class AutoKnowledgeSpecSetDraft(Contract):
+    """Second model stage: a complete Teaching Spec for every atomic key."""
+
+    specs: list[AutoKnowledgeNodeSpecDraft] = Field(default_factory=list, max_length=2000)
+
+    @model_validator(mode="after")
+    def unique_nodes(self) -> "AutoKnowledgeSpecSetDraft":
+        keys = [spec.node_key for spec in self.specs]
+        if len(keys) != len(set(keys)):
+            raise ValueError("Each automatic node may have only one Teaching Spec")
+        return self
 
 
 class AssessmentSlotSelection(Contract):

@@ -174,6 +174,7 @@ def mount_ui_extension(
         task_agent_url=os.getenv("UI_TASK_AGENT_URL", settings.ui_task_agent_url),
         coverage_reviewer=coverage_reviewer or _coverage_reviewer(settings),
         jev=jev,
+        auto_knowledge_map=getattr(host_app.state, "auto_knowledge_map", None),
     )
     ui_settings = _ui_settings(settings)
     from app.cm_update.integration import install_ui_extension

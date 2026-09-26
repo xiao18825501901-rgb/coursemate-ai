@@ -94,7 +94,15 @@ class AssessmentService:
             "(node.owner_user_id=? AND node.status='PRIVATE' "
             " AND metadata.status='PRIVATE_ACTIVE') OR "
             "(node.owner_user_id IS NULL AND node.status='PUBLISHED' "
-            " AND metadata.status='PUBLISHED')) "
+            " AND metadata.status='PUBLISHED') OR "
+            "(node.owner_user_id IS NULL AND node.status='CANDIDATE' "
+            " AND metadata.status='DRAFT' AND EXISTS("
+            "SELECT 1 FROM auto_course_tree_activations AS activation "
+            "JOIN knowledge_tree_memberships AS membership "
+            "ON membership.tree_version_id=activation.tree_version_id "
+            "WHERE activation.course_id=node.course_id AND activation.status='ACTIVE' "
+            "AND membership.node_id=node.id "
+            "AND membership.teaching_spec_version=metadata.version))) "
             "ORDER BY metadata.version DESC LIMIT 1",
             (node_id, workspace["course_id"], workspace["owner_user_id"]),
         ).fetchone()

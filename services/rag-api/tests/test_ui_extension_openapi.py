@@ -95,6 +95,7 @@ def test_openapi_schema_keeps_the_real_ui_routes(schema: dict) -> None:
         "/api/ui/v1/conversations/{conv_id}/runs",
         "/api/ui/v1/runs/{rid}",
         "/api/ui/v1/courses/{cid}/knowledge",
+        "/api/ui/v1/courses/{cid}/knowledge-build-status",
         "/api/ui/v1/courses/{cid}/bridges",
         "/health",
     ):

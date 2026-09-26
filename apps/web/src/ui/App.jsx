@@ -5,7 +5,7 @@ import { route, goto } from './utils.js';
 import { Icon, IconButton, Avatar } from './icons.jsx';
 import { CourseFiles, Discussion, Inbox, Calendar, Learn } from './pages.jsx';
 import { CanvasImport, CanvasImportLink } from './CanvasImport.jsx';
-import { FileUploadQueue, runUploadItems, uploadItemsFrom } from './FileUploadQueue.jsx';
+import { FileUploadQueue, runUploadBatch, uploadItemsFrom } from './FileUploadQueue.jsx';
 const COLORS = ['#38585b', '#756480', '#95657b', '#5b7793', '#a18b58', '#558b7a'];
 export const campusVerificationRequired = (config, course, verification) =>
     !!config?.student_verification_required_for_campus &&
@@ -171,8 +171,16 @@ class CourseForm extends React.Component {
     async uploadFiles(course, items) {
         if (!items.length) return;
         this.setState({ busy: true, error: '' });
-        await runUploadItems(items, async item => { const body = new FormData(); body.append('file', item.file); body.append('folder', ''); return request(`/courses/${course.id}/files`, { method: 'POST', body }); }, this.updateUpload, 2);
-        this.setState({ busy: false });
+        try {
+            await runUploadBatch(course.id, items, async (item, batchId) => { const body = new FormData(); body.append('file', item.file); body.append('folder', ''); body.append('batch_id', batchId); body.append('batch_item_id', item.clientItemId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100)); return request(`/courses/${course.id}/files`, { method: 'POST', body }); }, this.updateUpload, 2);
+        }
+        catch (error) {
+            this.setState({ error: error instanceof Error ? error.message : String(error) });
+            throw error;
+        }
+        finally {
+            this.setState({ busy: false });
+        }
     }
     retryFile(clientItemId) { const item = this.state.uploadQueue.find(row => row.clientItemId === clientItemId && row.status === 'failed'); if (item && this.state.course) this.uploadFiles(this.state.course, [item]); }
     retryFailed() { if (this.state.course) this.uploadFiles(this.state.course, this.state.uploadQueue.filter(item => item.status === 'failed')); }

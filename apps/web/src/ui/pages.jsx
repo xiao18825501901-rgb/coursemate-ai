@@ -7,7 +7,7 @@ import { dateKey, zonedParts, wallTimeToISO, formatBytes, formatTime, goto } fro
 import { citationVerdict } from './citationSupport.js';
 import { referenceVerificationNote } from './referenceVerification.js';
 import { Icon, IconButton, Avatar } from './icons.jsx';
-import { FileUploadQueue, runUploadItems, uploadItemsFrom } from './FileUploadQueue.jsx';
+import { FileUploadQueue, runUploadBatch, uploadItemsFrom } from './FileUploadQueue.jsx';
 export class CourseFiles extends React.Component {
     state = { files: [], q: '', folder: '', error: '', loading: true, menu: null, uploadQueue: [], uploading: false };
     componentDidMount() { this.load(); }
@@ -31,15 +31,24 @@ export class CourseFiles extends React.Component {
     async runUploads(items) {
         if (!items.length || this.state.uploading) return;
         this.setState({ uploading: true, error: '' });
-        const outcome = await runUploadItems(items, async item => {
-            const body = new FormData();
-            body.append('file', item.file);
-            body.append('folder', this.state.folder);
-            return request(`/courses/${this.props.course.id}/files`, { method: 'POST', body });
-        }, this.updateUpload, 2);
-        await this.load();
-        this.setState({ uploading: false });
-        this.props.toast(outcome.failed ? '部分文件上传失败，可在队列中只重试失败项' : '所选文件已处理完成');
+        try {
+            const outcome = await runUploadBatch(this.props.course.id, items, async (item, batchId) => {
+                const body = new FormData();
+                body.append('file', item.file);
+                body.append('folder', this.state.folder);
+                body.append('batch_id', batchId);
+                body.append('batch_item_id', item.clientItemId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100));
+                return request(`/courses/${this.props.course.id}/files`, { method: 'POST', body });
+            }, this.updateUpload, 2);
+            await this.load();
+            this.props.toast(outcome.failed ? '部分文件上传失败，可在队列中只重试失败项' : '所选文件已处理完成');
+        }
+        catch (error) {
+            this.setState({ error: error instanceof Error ? error.message : String(error) });
+        }
+        finally {
+            this.setState({ uploading: false });
+        }
     }
     retryUpload(clientItemId) {
         const item = this.state.uploadQueue.find(row => row.clientItemId === clientItemId && row.status === 'failed');
@@ -363,7 +372,7 @@ class FeedbackForm extends React.Component {
     render() { const { category, text, includeBody, busy, error } = this.state; return <form onSubmit={e => this.submit(e)}><p className="helper-note">报告一个具体问题，帮助我们改进。默认只发送报告标识符与你选择的类别。</p><div className="field"><label>问题类型（可选）</label><select value={category} onChange={e => this.setState({ category: e.target.value })}><option value="">（由系统自动判断）</option>{FEEDBACK_CATEGORIES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></div><label className="check-line"><input type="checkbox" checked={includeBody} onChange={e => this.setState({ includeBody: e.target.checked })}/>附上我的说明，以及当前题目与答案正文</label><div className="field"><label>补充说明（需要勾选上面的选项）</label><textarea value={text} maxLength="2000" disabled={!includeBody} placeholder={includeBody ? '描述你遇到的问题…' : '勾选上面的选项后即可填写'} onChange={e => this.setState({ text: e.target.value })}/></div><p className="helper-note">未勾选时，只发送报告标识符（消息、运行、课程、模型、模板与应用版本）和所选类别，不包含任何正文。</p>{error && <p className="error-text">{error}</p>}<button className="btn primary" style={{ marginTop: 16 }} disabled={busy}>{busy ? '正在提交…' : '提交报告'}</button></form>; }
 }
 export class Learn extends React.Component {
-    state = { attachments:{teach:[],problem:[]}, uploading:{teach:false,problem:false}, nodes: [], expanded: false, hover: null, ratio: .5, fullscreen: false, mobile: 'teach', conv: { teach: null, problem: null }, messages: { teach: [], problem: [] }, inputs: { teach: '', problem: '' }, run: { teach: null, problem: null }, partial: { teach: '', problem: '' }, status: { teach: '', problem: '' }, activeNode: null, error: '', busy: { teach: false, problem: false }, thinking: { teach: false }, exercises: {}, practiceAnswers: {}, practiceBusy: {}, explanations: {}, windows: {}, pair: null, assessment: null, assessPicker: null };
+    state = { attachments:{teach:[],problem:[]}, uploading:{teach:false,problem:false}, nodes: [], knowledgeBuild: null, expanded: false, hover: null, ratio: .5, fullscreen: false, mobile: 'teach', conv: { teach: null, problem: null }, messages: { teach: [], problem: [] }, inputs: { teach: '', problem: '' }, run: { teach: null, problem: null }, partial: { teach: '', problem: '' }, status: { teach: '', problem: '' }, activeNode: null, error: '', busy: { teach: false, problem: false }, thinking: { teach: false }, exercises: {}, practiceAnswers: {}, practiceBusy: {}, explanations: {}, windows: {}, pair: null, assessment: null, assessPicker: null };
     controllers = {};
     explanationControllers = {};
     follow = {teach:true,problem:true};
@@ -380,12 +389,13 @@ export class Learn extends React.Component {
     }
     componentDidMount() { this.load(); this.keyHandler = e => { if (e.key === 'Escape')
         this.setState({ fullscreen: false, expanded: false }); }; window.addEventListener('keydown', this.keyHandler); }
-    componentWillUnmount() { this.unmounted = true; window.removeEventListener('keydown', this.keyHandler); Object.values(this.controllers).forEach(c => c.abort()); Object.values(this.explanationControllers).forEach(c => c.abort()); if(this.onMove){window.removeEventListener('mousemove',this.onMove);window.removeEventListener('touchmove',this.onMove);}if(this.onUp){window.removeEventListener('mouseup',this.onUp);window.removeEventListener('touchend',this.onUp);window.removeEventListener('touchcancel',this.onUp);} }
+    componentWillUnmount() { this.unmounted = true; clearTimeout(this.knowledgePoll); window.removeEventListener('keydown', this.keyHandler); Object.values(this.controllers).forEach(c => c.abort()); Object.values(this.explanationControllers).forEach(c => c.abort()); if(this.onMove){window.removeEventListener('mousemove',this.onMove);window.removeEventListener('touchmove',this.onMove);}if(this.onUp){window.removeEventListener('mouseup',this.onUp);window.removeEventListener('touchend',this.onUp);window.removeEventListener('touchcancel',this.onUp);} }
     async load() { const revision=this.pairRevision || 0; try {
         const cid = this.props.course.id;
-        const [nodes, layout] = await Promise.all([request(`/courses/${cid}/knowledge`), request(`/courses/${cid}/layout`)]);
+        const [nodes, layout, knowledgeBuild] = await Promise.all([request(`/courses/${cid}/knowledge`), request(`/courses/${cid}/layout`), request(`/courses/${cid}/knowledge-build-status`)]);
         if (this.unmounted || revision !== (this.pairRevision || 0)) return;
-        this.setState({ nodes, ratio: layout.ratio || .5, activeNode: layout.active_node });
+        this.setState({ nodes, knowledgeBuild, ratio: layout.ratio || .5, activeNode: layout.active_node });
+        this.scheduleKnowledgePoll(knowledgeBuild);
         const pairs = await listPairs(cid);
         if (this.unmounted || revision !== (this.pairRevision || 0)) return;
         const current = pairs.find(p =>
@@ -403,6 +413,30 @@ export class Learn extends React.Component {
     catch (e) {
         this.setState({ error: e.message });
     } }
+    scheduleKnowledgePoll(status) {
+        clearTimeout(this.knowledgePoll);
+        if (!status || !['QUEUED','BUILDING','NOT_RECONCILED'].includes(status.status)) return;
+        this.knowledgePoll = setTimeout(() => this.refreshKnowledge(), 5000);
+    }
+    async refreshKnowledge() { try {
+        const cid = this.props.course.id;
+        const [nodes, knowledgeBuild] = await Promise.all([request(`/courses/${cid}/knowledge`), request(`/courses/${cid}/knowledge-build-status`)]);
+        if (this.unmounted) return;
+        this.setState({ nodes, knowledgeBuild });
+        this.scheduleKnowledgePoll(knowledgeBuild);
+    } catch (e) { if (!this.unmounted) this.setState({ error: e.message }); } }
+    knowledgeEmptyState() {
+        const build = this.state.knowledgeBuild || {};
+        const copy = {
+            QUEUED: ['资料已收到', '系统正在合并本批资料，随后会自动整理课程知识点。'],
+            BUILDING: ['正在整理课程知识点', '系统正在分析冻结的课程资料并生成可学习的 Teaching Spec。'],
+            WAITING_SOURCE: ['还没有可读的课程资料', '上传或导入可读取的教学资料后，知识图会自动生成。'],
+            BLOCKED: ['暂时无法生成知识图', build.message || '资料需要处理后才能继续。'],
+            FAILED: ['知识图生成未完成', build.message || '本次构建失败，已保留原有可用版本。'],
+            UNKNOWN: ['生成状态需要人工核对', '可能存在未确认的模型请求，系统不会自动重复收费。'],
+        }[build.status] || ['还没有课程知识树', '系统会在课程资料准备完成后自动生成，不会伪造节点。'];
+        return <div className="empty-state"><Icon name="tree"/><h3>{copy[0]}</h3><p>{copy[1]}</p></div>;
+    }
     diag() { /* diagnostics removed after the round-93 investigation */ }
     async reconcile(lane, cid, rid, controller = null) {
         // Bounded, model-free reconciliation of one run against the server's canonical record.
@@ -935,7 +969,7 @@ export class Learn extends React.Component {
         this.props.toast(e.message);
     } }
     reportProblem() { const all = [...this.state.messages.teach, ...this.state.messages.problem]; const lastUser = all.filter(m => m.role === 'user').pop(); const lastAnswer = all.filter(m => m.role === 'assistant').pop(); this.props.modal('报告问题', <FeedbackForm course={this.props.course} config={this.props.config} lastMessage={lastUser} lastAnswer={lastAnswer} runId={this.state.run?.teach || this.state.run?.problem || null} onDone={() => { this.props.closeModal(); this.props.toast('已收到你的问题报告，我们会尽快查看。'); }}/>); }
-    renderTree() { const groups = this.state.nodes.filter(n => !n.parent); return <div className="tree-expanded"><div className="row between"><div><h2>课程知识点</h2><p className="helper-note" style={{ marginTop: 5 }}>选择节点，分别查看学习进度与测评结果。</p></div><IconButton name="close" title="收起知识树" onClick={() => this.setState({ expanded: false })}/></div><div className="tree-columns">{groups.map(root => { const children = this.state.nodes.filter(n => n.parent === root.id); return <div className="tree-group" key={root.id}>{children.length ? <div className="tree-group-title">{root.title}</div> : null}{children.length ? this.renderNodes(root.id, 0) : this.renderNodeRow(root, 0)}</div>; })}</div>{!groups.length && <div className="empty-state"><Icon name="tree"/><h3>还没有课程知识树</h3><p>上传资料后，需由现有 V3 知识引擎生成。此更新包不会伪造节点和学习状态。</p></div>}</div>; }
+    renderTree() { const groups = this.state.nodes.filter(n => !n.parent), build = this.state.knowledgeBuild || {}; return <div className="tree-expanded"><div className="row between"><div><h2>课程知识点</h2><p className="helper-note" style={{ marginTop: 5 }}>选择节点，分别查看学习进度与测评结果。{build.machine_generated ? ' · AI整理，未经人工审核' : ''}</p></div><IconButton name="close" title="收起知识树" onClick={() => this.setState({ expanded: false })}/></div><div className="tree-columns">{groups.map(root => { const children = this.state.nodes.filter(n => n.parent === root.id); return <div className="tree-group" key={root.id}>{children.length ? <div className="tree-group-title">{root.title}</div> : null}{children.length ? this.renderNodes(root.id, 0) : this.renderNodeRow(root, 0)}</div>; })}</div>{!groups.length && this.knowledgeEmptyState()}</div>; }
     renderNodeRow(n, depth) { const progressLabel = n.progress === 'LEARNED' ? '已完成' : n.progress === 'LEARNING' ? '学习中' : n.progress === 'SPEC_UNAVAILABLE' ? '暂不可用' : '未学习'; return <div key={n.id} style={{ marginLeft: depth * 14 }}><div className={'tree-node-new ' + (this.state.activeNode === n.id ? 'selected' : '')} tabIndex="0" onMouseEnter={() => this.setState({ hover: n.id })} onFocus={() => this.setState({ hover: n.id })} onMouseLeave={() => this.setState({ hover: null })} onClick={() => this.setState({ hover: n.id })}><Icon name="book"/><span>{n.title}</span><Icon name="arrow"/>{this.state.hover === n.id && <div className="node-popover" onClick={e => e.stopPropagation()}><strong>{n.title}</strong><button onClick={() => this.learnNode(n)}><span>学习进度</span><b>{progressLabel}</b><Icon name="arrow"/></button><button onClick={() => this.assess(n)}><span>测评结果</span><b>{n.assessment_display || '未测评'}</b><Icon name="arrow"/></button><button className="start-assessment" onClick={() => this.assess(n)}><span>开始测评</span><Icon name="arrow"/></button></div>}</div>{this.renderNodes(n.id, depth + 1)}</div>; }
     renderNodes(parent, depth) { return this.state.nodes.filter(n => n.parent === parent).map(n => this.renderNodeRow(n, depth)); }
     renderPane(lane) {

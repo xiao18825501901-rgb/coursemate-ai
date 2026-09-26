@@ -11,8 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WORK_ROOT = ROOT / "work"
 sys.path.insert(0, str(ROOT / "services/rag-api"))
-from app.config import Settings
-from app.db import LATEST_V3_SCHEMA_VERSION, Database
+from app.config import Settings  # noqa: E402
+from app.db import LATEST_V3_SCHEMA_VERSION, Database  # noqa: E402
 
 TABLES = (
     "courses",
@@ -33,6 +33,7 @@ GOVERNANCE_MIGRATIONS = (
     "026_learning_start_events.sql",
     "027_assessment_preparation_reference.sql",
     "028_jev_decision_receipts.sql",
+    "042_auto_knowledge_map.sql",
 )
 SCHEMA_OBJECT = re.compile(
     r"CREATE\s+(?:UNIQUE\s+)?(TABLE|TRIGGER|INDEX)\s+(?:IF\s+NOT\s+EXISTS\s+)?"

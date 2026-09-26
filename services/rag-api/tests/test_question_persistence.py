@@ -227,8 +227,8 @@ def test_fresh_schema_includes_additive_question_engine_provenance(tmp_path: Pat
             )
         }
 
-    assert LATEST_V3_SCHEMA_VERSION == 40
-    assert versions == list(range(1, 41))
+    assert LATEST_V3_SCHEMA_VERSION >= 40
+    assert versions == list(range(1, LATEST_V3_SCHEMA_VERSION + 1))
     assert {
         "question_revision_id",
         "workspace_id",

@@ -205,6 +205,7 @@ class V3DomainAdapter:
         task_agent_credential: str = "",
         coverage_reviewer: CoverageReviewer | None = None,
         jev: SemanticDecisionService | None = None,
+        auto_knowledge_map: object | None = None,
     ) -> None:
         self.database = database
         self.settings = settings
@@ -220,6 +221,7 @@ class V3DomainAdapter:
         # Jev entirely; the deterministic path is byte-identical to before.
         self.jev = jev
         self.question_engine = learning.question_engine if learning is not None else None
+        self.auto_knowledge_map = auto_knowledge_map
         # Course-scope entity resolution over already-authorized fused candidates.
         # Query expansion is deterministic (never reaches Jev); relation resolution
         # goes through the shared gateway and is returned, never applied.
@@ -560,6 +562,28 @@ class V3DomainAdapter:
         content = payload.get("content")
         if not isinstance(content, (bytes, bytearray)) or not content:
             raise ApiError(422, "EMPTY_UPLOAD", "The uploaded file is empty.")
+        batch_id = str(payload.get("batch_id") or "")
+        batch_item_id = str(payload.get("batch_item_id") or "")
+        if bool(batch_id) != bool(batch_item_id):
+            raise ApiError(
+                422,
+                "AUTO_BATCH_INVALID",
+                "Both batch_id and batch_item_id are required for a batched upload.",
+            )
+        if batch_id:
+            if self.auto_knowledge_map is None:
+                raise ApiError(
+                    503,
+                    "AUTO_BATCH_UNAVAILABLE",
+                    "The automatic course-map batch coordinator is unavailable.",
+                )
+            self.auto_knowledge_map.record_upload_batch_item(  # type: ignore[attr-defined]
+                batch_id=batch_id,
+                item_key=batch_item_id,
+                course_id=course_id,
+                owner_user_id=subject,
+                status="ACCEPTED",
+            )
         duplicate = False
         try:
             accepted = self.ingestion.queue_document(
@@ -572,6 +596,15 @@ class V3DomainAdapter:
             )
         except ApiError as error:
             if error.code != "DUPLICATE_DOCUMENT":
+                if batch_id:
+                    self.auto_knowledge_map.record_upload_batch_item(  # type: ignore[attr-defined]
+                        batch_id=batch_id,
+                        item_key=batch_item_id,
+                        course_id=course_id,
+                        owner_user_id=subject,
+                        status="FAILED",
+                        error_code=error.code,
+                    )
                 raise
             document_id = str(error.details.get("documentId") or "")
             document = self._document_row(document_id)
@@ -584,6 +617,17 @@ class V3DomainAdapter:
             document = self._document_row(accepted.document.id)
         if document is None:
             raise ApiError(500, "UPLOAD_LOST", "The uploaded file could not be confirmed.")
+        if batch_id:
+            terminal = "INDEXED" if document["status"] == "ready" else "FAILED"
+            self.auto_knowledge_map.record_upload_batch_item(  # type: ignore[attr-defined]
+                batch_id=batch_id,
+                item_key=batch_item_id,
+                course_id=course_id,
+                owner_user_id=subject,
+                status=terminal,
+                document_id=str(document["id"]),
+                error_code=(str(document["error_message"])[:200] if terminal == "FAILED" else None),
+            )
         version = current_document_version(self.database, document["id"], subject)
         path = original_path(self.database, version)
         return {
@@ -597,6 +641,47 @@ class V3DomainAdapter:
             "version_id": version["id"],
             "duplicate": duplicate,
             "error": document["error_message"],
+        }
+
+    def _file_batch_begin(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        course_id = str(payload["course"])
+        self._course_row(course_id, subject, write=False)
+        workspace = self._workspace_row(course_id, subject)
+        if workspace is None or self.auto_knowledge_map is None:
+            raise ApiError(
+                409,
+                "AUTO_BATCH_UNAVAILABLE",
+                "This course cannot open an automatic-map upload batch.",
+            )
+        row = self.auto_knowledge_map.begin_upload_batch(  # type: ignore[attr-defined]
+            course_id=course_id,
+            source_course_id=str(workspace["private_course_id"]),
+            owner_user_id=subject,
+            batch_id=str(payload["batch_id"]),
+            expected_items=int(payload["expected_items"]),
+        )
+        return {
+            "batch_id": row["id"],
+            "status": row["status"],
+            "expected_items": row["expected_items"],
+            "expires_at": row["expires_at"],
+        }
+
+    def _file_batch_seal(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        course_id = str(payload["course"])
+        self._course_row(course_id, subject, write=False)
+        if self.auto_knowledge_map is None:
+            raise ApiError(503, "AUTO_BATCH_UNAVAILABLE", "The batch coordinator is unavailable.")
+        row = self.auto_knowledge_map.seal_upload_batch(  # type: ignore[attr-defined]
+            course_id=course_id,
+            owner_user_id=subject,
+            batch_id=str(payload["batch_id"]),
+            items=list(payload.get("items") or []),
+        )
+        return {
+            "batch_id": row["id"],
+            "status": row["status"],
+            "sealed_at": row["sealed_at"],
         }
 
     def _document_row(self, document_id: str) -> sqlite3.Row | None:
@@ -1356,15 +1441,37 @@ class V3DomainAdapter:
         selected = (
             state.get("personalized_tree")
             if state.get("selected_tree") == "PERSONALIZED"
-            else state.get("official_tree")
+            else (
+                state.get("auto_course_tree")
+                if state.get("selected_tree") == "AUTO_COURSE"
+                else state.get("official_tree")
+            )
         ) or {}
         snapshot = {
             "registry": state.get("registry") or [],
             "members": selected.get("members") or [],
             "selected_tree": state.get("selected_tree"),
+            "tree_label": selected.get("label"),
+            "machine_generated": bool(selected.get("machine_generated")),
         }
         _cache().snapshots[course_id] = snapshot
         return snapshot
+
+    def _knowledge_build_status(self, subject: str, course_id: str) -> dict[str, Any]:
+        if self.auto_knowledge_map is None:
+            return {
+                "course_id": course_id,
+                "status": "NOT_ENABLED",
+                "message": "Automatic knowledge-map service is not enabled",
+                "readable_document_count": 0,
+                "unreadable_document_count": 0,
+                "tree_version_id": None,
+                "machine_generated": False,
+                "human_reviewed": False,
+                "pending_source_events": 0,
+                "targets": [],
+            }
+        return self.auto_knowledge_map.status(course_id, subject)  # type: ignore[attr-defined]
 
     def _knowledge_tree(self, subject: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
         course_id = str(payload["course"])
@@ -2035,12 +2142,15 @@ class V3DomainAdapter:
             "course.delete",
             "file.list",
             "file.upload",
+            "file.batch.begin",
+            "file.batch.seal",
             "file.content",
             "file.text",
             "file.delete",
             "context.retrieve",
             "attachments.prepare",
             "knowledge.tree",
+            "knowledge.build_status",
             "knowledge.assessment",
             "knowledge.exercise.generate",
             "knowledge.exercise.hint",
@@ -2104,6 +2214,10 @@ class V3DomainAdapter:
             return items
         if operation == "file.upload":
             return self._file_upload(subject, payload)
+        if operation == "file.batch.begin":
+            return self._file_batch_begin(subject, payload)
+        if operation == "file.batch.seal":
+            return self._file_batch_seal(subject, payload)
         if operation == "file.content":
             return self._file_content(subject, payload)
         if operation == "file.text":
@@ -2126,6 +2240,8 @@ class V3DomainAdapter:
             return self._task_plan(credential, payload)
         if operation == "knowledge.tree":
             return self._knowledge_tree(subject, payload)
+        if operation == "knowledge.build_status":
+            return self._knowledge_build_status(subject, str(payload["course"]))
         if operation == "knowledge.assessment":
             return self._knowledge_assessment(subject, payload)
         if operation == "knowledge.exercise.generate":

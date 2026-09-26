@@ -69,6 +69,12 @@ class Settings(BaseSettings):
         default=50 * 1024 * 1024, ge=1_024, le=500 * 1024 * 1024
     )
     v3_office_max_compression_ratio: int = Field(default=100, ge=1, le=1_000)
+    # Automatic map generation is independently gated from ordinary teaching.
+    # Both switches must be explicit before a background worker can spend.
+    auto_knowledge_map_enabled: bool = False
+    auto_knowledge_map_allow_billable: bool = False
+    auto_knowledge_map_poll_seconds: float = Field(default=5.0, ge=1.0, le=300.0)
+    auto_knowledge_map_reconcile_seconds: float = Field(default=300.0, ge=30.0, le=3600.0)
 
     database_path: Path = Field(
         default=Path("../../data/rag.sqlite3"),

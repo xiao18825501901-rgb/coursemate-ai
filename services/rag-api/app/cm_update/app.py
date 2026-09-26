@@ -734,8 +734,33 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         elif folder is not None: rows=[x for x in rows if x['folder']==folder]
         return [public_file(x) for x in rows]
 
+    @r.post('/courses/{cid}/file-batches',status_code=201)
+    async def begin_file_batch(cid:str,user:User,request:Request,body:dict):
+        course_data=await course(user,cid,request)
+        course_gate(course_data,user)
+        if not domain: raise HTTPException(503,'批次协调器仅在真实 V3 集成模式可用')
+        try:
+            batch_id=str(body.get('batch_id') or '')
+            expected_items=int(body.get('expected_items') or 0)
+        except (TypeError,ValueError):
+            raise HTTPException(422,'上传批次参数无效') from None
+        return await remote('file.batch.begin',user,{
+            'course':cid,'batch_id':batch_id,'expected_items':expected_items
+        },request)
+
+    @r.post('/courses/{cid}/file-batches/{batch_id}/seal')
+    async def seal_file_batch(cid:str,batch_id:str,user:User,request:Request,body:dict):
+        course_data=await course(user,cid,request)
+        course_gate(course_data,user)
+        if not domain: raise HTTPException(503,'批次协调器仅在真实 V3 集成模式可用')
+        return await remote('file.batch.seal',user,{
+            'course':cid,'batch_id':batch_id,'items':list(body.get('items') or [])
+        },request)
+
     @r.post('/courses/{cid}/files',status_code=201)
-    async def upload(cid:str,user:User,request:Request,file:UploadFile=File(...),folder:str=Form(default='')):
+    async def upload(cid:str,user:User,request:Request,file:UploadFile=File(...),
+                     folder:str=Form(default=''),batch_id:str=Form(default=''),
+                     batch_item_id:str=Form(default='')):
         course_data=await course(user,cid,request)
         course_gate(course_data,user)
         rate(user,'upload',15)
@@ -761,7 +786,10 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             )
         if domain:
             # Integration owns the real V3 upload/ingestion. Bytes stay in-process, not JSON logs.
-            result=await remote('file.upload',user,{'course':cid,'name':name,'folder':folder,'content':content,'mime':mime},request)
+            result=await remote('file.upload',user,{
+                'course':cid,'name':name,'folder':folder,'content':content,'mime':mime,
+                'batch_id':batch_id,'batch_item_id':batch_item_id
+            },request)
             try:
                 file_list=await remote('file.list',user,{'course':cid,'q':'','folder':None},request)
                 samples=[]
@@ -1191,6 +1219,20 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         course_gate(course_data,user)
         if domain: return await remote('knowledge.tree',user,{'course':cid},request)
         return db.all("SELECT n.*,COALESCE(l.progress,'NOT_STARTED') progress,l.grade FROM cmui_nodes n LEFT JOIN cmui_learning l ON l.node=n.id AND l.owner=? WHERE n.course=? ORDER BY n.position",(user['id'],cid))
+
+    @r.get('/courses/{cid}/knowledge-build-status')
+    async def knowledge_build_status(cid:str,user:User,request:Request):
+        course_data=await course(user,cid,request)
+        course_gate(course_data,user)
+        if domain:
+            return await remote('knowledge.build_status',user,{'course':cid},request)
+        return {
+            'course_id':cid,'status':'NOT_ENABLED',
+            'message':'Automatic knowledge-map service is not enabled',
+            'readable_document_count':0,'unreadable_document_count':0,
+            'tree_version_id':None,'machine_generated':False,
+            'human_reviewed':False,'pending_source_events':0,'targets':[],
+        }
 
     @r.get('/courses/{cid}/knowledge/{node_id}/assessment')
     async def assessment(cid:str,node_id:str,user:User,request:Request):
@@ -2167,8 +2209,16 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             db.execute("INSERT INTO cmui_share_imports(share,recipient,course,status,updated_at) VALUES(?,?,?,'IMPORTING',?) ON CONFLICT(share,recipient) DO UPDATE SET status='IMPORTING',updated_at=excluded.updated_at",
                 (share_id,user['id'],joined_course_id,now()))
             mapping={}
+            batch_id='share_'+hashlib.sha256((share_id+'\0'+user['id']).encode()).hexdigest()[:32]
+            batch_results=[]
+            if manifest['files']:
+                await remote('file.batch.begin',user,{
+                    'course':joined_course_id,'batch_id':batch_id,
+                    'expected_items':len(manifest['files'])
+                },request)
             try:
-                for f in manifest['files']:
+                for item_index,f in enumerate(manifest['files']):
+                    item_key=f'shareitem_{item_index:05d}'
                     archived=db.one('SELECT * FROM cmui_share_files WHERE share=? AND file_id=?',(share_id,f['id']))
                     if not archived: raise ValueError('Snapshot missing')
                     path=Path(cfg.data_dir)/archived['archived_storage_key']
@@ -2177,10 +2227,16 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                     if hashlib.sha256(content).hexdigest()!=f['sha256'] or hashlib.sha256(index_bytes).hexdigest()!=f['index_sha256']:
                         raise ValueError('Snapshot integrity failure')
                     imported=await remote('snapshot.import',user,{'course':joined_course_id,'content':content,'index':json.loads(index_bytes)},request)
+                    batch_results.append({'item_key':item_key,'status':'INDEXED',
+                        'document_id':imported['document_id']})
                     mapping[f['id']]=imported
                     mapping[f['version_id']]={'version_id':imported['version_id']}
                     db.execute('UPDATE cmui_share_imports SET mapping_json=?,updated_at=? WHERE share=? AND recipient=?',
                         (json.dumps(mapping),now(),share_id,user['id']))
+                if manifest['files']:
+                    await remote('file.batch.seal',user,{
+                        'course':joined_course_id,'batch_id':batch_id,'items':batch_results
+                    },request)
                 if manifest.get('knowledge_snapshot'):
                     knowledge=await remote('snapshot.knowledge.import',user,{'course':joined_course_id,
                         'share_id':share_id,'snapshot':manifest['knowledge_snapshot'],'mapping':mapping},request)

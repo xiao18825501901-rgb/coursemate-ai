@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
@@ -41,6 +43,7 @@ from app.rag.embeddings import (
 )
 from app.rag.retrieval import HybridRetriever
 from app.repositories.chunks import ChunkRepository
+from app.services.auto_knowledge_map import AutoKnowledgeMapService
 from app.services.ingestion import IngestionService, MissingEmbeddingProvider
 from app.services.knowledge_publication import KnowledgePublicationService
 from app.services.official_knowledge_draft_builder import OfficialKnowledgeDraftBuilder
@@ -159,6 +162,57 @@ def create_app(
         application.state.official_knowledge_draft_builder = OfficialKnowledgeDraftBuilder(
             database, resolved_settings, application.state.learning
         )
+        application.state.auto_knowledge_map = AutoKnowledgeMapService(
+            database, resolved_settings, application.state.learning
+        )
+
+        async def auto_knowledge_worker() -> None:
+            service: AutoKnowledgeMapService = application.state.auto_knowledge_map
+            worker_id = f"auto-map-{id(application)}"
+            last_reconcile = 0.0
+            first_pass = True
+            while True:
+                try:
+                    now = asyncio.get_running_loop().time()
+                    if (
+                        first_pass
+                        or now - last_reconcile
+                        >= resolved_settings.auto_knowledge_map_reconcile_seconds
+                    ):
+                        await asyncio.to_thread(service.reconcile, full=True)
+                        first_pass = False
+                        last_reconcile = now
+                    while await asyncio.to_thread(service.run_once, worker_id) is not None:
+                        pass
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    LOGGER.exception("Automatic knowledge-map worker iteration failed")
+                await asyncio.sleep(resolved_settings.auto_knowledge_map_poll_seconds)
+
+        @asynccontextmanager
+        async def application_lifespan(_application: FastAPI):
+            task = None
+            if resolved_settings.auto_knowledge_map_enabled:
+                if resolved_settings.auto_knowledge_map_allow_billable:
+                    task = asyncio.create_task(
+                        auto_knowledge_worker(), name="auto-knowledge-map-worker"
+                    )
+                    application.state.auto_knowledge_map_task = task
+                else:
+                    LOGGER.warning(
+                        "Automatic knowledge maps enabled without billable worker authorization; "
+                        "no background worker was started"
+                    )
+            try:
+                yield
+            finally:
+                if task is not None:
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
+
+        application.router.lifespan_context = application_lifespan
     teaching_profile_service = TeachingProfileService(database)
     application.state.teaching_profile_service = teaching_profile_service
     application.state.publication_service = PublicationService(database)

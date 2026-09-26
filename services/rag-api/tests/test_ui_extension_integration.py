@@ -96,6 +96,24 @@ def create_official_course(client: TestClient, course_id: str = "cs3481") -> Non
     assert response.status_code == 201, response.text
 
 
+def test_knowledge_build_status_is_read_only_and_never_enqueues(client: TestClient) -> None:
+    create_official_course(client)
+
+    response = client.get(
+        f"{UI}/courses/cs3481/knowledge-build-status",
+        headers=auth("Bearer token-a"),
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "NOT_RECONCILED"
+    with client.app.state.database.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM auto_knowledge_jobs").fetchone()[0] == 0
+        assert (
+            connection.execute("SELECT COUNT(*) FROM learning_model_call_reservations").fetchone()[0]
+            == 0
+        )
+
+
 def upload_shared_document(
     client: TestClient,
     course_id: str = "cs3481",
@@ -279,6 +297,73 @@ def test_uploads_land_in_v3_documents_and_are_private(immutable_corpus: TestClie
 
     other = client.get(f"{UI}/courses/cs3481/files", headers=auth("Bearer token-b")).json()
     assert [item["name"] for item in other] == ["lecture.md"]
+
+
+def test_ui_multi_file_batch_releases_one_frozen_revision_after_seal(
+    client: TestClient,
+) -> None:
+    create_official_course(client)
+    opened = client.post(
+        f"{UI}/courses/cs3481/file-batches",
+        headers=auth("Bearer token-a"),
+        json={"batch_id": "ui-batch-one", "expected_items": 2},
+    )
+    assert opened.status_code == 201, opened.text
+
+    first = client.post(
+        f"{UI}/courses/cs3481/files",
+        headers=auth("Bearer token-a"),
+        data={
+            "folder": "",
+            "batch_id": "ui-batch-one",
+            "batch_item_id": "ui-item-one",
+        },
+        files={"file": ("one.md", _markdown(body="# One\n\nFirst concept."), "text/markdown")},
+    )
+    assert first.status_code == 201, first.text
+    assert client.app.state.auto_knowledge_map.reconcile(force=True)["BATCH_OPEN"] >= 1
+    with client.app.state.database.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM auto_knowledge_jobs").fetchone()[0] == 0
+
+    second = client.post(
+        f"{UI}/courses/cs3481/files",
+        headers=auth("Bearer token-a"),
+        data={
+            "folder": "",
+            "batch_id": "ui-batch-one",
+            "batch_item_id": "ui-item-two",
+        },
+        files={"file": ("two.md", _markdown(body="# Two\n\nSecond concept."), "text/markdown")},
+    )
+    assert second.status_code == 201, second.text
+    sealed = client.post(
+        f"{UI}/courses/cs3481/file-batches/ui-batch-one/seal",
+        headers=auth("Bearer token-a"),
+        json={
+            "items": [
+                {
+                    "item_key": "ui-item-one",
+                    "status": "INDEXED",
+                    "document_id": first.json()["id"],
+                },
+                {
+                    "item_key": "ui-item-two",
+                    "status": "INDEXED",
+                    "document_id": second.json()["id"],
+                },
+            ]
+        },
+    )
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == "SEALED"
+
+    result = client.app.state.auto_knowledge_map.reconcile(force=True)
+    assert result["QUEUED"] == 1
+    with client.app.state.database.connect() as connection:
+        jobs = connection.execute(
+            "SELECT target_kind,status FROM auto_knowledge_jobs ORDER BY id"
+        ).fetchall()
+    assert [dict(row) for row in jobs] == [{"target_kind": "SUPPLEMENT", "status": "QUEUED"}]
 
 
 def test_file_content_is_the_authorised_original_with_range_and_head(

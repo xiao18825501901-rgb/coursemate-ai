@@ -1,0 +1,73 @@
+{
+  "artifact_type": "ACTIVE_PAUSE_RESUME_LEDGER",
+  "created_at": "2026-09-27T05:00:00+08:00",
+  "actual_head": "4492fc82253a55af4b6b9a45c9d1425d01349323",
+  "safe_checkpoint_ack": true,
+  "checkpoint": {
+    "branch": "release/ui-campus-coursehero-20260927",
+    "commit": "c8161d5048ab2a52896a4b757207a84f75bf9022",
+    "worktree": "D:\\CourseMate_COMPLETE_ARCHIVE_20260918\\01_SOURCE_REPOSITORY\\work\\ui-campus-coursehero-20260927\\candidate",
+    "record": "docs/checkpoints/PAUSED_UI_CAMPUS_COURSEHERO_20260927.md",
+    "preserved_untracked": [
+      "apps/web/public/downloads/"
+    ]
+  },
+  "original_tasks_in_order": [
+    {
+      "id": "ui-minimal-entry-release",
+      "description": "Finish the minimal signed-out entry, primary Canvas action, and two dashboard action cards; verify and release to the existing Netlify site.",
+      "status": "PAUSED_CHECKPOINTED_NOT_DEPLOYED",
+      "order": 1,
+      "worktree_changes": "Committed locally at c8161d5; targeted browser journey, production build, deploy and public smoke remain.",
+      "batch": null,
+      "last_receipt": "3 focused regressions passed; 28 related unit tests passed; TypeScript check passed.",
+      "unknown_model_calls": 0,
+      "next_action": "Reconcile with the then-current production source, run the targeted browser/build gates, and deploy only after this priority feature completes all resume gates.",
+      "source_and_authorization_limits": "Same Netlify site only; preserve coursejesus.com, Clerk, API origins, redirects, and Windows Canvas Bridge artifact. No backend/schema changes for this slice."
+    },
+    {
+      "id": "local-campus-batch",
+      "description": "Freeze and process the local campus material inventory from D:\\Canvas and D:\\Canvas-DG.",
+      "status": "PAUSED_NOT_STARTED",
+      "order": 2,
+      "worktree_changes": "None.",
+      "batch": null,
+      "last_receipt": null,
+      "unknown_model_calls": 0,
+      "next_action": "Resume from a new frozen batch only after the priority feature is fully deployed and backfilled.",
+      "source_and_authorization_limits": "Both source roots are read-only and must never be deleted or moved; only previously authorized material may be published."
+    },
+    {
+      "id": "official-programme-map-and-coursehero",
+      "description": "Build the official programme/course matrix, then perform rights-gated Course Hero metadata discovery and eligible transfer.",
+      "status": "PAUSED_NOT_STARTED",
+      "order": 3,
+      "worktree_changes": "None.",
+      "batch": null,
+      "last_receipt": null,
+      "unknown_model_calls": 0,
+      "next_action": "Resume official-source verification before any Course Hero access; create a fresh isolated transfer batch only for rights-cleared content.",
+      "source_and_authorization_limits": "No cookie/profile copying, CAPTCHA/paywall bypass, extra purchase, or restricted-fulltext redistribution. Only exact current-batch temporary files can ever become cleanup candidates."
+    }
+  ],
+  "paused_runtime_state": {
+    "paid_model_requests_issued_by_paused_tasks": 0,
+    "unknown_model_requests_issued_by_paused_tasks": 0,
+    "netlify_writes_issued_by_paused_tasks": 0,
+    "database_writes_issued_by_paused_tasks": 0,
+    "content_batches_started": 0,
+    "student_services_stopped": false,
+    "accepted_uploads_stopped": false,
+    "credential_destruction_stopped": false,
+    "monitoring_stopped": false
+  },
+  "resume_gates": {
+    "production_feature_ready": false,
+    "new_upload_flow_verified": false,
+    "eligible_backfill_finished": false,
+    "history_and_access_preserved": false,
+    "recovery_and_monitoring_saved": false
+  },
+  "automatic_resume_after_all_gates": true,
+  "secrets_allowed_in_ledger": false
+}

@@ -134,7 +134,13 @@ class LearningOrchestrator:
         with self.db.connect() as db:
             row = db.execute(
                 "SELECT * FROM knowledge_nodes WHERE id=? AND course_id=? "
-                "AND ((owner_user_id=? AND status='PRIVATE') OR status='PUBLISHED')",
+                "AND ((owner_user_id=? AND status='PRIVATE') OR status='PUBLISHED' OR "
+                "(owner_user_id IS NULL AND status='CANDIDATE' AND EXISTS("
+                "SELECT 1 FROM auto_course_tree_activations AS activation "
+                "JOIN knowledge_tree_memberships AS membership "
+                "ON membership.tree_version_id=activation.tree_version_id "
+                "WHERE activation.course_id=knowledge_nodes.course_id "
+                "AND activation.status='ACTIVE' AND membership.node_id=knowledge_nodes.id)))",
                 (node_id, workspace["course_id"], workspace["owner_user_id"]),
             ).fetchone()
             spec = (
@@ -144,9 +150,16 @@ class LearningOrchestrator:
                     "ON metadata.node_id=teaching_specs.node_id "
                     "AND metadata.version=teaching_specs.version "
                     "WHERE teaching_specs.node_id=? "
-                    "AND metadata.status IN ('PRIVATE_ACTIVE','PUBLISHED') "
+                    "AND (metadata.status IN ('PRIVATE_ACTIVE','PUBLISHED') OR "
+                    "(metadata.status='DRAFT' AND EXISTS("
+                    "SELECT 1 FROM auto_course_tree_activations AS activation "
+                    "JOIN knowledge_tree_memberships AS membership "
+                    "ON membership.tree_version_id=activation.tree_version_id "
+                    "WHERE activation.course_id=? AND activation.status='ACTIVE' "
+                    "AND membership.node_id=teaching_specs.node_id "
+                    "AND membership.teaching_spec_version=teaching_specs.version))) "
                     "ORDER BY teaching_specs.version DESC LIMIT 1",
-                    (node_id,),
+                    (node_id, workspace["course_id"]),
                 ).fetchone()
                 if row is not None and row["kind"] == "ATOMIC"
                 else None
