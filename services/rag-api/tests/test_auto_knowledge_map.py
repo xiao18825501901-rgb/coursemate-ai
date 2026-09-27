@@ -15,7 +15,10 @@ from app.learning.orchestrator import LearningOrchestrator
 from app.learning.provider import LearningProvider
 from app.rag.retrieval import HybridRetriever
 from app.repositories.chunks import ChunkRepository
-from app.services.auto_knowledge_map import AutoKnowledgeMapService
+from app.services.auto_knowledge_map import (
+    AutoKnowledgeMapService,
+    OrchestratorDraftGenerator,
+)
 
 
 class FakeGenerator:
@@ -1292,6 +1295,55 @@ def test_live_incomplete_response_is_saved_then_repaired_with_larger_bound(
     ]
     assert attempts[0]["rejection_code"] == "MODEL_INCOMPLETE"
     assert all(len(row["output_hash"]) == 64 for row in attempts)
+
+
+def test_merge_prunes_empty_model_groupings_without_dropping_grounded_nodes() -> None:
+    draft = AutoKnowledgeMapDraft.model_validate(
+        {
+            "title": "Shard",
+            "modules": [
+                {
+                    "key": "used",
+                    "title": "Used module",
+                    "description": "Contains a grounded node",
+                    "major": "OTHER",
+                },
+                {
+                    "key": "empty",
+                    "title": "Empty model grouping",
+                    "description": "No atomic child",
+                    "major": "OTHER",
+                },
+            ],
+            "nodes": [
+                {
+                    "key": "atomic",
+                    "parent_key": "used",
+                    "title": "Grounded atom",
+                    "description": "Grounded in the source",
+                    "major": "OTHER",
+                    "prerequisite_keys": [],
+                    "evidence_ids": ["seg_one"],
+                }
+            ],
+            "dispositions": [
+                {
+                    "evidence_id": "seg_one",
+                    "status": "MAPPED",
+                    "reason": "Mapped",
+                    "node_keys": ["atomic"],
+                }
+            ],
+        }
+    )
+
+    merged = OrchestratorDraftGenerator._merge_maps(
+        {"name": "Course"}, [(draft, {"seg_one": "chunk_one"})]
+    )
+
+    assert [module.title for module in merged.modules] == ["Used module"]
+    assert len(merged.nodes) == 1
+    assert merged.nodes[0].evidence_ids == ["chunk_one"]
 
 
 def test_provider_output_cannot_silently_drop_a_frozen_source_segment(tmp_path: Path) -> None:

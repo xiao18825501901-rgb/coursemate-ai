@@ -597,9 +597,31 @@ class OrchestratorDraftGenerator:
                 )
                 current["status"] = "MAPPED"
                 current["node_keys"].add(node["key"])
+        # Grouping modules are navigational structure, not learnable evidence.
+        # A provider may return an extra empty heading; retaining it would make
+        # KnowledgeService correctly reject the tree as EMPTY_COMPOSITE. Keep
+        # only modules that contain a grounded atomic node, plus their ancestor
+        # chain. No atomic node, evidence or Teaching Spec is discarded.
+        retained_modules = {
+            str(node["parent_key"])
+            for node in nodes.values()
+            if node["parent_key"] is not None
+        }
+        while True:
+            parents = {
+                str(modules[key]["parent_key"])
+                for key in retained_modules
+                if key in modules and modules[key]["parent_key"] is not None
+            }
+            expanded = retained_modules | parents
+            if expanded == retained_modules:
+                break
+            retained_modules = expanded
         map_payload = {
             "title": f"{course['name']} · AI整理学习图",
-            "modules": list(modules.values()),
+            "modules": [
+                item for key, item in modules.items() if key in retained_modules
+            ],
             "nodes": [
                 {
                     **item,
