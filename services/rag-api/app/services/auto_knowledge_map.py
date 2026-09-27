@@ -93,6 +93,8 @@ class DraftGenerator(Protocol):
         *,
         job_id: str,
         workspace_id: str,
+        target_kind: str,
+        base_tree_version_id: str | None,
         course: dict[str, Any],
         evidence: list[dict[str, Any]],
         heartbeat: Callable[[], None] | None = None,
@@ -111,6 +113,182 @@ class OrchestratorDraftGenerator:
     def __init__(self, database: Database, learning: LearningOrchestrator) -> None:
         self.database = database
         self.learning = learning
+
+    def _legacy_tree_id(
+        self, course_id: str, workspace_id: str, target_kind: str
+    ) -> str | None:
+        with self.database.connect() as connection:
+            if target_kind != "AUTO_COURSE":
+                row = connection.execute(
+                    "SELECT id FROM knowledge_tree_versions WHERE workspace_id=? "
+                    "AND tree_kind='PERSONALIZED' AND status='ACTIVE'",
+                    (workspace_id,),
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    "SELECT tree_version_id AS id FROM auto_course_tree_activations "
+                    "WHERE course_id=? AND status='ACTIVE'",
+                    (course_id,),
+                ).fetchone()
+        return str(row["id"]) if row is not None else None
+
+    def _legacy_provisional(
+        self,
+        legacy_tree_id: str | None,
+        evidence: list[dict[str, Any]],
+    ) -> AutoKnowledgeMapDraft | None:
+        """Reuse an over-limit active tree as the provisional concept inventory.
+
+        The historical tree and paid specs remain immutable. Only its grounded
+        atomic concepts seed the new whole-course outline; raw source bytes are
+        not sent through the old per-shard analysis again.
+        """
+
+        if legacy_tree_id is None:
+            return None
+        authorized = {str(item["id"]) for item in evidence}
+        with self.database.connect() as connection:
+            count = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM knowledge_tree_memberships WHERE tree_version_id=?",
+                    (legacy_tree_id,),
+                ).fetchone()[0]
+            )
+            if count <= MAX_EFFECTIVE_COURSE_NODES:
+                return None
+            rows = connection.execute(
+                """
+                SELECT membership.node_id,node.title,node.description,node.major
+                FROM knowledge_tree_memberships AS membership
+                JOIN knowledge_nodes AS node ON node.id=membership.node_id
+                WHERE membership.tree_version_id=? AND node.kind='ATOMIC'
+                ORDER BY membership.ordinal,membership.node_id
+                """,
+                (legacy_tree_id,),
+            ).fetchall()
+            evidence_by_node: dict[str, list[str]] = {}
+            for row in rows:
+                evidence_by_node[str(row["node_id"])] = [
+                    str(item["chunk_id"])
+                    for item in connection.execute(
+                        "SELECT DISTINCT chunk_id FROM material_evidence "
+                        "WHERE node_id=? AND status='ACTIVE' ORDER BY chunk_id",
+                        (row["node_id"],),
+                    )
+                    if str(item["chunk_id"]) in authorized
+                ]
+            edges = connection.execute(
+                "SELECT node_id,prerequisite_node_id FROM knowledge_prerequisite_edges "
+                "WHERE tree_version_id=?",
+                (legacy_tree_id,),
+            ).fetchall()
+        keyed = {
+            str(row["node_id"]): "legacy_" + digest(str(row["node_id"]))[:24]
+            for row in rows
+            if evidence_by_node[str(row["node_id"])]
+        }
+        if not keyed:
+            return None
+        prerequisite_by_node: dict[str, list[str]] = defaultdict(list)
+        for edge in edges:
+            node_id = str(edge["node_id"])
+            prerequisite = str(edge["prerequisite_node_id"])
+            if node_id in keyed and prerequisite in keyed and node_id != prerequisite:
+                prerequisite_by_node[node_id].append(keyed[prerequisite])
+        node_keys_by_evidence: dict[str, list[str]] = defaultdict(list)
+        nodes: list[dict[str, Any]] = []
+        for row in rows:
+            node_id = str(row["node_id"])
+            if node_id not in keyed:
+                continue
+            for evidence_id in evidence_by_node[node_id]:
+                node_keys_by_evidence[evidence_id].append(keyed[node_id])
+            nodes.append(
+                {
+                    "key": keyed[node_id],
+                    "title": row["title"],
+                    "description": row["description"],
+                    "major": row["major"],
+                    "prerequisite_keys": sorted(set(prerequisite_by_node[node_id])),
+                    "evidence_ids": evidence_by_node[node_id],
+                }
+            )
+        dispositions = [
+            {
+                "evidence_id": evidence_id,
+                "status": "MAPPED" if node_keys_by_evidence[evidence_id] else "REVIEW_REQUIRED",
+                "reason": (
+                    "Reused from the grounded active historical tree"
+                    if node_keys_by_evidence[evidence_id]
+                    else "The historical active tree had no grounded node for this source"
+                ),
+                "node_keys": sorted(set(node_keys_by_evidence[evidence_id]))[:30],
+            }
+            for evidence_id in sorted(authorized)
+        ]
+        return AutoKnowledgeMapDraft.model_validate(
+            {
+                "title": "Historical grounded concept inventory",
+                "modules": [],
+                "nodes": nodes,
+                "dispositions": dispositions,
+            }
+        )
+
+    def _legacy_reusable_spec(
+        self, legacy_tree_id: str | None, node: Any
+    ) -> dict[str, Any] | None:
+        """Return an exact one-to-one old spec; merged units must be recompiled."""
+
+        if legacy_tree_id is None:
+            return None
+        authorized = set(node.evidence_ids)
+        normalized_title = re.sub(r"\s+", " ", str(node.title).strip().casefold())
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT membership.node_id,membership.teaching_spec_version,node.title,
+                    spec.content_json,metadata.change_reason
+                FROM knowledge_tree_memberships AS membership
+                JOIN knowledge_nodes AS node ON node.id=membership.node_id
+                JOIN teaching_specs AS spec ON spec.node_id=membership.node_id
+                    AND spec.version=membership.teaching_spec_version
+                JOIN teaching_spec_metadata AS metadata ON metadata.node_id=spec.node_id
+                    AND metadata.version=spec.version
+                WHERE membership.tree_version_id=? AND node.kind='ATOMIC'
+                """,
+                (legacy_tree_id,),
+            ).fetchall()
+            matches: list[sqlite3.Row] = []
+            for row in rows:
+                title = re.sub(r"\s+", " ", str(row["title"]).strip().casefold())
+                if title != normalized_title:
+                    continue
+                old_evidence = {
+                    str(item["chunk_id"])
+                    for item in connection.execute(
+                        "SELECT DISTINCT chunk_id FROM material_evidence "
+                        "WHERE node_id=? AND status='ACTIVE'",
+                        (row["node_id"],),
+                    )
+                }
+                if old_evidence == authorized:
+                    matches.append(row)
+        if len(matches) != 1:
+            return None
+        old = matches[0]
+        items = json.loads(str(old["content_json"]))
+        if any(
+            not set(item.get("evidence_ids") or []) <= authorized
+            for item in items
+        ):
+            return None
+        return {
+            "node_key": node.key,
+            "change_reason": "Reused exact historical Teaching Spec: "
+            + str(old["change_reason"] or "same grounded unit"),
+            "items": items,
+        }
 
     def _effective_operation_id(
         self, job_id: str, workspace_id: str, operation_id: str
@@ -1081,6 +1259,7 @@ class OrchestratorDraftGenerator:
         course_context: dict[str, Any],
         course: dict[str, Any],
         provisional: AutoKnowledgeMapDraft,
+        node_budget: int,
         heartbeat: Callable[[], None] | None,
     ) -> tuple[AutoKnowledgeMapDraft, int]:
         candidates = self._outline_candidates(provisional)
@@ -1119,11 +1298,11 @@ class OrchestratorDraftGenerator:
                     allowed_keys: set[str] = allowed,
                 ) -> None:
                     draft = cast(AutoKnowledgeMapDraft, value)
-                    if len(draft.modules) + len(draft.nodes) > MAX_EFFECTIVE_COURSE_NODES:
+                    if len(draft.modules) + len(draft.nodes) > node_budget:
                         raise ApiError(
                             422,
                             "TREE_NODE_LIMIT_EXCEEDED",
-                            "The whole-course outline exceeds the 50-node budget.",
+                            f"The generated outline exceeds its {node_budget}-node budget.",
                         )
                     cited = {item for node in draft.nodes for item in node.evidence_ids}
                     disposed = {item.evidence_id for item in draft.dispositions}
@@ -1154,7 +1333,7 @@ class OrchestratorDraftGenerator:
                         "Build a compact whole-course outline from every supplied provisional "
                         "source concept. The entire output, including COMPOSITE chapters, "
                         "ATOMIC learning units, and any stored root, must contain no more than "
-                        f"{MAX_EFFECTIVE_COURSE_NODES} nodes. Prefer 5-8 chapters and 20-36 "
+                        f"{node_budget} nodes. Prefer 5-8 chapters and 20-36 "
                         "complete learning units when the material supports that scale; use "
                         "fewer for a short course. Use only supplied concept keys as evidence "
                         "ids and account for every key by citing it from a final unit or by an "
@@ -1446,6 +1625,8 @@ class OrchestratorDraftGenerator:
         *,
         job_id: str,
         workspace_id: str,
+        target_kind: str,
+        base_tree_version_id: str | None,
         course: dict[str, Any],
         evidence: list[dict[str, Any]],
         heartbeat: Callable[[], None] | None = None,
@@ -1465,7 +1646,30 @@ class OrchestratorDraftGenerator:
         }
         map_parts: list[tuple[AutoKnowledgeMapDraft, dict[str, str]]] = []
         model_calls = 0
-        for index, shard in enumerate(self._shards(self._segments(evidence))):
+        legacy_tree_id = self._legacy_tree_id(
+            str(course["id"]), workspace_id, target_kind
+        )
+        node_budget = MAX_EFFECTIVE_COURSE_NODES
+        if target_kind == "SUPPLEMENT" and base_tree_version_id is not None:
+            with self.database.connect() as connection:
+                base_members = int(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM knowledge_tree_memberships WHERE tree_version_id=?",
+                        (base_tree_version_id,),
+                    ).fetchone()[0]
+                )
+            node_budget -= base_members
+            if node_budget < 1:
+                raise ApiError(
+                    409,
+                    "TREE_NODE_BUDGET_EXHAUSTED",
+                    "The active campus tree uses the complete 50-node budget; compact it "
+                    "before adding a private supplement.",
+                )
+        provisional_map = self._legacy_provisional(legacy_tree_id, evidence)
+        for index, shard in enumerate(
+            [] if provisional_map is not None else self._shards(self._segments(evidence))
+        ):
             if heartbeat:
                 heartbeat()
             shard_key = f"map-{index:05d}"
@@ -1527,7 +1731,8 @@ class OrchestratorDraftGenerator:
             model_calls += int(dispatched)
             output = cast(AutoKnowledgeMapDraft, output)
             map_parts.append((output, source_mapping))
-        provisional_map = self._merge_maps(course, map_parts)
+        if provisional_map is None:
+            provisional_map = self._merge_maps(course, map_parts)
         if not provisional_map.nodes:
             raise ApiError(
                 422,
@@ -1540,15 +1745,23 @@ class OrchestratorDraftGenerator:
             course_context=course_context,
             course=course,
             provisional=provisional_map,
+            node_budget=node_budget,
             heartbeat=heartbeat,
         )
         model_calls += outline_calls
         evidence_by_id = {str(item["id"]): item for item in evidence}
-        specs: list[dict[str, Any]] = []
-        for index in range(0, len(map_draft.nodes), SPEC_BATCH_NODES):
+        specs = [
+            reusable
+            for node in map_draft.nodes
+            if (reusable := self._legacy_reusable_spec(legacy_tree_id, node))
+            is not None
+        ]
+        reused_keys = {str(item["node_key"]) for item in specs}
+        pending_nodes = [node for node in map_draft.nodes if node.key not in reused_keys]
+        for index in range(0, len(pending_nodes), SPEC_BATCH_NODES):
             if heartbeat:
                 heartbeat()
-            nodes = map_draft.nodes[index : index + SPEC_BATCH_NODES]
+            nodes = pending_nodes[index : index + SPEC_BATCH_NODES]
             batch_ids = {value for node in nodes for value in node.evidence_ids}
             bounded_evidence = [
                 {**evidence_by_id[value], "content": str(evidence_by_id[value]["content"])[
@@ -2024,11 +2237,43 @@ class AutoKnowledgeMapService:
                 ),
             )
             return "EXISTING_ACTIVE"
-        # A pre-existing personalized tree is the safe migration baseline. Do
-        # not rebuild it merely because schema 42 was installed. Recording its
-        # current corpus fingerprint makes a later source revision observable;
-        # only that later revision queues an incremental replacement.
-        if current is None and existing_tree is not None:
+
+        # ``_existing_tree`` intentionally returns only a human-published tree
+        # for an AUTO_COURSE.  For migration decisions we must additionally
+        # inspect the machine tree selected by the activation table. Otherwise
+        # an old READY target with the same corpus fingerprint can mask a
+        # 1,000-node active tree forever.
+        migration_tree = existing_tree
+        if target.kind == "AUTO_COURSE":
+            migration_tree = connection.execute(
+                "SELECT tree.id FROM auto_course_tree_activations AS activation "
+                "JOIN knowledge_tree_versions AS tree ON tree.id=activation.tree_version_id "
+                "WHERE activation.course_id=? AND activation.status='ACTIVE'",
+                (target.course_id,),
+            ).fetchone()
+        existing_member_count = (
+            int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM knowledge_tree_memberships WHERE tree_version_id=?",
+                    (migration_tree["id"],),
+                ).fetchone()[0]
+            )
+            if migration_tree is not None
+            else 0
+        )
+        requires_compaction = (
+            migration_tree is not None
+            and existing_member_count > MAX_EFFECTIVE_COURSE_NODES
+        )
+        # A pre-existing valid personalized tree is the safe migration baseline.
+        # Historical trees above the new product ceiling are different: they
+        # must queue an immediate compact replacement without waiting for a new
+        # upload, while remaining active until that replacement commits.
+        if (
+            current is None
+            and migration_tree is not None
+            and existing_member_count <= MAX_EFFECTIVE_COURSE_NODES
+        ):
             connection.execute(
                 "INSERT INTO auto_knowledge_targets("
                 "target_key,course_id,workspace_id,owner_user_id,target_kind,status,"
@@ -2041,10 +2286,10 @@ class AutoKnowledgeMapService:
                     target.owner_user_id,
                     target.kind,
                     source.fingerprint,
-                    existing_tree["id"],
+                    migration_tree["id"],
                     len(source.versions),
                     len(source.unreadable),
-                    "Existing personalized tree preserved as the incremental baseline",
+                    "Existing bounded tree preserved as the incremental baseline",
                 ),
             )
             return "EXISTING_ACTIVE"
@@ -2072,6 +2317,7 @@ class AutoKnowledgeMapService:
         if (
             current is not None
             and current["corpus_fingerprint"] == source.fingerprint
+            and not requires_compaction
             and current["status"]
             in {
                 "QUEUED",
@@ -2092,7 +2338,14 @@ class AutoKnowledgeMapService:
             "WHERE target_key=? AND status='QUEUED' AND corpus_fingerprint!=?",
             (target.key, source.fingerprint),
         )
-        job_id = "akm-job-" + digest([target.key, source.fingerprint, BUILDER_VERSION])[:32]
+        compaction_source = (
+            [str(migration_tree["id"]), existing_member_count]
+            if requires_compaction
+            else None
+        )
+        job_id = "akm-job-" + digest(
+            [target.key, source.fingerprint, BUILDER_VERSION, compaction_source]
+        )[:32]
         snapshot = {
             "target": {
                 "key": target.key,
@@ -2103,6 +2356,7 @@ class AutoKnowledgeMapService:
             },
             "base_tree_version_id": source.base_tree_version_id,
             "base_tree_hash": source.base_tree_hash,
+            "compaction_source": compaction_source,
             "versions": source.versions,
         }
         # The job references its target.  Establish/update that parent row
@@ -3126,6 +3380,113 @@ class AutoKnowledgeMapService:
     def _node_id(target_key: str, key: str) -> str:
         return "auto-node-" + digest([target_key, key])[:28]
 
+    @staticmethod
+    def _normalized_title(value: object) -> str:
+        return re.sub(r"\s+", " ", str(value).strip().casefold())
+
+    @classmethod
+    def _legacy_members(
+        cls, connection: sqlite3.Connection, tree_version_id: str | None
+    ) -> list[dict[str, Any]]:
+        if tree_version_id is None:
+            return []
+        rows = connection.execute(
+            "SELECT membership.node_id,node.title,node.kind,node.course_id,"
+            "node.owner_user_id,node.status FROM knowledge_tree_memberships AS membership "
+            "JOIN knowledge_nodes AS node ON node.id=membership.node_id "
+            "WHERE membership.tree_version_id=? ORDER BY membership.ordinal,membership.node_id",
+            (tree_version_id,),
+        ).fetchall()
+        members: list[dict[str, Any]] = []
+        for row in rows:
+            members.append(
+                {
+                    **dict(row),
+                    "normalized_title": cls._normalized_title(row["title"]),
+                    "evidence_ids": {
+                        str(item["chunk_id"])
+                        for item in connection.execute(
+                            "SELECT DISTINCT chunk_id FROM material_evidence "
+                            "WHERE node_id=? AND status='ACTIVE'",
+                            (row["node_id"],),
+                        )
+                    },
+                }
+            )
+        return members
+
+    @classmethod
+    def _compact_mapping(
+        cls,
+        legacy_members: list[dict[str, Any]],
+        map_draft: AutoKnowledgeMapDraft,
+        key_to_id: dict[str, str],
+        retained_node_ids: set[str],
+    ) -> list[dict[str, Any]]:
+        compact = [
+            {
+                "node_id": key_to_id[draft.key],
+                "kind": kind,
+                "normalized_title": cls._normalized_title(draft.title),
+                "evidence_ids": set(getattr(draft, "evidence_ids", [])),
+            }
+            for kind, drafts in (
+                ("COMPOSITE", map_draft.modules),
+                ("ATOMIC", map_draft.nodes),
+            )
+            for draft in drafts
+        ]
+        compact_ids = {str(item["node_id"]) for item in compact}
+        # A SUPPLEMENT carries its reviewed official base into the new
+        # personalized view unchanged. Those retained memberships are exact
+        # lineage, even though they are not emitted by the private draft.
+        compact.extend(
+            {
+                "node_id": str(legacy["node_id"]),
+                "kind": str(legacy["kind"]),
+                "normalized_title": str(legacy["normalized_title"]),
+                "evidence_ids": set(legacy["evidence_ids"]),
+            }
+            for legacy in legacy_members
+            if str(legacy["node_id"]) in retained_node_ids
+            and str(legacy["node_id"]) not in compact_ids
+        )
+        mappings: list[dict[str, Any]] = []
+        for legacy in legacy_members:
+            exact = [item for item in compact if item["node_id"] == legacy["node_id"]]
+            if exact:
+                selected = exact[0]
+                relation = "EXACT"
+                overlap = len(legacy["evidence_ids"] & selected["evidence_ids"])
+            else:
+                candidates = [
+                    (
+                        len(legacy["evidence_ids"] & item["evidence_ids"]),
+                        item["normalized_title"] == legacy["normalized_title"],
+                        item,
+                    )
+                    for item in compact
+                    if item["kind"] == legacy["kind"]
+                ]
+                candidates.sort(key=lambda value: (-value[0], not value[1], value[2]["node_id"]))
+                overlap, title_match, selected = candidates[0] if candidates else (0, False, None)
+                if selected is not None and overlap > 0:
+                    relation = "MERGED_INTO"
+                elif selected is not None and title_match:
+                    relation = "RELATED"
+                else:
+                    relation = "UNMAPPED"
+                    selected = None
+            mappings.append(
+                {
+                    "legacy_node_id": str(legacy["node_id"]),
+                    "compact_node_id": selected["node_id"] if selected is not None else None,
+                    "relation": relation,
+                    "shared_evidence_count": overlap,
+                }
+            )
+        return mappings
+
     def _activate(
         self,
         job: sqlite3.Row,
@@ -3168,13 +3529,42 @@ class AutoKnowledgeMapService:
                 raise ApiError(404, "COURSE_NOT_FOUND", "The course was removed.")
             owner = None if target.kind == "AUTO_COURSE" else target.owner_user_id
             status = "CANDIDATE" if owner is None else "PRIVATE"
+            previous = None
+            if target.kind != "AUTO_COURSE":
+                previous = connection.execute(
+                    "SELECT id FROM knowledge_tree_versions WHERE workspace_id=? "
+                    "AND tree_kind='PERSONALIZED' AND status='ACTIVE'",
+                    (target.workspace_id,),
+                ).fetchone()
+            else:
+                previous = connection.execute(
+                    "SELECT tree_version_id AS id FROM auto_course_tree_activations "
+                    "WHERE course_id=? AND status='ACTIVE'",
+                    (target.course_id,),
+                ).fetchone()
+            legacy_tree_id = str(previous["id"]) if previous is not None else None
+            legacy_members = self._legacy_members(connection, legacy_tree_id)
             key_to_id: dict[str, str] = {}
             kinds: dict[str, str] = {}
             for module in map_draft.modules:
                 key_to_id[module.key] = self._node_id(target.key, module.key)
                 kinds[module.key] = "COMPOSITE"
             for node in map_draft.nodes:
-                key_to_id[node.key] = self._node_id(target.key, node.key)
+                exact = [
+                    item
+                    for item in legacy_members
+                    if item["kind"] == "ATOMIC"
+                    and item["course_id"] == target.course_id
+                    and item["owner_user_id"] == owner
+                    and item["status"] == status
+                    and item["normalized_title"] == self._normalized_title(node.title)
+                    and item["evidence_ids"] == set(node.evidence_ids)
+                ]
+                key_to_id[node.key] = (
+                    str(exact[0]["node_id"])
+                    if len(exact) == 1
+                    else self._node_id(target.key, node.key)
+                )
                 kinds[node.key] = "ATOMIC"
             node_rows: dict[str, sqlite3.Row] = {}
             spec_versions: dict[str, int] = {}
@@ -3320,28 +3710,24 @@ class AutoKnowledgeMapService:
                             "A frozen source citation is no longer active for this node.",
                         )
 
-            previous = None
-            if target.kind != "AUTO_COURSE":
-                previous = connection.execute(
-                    "SELECT id FROM knowledge_tree_versions WHERE workspace_id=? "
-                    "AND tree_kind='PERSONALIZED' AND status='ACTIVE'",
-                    (target.workspace_id,),
-                ).fetchone()
             memberships: list[TreeMembershipInput] = []
             prerequisites: set[tuple[str, str]] = set()
-            base_tree_id = (
-                current.base_tree_version_id
+            copy_base_tree_id = (
+                current.base_tree_version_id if target.kind == "SUPPLEMENT" else None
+            )
+            lineage_base_tree_id = (
+                copy_base_tree_id
                 if target.kind == "SUPPLEMENT"
-                else (str(previous["id"]) if previous is not None else None)
+                else legacy_tree_id
             )
             sibling_counts: dict[str | None, int] = defaultdict(int)
             membership_index: dict[str, int] = {}
-            if target.kind != "AUTO_COURSE" and base_tree_id is not None:
+            if copy_base_tree_id is not None:
                 for row in connection.execute(
                     "SELECT node_id,parent_node_id,ordinal,teaching_spec_version "
                     "FROM knowledge_tree_memberships WHERE tree_version_id=? "
                     "ORDER BY COALESCE(parent_node_id,''),ordinal,node_id",
-                    (base_tree_id,),
+                    (copy_base_tree_id,),
                 ):
                     membership_index[str(row["node_id"])] = len(memberships)
                     memberships.append(
@@ -3363,7 +3749,7 @@ class AutoKnowledgeMapService:
                     for row in connection.execute(
                         "SELECT node_id,prerequisite_node_id FROM knowledge_prerequisite_edges "
                         "WHERE tree_version_id=?",
-                        (base_tree_id,),
+                        (copy_base_tree_id,),
                     )
                 )
             ordered = [*map_draft.modules, *map_draft.nodes]
@@ -3399,6 +3785,12 @@ class AutoKnowledgeMapService:
                 for prerequisite in node.prerequisite_keys:
                     prerequisites.add((key_to_id[node.key], key_to_id[prerequisite]))
             KnowledgeService._validate_graph(node_rows, memberships, prerequisites)  # noqa: SLF001
+            compact_mapping = self._compact_mapping(
+                legacy_members,
+                map_draft,
+                key_to_id,
+                {str(member.node_id) for member in memberships},
+            )
             if target.kind == "AUTO_COURSE":
                 version = int(
                     connection.execute(
@@ -3432,6 +3824,7 @@ class AutoKnowledgeMapService:
                 "members": [member.model_dump() for member in memberships],
                 "prerequisites": sorted(prerequisites),
                 "teaching_specs": specs.model_dump(),
+                "legacy_mapping": compact_mapping,
             }
             connection.execute(
                 "INSERT INTO knowledge_tree_versions("
@@ -3448,7 +3841,7 @@ class AutoKnowledgeMapService:
                     map_draft.title,
                     "AI整理 · 自动校验，未冒充人工审核",
                     digest(tree_content),
-                    base_tree_id or (previous["id"] if previous is not None else None),
+                    lineage_base_tree_id,
                     job["corpus_fingerprint"],
                 ),
             )
@@ -3471,6 +3864,109 @@ class AutoKnowledgeMapService:
                     "tree_version_id,node_id,prerequisite_node_id) VALUES(?,?,?)",
                     (tree_id, node_id, prerequisite_id),
                 )
+            if legacy_tree_id is not None:
+                for mapping in compact_mapping:
+                    mapping_id = "compact-map-" + digest(
+                        [tree_id, legacy_tree_id, mapping["legacy_node_id"]]
+                    )[:28]
+                    connection.execute(
+                        "INSERT INTO compact_node_mappings("
+                        "id,compact_tree_version_id,compact_node_id,legacy_tree_version_id,"
+                        "legacy_node_id,relation,shared_evidence_count) VALUES(?,?,?,?,?,?,?)",
+                        (
+                            mapping_id,
+                            tree_id,
+                            mapping["compact_node_id"],
+                            legacy_tree_id,
+                            mapping["legacy_node_id"],
+                            mapping["relation"],
+                            mapping["shared_evidence_count"],
+                        ),
+                    )
+                if len(legacy_members) > MAX_EFFECTIVE_COURSE_NODES:
+                    mapped = [
+                        item for item in compact_mapping if item["relation"] != "UNMAPPED"
+                    ]
+                    connection.execute(
+                        "INSERT INTO compact_tree_receipts("
+                        "compact_tree_version_id,legacy_tree_version_id,legacy_member_count,"
+                        "compact_member_count,exact_node_reuse_count,mapped_legacy_count,"
+                        "unmapped_legacy_count,source_coverage_json) VALUES(?,?,?,?,?,?,?,?)",
+                        (
+                            tree_id,
+                            legacy_tree_id,
+                            len(legacy_members),
+                            len(memberships),
+                            sum(item["relation"] == "EXACT" for item in compact_mapping),
+                            len(mapped),
+                            len(compact_mapping) - len(mapped),
+                            canonical_json(
+                                {
+                                    "frozen_source_count": len(evidence),
+                                    "legacy_evidence_count": len(
+                                        {
+                                            evidence_id
+                                            for item in legacy_members
+                                            for evidence_id in item["evidence_ids"]
+                                        }
+                                    ),
+                                    "mapped_legacy_evidence_count": len(
+                                        {
+                                            evidence_id
+                                            for item in legacy_members
+                                            if any(
+                                                mapping["legacy_node_id"] == item["node_id"]
+                                                and mapping["relation"] != "UNMAPPED"
+                                                for mapping in compact_mapping
+                                            )
+                                            for evidence_id in item["evidence_ids"]
+                                        }
+                                    ),
+                                }
+                            ),
+                        ),
+                    )
+                workspace_rows = (
+                    connection.execute(
+                        "SELECT id FROM learning_workspaces WHERE course_id=?",
+                        (target.course_id,),
+                    ).fetchall()
+                    if target.kind == "AUTO_COURSE"
+                    else [{"id": target.workspace_id}]
+                )
+                for workspace in workspace_rows:
+                    workspace_id = str(workspace["id"])
+                    for compact_node_id in sorted(
+                        {
+                            str(item["compact_node_id"])
+                            for item in compact_mapping
+                            if item["compact_node_id"] is not None
+                        }
+                    ):
+                        legacy_ids = [
+                            str(item["legacy_node_id"])
+                            for item in compact_mapping
+                            if item["compact_node_id"] == compact_node_id
+                        ]
+                        placeholders = ",".join("?" for _ in legacy_ids)
+                        pair = connection.execute(
+                            "SELECT id,bound_node_id FROM learning_pairs WHERE workspace_id=? "
+                            f"AND bound_node_id IN ({placeholders}) "
+                            "ORDER BY updated_at DESC,id DESC LIMIT 1",
+                            (workspace_id, *legacy_ids),
+                        ).fetchone()
+                        if pair is not None:
+                            connection.execute(
+                                "INSERT INTO compact_pair_selections("
+                                "workspace_id,compact_node_id,primary_pair_id,"
+                                "selected_from_legacy_node_id) VALUES(?,?,?,?)",
+                                (
+                                    workspace_id,
+                                    compact_node_id,
+                                    pair["id"],
+                                    pair["bound_node_id"],
+                                ),
+                            )
             if target.kind == "AUTO_COURSE":
                 connection.execute(
                     "INSERT INTO auto_course_tree_activations("
@@ -3774,6 +4270,8 @@ class AutoKnowledgeMapService:
             map_draft, specs, model_calls = self.generator.generate(
                 job_id=str(job["id"]),
                 workspace_id=workspace_id,
+                target_kind=str(job["target_kind"]),
+                base_tree_version_id=current.base_tree_version_id,
                 course=dict(course),
                 evidence=evidence,
                 heartbeat=lambda: self._renew(str(job["id"]), worker_id),

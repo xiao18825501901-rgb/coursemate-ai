@@ -39,6 +39,8 @@ class FakeGenerator:
         *,
         job_id: str,
         workspace_id: str,
+        target_kind: str,
+        base_tree_version_id: str | None,
         course: dict[str, Any],
         evidence: list[dict[str, Any]],
         heartbeat=None,
@@ -114,6 +116,7 @@ class RecordingLearning:
                 "operation": operation,
                 "schema": schema.__name__,
                 "context_size": len(serialized),
+                "context_keys": sorted(context),
                 "instructions": kwargs["instructions"],
                 "max_output_tokens": kwargs.get("max_output_tokens"),
             }
@@ -1038,11 +1041,17 @@ def test_existing_private_tree_stays_active_until_incremental_replacement_is_rea
             "WHERE tree_version_id=? AND node_id='legacy-private-node'",
             (active["id"],),
         ).fetchone()[0]
+        lineage = connection.execute(
+            "SELECT relation FROM compact_node_mappings "
+            "WHERE compact_tree_version_id=? AND legacy_node_id='legacy-private-node'",
+            (active["id"],),
+        ).fetchone()
     assert old["status"] == "RETIRED"
     assert active["id"] != "legacy-private-tree"
     assert active["base_tree_version_id"] == "legacy-private-tree"
     assert old_node_count == 1
-    assert old_node_in_replacement == 1
+    assert old_node_in_replacement == 0
+    assert lineage["relation"] == "UNMAPPED"
 
 
 def test_upload_event_respects_quiet_window_and_status_get_only_reads(tmp_path: Path) -> None:
@@ -1282,6 +1291,8 @@ def test_complete_source_is_segmented_without_truncation_or_oversize_single_call
     _map, _specs, dispatched = restarted.generator.generate(
         job_id=str(job["id"]),
         workspace_id="workspace-a",
+        target_kind=str(job["target_kind"]),
+        base_tree_version_id=None,
         course=dict(course),
         evidence=restarted._evidence(job),
     )
@@ -1334,6 +1345,219 @@ def test_many_source_concepts_are_compacted_before_teaching_specs(tmp_path: Path
     assert len(
         [item for item in learning.calls if item["schema"] == "AutoKnowledgeSpecSetDraft"]
     ) == 5
+
+
+def _install_over_limit_private_tree(
+    database: Database,
+    *,
+    tree_id: str,
+    evidence_id: str,
+    member_count: int = 51,
+) -> None:
+    """Install a pre-schema-56 tree without weakening the final test database."""
+
+    migration = (
+        Path(__file__).parents[1] / "migrations" / "056_compact_knowledge_tree_budget.sql"
+    ).read_text(encoding="utf-8")
+    with database.connect() as connection:
+        connection.executescript(
+            "DROP TRIGGER IF EXISTS limit_tree_membership_insert;"
+            "DROP TRIGGER IF EXISTS limit_tree_status_activation;"
+        )
+        connection.execute(
+            "INSERT INTO knowledge_tree_versions("
+            "id,course_id,workspace_id,owner_user_id,tree_kind,version,status,title,"
+            "change_reason,content_hash) VALUES(?,?,?,?,? ,1,'DRAFT',?,?,?)",
+            (
+                tree_id,
+                "private-course",
+                "workspace-a",
+                "owner-a",
+                "PERSONALIZED",
+                "Historical detailed tree",
+                "Predates compact-tree policy",
+                "d" * 64,
+            ),
+        )
+        for index in range(member_count):
+            node_id = f"legacy-node-{index:03d}"
+            connection.execute(
+                "INSERT INTO knowledge_nodes(id,course_id,owner_user_id,title,description,"
+                "major,kind,status) VALUES(?,?,?, ?,?,'OTHER','ATOMIC','PRIVATE')",
+                (
+                    node_id,
+                    "private-course",
+                    "owner-a",
+                    f"Legacy concept {index:03d}",
+                    f"Grounded historical concept {index:03d}",
+                ),
+            )
+            spec_content = json.dumps(
+                [
+                    {
+                        "item_id": f"legacy-required-{index:03d}",
+                        "requirement": "REQUIRED",
+                        "objective": f"Explain legacy concept {index:03d}",
+                        "acceptance": "Explain the grounded concept accurately",
+                        "evidence_ids": [evidence_id],
+                    }
+                ],
+                sort_keys=True,
+            )
+            connection.execute(
+                "INSERT INTO teaching_specs(node_id,version,content_json,content_hash) "
+                "VALUES(?,1,?,?)",
+                (node_id, spec_content, hashlib.sha256(spec_content.encode()).hexdigest()),
+            )
+            connection.execute(
+                "UPDATE teaching_spec_metadata SET status='PRIVATE_ACTIVE' "
+                "WHERE node_id=? AND version=1",
+                (node_id,),
+            )
+            connection.execute(
+                "INSERT INTO knowledge_tree_memberships("
+                "tree_version_id,node_id,parent_node_id,ordinal,teaching_spec_version) "
+                "VALUES(?,?,NULL,?,1)",
+                (tree_id, node_id, index),
+            )
+            connection.execute(
+                "INSERT INTO material_evidence("
+                "id,node_id,document_version_id,chunk_id,owner_user_id,source_scope,"
+                "locator_type,locator_value,status) "
+                "SELECT ?,?,version.id,?,'owner-a','WORKSPACE_PRIVATE','line','1','ACTIVE' "
+                "FROM document_versions AS version WHERE version.document_id='legacy-doc'",
+                (f"legacy-evidence-{index:03d}", node_id, evidence_id),
+            )
+        connection.execute(
+            "UPDATE knowledge_tree_versions SET status='ACTIVE' WHERE id=?", (tree_id,)
+        )
+        connection.executescript(migration)
+
+
+def test_over_limit_private_tree_reuses_grounded_inventory_without_source_shard_calls(
+    tmp_path: Path,
+) -> None:
+    settings = settings_at(tmp_path)
+    database = Database(settings)
+    database.initialize()
+    private_workspace(database)
+    ready_document(
+        database,
+        document_id="legacy-doc",
+        chunk_id="legacy-chunk",
+        content="One source section grounds the historical detailed concepts.",
+    )
+    _install_over_limit_private_tree(
+        database, tree_id="legacy-over-limit", evidence_id="legacy-chunk"
+    )
+    learning = RecordingLearning()
+    service = AutoKnowledgeMapService(database, settings, learning)  # type: ignore[arg-type]
+    assert service.reconcile(force=True)["QUEUED"] == 1
+
+    completed = service.run_once("compact-legacy-generator-worker")
+
+    assert completed is not None and completed["status"] == "READY"
+    assert learning.calls
+    assert all("frozen_source_segments" not in call["context_keys"] for call in learning.calls)
+    assert any("provisional_concepts" in call["context_keys"] for call in learning.calls)
+
+
+def test_over_limit_private_tree_is_replaced_with_lineage_not_copied(
+    tmp_path: Path,
+) -> None:
+    database, service, _generator = service_at(tmp_path)
+    ready_document(
+        database,
+        document_id="legacy-doc",
+        chunk_id="legacy-chunk",
+        content="Historical material that stays available after compaction.",
+    )
+    _install_over_limit_private_tree(
+        database, tree_id="legacy-over-limit", evidence_id="legacy-chunk"
+    )
+    assert service.reconcile(force=True)["QUEUED"] == 1
+    completed = service.run_once("legacy-compaction-worker")
+
+    assert completed is not None and completed["status"] == "READY"
+    with database.connect() as connection:
+        tree = connection.execute(
+            "SELECT id,base_tree_version_id FROM knowledge_tree_versions "
+            "WHERE workspace_id='workspace-a' AND status='ACTIVE'"
+        ).fetchone()
+        member_count = connection.execute(
+            "SELECT COUNT(*) FROM knowledge_tree_memberships WHERE tree_version_id=?",
+            (tree["id"],),
+        ).fetchone()[0]
+        copied_legacy = connection.execute(
+            "SELECT COUNT(*) FROM knowledge_tree_memberships "
+            "WHERE tree_version_id=? AND node_id LIKE 'legacy-node-%'",
+            (tree["id"],),
+        ).fetchone()[0]
+        mappings = connection.execute(
+            "SELECT COUNT(*) FROM compact_node_mappings WHERE compact_tree_version_id=?",
+            (tree["id"],),
+        ).fetchone()[0]
+        receipt = connection.execute(
+            "SELECT * FROM compact_tree_receipts WHERE compact_tree_version_id=?",
+            (tree["id"],),
+        ).fetchone()
+    assert tree["base_tree_version_id"] == "legacy-over-limit"
+    assert member_count <= 50
+    assert copied_legacy == 0
+    assert mappings == 51
+    assert receipt["legacy_member_count"] == 51
+    assert receipt["compact_member_count"] == member_count
+
+
+def test_existing_target_record_does_not_mask_over_limit_tree_compaction(
+    tmp_path: Path,
+) -> None:
+    database, service, _generator = service_at(tmp_path)
+    ready_document(
+        database,
+        document_id="legacy-doc",
+        chunk_id="legacy-chunk",
+        content="Historical source content remains frozen for compaction.",
+    )
+    _install_over_limit_private_tree(
+        database, tree_id="legacy-over-limit", evidence_id="legacy-chunk"
+    )
+    with database.connect() as connection:
+        target = next(
+            item for item in service._targets(connection) if item.workspace_id == "workspace-a"
+        )
+        source = service._source_state(connection, target)
+        connection.execute(
+            "INSERT INTO auto_knowledge_targets("
+            "target_key,course_id,workspace_id,owner_user_id,target_kind,status,"
+            "corpus_fingerprint,active_tree_version_id,readable_document_count,"
+            "unreadable_document_count,message) VALUES(?,?,?,?,?,'EXISTING_ACTIVE',?,?,1,0,?)",
+            (
+                target.key,
+                target.course_id,
+                target.workspace_id,
+                target.owner_user_id,
+                target.kind,
+                source.fingerprint,
+                "legacy-over-limit",
+                "Historical target record",
+            ),
+        )
+
+    reconciled = service.reconcile(force=True)
+
+    assert reconciled["QUEUED"] == 1
+    with database.connect() as connection:
+        active = connection.execute(
+            "SELECT status FROM knowledge_tree_versions WHERE id='legacy-over-limit'"
+        ).fetchone()
+        target = connection.execute(
+            "SELECT status,active_job_id FROM auto_knowledge_targets "
+            "WHERE workspace_id='workspace-a'"
+        ).fetchone()
+    assert active["status"] == "ACTIVE"
+    assert target["status"] == "QUEUED"
+    assert target["active_job_id"] is not None
 
 def test_real_orchestrator_and_provider_complete_over_fake_http_upstream(
     tmp_path: Path,
@@ -2711,6 +2935,8 @@ def test_safe_validation_failure_uses_one_targeted_repair_and_reuses_stage_contr
     _map, _specs, dispatched = restarted.generator.generate(
         job_id=str(job["id"]),
         workspace_id="workspace-a",
+        target_kind=str(job["target_kind"]),
+        base_tree_version_id=None,
         course=dict(course),
         evidence=restarted._evidence(job),
     )
@@ -3053,6 +3279,8 @@ def test_live_incomplete_response_is_saved_then_repaired_with_larger_bound(
     _map, _specs, dispatched = restarted.generator.generate(
         job_id=str(job["id"]),
         workspace_id="workspace-a",
+        target_kind=str(job["target_kind"]),
+        base_tree_version_id=None,
         course=dict(course),
         evidence=restarted._evidence(job),
     )

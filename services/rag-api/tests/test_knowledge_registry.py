@@ -8,6 +8,7 @@ from test_learning_journey import setup_workspace
 from test_learning_workspace import client_at, join
 
 from app.db import LATEST_V3_SCHEMA_VERSION
+from app.learning.knowledge import KnowledgeService
 
 
 def private_node(
@@ -122,6 +123,77 @@ def test_tree_budget_accepts_50_members_and_rejects_51_in_service_and_database(
                     "VALUES('tree-budget-db',?,NULL,50,1)",
                     (nodes[50]["id"],),
                 )
+
+
+def test_compact_merged_unit_inherits_started_fact_but_not_learned_or_grade(
+    tmp_path: Path,
+) -> None:
+    with client_at(tmp_path) as client:
+        workspace, legacy = setup_workspace(client)
+        first_tree = plan(
+            client,
+            workspace["id"],
+            [{"node_id": legacy["id"], "parent_node_id": None, "ordinal": 0}],
+            operation_id="legacy-tree",
+        )
+        assert first_tree.status_code == 200, first_tree.text
+        taught = client.post(
+            f"/api/learning/workspaces/{workspace['id']}/units",
+            json={
+                "operation_id": "legacy-teaching",
+                "revision": first_tree.json()["revision"],
+                "node_id": legacy["id"],
+            },
+        )
+        assert taught.status_code == 200 and taught.json()["progress"] == "LEARNED"
+        compact = private_node(client, workspace["id"], "Compact merged unit")
+        second_tree = plan(
+            client,
+            workspace["id"],
+            [{"node_id": compact["id"], "parent_node_id": None, "ordinal": 0}],
+            operation_id="compact-tree",
+        )
+        assert second_tree.status_code == 200, second_tree.text
+        database = client.app.state.database
+        with database.connect() as connection:
+            trees = connection.execute(
+                "SELECT id,status FROM knowledge_tree_versions WHERE workspace_id=? "
+                "ORDER BY version",
+                (workspace["id"],),
+            ).fetchall()
+            connection.execute(
+                "INSERT INTO compact_node_mappings("
+                "id,compact_tree_version_id,compact_node_id,legacy_tree_version_id,"
+                "legacy_node_id,relation,shared_evidence_count) VALUES(?,?,?,?,?,'MERGED_INTO',1)",
+                (
+                    "compact-progress-map",
+                    trees[-1]["id"],
+                    compact["id"],
+                    trees[-2]["id"],
+                    legacy["id"],
+                ),
+            )
+            projected = KnowledgeService._atomic_learning(
+                connection, workspace["id"], compact["id"], 1
+            )
+            assessment = KnowledgeService._atomic_assessment(
+                connection, workspace["id"], compact["id"]
+            )
+
+        assert projected["status"] == "LEARNING"
+        assert projected["covered_required"] == 0
+        assert projected["started"] is True
+        assert projected["start_source"].startswith("COMPACT_MAPPING:")
+        assert assessment["status"] == "NOT_ASSESSED"
+        snapshot = client.get(
+            f"/api/learning/workspaces/{workspace['id']}/knowledge"
+        ).json()
+        compact_member = next(
+            item
+            for item in snapshot["personalized_tree"]["members"]
+            if item["node_id"] == compact["id"]
+        )
+        assert compact_member["legacy_node_ids"] == [legacy["id"]]
 
 
 def test_migration_014_backfills_normalized_specs_and_is_repeatable(tmp_path: Path) -> None:

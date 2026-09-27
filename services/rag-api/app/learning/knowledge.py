@@ -95,6 +95,66 @@ def _learning_start_fact(
     return None, None
 
 
+def _mapped_learning_start_fact(
+    connection: sqlite3.Connection,
+    workspace_id: str,
+    compact_node_id: str,
+) -> tuple[str | None, str | None]:
+    """Project only the fact that a learner started a merged legacy unit.
+
+    Coverage and assessment rows deliberately stay attached to their immutable
+    legacy node/spec.  A mapping may therefore turn NOT_STARTED into LEARNING,
+    but can never manufacture LEARNED or a grade for the compact unit.
+    """
+
+    mapping_scope = (
+        "FROM compact_node_mappings AS mapping "
+        "JOIN knowledge_tree_versions AS compact_tree "
+        "ON compact_tree.id=mapping.compact_tree_version_id "
+        "JOIN learning_workspaces AS workspace ON workspace.id=? "
+        "WHERE mapping.compact_node_id=? AND mapping.relation IN "
+        "('EXACT','MERGED_INTO','RELATED') AND ("
+        "(compact_tree.workspace_id=workspace.id AND compact_tree.status='ACTIVE') OR "
+        "(compact_tree.workspace_id IS NULL AND compact_tree.course_id=workspace.course_id "
+        "AND EXISTS(SELECT 1 FROM auto_course_tree_activations AS activation "
+        "WHERE activation.course_id=compact_tree.course_id "
+        "AND activation.tree_version_id=compact_tree.id AND activation.status='ACTIVE'))"
+        ") "
+    )
+    event = connection.execute(
+        "SELECT start.accepted_at,start.source "
+        + mapping_scope.replace(
+            "FROM compact_node_mappings AS mapping ",
+            "FROM compact_node_mappings AS mapping "
+            "JOIN learning_start_events AS start "
+            "ON start.node_id=mapping.legacy_node_id AND start.workspace_id=? ",
+        )
+        + "ORDER BY start.accepted_at,start.id LIMIT 1",
+        (workspace_id, workspace_id, compact_node_id),
+    ).fetchone()
+    if event is not None:
+        return str(event["accepted_at"]), "COMPACT_MAPPING:" + str(event["source"])
+    legacy = connection.execute(
+        "SELECT journey.id,(SELECT MIN(unit.created_at) FROM teaching_units AS unit "
+        "WHERE unit.journey_id=journey.id) AS first_unit_at "
+        + mapping_scope.replace(
+            "FROM compact_node_mappings AS mapping ",
+            "FROM compact_node_mappings AS mapping "
+            "JOIN learning_journeys AS journey ON journey.node_id=mapping.legacy_node_id "
+            "AND journey.workspace_id=? ",
+        )
+        + "AND (journey.status='LEARNED' "
+        "OR EXISTS(SELECT 1 FROM teaching_units AS unit WHERE unit.journey_id=journey.id) "
+        "OR EXISTS(SELECT 1 FROM learning_coverage AS cov WHERE cov.journey_id=journey.id) "
+        "OR EXISTS(SELECT 1 FROM teaching_delivery_evidence AS ev "
+        "WHERE ev.journey_id=journey.id)) ORDER BY first_unit_at,journey.id LIMIT 1",
+        (workspace_id, workspace_id, compact_node_id),
+    ).fetchone()
+    if legacy is not None:
+        return str(legacy["first_unit_at"] or ""), "COMPACT_MAPPING:LEGACY_JOURNEY"
+    return None, None
+
+
 class KnowledgeService:
     """Course-scoped Registry and immutable tree projections.
 
@@ -507,6 +567,10 @@ class KnowledgeService:
         start_fact_at, start_source = _learning_start_fact(
             connection, workspace_id, node_id, spec_version
         )
+        if start_source is None:
+            start_fact_at, start_source = _mapped_learning_start_fact(
+                connection, workspace_id, node_id
+            )
         if status == "NOT_STARTED" and start_source is not None:
             status = "LEARNING"
         return {
@@ -757,6 +821,16 @@ class KnowledgeService:
             for member in memberships
             if member["kind"] == "ATOMIC"
         }
+        legacy_nodes_by_compact: dict[str, list[str]] = defaultdict(list)
+        for mapping in connection.execute(
+            "SELECT compact_node_id,legacy_node_id FROM compact_node_mappings "
+            "WHERE compact_tree_version_id=? AND compact_node_id IS NOT NULL "
+            "ORDER BY compact_node_id,legacy_node_id",
+            (row["id"],),
+        ):
+            legacy_nodes_by_compact[str(mapping["compact_node_id"])].append(
+                str(mapping["legacy_node_id"])
+            )
         children: dict[str, set[str]] = defaultdict(set)
         for member in memberships:
             if member["parent_node_id"] is not None:
@@ -817,6 +891,7 @@ class KnowledgeService:
                 "description": member["description"],
                 "major": member["major"],
                 "kind": member["kind"],
+                "legacy_node_ids": legacy_nodes_by_compact.get(member["node_id"], []),
                 "source": (
                     "PRIVATE"
                     if member["owner_user_id"]
