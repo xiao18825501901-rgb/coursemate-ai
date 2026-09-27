@@ -234,7 +234,7 @@ export const TOKEN_STEPS = [
 
 export const TOKEN_WARNING =
   "为了保护你的 Canvas 凭据，请不要把这个 Token 粘贴到 CourseJesus 网页。" +
-  "本地导入工具只会在当前进程内存中使用 Token，关闭工具后不会保留。";
+  "本地导入工具使用隐藏输入，并且只会在当前进程内存中使用 Token，关闭工具后不会保留。";
 
 export const BRIDGE_RELEASE_MANIFEST_PATH = "/downloads/canvas-bridge/manifest.json";
 

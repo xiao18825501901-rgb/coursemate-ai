@@ -10,7 +10,7 @@ So there are two routes, and they are not interchangeable:
 | | OAuth | Local bridge |
 |---|---|---|
 | Who it is for | every user, in production | a school with no Developer Key yet; the owner's own migration; development |
-| Where the credential lives | the school's token, encrypted by this service under `CANVAS_CREDENTIAL_KEY`, bound to a connection | **only on the user's own machine** — hidden input, then the OS credential store |
+| Where the credential lives | the school's token, encrypted by this service under `CANVAS_CREDENTIAL_KEY`, bound to a connection | **only on the user's own machine** — hidden input and process memory until the current run ends |
 | What CourseJesus receives | the authorisation code, then API responses through its own adapter | course metadata, file bytes, receipts |
 | Where the import runs | this service's worker | the user's machine downloads from Canvas, then uploads here |
 | Entry in the UI | the primary `连接 Canvas` button | behind `无法连接？查看本地 Token 导入方式` |
@@ -31,7 +31,7 @@ four places:
    disappeared. Its negative control is a planted `<input name="canvas_token" />` that it catches.
 4. **The tutorial says so.** The Account → Settings → Approved Integrations → + New Access Token steps
    are shown, followed by: *"为了保护你的 Canvas 凭据，请不要把这个 Token 粘贴到 CourseJesus 网页。
-   本地导入工具会通过隐藏输入读取 Token，并保存在你电脑的系统凭据库里。"*
+   本地导入工具会通过隐藏输入读取 Token，只在当前进程内存中使用，关闭后不会保留。"*
 
 ## The flow
 
@@ -42,9 +42,9 @@ open session ──────────────────────�
   POST /local-sessions                 │
   { institution_key }                  │
   ◄─ { sessionId, code, expiresAt }    │
-show: canvas-study-assistant bridge --code <code>
+show: portable EXE + opaque ticket
                                        │ hidden input: PAT
-                                       │ → OS credential store
+                                       │ → current-process memory only
                                        ├─ GET /api/v1/courses ──────────►
 claim ────────────────────────────────►│  (active + completed)
   POST /local-sessions/claim           │

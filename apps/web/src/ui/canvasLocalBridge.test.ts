@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  BRIDGE_STEPS,
   bridgeCommand,
   institutionForAddress,
   localBridgeCapability,
@@ -109,7 +110,11 @@ describe("local bridge client", () => {
   });
 
   it("gives the user the command, the steps and the warning the task requires", () => {
-    expect(bridgeCommand("abc123")).toContain("--code abc123");
+    expect(bridgeCommand("abc123")).toBe(
+      'CourseJesus-Canvas-Bridge.exe --ticket "abc123"',
+    );
+    expect(bridgeCommand("abc123")).not.toContain("--code");
+    expect(BRIDGE_STEPS.join(" ")).toContain("不需要安装 Python、WSL 或修改 PATH");
     expect(TOKEN_STEPS.join(" ")).toContain("Approved Integrations");
     expect(TOKEN_STEPS.join(" ")).toContain("New Access Token");
     expect(TOKEN_WARNING).toContain("不要把这个 Token 粘贴到 CourseJesus 网页");
