@@ -42,6 +42,15 @@ class StorageBackend(Protocol):
         content_type: str,
     ) -> StoredObject: ...
 
+    def put_path(
+        self,
+        key: str,
+        path: Path,
+        *,
+        expected_sha256: str,
+        content_type: str,
+    ) -> StoredObject: ...
+
     def read_range(self, key: str, *, start: int, end: int) -> bytes: ...
 
 
@@ -122,6 +131,68 @@ class LocalStorageBackend:
             stream.seek(start)
             return stream.read(end - start + 1)
 
+    def put_path(
+        self,
+        key: str,
+        path: Path,
+        *,
+        expected_sha256: str,
+        content_type: str,
+    ) -> StoredObject:
+        digest = hashlib.sha256()
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != expected_sha256:
+            raise StorageIntegrityError("File SHA-256 does not match the trusted manifest")
+        destination = self._path(key)
+        if destination.exists():
+            return self.verify_object(
+                key,
+                expected_size=path.stat().st_size,
+                expected_sha256=expected_sha256,
+                content_type=content_type,
+            )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(f".{destination.name}.{uuid4().hex}.part")
+        try:
+            with path.open("rb") as source, temporary.open("xb") as target:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    target.write(chunk)
+                target.flush()
+                os.fsync(target.fileno())
+            temporary.replace(destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return self.verify_object(
+            key,
+            expected_size=path.stat().st_size,
+            expected_sha256=expected_sha256,
+            content_type=content_type,
+        )
+
+    def verify_object(
+        self,
+        key: str,
+        *,
+        expected_size: int,
+        expected_sha256: str,
+        content_type: str,
+    ) -> StoredObject:
+        path = self._path(key)
+        digest = hashlib.sha256()
+        observed = 0
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                observed += len(chunk)
+                digest.update(chunk)
+        if observed != expected_size or digest.hexdigest() != expected_sha256:
+            raise StorageIntegrityError("Stored file does not match the trusted manifest")
+        return StoredObject(
+            "local", None, _safe_key(key), None, observed, expected_sha256,
+            None, None, content_type,
+        )
+
 
 class AliyunOssStorageBackend:
     """Small OSS V2 adapter whose integrity boundary is SHA-256, never ETag."""
@@ -149,17 +220,28 @@ class AliyunOssStorageBackend:
             raise StorageIntegrityError("Content SHA-256 does not match the trusted manifest")
         from alibabacloud_oss_v2 import PutObjectRequest
 
-        self.client.put_object(
-            PutObjectRequest(
-                bucket=self.bucket,
-                key=self._key(key),
-                body=content,
-                content_length=len(content),
-                content_type=content_type,
-                forbid_overwrite=True,
-                metadata={"coursemate-sha256": expected_sha256},
+        try:
+            self.client.put_object(
+                PutObjectRequest(
+                    bucket=self.bucket,
+                    key=self._key(key),
+                    body=content,
+                    content_length=len(content),
+                    content_type=content_type,
+                    forbid_overwrite=True,
+                    metadata={"coursemate-sha256": expected_sha256},
+                )
             )
-        )
+        except Exception as upload_error:
+            try:
+                return self.verify_object(
+                    key,
+                    expected_size=len(content),
+                    expected_sha256=expected_sha256,
+                    content_type=content_type,
+                )
+            except Exception:
+                raise upload_error
         return self.verify_object(
             key,
             expected_size=len(content),
@@ -212,6 +294,53 @@ class AliyunOssStorageBackend:
             sha256=digest.hexdigest(),
             crc64=getattr(head, "hash_crc64", None),
             etag=getattr(head, "etag", None),
+            content_type=content_type,
+        )
+
+    def put_path(
+        self,
+        key: str,
+        path: Path,
+        *,
+        expected_sha256: str,
+        content_type: str,
+    ) -> StoredObject:
+        digest = hashlib.sha256()
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != expected_sha256:
+            raise StorageIntegrityError("File SHA-256 does not match the trusted manifest")
+        from alibabacloud_oss_v2 import PutObjectRequest
+
+        size = path.stat().st_size
+        try:
+            with path.open("rb") as source:
+                self.client.put_object(
+                    PutObjectRequest(
+                        bucket=self.bucket,
+                        key=self._key(key),
+                        body=source,
+                        content_length=size,
+                        content_type=content_type,
+                        forbid_overwrite=True,
+                        metadata={"coursemate-sha256": expected_sha256},
+                    )
+                )
+        except Exception as upload_error:
+            try:
+                return self.verify_object(
+                    key,
+                    expected_size=size,
+                    expected_sha256=expected_sha256,
+                    content_type=content_type,
+                )
+            except Exception:
+                raise upload_error
+        return self.verify_object(
+            key,
+            expected_size=size,
+            expected_sha256=expected_sha256,
             content_type=content_type,
         )
 

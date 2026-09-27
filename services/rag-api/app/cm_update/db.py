@@ -174,6 +174,18 @@ CREATE TABLE IF NOT EXISTS cmui_node_starts (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS cmui_pairs_node_binding
 ON cmui_pairs(owner, course, bound_node) WHERE bound_node IS NOT NULL;
+CREATE TABLE IF NOT EXISTS cmui_compact_pair_links (
+ compact_node TEXT NOT NULL,
+ legacy_node TEXT NOT NULL,
+ pair TEXT NOT NULL REFERENCES cmui_pairs(id) ON DELETE CASCADE,
+ owner TEXT NOT NULL REFERENCES cmui_users(id),
+ course TEXT NOT NULL,
+ is_primary INTEGER NOT NULL DEFAULT 0 CHECK(is_primary IN (0,1)),
+ created_at TEXT NOT NULL,
+ PRIMARY KEY(compact_node,pair)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS cmui_one_compact_primary_pair
+ON cmui_compact_pair_links(owner,course,compact_node) WHERE is_primary=1;
 CREATE TABLE IF NOT EXISTS cmui_classifications (
   course TEXT PRIMARY KEY,
   status TEXT NOT NULL CHECK(status IN

@@ -1839,6 +1839,26 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         with db.connect(True) as c:
             pair=c.execute('SELECT * FROM cmui_pairs WHERE owner=? AND course=? AND bound_node=?',(user['id'],cid,node_id)).fetchone()
             if pair is None:
+                legacy_ids=[str(value) for value in (node.get('legacy_node_ids') or []) if value]
+                if legacy_ids:
+                    placeholders=','.join('?' for _ in legacy_ids)
+                    historical=c.execute(
+                        f'SELECT * FROM cmui_pairs WHERE owner=? AND course=? AND bound_node IN ({placeholders}) ORDER BY updated_at DESC,id DESC',
+                        (user['id'],cid,*legacy_ids),
+                    ).fetchall()
+                    if historical:
+                        pair=historical[0]
+                        for index,item in enumerate(historical):
+                            c.execute(
+                                'INSERT OR IGNORE INTO cmui_compact_pair_links(compact_node,legacy_node,pair,owner,course,is_primary,created_at) VALUES(?,?,?,?,?,?,?)',
+                                (node_id,item['bound_node'],item['id'],user['id'],cid,1 if index==0 else 0,now()),
+                            )
+                        c.execute(
+                            'UPDATE cmui_pairs SET bound_node=?,updated_at=? WHERE id=?',
+                            (node_id,now(),pair['id']),
+                        )
+                        pair=c.execute('SELECT * FROM cmui_pairs WHERE id=?',(pair['id'],)).fetchone()
+            if pair is None:
                 pid=uid('pair_'); conv=uid('conv_')
                 c.execute('INSERT INTO cmui_conversations(id,owner,course,lane,title,created_at,updated_at) VALUES(?,?,?,?,?,?,?)',
                     (conv,user['id'],cid,'teach',node['title'][:100],now(),now()))

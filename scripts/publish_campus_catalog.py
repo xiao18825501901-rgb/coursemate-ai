@@ -520,16 +520,15 @@ def import_bundle(
                     continue
 
                 source = _safe_bundle_file(bundle_dir, item)
-                content = source.read_bytes()
                 status = "INDEXED"
                 error_code = None
                 existing_document = False
                 try:
-                    accepted = ingestion.queue_document(
+                    accepted = ingestion.queue_document_path(
                         course_id=target,
                         filename=str(item["filename"]),
                         media_type=_media_type(str(item["filename"])),
-                        content=content,
+                        source_path=source,
                         is_admin=True,
                     )
                     document_id = str(accepted.document.id)

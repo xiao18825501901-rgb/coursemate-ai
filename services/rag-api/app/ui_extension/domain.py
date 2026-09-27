@@ -25,7 +25,9 @@ import json
 import sqlite3
 from contextvars import ContextVar
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
+from urllib.parse import quote
 from uuid import uuid4
 
 import httpx
@@ -696,6 +698,69 @@ class V3DomainAdapter:
         if str(payload['id']) not in {item['id'] for item in self._file_rows(course_id,subject)}:
             raise ApiError(404,'DOCUMENT_NOT_FOUND','Document not found in this course.')
         version = current_document_version(self.database, str(payload["id"]), subject)
+        stored = str(version["stored_path"])
+        if not Path(stored).is_file() and self.ingestion.has_stored_object(
+            stored, int(version["byte_size"])
+        ):
+            size = int(version["byte_size"])
+            header = str(payload.get("range") or "")
+            start, end, status = 0, size - 1, 200
+            if header:
+                if not header.startswith("bytes=") or "," in header:
+                    return Response(
+                        status_code=416,
+                        headers={"Content-Range": f"bytes */{size}"},
+                    )
+                first, separator, last = header[6:].partition("-")
+                try:
+                    if first:
+                        start = int(first)
+                        end = min(int(last), size - 1) if separator and last else size - 1
+                    elif separator and last and int(last) > 0:
+                        start = max(size - int(last), 0)
+                    else:
+                        raise ValueError
+                except ValueError:
+                    return Response(
+                        status_code=416,
+                        headers={"Content-Range": f"bytes */{size}"},
+                    )
+                if start < 0 or start >= size or end < start:
+                    return Response(
+                        status_code=416,
+                        headers={"Content-Range": f"bytes */{size}"},
+                    )
+                status = 206
+            content = self.ingestion.read_stored_range(stored, start, end)
+            if content is None:
+                raise ApiError(410, "ORIGINAL_UNAVAILABLE", "The original file is unavailable.")
+            media = {
+                ".pdf": "application/pdf",
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".gif": "image/gif",
+                ".txt": "text/plain; charset=utf-8",
+                ".md": "text/plain; charset=utf-8",
+            }
+            inline_ok = version["extension"] in media
+            disposition = "attachment" if payload.get("download") or not inline_ok else "inline"
+            headers = {
+                "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
+                "Accept-Ranges": "bytes",
+                "Content-Disposition": (
+                    f"{disposition}; filename*=UTF-8''{quote(str(version['filename']))}"
+                ),
+            }
+            if status == 206:
+                headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+            return Response(
+                content=content,
+                status_code=status,
+                media_type=media.get(version["extension"], "application/octet-stream"),
+                headers=headers,
+            )
         path = original_path(self.database, version)
         if path is None:
             raise ApiError(410, "ORIGINAL_UNAVAILABLE", "The original file is unavailable.")
@@ -1516,6 +1581,7 @@ class V3DomainAdapter:
                     "active_session": assessment.get("active_session"),
                     "assessment": assessment,
                     "learning": learning,
+                    "legacy_node_ids": member.get("legacy_node_ids") or [],
                 }
             )
         # Registry entries that belong to the caller but are not members of the

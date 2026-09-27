@@ -124,11 +124,15 @@ def create_app(
             )
 
     application = FastAPI(title=f"{BRAND.name} RAG API", version="0.1.0")
-    application.state.ingestion_service = IngestionService(
+    ingestion_service = IngestionService(
         database,
         resolved_settings,
         embedding_provider,
     )
+    application.state.ingestion_service = ingestion_service
+    database.storage_path_resolver = ingestion_service.ensure_stored_path
+    database.storage_object_probe = ingestion_service.has_stored_object
+    database.storage_range_resolver = ingestion_service.read_stored_range
     application.state.database = database
     # One shared semantic-decision layer for the whole app (single gateway, single
     # service). Shadow is the default runtime mode; with no TypeSafe credential the

@@ -1,9 +1,10 @@
 import sqlite3
 from pathlib import Path
 from typing import Annotated, Any, Literal, cast
+from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth import AuthenticatedUser, require_user
@@ -44,6 +45,7 @@ from app.learning.workspaces import (
     join_course,
     original_path,
     sized_file_path,
+    stored_file_available,
     valid_preview_artifact,
     workspace_for,
 )
@@ -123,6 +125,85 @@ def _source_file_response(
     )
 
 
+def _remote_source_response(
+    database: Database,
+    version: sqlite3.Row,
+    request: Request,
+    download: bool,
+) -> Response | None:
+    """Serve one immutable OSS range without filling the local cache."""
+
+    resolver = database.storage_range_resolver
+    if resolver is None or not stored_file_available(
+        database, version["stored_path"], version["byte_size"]
+    ):
+        return None
+    size = int(version["byte_size"])
+    range_header = request.headers.get("range")
+    start, end, status = 0, max(size - 1, 0), 200
+    if range_header:
+        if not range_header.startswith("bytes=") or "," in range_header:
+            return Response(
+                status_code=416,
+                headers={**PRIVATE_FILE_HEADERS, "Content-Range": f"bytes */{size}"},
+            )
+        first, separator, last = range_header[6:].partition("-")
+        try:
+            if first:
+                start = int(first)
+                end = min(int(last), size - 1) if separator and last else size - 1
+            elif separator and last:
+                suffix = int(last)
+                if suffix <= 0:
+                    raise ValueError
+                start = max(size - suffix, 0)
+                end = size - 1
+            else:
+                raise ValueError
+        except ValueError:
+            return Response(
+                status_code=416,
+                headers={**PRIVATE_FILE_HEADERS, "Content-Range": f"bytes */{size}"},
+            )
+        if start < 0 or start >= size or end < start:
+            return Response(
+                status_code=416,
+                headers={**PRIVATE_FILE_HEADERS, "Content-Range": f"bytes */{size}"},
+            )
+        status = 206
+    length = max(end - start + 1, 0)
+    content = b"" if request.method == "HEAD" or length == 0 else resolver(
+        str(version["stored_path"]), start, end
+    )
+    if content is None:
+        return None
+    media = {
+        ".pdf": "application/pdf",
+        ".txt": "text/plain; charset=utf-8",
+        ".md": "text/plain; charset=utf-8",
+        ".markdown": "text/plain; charset=utf-8",
+        **IMAGE_MEDIA_TYPES,
+    }
+    supported = version["extension"] in media
+    disposition = "attachment" if download or not supported else "inline"
+    headers = {
+        **PRIVATE_FILE_HEADERS,
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(length),
+        "Content-Disposition": (
+            f"{disposition}; filename*=UTF-8''{quote(str(version['filename']))}"
+        ),
+    }
+    if status == 206:
+        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+    return Response(
+        content=content,
+        status_code=status,
+        media_type=media.get(version["extension"], "application/octet-stream"),
+        headers=headers,
+    )
+
+
 def _version_preview(version: sqlite3.Row, request: Request, user: User) -> object:
     database = request.app.state.database
     path = original_path(database, version)
@@ -156,7 +237,9 @@ def _version_preview(version: sqlite3.Row, request: Request, user: User) -> obje
 
 
 def _version_details(database: Database, version: sqlite3.Row) -> dict[str, object]:
-    source_available = original_path(database, version) is not None
+    source_available = stored_file_available(
+        database, version["stored_path"], version["byte_size"]
+    )
     artifact = valid_preview_artifact(database, version["id"])
     preview = _preview_descriptor(
         version["extension"],
@@ -335,8 +418,7 @@ def documents(
         )
         descriptor = _preview_descriptor(
             row["extension"],
-            sized_file_path(database, row["stored_path"], row["byte_size"])
-            is not None,
+            stored_file_available(database, row["stored_path"], row["byte_size"]),
             artifact_id,
             row["preview_artifact_id"] is not None,
         )
@@ -442,9 +524,13 @@ def version_content(
     request: Request,
     user: User,
     download: bool = False,
-) -> FileResponse:
+) -> Response:
     database = request.app.state.database
     version = document_version_for(database, version_id, user.user_id)
+    if not Path(version["stored_path"]).is_file():
+        remote = _remote_source_response(database, version, request, download)
+        if remote is not None:
+            return remote
     path = original_path(database, version)
     if path is None:
         raise ApiError(410, "ORIGINAL_UNAVAILABLE", "The original file is unavailable.")
@@ -480,9 +566,13 @@ def preview(document_id: str, request: Request, user: User) -> object:
 
 
 @router.api_route("/documents/{document_id}/content", methods=["GET", "HEAD"])
-def content(document_id: str, request: Request, user: User, download: bool = False) -> FileResponse:
+def content(document_id: str, request: Request, user: User, download: bool = False) -> Response:
     database = request.app.state.database
     version = current_document_version(database, document_id, user.user_id)
+    if not Path(version["stored_path"]).is_file():
+        remote = _remote_source_response(database, version, request, download)
+        if remote is not None:
+            return remote
     path = original_path(database, version)
     if path is None:
         raise ApiError(410, "ORIGINAL_UNAVAILABLE", "The original file is unavailable.")

@@ -5,7 +5,7 @@ import shutil
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from uuid import uuid4
 
 from app.config import Settings
@@ -70,6 +70,60 @@ class IngestionService:
         self.settings = settings
         self.embedding_provider = embedding_provider
         self.storage_backend = storage_backend or storage_backend_from_settings(settings)
+
+    def _record_unlinked_canonical_object(
+        self,
+        *,
+        object_id: str,
+        stored: Any,
+        owner_user_id: str,
+        course_id: str,
+        local_cache_path: str | None = None,
+    ) -> str:
+        """Persist a promoted object before a document transaction can fail.
+
+        Durable bytes must always have a database-visible GC/audit receipt. The
+        object stays unlinked until the document transaction succeeds.
+        """
+
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO storage_objects(
+                    id,backend,bucket,object_key,version_id,byte_size,sha256,crc64,etag,
+                    media_type,state,owner_user_id,course_id,local_cache_path,verified_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,'CANONICAL',?,?,?,
+                    strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+                """,
+                (
+                    object_id,
+                    "ALIYUN_OSS",
+                    stored.bucket,
+                    stored.key,
+                    stored.version_id,
+                    stored.size,
+                    stored.sha256,
+                    stored.crc64,
+                    stored.etag,
+                    stored.content_type,
+                    owner_user_id,
+                    course_id,
+                    local_cache_path,
+                ),
+            )
+            row = connection.execute(
+                "SELECT id,byte_size,sha256,owner_user_id,course_id FROM storage_objects "
+                "WHERE id=?",
+                (object_id,),
+            ).fetchone()
+            if row is None or (
+                int(row["byte_size"]) != int(stored.size)
+                or str(row["sha256"]) != str(stored.sha256)
+                or str(row["owner_user_id"]) != owner_user_id
+                or str(row["course_id"]) != course_id
+            ):
+                raise RuntimeError("Canonical object receipt conflicts with durable bytes")
+        return object_id
 
     def begin_direct_upload(
         self,
@@ -226,6 +280,9 @@ class IngestionService:
                 "UPLOAD_FINALIZATION_IN_PROGRESS",
                 "Upload verification is in progress.",
             )
+        promoted_object = None
+        canonical_id: str | None = None
+        canonical_key: str | None = None
         try:
             content = self.storage_backend.read_range(
                 session["object_key"], start=0, end=session["expected_size"] - 1
@@ -244,6 +301,7 @@ class IngestionService:
                 sha256=session["expected_sha256"],
                 extension=session["extension"],
             )
+            canonical_key = key
             stored = self.storage_backend.promote_verified(
                 session["object_key"],
                 key,
@@ -251,6 +309,7 @@ class IngestionService:
                 expected_sha256=session["expected_sha256"],
                 content_type=session["media_type"],
             )
+            promoted_object = stored
             canonical_id = f"obj_{uuid4().hex}"
             cache_path = self.settings.storage_cache_dir / key
             cache_available = self._cache_if_capacity_allows(key, content, cache_path)
@@ -278,7 +337,7 @@ class IngestionService:
                         stored.version_id, stored.size, stored.sha256, stored.crc64,
                         stored.etag, stored.content_type, owner_user_id,
                         session["course_id"],
-                        str(cache_path) if cache_available else None,
+                        str(cache_path),
                     ),
                 )
                 connection.execute(
@@ -296,8 +355,10 @@ class IngestionService:
                     ),
                 )
                 connection.execute(
-                    "UPDATE storage_objects SET document_id=? WHERE id=?",
-                    (document_id, canonical_id),
+                    "UPDATE storage_objects SET document_id=?,document_version_id=("
+                    "SELECT id FROM document_versions WHERE document_id=? "
+                    "ORDER BY version DESC LIMIT 1) WHERE id=?",
+                    (document_id, document_id, canonical_id),
                 )
                 connection.execute(
                     "INSERT INTO ingestion_jobs(id,document_id,status,error_message) "
@@ -321,11 +382,28 @@ class IngestionService:
             )
         except Exception:
             with self.database.connect() as connection:
+                # Promotion is durable and precedes the metadata transaction.
+                # If admission loses a race or SQLite fails after the OSS copy,
+                # retain a database-visible, unlinked canonical receipt for a
+                # later audited GC pass. Never silently orphan remote bytes.
+                if promoted_object is not None and canonical_id is not None and canonical_key:
+                    canonical_id = self._record_unlinked_canonical_object(
+                        object_id=canonical_id,
+                        stored=promoted_object,
+                        owner_user_id=owner_user_id,
+                        course_id=str(session["course_id"]),
+                    )
                 connection.execute(
-                    "UPDATE storage_upload_sessions SET status='INVALID',"
+                    "UPDATE storage_upload_sessions SET status='INVALID',canonical_object_id=?,"
                     "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
                     "WHERE id=? AND status='VERIFYING'",
-                    (upload_id,),
+                    (canonical_id, upload_id),
+                )
+            if promoted_object is not None:
+                LOGGER.exception(
+                    "Verified durable object %s exists without a committed document; "
+                    "retained for GC audit",
+                    canonical_key,
                 )
             raise
 
@@ -487,6 +565,128 @@ class IngestionService:
             return True
         finally:
             self._release_capacity(reservation_id)
+
+    def ensure_stored_path(self, stored_path: str) -> Path | None:
+        """Hydrate one verified canonical object for an authorized read path.
+
+        Authorization happens before callers reach the path resolver. This
+        method only accepts a database-recorded cache destination under the
+        configured cache root, reserves peak disk space, verifies size and
+        SHA-256, and publishes atomically. It never changes ingestion status.
+        """
+
+        destination = Path(stored_path).resolve()
+        root: Path | None = None
+        relative: Path | None = None
+        for candidate in (
+            self.settings.storage_cache_dir.resolve(),
+            self.settings.upload_dir.resolve(),
+        ):
+            try:
+                relative = destination.relative_to(candidate)
+                root = candidate
+                break
+            except ValueError:
+                continue
+        if root is None or relative is None:
+            return destination if destination.is_file() else None
+        if destination.is_file():
+            return destination
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT object.id,object.object_key,object.byte_size,object.sha256,"
+                "object.media_type FROM storage_objects AS object "
+                "WHERE object.local_cache_path=? AND object.state='CANONICAL'",
+                (str(destination),),
+            ).fetchone()
+        if row is None or not isinstance(self.storage_backend, AliyunOssStorageBackend):
+            return None
+        reservation_id = self._reserve_capacity(
+            peak_bytes=int(row["byte_size"]),
+            owner_kind="READ_CACHE",
+            owner_id=str(row["id"]),
+        )
+        if reservation_id is None:
+            return None
+        try:
+            content = self.storage_backend.read_range(
+                str(row["object_key"]), start=0, end=int(row["byte_size"]) - 1
+            )
+            if (
+                len(content) != int(row["byte_size"])
+                or hashlib.sha256(content).hexdigest() != str(row["sha256"])
+            ):
+                raise RuntimeError("Durable object failed read-cache integrity verification")
+            LocalStorageBackend(root).put_bytes(
+                relative.as_posix(),
+                content,
+                expected_sha256=str(row["sha256"]),
+                content_type=str(row["media_type"]),
+            )
+            with self.database.connect() as connection:
+                connection.execute(
+                    "UPDATE storage_objects SET local_cache_path=?,updated_at="
+                    "strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
+                    (str(destination), row["id"]),
+                )
+            return destination
+        finally:
+            self._release_capacity(reservation_id)
+
+    def has_stored_object(self, stored_path: str, byte_size: int) -> bool:
+        destination = Path(stored_path).resolve()
+        if destination.is_file():
+            return destination.stat().st_size == byte_size
+        if not any(
+            _is_relative_to(destination, root)
+            for root in (
+                self.settings.storage_cache_dir.resolve(),
+                self.settings.upload_dir.resolve(),
+            )
+        ):
+            return False
+        with self.database.connect() as connection:
+            return (
+                connection.execute(
+                    "SELECT 1 FROM storage_objects WHERE local_cache_path=? "
+                    "AND byte_size=? AND state='CANONICAL' LIMIT 1",
+                    (str(destination), byte_size),
+                ).fetchone()
+                is not None
+            )
+
+    def read_stored_range(self, stored_path: str, start: int, end: int) -> bytes | None:
+        """Read an authorized immutable range without hydrating the whole cache."""
+
+        destination = Path(stored_path).resolve()
+        if start < 0 or end < start:
+            return None
+        if not any(
+            _is_relative_to(destination, root)
+            for root in (
+                self.settings.storage_cache_dir.resolve(),
+                self.settings.upload_dir.resolve(),
+            )
+        ):
+            return None
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT object_key,byte_size FROM storage_objects "
+                "WHERE local_cache_path=? AND state='CANONICAL' LIMIT 1",
+                (str(destination),),
+            ).fetchone()
+        if (
+            row is None
+            or end >= int(row["byte_size"])
+            or not isinstance(self.storage_backend, AliyunOssStorageBackend)
+        ):
+            return None
+        content = self.storage_backend.read_range(
+            str(row["object_key"]), start=start, end=end
+        )
+        if len(content) != end - start + 1:
+            raise RuntimeError("Durable object returned an invalid byte range")
+        return content
 
     def _check_document_admission(
         self,
@@ -1060,6 +1260,7 @@ class IngestionService:
         content: bytes,
         owner_user_id: str | None = None,
         is_admin: bool = True,
+        _storage_source_path: Path | None = None,
     ) -> UploadAccepted:
         self._require_course(
             course_id, owner_user_id=owner_user_id, is_admin=is_admin, write=True
@@ -1106,14 +1307,30 @@ class IngestionService:
                 byte_size=len(content),
                 sha256=digest,
             )
-            stored_object = self.storage_backend.put_bytes(
-                storage_key,
-                content,
-                expected_sha256=digest,
-                content_type=media_type,
+            stored_object = (
+                self.storage_backend.put_path(
+                    storage_key,
+                    _storage_source_path,
+                    expected_sha256=digest,
+                    content_type=media_type,
+                )
+                if _storage_source_path is not None
+                else self.storage_backend.put_bytes(
+                    storage_key,
+                    content,
+                    expected_sha256=digest,
+                    content_type=media_type,
+                )
             )
             cache_available = self._cache_if_capacity_allows(
                 storage_key, content, destination
+            )
+            storage_object_id = self._record_unlinked_canonical_object(
+                object_id=str(storage_object_id),
+                stored=stored_object,
+                owner_user_id=owner_user_id or "official-system",
+                course_id=course_id,
+                local_cache_path=str(destination),
             )
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -1157,33 +1374,7 @@ class IngestionService:
                     details={"documentId": duplicate["id"]},
                 )
             try:
-                if stored_object is not None:
-                    connection.execute(
-                        """
-                        INSERT INTO storage_objects(
-                            id,backend,bucket,object_key,version_id,byte_size,sha256,
-                            crc64,etag,media_type,state,owner_user_id,course_id,
-                            local_cache_path,verified_at
-                        ) VALUES(?,?,?,?,?,?,?,?,?,?,'CANONICAL',?,?,?,
-                            strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-                        """,
-                        (
-                            storage_object_id,
-                            "ALIYUN_OSS",
-                            stored_object.bucket,
-                            stored_object.key,
-                            stored_object.version_id,
-                            stored_object.size,
-                            stored_object.sha256,
-                            stored_object.crc64,
-                            stored_object.etag,
-                            stored_object.content_type,
-                            owner_user_id or "official-system",
-                            course_id,
-                            str(destination) if cache_available else None,
-                        ),
-                    )
-                else:
+                if stored_object is None:
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     destination.write_bytes(content)
                 document_values = (
@@ -1227,8 +1418,10 @@ class IngestionService:
                 )
                 if storage_object_id is not None:
                     connection.execute(
-                        "UPDATE storage_objects SET document_id=? WHERE id=?",
-                        (document_id, storage_object_id),
+                        "UPDATE storage_objects SET document_id=?,document_version_id=("
+                        "SELECT id FROM document_versions WHERE document_id=? "
+                        "ORDER BY version DESC LIMIT 1) WHERE id=?",
+                        (document_id, document_id, storage_object_id),
                     )
                 # Make commit failures part of the same compensating boundary as inserts.
                 connection.commit()
@@ -1239,13 +1432,57 @@ class IngestionService:
                 else:
                     LOGGER.exception(
                         "Durable object %s exists without a committed document; retain for GC audit",
-                        storage_object.key,
+                        stored_object.key,
                     )
                 raise
 
         return UploadAccepted(
             document=self._get_document(document_id),
             job=self.get_job(job_id, owner_user_id=owner_user_id, is_admin=is_admin),
+        )
+
+    def queue_document_path(
+        self,
+        *,
+        course_id: str,
+        filename: str,
+        media_type: str,
+        source_path: Path,
+        is_admin: bool,
+    ) -> UploadAccepted:
+        """Queue one trusted operator file and stream its durable OSS upload.
+
+        This is intentionally not exposed to ordinary HTTP callers: accepting
+        an arbitrary server path from a learner would create a local-file read
+        primitive. Campus/admin importers already own the source inventory and
+        pass its exact path here. The normal filename, media, quota, duplicate,
+        immutable-object, and ingestion contracts are still reused.
+        """
+
+        if not is_admin:
+            raise ApiError(
+                403,
+                "ADMIN_PATH_IMPORT_REQUIRED",
+                "Server-side path import is restricted to administrators.",
+            )
+        source = source_path.resolve(strict=True)
+        if source_path.is_symlink() or not source.is_file():
+            raise ApiError(
+                400,
+                "INVALID_IMPORT_SOURCE",
+                "The import source must be a regular non-symlink file.",
+            )
+        # Full format validation remains mandatory. The upload itself uses
+        # put_path so bytes stream to OSS rather than being posted through the
+        # small application API. File-size policy bounds this validation read.
+        content = source.read_bytes()
+        return self.queue_document(
+            course_id=course_id,
+            filename=filename,
+            media_type=media_type,
+            content=content,
+            is_admin=True,
+            _storage_source_path=source,
         )
 
     def import_snapshot(self, *, course_id: str, owner_user_id: str,

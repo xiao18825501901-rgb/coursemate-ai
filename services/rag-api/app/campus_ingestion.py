@@ -627,14 +627,24 @@ def _ingest_one(
         repository.upsert(row, download_only, target_course_id=target_course_id)
         return IngestionOutcome(row.relative_path, DOWNLOAD_ONLY, download_only.reason)
 
-    content = path.read_bytes()
     try:
-        accepted = service.queue_document(
-            course_id=target_course_id,
-            filename=pathlib.PurePosixPath(row.filename).name,
-            media_type=media_type,
-            content=content,
-            is_admin=True,
+        queue_path = getattr(service, "queue_document_path", None)
+        accepted = (
+            queue_path(
+                course_id=target_course_id,
+                filename=pathlib.PurePosixPath(row.filename).name,
+                media_type=media_type,
+                source_path=path,
+                is_admin=True,
+            )
+            if queue_path is not None
+            else service.queue_document(
+                course_id=target_course_id,
+                filename=pathlib.PurePosixPath(row.filename).name,
+                media_type=media_type,
+                content=path.read_bytes(),
+                is_admin=True,
+            )
         )
     except ApiError as error:
         existing = error.details.get("documentId")
@@ -669,6 +679,22 @@ def _ingest_one(
             decision.reason,
             document_id=accepted.document.id,
             chunks=int(document.chunk_count),
+        )
+    if (
+        str(ingest_job.status.value) == "queued"
+        and ingest_job.error_message == "WAITING_CAPACITY"
+    ):
+        repository.upsert(
+            row,
+            decision,
+            target_course_id=target_course_id,
+            document_id=accepted.document.id,
+        )
+        return IngestionOutcome(
+            row.relative_path,
+            "WAITING_CAPACITY",
+            "durable original verified; local parse cache is waiting for reserved space",
+            document_id=accepted.document.id,
         )
     # Stored, but no readable text: recorded as DOWNLOAD_ONLY so it can never count as coverage.
     download_only = MaterialDecision(

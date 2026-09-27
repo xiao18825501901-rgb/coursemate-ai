@@ -54,6 +54,7 @@ V3_MIGRATIONS = (
     "056_compact_knowledge_tree_budget.sql",
     "057_durable_object_storage.sql",
     "058_compact_tree_lineage.sql",
+    "059_storage_document_versions.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -104,9 +105,14 @@ V3_REPLAY_SUPERSEDED_BY = {
     # Migration 055 records the one safe resume after V54's short-lived
     # global normalization lookup stopped an otherwise authorized new shard.
     "055_auto_knowledge_evidence_scope_resume.sql": 55,
+    # SQLite has no portable ADD COLUMN IF NOT EXISTS. Migration 059 links
+    # immutable document versions to durable objects and is therefore a
+    # deliberately one-shot schema alteration; its own ledger row is the
+    # restart-safe replay guard.
+    "059_storage_document_versions.sql": 59,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 58
+LATEST_V3_SCHEMA_VERSION = 59
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (
