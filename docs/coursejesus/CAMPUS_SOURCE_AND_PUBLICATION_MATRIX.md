@@ -1,5 +1,7 @@
 # CAMPUS SOURCE AND PUBLICATION MATRIX (task C1)
 
+> 2026-09-27 恢复更新：最新冻结批次是 `work/local-campus-20260927T0325Z`，共 1,925 行（1,923 个源文件）、8,870,732,743 bytes。相对本页原始 round-44 清单，`D:\Canvas` 的 CS4394 新增三份可解析教学资料和一份答案资料；三份教学资料已进入隔离私人复核库并在第二次执行中全部 `SKIPPED_IDENTICAL`，答案保持 blocked。共享发布仍为 0，因为现有资料没有面向 CourseJesus 全部注册用户的再发布依据。权威增量结果见 `LOCAL_CAMPUS_BATCH_REPORT_20260927.md`；本页以下内容保留为最初扫描与旧批次的历史证据，不应再当作当前计数。
+
 **State of this document.** Round 44 reconnaissance, extended in round 71 with the ingestion plan.
 Sections 1–8 are the scan's findings; §9–§11 record what the planner decided per file, what was
 ingested, and what is still waiting on the owner. Nothing here has been published: the scan reads

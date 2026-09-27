@@ -1,7 +1,7 @@
 {
   "artifact_type": "ACTIVE_PAUSE_RESUME_LEDGER",
-  "updated_at": "2026-09-27T11:07:07+08:00",
-  "actual_head": "2d11587eb2f4037397ca654d2ee1b09558c94281",
+  "updated_at": "2026-09-27T11:37:33+08:00",
+  "actual_head": "f77920f598e3195f4c70cef6390c1b0d4ba9f219",
   "safe_checkpoint_ack": true,
   "checkpoint": {
     "branch": "release/ui-campus-coursehero-20260927",
@@ -14,37 +14,37 @@
     {
       "id": "ui-minimal-entry-release",
       "description": "Finish the minimal signed-out entry, primary Canvas action, and two dashboard action cards; verify and release to the existing Netlify site.",
-      "status": "AUTOMATIC_RESUME_STARTED",
+      "status": "COMPLETED_DEPLOYED",
       "order": 1,
       "worktree_changes": "Committed locally at c8161d5; must be reconciled onto application 2d11587 before build/deploy.",
       "batch": null,
-      "last_receipt": "Paused baseline: 3 focused regressions, 28 related unit tests and TypeScript passed.",
+      "last_receipt": "Netlify production deploy 6ab88bbfa3cdab3c8481a88e; focused Vitest 6 passed; targeted Playwright 2 passed; public signed-out visual and four public endpoints verified.",
       "unknown_model_calls": 0,
-      "next_action": "Reconcile c8161d5 with 2d11587, run targeted browser/build gates, deploy only the frontend to the same Netlify site.",
+      "next_action": "None for this slice. Authenticated Owner-browser verification remains separately not re-run.",
       "source_and_authorization_limits": "Preserve coursejesus.com, Clerk, API origins, redirects and Windows Canvas Bridge artifact; no backend/schema changes for this slice."
     },
     {
       "id": "local-campus-batch",
       "description": "Freeze and process the local campus material inventory from D:\\Canvas and D:\\Canvas-DG.",
-      "status": "WAITING_FOR_ORDER_1",
+      "status": "COMPLETE_WITH_RIGHTS_EXCEPTIONS",
       "order": 2,
       "worktree_changes": "None.",
-      "batch": null,
-      "last_receipt": null,
+      "batch": "work/local-campus-20260927T0325Z",
+      "last_receipt": "Frozen inventory 1925 rows/1923 source files; private review ledger incremented for three new CS4394 documents and proved idempotent; production/shared publication 0 because rights remain unverified.",
       "unknown_model_calls": 0,
-      "next_action": "Start a new frozen read-only source inventory after the UI release; every newly imported course must pass through the deployed auto-map pipeline.",
+      "next_action": "Resolve per-material audience rights before any shared publication; do not re-scan automatically.",
       "source_and_authorization_limits": "Both roots remain read-only and must never be deleted or moved; publish only material with an established authorization basis."
     },
     {
       "id": "official-programme-map-and-coursehero",
       "description": "Build the official programme/course matrix, then perform rights-gated Course Hero metadata discovery and eligible transfer.",
-      "status": "WAITING_FOR_ORDER_2",
+      "status": "COMPLETE_WITH_EXCEPTIONS",
       "order": 3,
       "worktree_changes": "None.",
-      "batch": null,
-      "last_receipt": null,
+      "batch": "METADATA_ONLY_NO_TRANSFER_BATCH",
+      "last_receipt": "Official matrix records 5 current undergraduate and 10 current taught-master programmes, one cross-year unresolved programme, and 24 static Gateway courses; Course Hero produced metadata only with zero download/upload/delete.",
       "unknown_model_calls": 0,
-      "next_action": "Verify official sources first; create an isolated transfer batch only for rights-cleared content.",
+      "next_action": "If a safe attachable browser session and material-level redistribution rights later exist, create a new isolated transfer batch; current report does not grant those rights.",
       "source_and_authorization_limits": "No cookie/profile copying, CAPTCHA/paywall bypass, extra purchase or restricted-fulltext redistribution. Only exact current-batch temporary files may become cleanup candidates."
     }
   ],
@@ -68,5 +68,13 @@
   },
   "automatic_resume_after_all_gates": true,
   "automatic_resume_started": true,
+  "automatic_resume_completed": true,
+  "completion_reports": [
+    "docs/coursejesus/UI_RELEASE_REPORT_20260927.md",
+    "docs/coursejesus/LOCAL_CAMPUS_BATCH_REPORT_20260927.md",
+    "docs/coursejesus/OFFICIAL_PROGRAMME_AND_COURSE_COVERAGE_20260927.md",
+    "docs/coursejesus/COURSEHERO_SOURCE_AND_LICENSE_REPORT_20260927.md",
+    "docs/coursejesus/FINAL_UI_CAMPUS_COURSEHERO_EXECUTION_STATE_20260927.md"
+  ],
   "secrets_allowed_in_ledger": false
 }

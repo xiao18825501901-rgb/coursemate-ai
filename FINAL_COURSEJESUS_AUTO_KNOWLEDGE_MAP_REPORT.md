@@ -46,7 +46,9 @@
 
 ## 原任务恢复
 
-五个恢复门均已满足并写入 `PAUSED_TASKS_AND_RESUME.json`。已按原顺序自动恢复第 1 项：最小未登录入口与 Canvas 操作卡 UI；随后才开始 `D:\Canvas`/`D:\Canvas-DG` 冻结批次，最后处理官方专业映射和权利受限的 Course Hero 来源。恢复任务必须继续使用本次已上线自动管线。
+五个恢复门均已满足并写入 `PAUSED_TASKS_AND_RESUME.json`。暂停前任务现已按原顺序全部恢复并收口：UI 已发布为 Netlify deploy `6ab88bbfa3cdab3c8481a88e`；本地校园根完成新冻结清单和 CS4394 私人隔离增量，但因共享再发布权不明而没有生产发布；官方目录完成当前 5 本科/10 硕士及静态 Gateway 覆盖表，Course Hero 因没有可安全附着的已登录会话且缺逐文件再利用权，只保留公共元数据，零下载/上传/删除。详见 `docs/coursejesus/FINAL_UI_CAMPUS_COURSEHERO_EXECUTION_STATE_20260927.md`。
+
+当前前端源码 HEAD 为 `f77920f598e3195f4c70cef6390c1b0d4ba9f219`；自动知识图 production backend 仍是经过验收的 `2d11587eb2f4037397ca654d2ee1b09558c94281`，本次恢复未改变 schema 或后端运行时。
 
 详细证据：
 
