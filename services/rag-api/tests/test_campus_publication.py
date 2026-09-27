@@ -13,6 +13,11 @@ if str(SCRIPTS) not in sys.path:
 
 import publish_campus_catalog as publication  # noqa: E402
 
+from app.config import Settings  # noqa: E402
+from app.db import Database  # noqa: E402
+from app.rag.embeddings import DeterministicEmbeddingProvider  # noqa: E402
+from app.services.ingestion import IngestionService  # noqa: E402
+
 
 def _plan(root: pathlib.Path, *, digest: str) -> dict:
     source = root / "course"
@@ -203,3 +208,144 @@ def test_manifest_hash_rejects_changes_after_freeze(tmp_path: pathlib.Path) -> N
     manifest["courses"][0]["name"] = "changed after freeze"
     with pytest.raises(publication.PublicationBundleError, match="manifest hash"):
         publication.verify_manifest(manifest)
+
+
+class _BatchRecorder:
+    def __init__(self) -> None:
+        self.opened: list[dict] = []
+        self.items: list[dict] = []
+        self.sealed: list[dict] = []
+
+    def begin_upload_batch(self, **values):
+        self.opened.append(values)
+        return {"status": "OPEN", **values}
+
+    def record_upload_batch_item(self, **values):
+        self.items.append(values)
+
+    def seal_upload_batch(self, **values):
+        self.sealed.append(values)
+        return {"status": "SEALED", **values}
+
+
+def _database(tmp_path: pathlib.Path) -> tuple[Database, IngestionService]:
+    settings = Settings(
+        database_path=tmp_path / "rag.sqlite3",
+        upload_dir=tmp_path / "uploads",
+        app_env="test",
+        v3_enabled=True,
+        rag_provider_mode="deterministic",
+        ui_web_dir=tmp_path / "web",
+    )
+    database = Database(settings)
+    database.initialize()
+    return database, IngestionService(database, settings, DeterministicEmbeddingProvider())
+
+
+def test_import_is_private_idempotent_and_seals_one_batch_per_course(
+    tmp_path: pathlib.Path,
+) -> None:
+    digest = publication.sha256_bytes(b"lecture evidence")
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(json.dumps(_plan(tmp_path, digest=digest)), encoding="utf-8")
+    ledger_path = tmp_path / "ledger.sqlite3"
+    _ledger(ledger_path, digest=digest)
+    bundle = tmp_path / "bundle"
+    manifest = publication.prepare_bundle(
+        plan_path=plan_path,
+        ledger_path=ledger_path,
+        bundle_dir=bundle,
+        operation_id="campus-publication-test",
+    )
+    database, ingestion = _database(tmp_path / "runtime")
+    batches = _BatchRecorder()
+
+    first = publication.import_bundle(
+        bundle_dir=bundle,
+        database=database,
+        ingestion=ingestion,
+        auto_map=batches,
+        receipt_path=tmp_path / "receipt-first.json",
+    )
+    second = publication.import_bundle(
+        bundle_dir=bundle,
+        database=database,
+        ingestion=ingestion,
+        auto_map=_BatchRecorder(),
+        receipt_path=tmp_path / "receipt-second.json",
+    )
+
+    with database.connect() as connection:
+        ge = connection.execute("SELECT * FROM courses WHERE id='ge2324'").fetchone()
+        pe = connection.execute(
+            "SELECT * FROM courses WHERE id=?",
+            (publication.target_course_id("https://cityu-dg.instructure.com", "214"),),
+        ).fetchone()
+        assert ge["visibility"] == "private"
+        assert ge["publication_status"] == "private"
+        assert pe["visibility"] == "private"
+        assert connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] > 0
+        rows = connection.execute(
+            "SELECT decision,review_status,usage_rights FROM campus_material_records "
+            "ORDER BY relative_path"
+        ).fetchall()
+    assert [row["decision"] for row in rows] == ["INGESTABLE", "INGESTABLE", "BLOCKED"]
+    assert rows[0]["review_status"] == publication.APPROVED_REVIEW_STATUS
+    assert rows[0]["usage_rights"] == "UNVERIFIED"
+    assert rows[2]["review_status"] == publication.WITHHELD_REVIEW_STATUS
+    assert len(batches.opened) == len(batches.sealed) == 1
+    assert len(batches.items) == 1
+    assert first["summary"]["indexed"] == 1
+    assert second["summary"]["existing"] == 1
+
+
+def test_activation_is_atomic_and_requires_terminal_auto_map_state(
+    tmp_path: pathlib.Path,
+) -> None:
+    database, ingestion = _database(tmp_path)
+    target = publication.target_course_id("https://cityu-dg.instructure.com", "214")
+    ingestion.create_course(
+        publication.course_create(target, "Physical Education I", "campus"),
+        is_admin=True,
+        publication_status=publication.private_publication_status(),
+    )
+    manifest = {
+        "schemaVersion": publication.SCHEMA_VERSION,
+        "operationId": "activation-test",
+        "courses": [
+            {
+                "targetCourseId": target,
+                "sourceCourseId": "214",
+                "name": "Physical Education I",
+                "files": [],
+            }
+        ],
+        "excludedContainers": [],
+        "summary": {},
+    }
+    manifest["manifestSha256"] = publication.freeze_manifest(manifest)
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO auto_knowledge_targets(target_key,course_id,target_kind,status,message) "
+            "VALUES(?,?,'AUTO_COURSE','BUILDING','still building')",
+            (f"AUTO_COURSE:{target}", target),
+        )
+
+    with pytest.raises(publication.PublicationBundleError, match="not terminal"):
+        publication.activate_catalog(database=database, manifest=manifest)
+    with database.connect() as connection:
+        assert connection.execute(
+            "SELECT visibility FROM courses WHERE id=?", (target,)
+        ).fetchone()[0] == "private"
+        connection.execute(
+            "UPDATE auto_knowledge_targets SET status='WAITING_SOURCE' WHERE target_key=?",
+            (f"AUTO_COURSE:{target}",),
+        )
+
+    result = publication.activate_catalog(database=database, manifest=manifest)
+    with database.connect() as connection:
+        course = connection.execute("SELECT * FROM courses WHERE id=?", (target,)).fetchone()
+    assert course["visibility"] == "public"
+    assert course["publication_status"] == "published"
+    assert result == {"activated": 1, "alreadyPublished": 0}
