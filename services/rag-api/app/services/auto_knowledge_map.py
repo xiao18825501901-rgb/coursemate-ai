@@ -107,6 +107,59 @@ class OrchestratorDraftGenerator:
         self.database = database
         self.learning = learning
 
+    def _effective_operation_id(
+        self, job_id: str, workspace_id: str, operation_id: str
+    ) -> str:
+        """Use a fresh id only for a durably proven pre-dispatch quota stop.
+
+        The original UNKNOWN learning operation remains as audit evidence.  A
+        recovery receipt plus the absence of a reservation, transport attempt,
+        run evidence and shard artifact proves that operation never reached the
+        provider.  Every other incomplete operation keeps the conservative
+        no-retry behaviour.
+        """
+
+        with self.database.connect() as connection:
+            recovery = connection.execute(
+                "SELECT 1 FROM auto_knowledge_job_recovery_receipts "
+                "WHERE job_id=? AND reason='BACKGROUND_QUOTA_SCOPE_V1'",
+                (job_id,),
+            ).fetchone()
+            original = connection.execute(
+                "SELECT status,kind FROM learning_operations "
+                "WHERE workspace_id=? AND id=?",
+                (workspace_id, operation_id),
+            ).fetchone()
+            if recovery is None or original is None:
+                return operation_id
+            if original["status"] != "UNKNOWN" or original["kind"] != "auto.knowledge.map":
+                return operation_id
+            sent_evidence = any(
+                (
+                    connection.execute(
+                        "SELECT 1 FROM learning_model_call_reservations "
+                        "WHERE workspace_id=? AND operation_id=? LIMIT 1",
+                        (workspace_id, operation_id),
+                    ).fetchone(),
+                    connection.execute(
+                        "SELECT 1 FROM learning_model_run_evidence "
+                        "WHERE workspace_id=? AND operation_id=? LIMIT 1",
+                        (workspace_id, operation_id),
+                    ).fetchone(),
+                    connection.execute(
+                        "SELECT 1 FROM auto_knowledge_model_attempts "
+                        "WHERE operation_id=? LIMIT 1",
+                        (operation_id,),
+                    ).fetchone(),
+                    connection.execute(
+                        "SELECT 1 FROM auto_knowledge_job_artifacts "
+                        "WHERE model_operation_id=? LIMIT 1",
+                        (operation_id,),
+                    ).fetchone(),
+                )
+            )
+            return operation_id if sent_evidence else f"{operation_id}-q1"
+
     @staticmethod
     def _safe_validation_detail(error: Exception) -> dict[str, object]:
         if isinstance(error, ApiError):
@@ -223,6 +276,9 @@ class OrchestratorDraftGenerator:
         context: dict[str, Any],
         validate: Callable[[Any], None] | None = None,
     ) -> tuple[Any, bool]:
+        operation_id = self._effective_operation_id(
+            job_id, workspace_id, operation_id
+        )
         request_payload = {
             "builder": BUILDER_VERSION,
             "operation": operation_id,
@@ -298,6 +354,7 @@ class OrchestratorDraftGenerator:
                 template_version=BUILDER_VERSION,
                 schema_version=BUILDER_VERSION,
                 max_output_tokens=AUTO_MODEL_MAX_OUTPUT_TOKENS,
+                quota_scope="BACKGROUND_AUTO_MAP",
                 transport_event_sink=attempt_sink,
             )
             provider_completed = True
@@ -392,25 +449,47 @@ class OrchestratorDraftGenerator:
             )
         return output, True
 
-    def _reserve_repair(self, job_id: str) -> int:
+    def _reserve_repair(
+        self,
+        job_id: str,
+        stage: str,
+        shard_key: str,
+        operation_base: str,
+    ) -> int:
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            changed = connection.execute(
-                "UPDATE auto_knowledge_jobs SET repair_calls_made=repair_calls_made+1,"
-                "updated_at=? WHERE id=? AND status='RUNNING' AND repair_calls_made<2",
-                (stamp(), job_id),
-            ).rowcount
-            if changed != 1:
+            current = int(
+                connection.execute(
+                    "SELECT COALESCE(MAX(ordinal),0) "
+                    "FROM auto_knowledge_repair_reservations "
+                    "WHERE job_id=? AND stage=? AND shard_key=?",
+                    (job_id, stage, shard_key),
+                ).fetchone()[0]
+            )
+            ordinal = current + 1
+            if ordinal > 2:
                 raise ApiError(
                     422,
                     "AUTO_REPAIR_LIMIT",
-                    "The two targeted automatic-map repair calls were exhausted.",
+                    "The two targeted repairs for this automatic-map shard were exhausted.",
                 )
-            return int(
-                connection.execute(
-                    "SELECT repair_calls_made FROM auto_knowledge_jobs WHERE id=?", (job_id,)
-                ).fetchone()[0]
+            running = connection.execute(
+                "SELECT 1 FROM auto_knowledge_jobs WHERE id=? AND status='RUNNING'",
+                (job_id,),
+            ).fetchone()
+            if running is None:
+                raise ApiError(409, "AUTO_LEASE_LOST", "The automatic build lease was lost.")
+            connection.execute(
+                "INSERT INTO auto_knowledge_repair_reservations("
+                "job_id,stage,shard_key,ordinal,operation_id) VALUES(?,?,?,?,?)",
+                (job_id, stage, shard_key, ordinal, f"{operation_base}-r{ordinal}"),
             )
+            connection.execute(
+                "UPDATE auto_knowledge_jobs SET repair_calls_made=MAX(repair_calls_made,?),"
+                "updated_at=? WHERE id=?",
+                (ordinal, stamp(), job_id),
+            )
+            return ordinal
 
     def _run_with_repairs(
         self,
@@ -427,6 +506,34 @@ class OrchestratorDraftGenerator:
     ) -> tuple[Any, bool]:
         repair = 0
         repair_feedback: dict[str, object] | None = None
+        with self.database.connect() as connection:
+            recovery = connection.execute(
+                "SELECT 1 FROM auto_knowledge_job_recovery_receipts "
+                "WHERE job_id=? AND reason='PER_SHARD_REPAIR_SCOPE_V1'",
+                (job_id,),
+            ).fetchone()
+            artifact = connection.execute(
+                "SELECT 1 FROM auto_knowledge_job_artifacts "
+                "WHERE job_id=? AND stage=? AND shard_key=?",
+                (job_id, stage, shard_key),
+            ).fetchone()
+            if recovery is not None and artifact is None:
+                previous = connection.execute(
+                    "SELECT operation_id,rejection_detail_json "
+                    "FROM auto_knowledge_model_attempts "
+                    "WHERE job_id=? AND stage=? AND shard_key=? "
+                    "AND status IN ('BUSINESS_REJECTED','CONTRACT_REJECTED') "
+                    "ORDER BY updated_at DESC,operation_id DESC LIMIT 1",
+                    (job_id, stage, shard_key),
+                ).fetchone()
+                if previous is not None:
+                    repair_feedback = cast(
+                        dict[str, object],
+                        json.loads(str(previous["rejection_detail_json"]) or "{}"),
+                    )
+                    repair = self._reserve_repair(
+                        job_id, stage, shard_key, operation_base
+                    )
         while True:
             operation_id = operation_base if repair == 0 else f"{operation_base}-r{repair}"
             effective_instructions = instructions
@@ -455,7 +562,9 @@ class OrchestratorDraftGenerator:
                 repair_feedback = cast(
                     dict[str, object], error.details.get("validation") or {}
                 )
-                repair = self._reserve_repair(job_id)
+                repair = self._reserve_repair(
+                    job_id, stage, shard_key, operation_base
+                )
 
     @staticmethod
     def _segments(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1350,6 +1459,138 @@ class AutoKnowledgeMapService:
         )
         return "QUEUED"
 
+    @staticmethod
+    def _recover_safe_blocked_jobs(connection: sqlite3.Connection) -> int:
+        """Resume only failures proven to have stopped before provider dispatch.
+
+        Completed shard artifacts stay attached to the same frozen job.  The
+        failed terminal receipt is first copied into an immutable recovery
+        ledger, then removed so the resumed job can write its final receipt.
+        UNKNOWN transport outcomes and every failure with send evidence remain
+        terminal and are never selected here.
+        """
+
+        recovered = 0
+        rows = connection.execute(
+            "SELECT job.*,receipt.status AS receipt_status,"
+            "receipt.tree_version_id AS receipt_tree_version_id,"
+            "receipt.source_snapshot_hash AS receipt_source_snapshot_hash,"
+            "receipt.result_hash AS receipt_result_hash,"
+            "receipt.model_calls_made AS receipt_model_calls_made,"
+            "receipt.detail_json AS receipt_detail_json,"
+            "receipt.created_at AS receipt_created_at "
+            "FROM auto_knowledge_jobs AS job "
+            "JOIN auto_knowledge_job_receipts AS receipt ON receipt.job_id=job.id "
+            "WHERE job.status='FAILED' "
+            "AND job.error_code IN ('DAILY_MODEL_CALL_QUOTA','AUTO_REPAIR_LIMIT') "
+            "AND receipt.status='FAILED' AND NOT EXISTS("
+            "SELECT 1 FROM auto_knowledge_job_recovery_receipts AS recovery "
+            "WHERE recovery.job_id=job.id AND recovery.reason=CASE job.error_code "
+            "WHEN 'DAILY_MODEL_CALL_QUOTA' THEN 'BACKGROUND_QUOTA_SCOPE_V1' "
+            "ELSE 'PER_SHARD_REPAIR_SCOPE_V1' END)"
+        ).fetchall()
+        for row in rows:
+            operation_prefix = f"akm-{digest(str(row['id']))[:16]}-%"
+            uncertain = connection.execute(
+                "SELECT 1 FROM auto_knowledge_model_attempts "
+                "WHERE job_id=? AND status IN ('SEND_INTENT','RESPONSE_UNKNOWN') LIMIT 1",
+                (row["id"],),
+            ).fetchone()
+            if uncertain is not None:
+                continue
+            if row["error_code"] == "DAILY_MODEL_CALL_QUOTA":
+                blocked = connection.execute(
+                    "SELECT operation.id FROM learning_operations AS operation "
+                    "WHERE operation.id LIKE ? "
+                    "AND operation.kind='auto.knowledge.map' "
+                    "AND operation.status='UNKNOWN' "
+                    "AND NOT EXISTS(SELECT 1 FROM learning_model_call_reservations AS reserve "
+                    "WHERE reserve.workspace_id=operation.workspace_id "
+                    "AND reserve.operation_id=operation.id) "
+                    "AND NOT EXISTS(SELECT 1 FROM learning_model_run_evidence AS evidence "
+                    "WHERE evidence.workspace_id=operation.workspace_id "
+                    "AND evidence.operation_id=operation.id) "
+                    "AND NOT EXISTS(SELECT 1 FROM auto_knowledge_model_attempts AS attempt "
+                    "WHERE attempt.operation_id=operation.id) "
+                    "AND NOT EXISTS(SELECT 1 FROM auto_knowledge_job_artifacts AS artifact "
+                    "WHERE artifact.model_operation_id=operation.id) "
+                    "ORDER BY operation.id",
+                    (operation_prefix,),
+                ).fetchall()
+                reason = "BACKGROUND_QUOTA_SCOPE_V1"
+                if len(blocked) != 1:
+                    continue
+            else:
+                # Only V4 jobs have the durable pre-parse evidence needed to
+                # prove that a rejected shard is safe to repair. Legacy V2
+                # failures remain terminal and visible.
+                if row["builder_version"] != BUILDER_VERSION:
+                    continue
+                blocked = connection.execute(
+                    "SELECT attempt.operation_id FROM auto_knowledge_model_attempts AS attempt "
+                    "WHERE attempt.job_id=? "
+                    "AND attempt.status IN ('BUSINESS_REJECTED','CONTRACT_REJECTED') "
+                    "AND NOT EXISTS(SELECT 1 FROM auto_knowledge_job_artifacts AS artifact "
+                    "WHERE artifact.job_id=attempt.job_id "
+                    "AND artifact.stage=attempt.stage AND artifact.shard_key=attempt.shard_key) "
+                    "ORDER BY attempt.updated_at,attempt.operation_id",
+                    (row["id"],),
+                ).fetchall()
+                reason = "PER_SHARD_REPAIR_SCOPE_V1"
+                if not blocked:
+                    continue
+            receipt = {
+                "job_id": row["id"],
+                "target_key": row["target_key"],
+                "corpus_fingerprint": row["corpus_fingerprint"],
+                "status": row["receipt_status"],
+                "tree_version_id": row["receipt_tree_version_id"],
+                "source_snapshot_hash": row["receipt_source_snapshot_hash"],
+                "result_hash": row["receipt_result_hash"],
+                "model_calls_made": row["receipt_model_calls_made"],
+                "detail": json.loads(str(row["receipt_detail_json"])),
+                "created_at": row["receipt_created_at"],
+            }
+            receipt_json = canonical_json(receipt)
+            recovery_id = "akm-recovery-" + digest(
+                [row["id"], reason, receipt]
+            )[:32]
+            connection.execute(
+                "INSERT INTO auto_knowledge_job_recovery_receipts("
+                "id,job_id,reason,prior_receipt_json,prior_receipt_hash,"
+                "blocked_operation_ids_json) VALUES(?,?,?,?,?,?)",
+                (
+                    recovery_id,
+                    row["id"],
+                    reason,
+                    receipt_json,
+                    hashlib.sha256(receipt_json.encode("utf-8")).hexdigest(),
+                    canonical_json([str(item[0]) for item in blocked]),
+                ),
+            )
+            connection.execute(
+                "DELETE FROM auto_knowledge_job_receipts WHERE job_id=?",
+                (row["id"],),
+            )
+            connection.execute(
+                "UPDATE auto_knowledge_jobs SET status='QUEUED',lease_owner=NULL,"
+                "lease_expires_at=NULL,error_code=NULL,error_message=NULL,completed_at=NULL,"
+                "updated_at=? WHERE id=? AND status='FAILED'",
+                (stamp(), row["id"]),
+            )
+            connection.execute(
+                "UPDATE auto_knowledge_targets SET status='QUEUED',message=?,updated_at=? "
+                "WHERE target_key=? AND active_job_id=? AND status='FAILED'",
+                (
+                    "Resuming frozen artifacts under the background metering scope",
+                    stamp(),
+                    row["target_key"],
+                    row["id"],
+                ),
+            )
+            recovered += 1
+        return recovered
+
     def reconcile(self, *, force: bool = False, full: bool = False) -> dict[str, int]:
         """Queue missing/stale targets and consume due source events.
 
@@ -1405,6 +1646,13 @@ class AutoKnowledgeMapService:
                     ),
                 )
                 counts["UNKNOWN"] += 1
+            if (
+                self.settings.auto_knowledge_map_enabled
+                and self.settings.auto_knowledge_map_allow_billable
+            ):
+                counts["RECOVERED_SAFE_FAILURE"] += self._recover_safe_blocked_jobs(
+                    connection
+                )
             due = connection.execute(
                 "SELECT id FROM auto_knowledge_source_events WHERE status='PENDING' "
                 + ("" if force else "AND not_before<=? ")

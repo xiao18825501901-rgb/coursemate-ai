@@ -18,6 +18,7 @@ from app.repositories.chunks import ChunkRepository
 from app.services.auto_knowledge_map import (
     AutoKnowledgeMapService,
     OrchestratorDraftGenerator,
+    digest,
 )
 
 
@@ -193,6 +194,32 @@ class RepairingLearning(RecordingLearning):
             )
             return schema.model_validate(
                 {"title": "Incomplete first response", "modules": [], "nodes": []}
+            ), {"status": "COMPLETED"}
+        return super().generate(workspace_id, operation, schema, **kwargs)
+
+
+class MultiShardRepairingLearning(RecordingLearning):
+    def __init__(self) -> None:
+        super().__init__()
+        self.rejected_operations: set[str] = set()
+
+    def generate(self, workspace_id, operation, schema, **kwargs):
+        if (
+            schema.__name__ == "AutoKnowledgeMapDraft"
+            and "-r" not in operation
+            and len(self.rejected_operations) < 3
+        ):
+            self.rejected_operations.add(operation)
+            self.calls.append(
+                {
+                    "operation": operation,
+                    "schema": schema.__name__,
+                    "instructions": kwargs["instructions"],
+                    "max_output_tokens": kwargs.get("max_output_tokens"),
+                }
+            )
+            return schema.model_validate(
+                {"title": "Incomplete shard", "modules": [], "nodes": []}
             ), {"status": "COMPLETED"}
         return super().generate(workspace_id, operation, schema, **kwargs)
 
@@ -998,8 +1025,11 @@ def test_real_orchestrator_and_provider_complete_over_fake_http_upstream(
             "v3_model": "deepseek-flash",
             "v3_model_api_key": SecretStr("offline-contract-only"),
             "v3_model_base_url": "https://api.deepseek.com",
-            "v3_daily_model_calls_per_user": 30,
-            "v3_daily_model_calls_per_user_course": 30,
+            # Course builds can legitimately need more shards than a learner's
+            # interactive daily allowance. They remain metered, but use an
+            # explicit background scope instead of consuming this quota.
+            "v3_daily_model_calls_per_user": 1,
+            "v3_daily_model_calls_per_user_course": 1,
         }
     )
     database = Database(settings)
@@ -1108,7 +1138,7 @@ def test_real_orchestrator_and_provider_complete_over_fake_http_upstream(
     ]
     with database.connect() as connection:
         reservations = connection.execute(
-            "SELECT status FROM learning_model_call_reservations ORDER BY rowid"
+            "SELECT status,quota_scope FROM learning_model_call_reservations ORDER BY rowid"
         ).fetchall()
         artifacts = connection.execute(
             "SELECT stage,input_hash,output_hash FROM auto_knowledge_job_artifacts "
@@ -1119,13 +1149,191 @@ def test_real_orchestrator_and_provider_complete_over_fake_http_upstream(
             "ORDER BY created_at,operation_id"
         ).fetchall()
     assert len(reservations) == len(requests)
-    assert all(row["status"] == "COMPLETED" for row in reservations)
+    assert all(
+        (row["status"], row["quota_scope"]) == ("COMPLETED", "BACKGROUND_AUTO_MAP")
+        for row in reservations
+    )
     assert len(artifacts) == len(requests)
     assert all(len(row["input_hash"]) == len(row["output_hash"]) == 64 for row in artifacts)
     assert len(attempts) == len(requests)
     assert all(row["status"] == "ACCEPTED" for row in attempts)
     assert all(len(row["output_hash"]) == 64 for row in attempts)
     assert all(row["rejection_code"] is None for row in attempts)
+
+
+def test_pre_dispatch_quota_failure_resumes_from_frozen_artifacts_with_audit(
+    tmp_path: Path,
+) -> None:
+    settings = settings_at(tmp_path).model_copy(
+        update={
+            "auto_knowledge_map_enabled": True,
+            "auto_knowledge_map_allow_billable": True,
+        }
+    )
+    database = Database(settings)
+    database.initialize()
+    private_workspace(database)
+    ready_document(
+        database,
+        document_id="quota-resume-doc",
+        chunk_id="quota-resume-chunk",
+        content="A quota stop before dispatch must reuse completed frozen work.",
+    )
+    learning = RecordingLearning()
+    service = AutoKnowledgeMapService(database, settings, learning)  # type: ignore[arg-type]
+    assert service.reconcile(force=True)["QUEUED"] == 1
+
+    with database.connect() as connection:
+        job = connection.execute("SELECT * FROM auto_knowledge_jobs").fetchone()
+        operation = f"akm-{digest(str(job['id']))[:16]}-m-00000"
+        connection.execute(
+            "INSERT INTO learning_operations(workspace_id,id,request_hash,kind,status) "
+            "VALUES('workspace-a',?,?,'auto.knowledge.map','UNKNOWN')",
+            (operation, "f" * 64),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='FAILED',"
+            "error_code='DAILY_MODEL_CALL_QUOTA',"
+            "error_message='No provider call was made',completed_at=? WHERE id=?",
+            ("2026-09-27T00:00:00.000Z", job["id"]),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_targets SET status='FAILED' WHERE target_key=?",
+            (job["target_key"],),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_job_receipts("
+            "job_id,target_key,corpus_fingerprint,status,source_snapshot_hash,"
+            "model_calls_made,detail_json) VALUES(?,?,?,'FAILED',?,0,?)",
+            (
+                job["id"],
+                job["target_key"],
+                job["corpus_fingerprint"],
+                digest(json.loads(job["source_snapshot_json"])),
+                json.dumps({"error_code": "DAILY_MODEL_CALL_QUOTA"}),
+            ),
+        )
+
+    reconciled = service.reconcile(force=True)
+    assert reconciled["RECOVERED_SAFE_FAILURE"] == 1
+    completed = service.run_once("quota-recovery-worker")
+    assert completed is not None and completed["status"] == "READY"
+
+    with database.connect() as connection:
+        recovery = connection.execute(
+            "SELECT reason,prior_receipt_json,blocked_operation_ids_json "
+            "FROM auto_knowledge_job_recovery_receipts"
+        ).fetchone()
+        operations = connection.execute(
+            "SELECT id,status FROM learning_operations ORDER BY id"
+        ).fetchall()
+        receipt = connection.execute(
+            "SELECT status FROM auto_knowledge_job_receipts"
+        ).fetchone()
+    assert recovery["reason"] == "BACKGROUND_QUOTA_SCOPE_V1"
+    assert json.loads(recovery["prior_receipt_json"])["status"] == "FAILED"
+    assert json.loads(recovery["blocked_operation_ids_json"]) == [operation]
+    assert (operation, "UNKNOWN") in {tuple(row) for row in operations}
+    assert (f"{operation}-q1", "COMPLETED") in {tuple(row) for row in operations}
+    assert receipt["status"] == "READY"
+
+
+def test_legacy_job_level_repair_limit_resumes_only_known_rejected_shard(
+    tmp_path: Path,
+) -> None:
+    settings = settings_at(tmp_path).model_copy(
+        update={
+            "auto_knowledge_map_enabled": True,
+            "auto_knowledge_map_allow_billable": True,
+        }
+    )
+    database = Database(settings)
+    database.initialize()
+    private_workspace(database)
+    ready_document(
+        database,
+        document_id="repair-resume-doc",
+        chunk_id="repair-resume-chunk",
+        content="A known rejected shard can receive its own bounded repair.",
+    )
+    learning = RecordingLearning()
+    service = AutoKnowledgeMapService(database, settings, learning)  # type: ignore[arg-type]
+    assert service.reconcile(force=True)["QUEUED"] == 1
+
+    output_text = "{}"
+    output_hash = __import__("hashlib").sha256(output_text.encode()).hexdigest()
+    with database.connect() as connection:
+        job = connection.execute("SELECT * FROM auto_knowledge_jobs").fetchone()
+        operation = f"akm-{digest(str(job['id']))[:16]}-m-00000"
+        connection.execute(
+            "INSERT INTO learning_operations(workspace_id,id,request_hash,kind,status) "
+            "VALUES('workspace-a',?,?,'auto.knowledge.map','FAILED')",
+            (operation, "e" * 64),
+        )
+        connection.execute(
+            "INSERT INTO learning_model_call_reservations("
+            "id,workspace_id,operation_id,owner_user_id,course_id,role,"
+            "reserved_output_tokens,status,finished_at) "
+            "VALUES('legacy-repair-reservation','workspace-a',?,'owner-a',"
+            "'private-course','teacher',8000,'FAILED',?)",
+            (operation, "2026-09-27T00:00:00.000Z"),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_model_attempts("
+            "operation_id,job_id,stage,shard_key,input_hash,status,"
+            "output_text,output_hash,rejection_code,rejection_detail_json) "
+            "VALUES(?,?,'SECTION_MAP','map-00000',?,'CONTRACT_REJECTED',?,?,?,?)",
+            (
+                operation,
+                job["id"],
+                "d" * 64,
+                output_text,
+                output_hash,
+                "SCHEMA_INVALID",
+                json.dumps({"code": "SCHEMA_INVALID"}),
+            ),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='FAILED',model_calls_made=1,"
+            "repair_calls_made=2,error_code='AUTO_REPAIR_LIMIT',"
+            "error_message='Legacy job-level repair limit',completed_at=? WHERE id=?",
+            ("2026-09-27T00:00:00.000Z", job["id"]),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_targets SET status='FAILED' WHERE target_key=?",
+            (job["target_key"],),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_job_receipts("
+            "job_id,target_key,corpus_fingerprint,status,source_snapshot_hash,"
+            "model_calls_made,detail_json) VALUES(?,?,?,'FAILED',?,1,?)",
+            (
+                job["id"],
+                job["target_key"],
+                job["corpus_fingerprint"],
+                digest(json.loads(job["source_snapshot_json"])),
+                json.dumps({"error_code": "AUTO_REPAIR_LIMIT"}),
+            ),
+        )
+
+    assert service.reconcile(force=True)["RECOVERED_SAFE_FAILURE"] == 1
+    completed = service.run_once("repair-scope-recovery-worker")
+    assert completed is not None and completed["status"] == "READY"
+
+    with database.connect() as connection:
+        recovery = connection.execute(
+            "SELECT reason,blocked_operation_ids_json "
+            "FROM auto_knowledge_job_recovery_receipts"
+        ).fetchone()
+        repairs = connection.execute(
+            "SELECT stage,shard_key,ordinal,operation_id "
+            "FROM auto_knowledge_repair_reservations"
+        ).fetchall()
+    assert recovery["reason"] == "PER_SHARD_REPAIR_SCOPE_V1"
+    assert json.loads(recovery["blocked_operation_ids_json"]) == [operation]
+    assert [tuple(row) for row in repairs] == [
+        ("SECTION_MAP", "map-00000", 1, f"{operation}-r1")
+    ]
 
 
 def test_safe_validation_failure_uses_one_targeted_repair_and_reuses_stage_contract(
@@ -1169,6 +1377,36 @@ def test_safe_validation_failure_uses_one_targeted_repair_and_reuses_stage_contr
     assert learning.calls[0]["max_output_tokens"] == 8_000
     assert "previous complete response" in learning.calls[1]["instructions"].lower()
     assert "AUTO_SOURCE_COVERAGE_INCOMPLETE" in learning.calls[1]["instructions"]
+
+
+def test_targeted_repair_budget_is_bounded_per_shard_not_per_course(
+    tmp_path: Path,
+) -> None:
+    settings = settings_at(tmp_path)
+    database = Database(settings)
+    database.initialize()
+    private_workspace(database)
+    ready_document(
+        database,
+        document_id="many-shards-doc",
+        chunk_id="many-shards-chunk",
+        content="grounded concept " * 3_000,
+    )
+    learning = MultiShardRepairingLearning()
+    service = AutoKnowledgeMapService(database, settings, learning)  # type: ignore[arg-type]
+    service.reconcile(force=True)
+
+    result = service.run_once("many-shards-repair-worker")
+
+    assert result is not None and result["status"] == "READY"
+    assert len(learning.rejected_operations) == 3
+    with database.connect() as connection:
+        repairs = connection.execute(
+            "SELECT stage,shard_key,ordinal FROM auto_knowledge_repair_reservations "
+            "ORDER BY stage,shard_key,ordinal"
+        ).fetchall()
+    assert len(repairs) == 3
+    assert all(row["ordinal"] == 1 for row in repairs)
 
 
 def test_live_incomplete_response_is_saved_then_repaired_with_larger_bound(

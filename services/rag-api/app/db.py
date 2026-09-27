@@ -39,6 +39,7 @@ V3_MIGRATIONS = (
     "041_canvas_local_bridge_client.sql",
     "042_auto_knowledge_map.sql",
     "043_auto_knowledge_model_attempts.sql",
+    "044_auto_knowledge_background_budget_scope.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -54,10 +55,13 @@ V3_REPLAY_SUPERSEDED_BY = {
     "021_model_call_budget_reservations.sql": 39,
     "027_assessment_preparation_reference.sql": 38,
     "038_assessment_question_slots.sql": 39,
+    # Migration 044 appends quota_scope. Replaying 039 afterwards would rebuild
+    # the ledger with its historical 12-column shape and SELECT * 13 values.
+    "039_practice_operation_reconciliation.sql": 44,
     "040_configurable_assessments.sql": 40,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 43
+LATEST_V3_SCHEMA_VERSION = 44
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (
@@ -602,6 +606,27 @@ class Database:
                         "ALTER TABLE canvas_local_sessions ADD COLUMN "
                         "bridge_token_hash TEXT NOT NULL DEFAULT ''"
                     )
+                # Migration 044 gives course-scale background generation its own
+                # metering scope without weakening the learner's interactive
+                # daily quota. SQLite cannot ADD COLUMN IF NOT EXISTS, so keep
+                # the replay-safe guard beside the earlier conditional ALTERs.
+                reservation_columns = {
+                    row["name"]
+                    for row in connection.execute(
+                        "PRAGMA table_info(learning_model_call_reservations)"
+                    )
+                }
+                if reservation_columns and "quota_scope" not in reservation_columns:
+                    connection.execute(
+                        "ALTER TABLE learning_model_call_reservations ADD COLUMN "
+                        "quota_scope TEXT NOT NULL DEFAULT 'INTERACTIVE' "
+                        "CHECK(quota_scope IN ('INTERACTIVE','BACKGROUND_AUTO_MAP'))"
+                    )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_model_call_interactive_owner_day "
+                    "ON learning_model_call_reservations(owner_user_id,course_id,created_at) "
+                    "WHERE quota_scope='INTERACTIVE'"
+                )
 
     def is_ready(self) -> bool:
         if not self.upload_dir.is_dir():

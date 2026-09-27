@@ -1310,6 +1310,7 @@ class LearningOrchestrator:
         operation: str,
         role: str,
         max_output_tokens: int | None = None,
+        quota_scope: Literal["INTERACTIVE", "BACKGROUND_AUTO_MAP"] = "INTERACTIVE",
     ) -> str:
         reservation_id = identifier()
         reserved_output_tokens = (
@@ -1331,30 +1332,33 @@ class LearningOrchestrator:
             ).fetchone()
             if workspace is None:
                 raise ApiError(404, "WORKSPACE_NOT_FOUND", "The workspace was not found.")
-            user_calls = db.execute(
-                "SELECT COUNT(*) FROM learning_model_call_reservations "
-                "WHERE owner_user_id=? AND created_at>=date('now') AND status!='BLOCKED'",
-                (workspace["owner_user_id"],),
-            ).fetchone()[0]
-            course_calls = db.execute(
-                "SELECT COUNT(*) FROM learning_model_call_reservations "
-                "WHERE owner_user_id=? AND course_id=? AND created_at>=date('now') "
-                "AND status!='BLOCKED'",
-                (workspace["owner_user_id"], workspace["course_id"]),
-            ).fetchone()[0]
-            if (
-                user_calls >= self.settings.v3_daily_model_calls_per_user
-                or course_calls >= self.settings.v3_daily_model_calls_per_user_course
-            ):
-                raise ApiError(
-                    429,
-                    "DAILY_MODEL_CALL_QUOTA",
-                    "The daily model-call budget has been reached; no provider call was made.",
-                )
+            if quota_scope == "INTERACTIVE":
+                user_calls = db.execute(
+                    "SELECT COUNT(*) FROM learning_model_call_reservations "
+                    "WHERE owner_user_id=? AND created_at>=date('now') "
+                    "AND status!='BLOCKED' AND quota_scope='INTERACTIVE'",
+                    (workspace["owner_user_id"],),
+                ).fetchone()[0]
+                course_calls = db.execute(
+                    "SELECT COUNT(*) FROM learning_model_call_reservations "
+                    "WHERE owner_user_id=? AND course_id=? AND created_at>=date('now') "
+                    "AND status!='BLOCKED' AND quota_scope='INTERACTIVE'",
+                    (workspace["owner_user_id"], workspace["course_id"]),
+                ).fetchone()[0]
+                if (
+                    user_calls >= self.settings.v3_daily_model_calls_per_user
+                    or course_calls >= self.settings.v3_daily_model_calls_per_user_course
+                ):
+                    raise ApiError(
+                        429,
+                        "DAILY_MODEL_CALL_QUOTA",
+                        "The daily model-call budget has been reached; no provider call was made.",
+                    )
             db.execute(
                 "INSERT INTO learning_model_call_reservations("
                 "id,workspace_id,operation_id,owner_user_id,course_id,role,"
-                "reserved_output_tokens,status) VALUES(?,?,?,?,?,?,?,'RESERVED')",
+                "reserved_output_tokens,status,quota_scope) "
+                "VALUES(?,?,?,?,?,?,?,'RESERVED',?)",
                 (
                     reservation_id,
                     workspace_id,
@@ -1363,6 +1367,7 @@ class LearningOrchestrator:
                     workspace["course_id"],
                     role,
                     reserved_output_tokens,
+                    quota_scope,
                 ),
             )
         return reservation_id
@@ -1440,10 +1445,11 @@ class LearningOrchestrator:
         schema_version: str,
         images: list[ProviderImage] | None = None,
         max_output_tokens: int | None = None,
+        quota_scope: Literal["INTERACTIVE", "BACKGROUND_AUTO_MAP"] = "INTERACTIVE",
         transport_event_sink: Callable[[dict[str, Any]], None] | None = None,
     ) -> tuple[Output, dict[str, Any]]:
         reservation_id = self.reserve_model_call(
-            workspace_id, operation, role, max_output_tokens
+            workspace_id, operation, role, max_output_tokens, quota_scope
         )
         try:
             output, run = self.provider.generate(
