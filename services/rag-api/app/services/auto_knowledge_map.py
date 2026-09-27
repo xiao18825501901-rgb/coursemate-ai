@@ -541,12 +541,12 @@ class OrchestratorDraftGenerator:
                 "'EVIDENCE_SCOPE_REPAIR_V1')",
                 (job_id,),
             ).fetchall()
-            authorized_third_repairs = {
-                str(row["reason"]): set(
-                    json.loads(str(row["blocked_operation_ids_json"]))
+            authorized_third_repairs: defaultdict[str, set[str]] = defaultdict(set)
+            for row in third_recovery_rows:
+                authorized_third_repairs[str(row["reason"])].update(
+                    str(item)
+                    for item in json.loads(str(row["blocked_operation_ids_json"]))
                 )
-                for row in third_recovery_rows
-            }
             required_authorized = (
                 stage == "TEACHING_SPEC"
                 and f"{operation_base}-r2"
@@ -663,6 +663,10 @@ class OrchestratorDraftGenerator:
             f"{base_operation}-r1",
             f"{base_operation}-r2",
         ]
+        expected_scope_json = canonical_json(expected_scope_operations)
+        expected_normalization_json = canonical_json(
+            [*expected_scope_operations, operation_id]
+        )
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             running = connection.execute(
@@ -686,13 +690,15 @@ class OrchestratorDraftGenerator:
             ).fetchone()
             scope_receipt = connection.execute(
                 "SELECT blocked_operation_ids_json FROM auto_knowledge_job_recovery_receipts "
-                "WHERE job_id=? AND reason='EVIDENCE_SCOPE_REPAIR_V1'",
-                (job_id,),
+                "WHERE job_id=? AND reason='EVIDENCE_SCOPE_REPAIR_V1' "
+                "AND blocked_operation_ids_json=?",
+                (job_id, expected_scope_json),
             ).fetchone()
             normalization_receipt = connection.execute(
                 "SELECT 1 FROM auto_knowledge_job_recovery_receipts "
-                "WHERE job_id=? AND reason='EVIDENCE_SCOPE_NORMALIZATION_V1'",
-                (job_id,),
+                "WHERE job_id=? AND reason='EVIDENCE_SCOPE_NORMALIZATION_V1' "
+                "AND blocked_operation_ids_json=?",
+                (job_id, expected_normalization_json),
             ).fetchone()
             if existing is not None:
                 if (
@@ -715,11 +721,9 @@ class OrchestratorDraftGenerator:
                 or attempt["status"] != "BUSINESS_REJECTED"
                 or attempt["rejection_code"] != "AUTO_EVIDENCE_INVALID"
                 or attempt["output_hash"] != raw_output_hash
-                or scope_receipt is None
-                or normalization_receipt is None
-                or json.loads(str(scope_receipt["blocked_operation_ids_json"]))
-                != expected_scope_operations
-            ):
+            or scope_receipt is None
+            or normalization_receipt is None
+        ):
                 raise ApiError(
                     409,
                     "AUTO_ARTIFACT_CONFLICT",
@@ -2067,11 +2071,6 @@ class AutoKnowledgeMapService:
                     if len(evidence_scope_r3) == 1
                     else set()
                 )
-                scope_repair_receipt = connection.execute(
-                    "SELECT blocked_operation_ids_json FROM auto_knowledge_job_recovery_receipts "
-                    "WHERE job_id=? AND reason='EVIDENCE_SCOPE_REPAIR_V1'",
-                    (row["id"],),
-                ).fetchone()
                 original_scope_operations = (
                     [
                         evidence_scope_r2[0][:-3],
@@ -2081,6 +2080,12 @@ class AutoKnowledgeMapService:
                     if len(evidence_scope_r2) == 1
                     else []
                 )
+                scope_repair_receipt = connection.execute(
+                    "SELECT 1 FROM auto_knowledge_job_recovery_receipts "
+                    "WHERE job_id=? AND reason='EVIDENCE_SCOPE_REPAIR_V1' "
+                    "AND blocked_operation_ids_json=?",
+                    (row["id"], canonical_json(original_scope_operations)),
+                ).fetchone()
                 r3_reservation = (
                     connection.execute(
                         "SELECT 1 FROM auto_knowledge_repair_reservations "
@@ -2101,8 +2106,6 @@ class AutoKnowledgeMapService:
                     and evidence_scope_operations
                     == expected_evidence_scope_normalization_operations
                     and scope_repair_receipt is not None
-                    and json.loads(str(scope_repair_receipt["blocked_operation_ids_json"]))
-                    == original_scope_operations
                     and r3_reservation is not None
                     and all(
                         str(item["stage"]) == "TEACHING_SPEC"
@@ -2146,46 +2149,44 @@ class AutoKnowledgeMapService:
                 # the r2 feedback that was part of r3's original request.
                 # Permit one retry only when the entire frozen repair chain is
                 # still present and no local artifact was written.
-                scope_receipt = connection.execute(
+                scope_operations: list[str] | None = None
+                expected_normalization_operations: list[str] | None = None
+                for scope_receipt in connection.execute(
                     "SELECT blocked_operation_ids_json FROM "
                     "auto_knowledge_job_recovery_receipts "
-                    "WHERE job_id=? AND reason='EVIDENCE_SCOPE_REPAIR_V1'",
+                    "WHERE job_id=? AND reason='EVIDENCE_SCOPE_REPAIR_V1' "
+                    "ORDER BY created_at,id",
                     (row["id"],),
-                ).fetchone()
-                normalization_receipt = connection.execute(
-                    "SELECT blocked_operation_ids_json FROM "
-                    "auto_knowledge_job_recovery_receipts "
-                    "WHERE job_id=? AND reason='EVIDENCE_SCOPE_NORMALIZATION_V1'",
-                    (row["id"],),
-                ).fetchone()
-                if scope_receipt is None or normalization_receipt is None:
-                    continue
-                scope_operations = json.loads(
-                    str(scope_receipt["blocked_operation_ids_json"])
-                )
-                normalization_operations = json.loads(
-                    str(normalization_receipt["blocked_operation_ids_json"])
-                )
-                if (
-                    not isinstance(scope_operations, list)
-                    or len(scope_operations) != 3
-                    or not all(isinstance(item, str) for item in scope_operations)
-                ):
-                    continue
-                base_operation = scope_operations[0]
-                expected_scope_operations = [
-                    base_operation,
-                    f"{base_operation}-r1",
-                    f"{base_operation}-r2",
-                ]
-                expected_normalization_operations = [
-                    *expected_scope_operations,
-                    f"{base_operation}-r3",
-                ]
-                if (
-                    scope_operations != expected_scope_operations
-                    or normalization_operations != expected_normalization_operations
-                ):
+                ).fetchall():
+                    candidate_scope = json.loads(
+                        str(scope_receipt["blocked_operation_ids_json"])
+                    )
+                    if (
+                        not isinstance(candidate_scope, list)
+                        or len(candidate_scope) != 3
+                        or not all(isinstance(item, str) for item in candidate_scope)
+                    ):
+                        continue
+                    base_operation = candidate_scope[0]
+                    expected_scope = [
+                        base_operation,
+                        f"{base_operation}-r1",
+                        f"{base_operation}-r2",
+                    ]
+                    expected_normalization = [*expected_scope, f"{base_operation}-r3"]
+                    if candidate_scope != expected_scope:
+                        continue
+                    normalization_receipt = connection.execute(
+                        "SELECT 1 FROM auto_knowledge_job_recovery_receipts "
+                        "WHERE job_id=? AND reason='EVIDENCE_SCOPE_NORMALIZATION_V1' "
+                        "AND blocked_operation_ids_json=?",
+                        (row["id"], canonical_json(expected_normalization)),
+                    ).fetchone()
+                    if normalization_receipt is not None:
+                        scope_operations = candidate_scope
+                        expected_normalization_operations = expected_normalization
+                        break
+                if scope_operations is None or expected_normalization_operations is None:
                     continue
                 attempts = connection.execute(
                     "SELECT operation_id,stage,shard_key,status,rejection_code,"
@@ -2366,11 +2367,23 @@ class AutoKnowledgeMapService:
                     reason = "LEGACY_REJECTION_FEEDBACK_REHYDRATION_V1"
                 else:
                     continue
-            if connection.execute(
+            blocked_operation_ids_json = canonical_json([str(item[0]) for item in blocked])
+            per_shard_evidence_reason = reason in {
+                "EVIDENCE_SCOPE_REPAIR_V1",
+                "EVIDENCE_SCOPE_NORMALIZATION_V1",
+                "EVIDENCE_SCOPE_NORMALIZATION_RETRY_V1",
+            }
+            existing_recovery = connection.execute(
                 "SELECT 1 FROM auto_knowledge_job_recovery_receipts "
-                "WHERE job_id=? AND reason=?",
-                (row["id"], reason),
-            ).fetchone() is not None:
+                "WHERE job_id=? AND reason=?"
+                + (" AND blocked_operation_ids_json=?" if per_shard_evidence_reason else ""),
+                (
+                    (row["id"], reason, blocked_operation_ids_json)
+                    if per_shard_evidence_reason
+                    else (row["id"], reason)
+                ),
+            ).fetchone()
+            if existing_recovery is not None:
                 continue
             receipt = {
                 "job_id": row["id"],
@@ -2386,7 +2399,7 @@ class AutoKnowledgeMapService:
             }
             receipt_json = canonical_json(receipt)
             recovery_id = "akm-recovery-" + digest(
-                [row["id"], reason, receipt]
+                [row["id"], reason, blocked_operation_ids_json, receipt]
             )[:32]
             connection.execute(
                 "INSERT INTO auto_knowledge_job_recovery_receipts("
@@ -2398,7 +2411,7 @@ class AutoKnowledgeMapService:
                     reason,
                     receipt_json,
                     hashlib.sha256(receipt_json.encode("utf-8")).hexdigest(),
-                    canonical_json([str(item[0]) for item in blocked]),
+                    blocked_operation_ids_json,
                 ),
             )
             connection.execute(

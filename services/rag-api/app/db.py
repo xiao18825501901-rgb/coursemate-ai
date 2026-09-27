@@ -49,6 +49,7 @@ V3_MIGRATIONS = (
     "051_auto_knowledge_evidence_scope_repair.sql",
     "052_auto_knowledge_evidence_scope_normalization.sql",
     "053_auto_knowledge_evidence_scope_normalization_retry.sql",
+    "054_auto_knowledge_per_shard_evidence_recovery_receipts.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -93,9 +94,12 @@ V3_REPLAY_SUPERSEDED_BY = {
     # Migration 053 grants one retry only when V52's local normalization was
     # stopped by an input-hash reconstruction defect before writing an artifact.
     "053_auto_knowledge_evidence_scope_normalization_retry.sql": 53,
+    # Migration 054 scopes atomic-evidence recovery uniqueness to the frozen
+    # shard list, so one course cannot consume another shard's one-shot repair.
+    "054_auto_knowledge_per_shard_evidence_recovery_receipts.sql": 54,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 53
+LATEST_V3_SCHEMA_VERSION = 54
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (

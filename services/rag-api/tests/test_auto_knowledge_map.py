@@ -2359,6 +2359,72 @@ def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_cal
     assert json.loads(artifact["output_json"])["specs"][0]["items"][0]["evidence_ids"] == ["e1"]
     assert [row["ordinal"] for row in repairs] == [1, 2, 3]
 
+    # A second frozen Teaching-Spec shard in the same course must receive its
+    # own one-shot evidence-scope repair; the first shard's receipt must not
+    # consume the authorization for all later shards.
+    second_base = f"akm-{digest(str(job['id']))[:16]}-s-00061"
+    with database.connect() as connection:
+        for ordinal, suffix in enumerate(("", "-r1", "-r2")):
+            operation = f"{second_base}{suffix}"
+            connection.execute(
+                "INSERT INTO auto_knowledge_model_attempts("
+                "operation_id,job_id,stage,shard_key,input_hash,status,output_text,"
+                "output_hash,rejection_code,rejection_detail_json) "
+                "VALUES(?,?,'TEACHING_SPEC','spec-00061',?,'BUSINESS_REJECTED',"
+                "?,?, 'AUTO_EVIDENCE_INVALID',?)",
+                (
+                    operation,
+                    job["id"],
+                    f"second-{ordinal}".ljust(64, "0"),
+                    rejected_json,
+                    hashlib.sha256(rejected_json.encode()).hexdigest(),
+                    canonical_json(issue),
+                ),
+            )
+            if ordinal:
+                connection.execute(
+                    "INSERT INTO auto_knowledge_repair_reservations("
+                    "job_id,stage,shard_key,ordinal,operation_id) VALUES(?,?,?,?,?)",
+                    (job["id"], "TEACHING_SPEC", "spec-00061", ordinal, operation),
+                )
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='FAILED',"
+            "error_code='AUTO_REPAIR_LIMIT',"
+            "error_message='The 2 targeted repairs for this automatic-map shard "
+            "were exhausted.',completed_at=? WHERE id=?",
+            ("2026-09-27T12:45:30.000Z", job["id"]),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_targets SET status='FAILED' WHERE active_job_id=?",
+            (job["id"],),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_job_receipts("
+            "job_id,target_key,corpus_fingerprint,status,source_snapshot_hash,"
+            "model_calls_made,detail_json) VALUES(?,?,?,'FAILED',?,4,?)",
+            (
+                job["id"],
+                job["target_key"],
+                job["corpus_fingerprint"],
+                digest(json.loads(job["source_snapshot_json"])),
+                canonical_json(original_receipt),
+            ),
+        )
+    assert service.reconcile(force=True)["RECOVERED_SAFE_FAILURE"] == 1
+    with database.connect() as connection:
+        scope_receipts = connection.execute(
+            "SELECT blocked_operation_ids_json FROM auto_knowledge_job_recovery_receipts "
+            "WHERE job_id=? AND reason='EVIDENCE_SCOPE_REPAIR_V1' "
+            "ORDER BY blocked_operation_ids_json",
+            (job["id"],),
+        ).fetchall()
+    assert {
+        tuple(json.loads(row["blocked_operation_ids_json"])) for row in scope_receipts
+    } == {
+        (base, f"{base}-r1", f"{base}-r2"),
+        (second_base, f"{second_base}-r1", f"{second_base}-r2"),
+    }
+
 
 def test_safe_validation_failure_uses_one_targeted_repair_and_reuses_stage_contract(
     tmp_path: Path,
