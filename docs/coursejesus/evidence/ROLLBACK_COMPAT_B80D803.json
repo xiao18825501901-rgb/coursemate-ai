@@ -1,0 +1,30 @@
+{
+  "release_tree": "D:\\CourseMate_COMPLETE_ARCHIVE_20260918\\01_SOURCE_REPOSITORY\\work\\auto-knowledge-map-20260927\\candidate\\work\\rollback-compat-b80d",
+  "migrated_database": "C:\\Users\\Hp\\AppData\\Local\\Temp\\cm-rollback-jhk4ross\\migrated.sqlite3",
+  "release_import_error": null,
+  "release_open_migrated_error": null,
+  "release_schema_dump_error": null,
+  "release_sees_max_migration": 59,
+  "release_own_schema_migration": 55,
+  "release_integrity_check": "ok",
+  "release_foreign_key_violations": 0,
+  "tables_missing_for_release": [],
+  "columns_missing_for_release": [],
+  "columns_retyped_for_release": [],
+  "check_enums_narrowed": [],
+  "pool_filter_verdict": "UNCHANGED",
+  "pool_filter_unchanged": true,
+  "pool_filter_release": "validation_status='VALIDATED' \"\n            \"AND question.verification_method!='MODEL_ONLY'",
+  "pool_filter_current": "validation_status='VALIDATED' \"\n            \"AND question.verification_method!='MODEL_ONLY'",
+  "pool_filter_detail": "byte-identical predicate",
+  "rollback_concerns": [],
+  "reasons": [],
+  "rebuilt_tables_checked": [
+    "assessment_question_revisions",
+    "assessment_blueprint_items",
+    "learning_model_run_evidence",
+    "learning_model_call_reservations"
+  ],
+  "verdict": "ROLLBACK_SAFE_WITH_MIGRATED_DB",
+  "note": "A code-only rollback is viable when the verdict is ROLLBACK_SAFE_WITH_MIGRATED_DB; the pre-migration database backup remains the primary rollback path either way. The verdict covers schema and code compatibility with the migrated database only: pool_filter_verdict != UNCHANGED means the two releases select different assessment pools (or the predicate could not be located, reported as UNDETERMINED), which is listed in rollback_concerns and needs an owner decision."
+}

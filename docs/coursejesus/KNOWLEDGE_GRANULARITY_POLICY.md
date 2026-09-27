@@ -16,6 +16,11 @@ The limit is not pagination, CSS hiding, or truncation. A version cannot be
 activated unless the entire source corpus is dispositioned against its final
 bounded outline.
 
+The same materialized limit applies to reviewed official, AI-organized campus,
+private, shared-snapshot, overlay, and resolved composite views. A base plus an
+overlay is not allowed to exceed 50 merely because each source view separately
+fits the limit.
+
 Typical courses should use 5–8 chapters and 20–36 learning units. Short courses
 may use fewer. Fifty is a hard ceiling, not a target.
 
@@ -30,6 +35,12 @@ Different algorithms, objects, or conflicting validity conditions must not be
 merged merely to satisfy the count. Conversely, moving one hundred old micro
 objectives unchanged into a single Spec does not count as compaction.
 
+Each ATOMIC unit contains a bounded, teachable set of REQUIRED objectives plus
+definitions, applicability conditions, method steps, worked examples,
+misconceptions, practice hooks, and source locators. Teaching, `做一题`, and
+N-question assessment resolve that unit, its objective contract, and its tree
+version together; none may silently fall back to a retired micro-node default.
+
 ## Build order
 
 1. Freeze the exact accessible source versions and reuse eligible prior paid
@@ -43,10 +54,16 @@ objectives unchanged into a single Spec does not count as compaction.
 6. Activate the complete version atomically while the prior version stays
    available until the switch.
 
+Only the final ATOMIC units receive newly compiled Teaching Specs. Planning and
+source-segment artifacts are durable, reusable intermediate evidence; they do
+not create navigation nodes and do not each trigger a Spec call.
+
 ## History semantics
 
 - One-to-one replacements may keep the original node ID.
 - Many-to-one replacements require explicit lineage and an immutable mapping.
+- Exact, hash-compatible one-to-one Specs may be reused. A merged unit must be
+  recompiled unless its complete objective and source contract is identical.
 - Existing transcripts and Pairs are preserved; one Pair becomes primary and
   the others remain associated history. Conversations are never concatenated.
 - A prior learning-start fact may remain visible as history.
@@ -62,3 +79,8 @@ Empty courses produce `WAITING_SOURCE`, not fabricated chapters. Unreadable or
 partially failed sources remain in the denominator and surface as explicit
 exceptions. Provider failures retain receipts and retry identity; they are not
 silently converted to success or removed from reconciliation.
+
+Compaction uses a new builder identity even when the source-corpus fingerprint
+is unchanged. This prevents an old same-corpus READY/FAILED target from masking
+the mandatory over-limit migration. No old paid request is re-sent under the
+same operation ID; `UNKNOWN` remains `UNKNOWN` until separately reconciled.
