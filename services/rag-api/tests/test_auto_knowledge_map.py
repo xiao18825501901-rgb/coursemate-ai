@@ -1604,16 +1604,46 @@ def test_live_incomplete_response_is_saved_then_repaired_with_larger_bound(
     assert "MODEL_INCOMPLETE" in requests[1]["instructions"]
     with database.connect() as connection:
         attempts = connection.execute(
-            "SELECT status,rejection_code,output_hash "
+            "SELECT status,rejection_code,rejection_detail_json,output_hash "
             "FROM auto_knowledge_model_attempts ORDER BY created_at,operation_id"
         ).fetchall()
+        job = connection.execute("SELECT * FROM auto_knowledge_jobs").fetchone()
+        course = connection.execute(
+            "SELECT * FROM courses WHERE id=?", (job["course_id"],)
+        ).fetchone()
     assert [row["status"] for row in attempts] == [
         "CONTRACT_REJECTED",
         "ACCEPTED",
         "ACCEPTED",
     ]
     assert attempts[0]["rejection_code"] == "MODEL_INCOMPLETE"
+    assert json.loads(attempts[0]["rejection_detail_json"])["code"] == "MODEL_INCOMPLETE"
     assert all(len(row["output_hash"]) == 64 for row in attempts)
+
+    requests_before_restart = len(requests)
+    restarted = AutoKnowledgeMapService(database, settings, learning)
+    _map, _specs, dispatched = restarted.generator.generate(
+        job_id=str(job["id"]),
+        workspace_id="workspace-a",
+        course=dict(course),
+        evidence=restarted._evidence(job),
+    )
+    assert dispatched == 0
+    assert len(requests) == requests_before_restart
+
+
+def test_legacy_schema_rejection_feedback_is_reconstructed_from_saved_output() -> None:
+    feedback = OrchestratorDraftGenerator._durable_rejection_feedback(
+        {
+            "rejection_code": "ValidationError",
+            "rejection_detail_json": "{}",
+            "output_text": "{}",
+        },  # type: ignore[arg-type]
+        AutoKnowledgeMapDraft,
+    )
+
+    assert feedback["code"] == "SCHEMA_INVALID"
+    assert feedback["issues"]
 
 
 def test_merge_prunes_empty_model_groupings_without_dropping_grounded_nodes() -> None:

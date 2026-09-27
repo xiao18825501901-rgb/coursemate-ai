@@ -182,6 +182,35 @@ class OrchestratorDraftGenerator:
             }
         return {"code": type(error).__name__[:100]}
 
+    @classmethod
+    def _durable_rejection_feedback(
+        cls, row: sqlite3.Row, schema: type
+    ) -> dict[str, object]:
+        detail = cast(
+            dict[str, object],
+            json.loads(str(row["rejection_detail_json"]) or "{}"),
+        )
+        if detail:
+            return detail
+        code = str(row["rejection_code"] or "")
+        if code == "MODEL_INCOMPLETE":
+            return {
+                "code": "MODEL_INCOMPLETE",
+                "message": "Incomplete output was not recorded as teaching coverage.",
+                "details": {},
+            }
+        output_text = str(row["output_text"] or "")
+        if output_text:
+            try:
+                schema.model_validate_json(output_text)
+            except Exception as error:  # validation type belongs to the supplied schema
+                return cls._safe_validation_detail(error)
+        raise ApiError(
+            409,
+            "AUTO_ARTIFACT_CONFLICT",
+            "A repaired generation shard is missing reproducible rejection evidence.",
+        )
+
     def _attempt_sink(
         self,
         *,
@@ -390,6 +419,22 @@ class OrchestratorDraftGenerator:
                             operation_id,
                         ),
                     )
+                elif safely_failed:
+                    # Contract rejection happens inside the provider before it
+                    # returns a typed object, so provider_completed is false.
+                    # Persist the same normalized feedback used to construct a
+                    # repair request; future restarts can then reproduce its
+                    # exact input hash without another provider call.
+                    connection.execute(
+                        "UPDATE auto_knowledge_model_attempts "
+                        "SET rejection_detail_json=?,updated_at=? "
+                        "WHERE operation_id=? AND status='CONTRACT_REJECTED'",
+                        (
+                            canonical_json(validation_detail),
+                            stamp(),
+                            operation_id,
+                        ),
+                    )
                 connection.execute(
                     "UPDATE learning_operations SET status=? "
                     "WHERE workspace_id=? AND id=? AND status='RUNNING'",
@@ -530,7 +575,8 @@ class OrchestratorDraftGenerator:
                 if repaired is not None:
                     repair = int(repaired.group(1))
                     previous = connection.execute(
-                        "SELECT rejection_detail_json FROM auto_knowledge_model_attempts "
+                        "SELECT rejection_code,rejection_detail_json,output_text "
+                        "FROM auto_knowledge_model_attempts "
                         "WHERE job_id=? AND stage=? AND shard_key=? "
                         "AND status IN ('BUSINESS_REJECTED','CONTRACT_REJECTED') "
                         "AND updated_at<=? ORDER BY updated_at DESC,operation_id DESC LIMIT 1",
@@ -542,13 +588,10 @@ class OrchestratorDraftGenerator:
                             "AUTO_ARTIFACT_CONFLICT",
                             "A repaired generation shard is missing its rejection evidence.",
                         )
-                    repair_feedback = cast(
-                        dict[str, object],
-                        json.loads(str(previous["rejection_detail_json"]) or "{}"),
-                    )
+                    repair_feedback = self._durable_rejection_feedback(previous, schema)
             if recovery is not None and artifact is None:
                 previous = connection.execute(
-                    "SELECT operation_id,rejection_detail_json "
+                    "SELECT operation_id,rejection_code,rejection_detail_json,output_text "
                     "FROM auto_knowledge_model_attempts "
                     "WHERE job_id=? AND stage=? AND shard_key=? "
                     "AND status IN ('BUSINESS_REJECTED','CONTRACT_REJECTED') "
@@ -556,10 +599,7 @@ class OrchestratorDraftGenerator:
                     (job_id, stage, shard_key),
                 ).fetchone()
                 if previous is not None:
-                    repair_feedback = cast(
-                        dict[str, object],
-                        json.loads(str(previous["rejection_detail_json"]) or "{}"),
-                    )
+                    repair_feedback = self._durable_rejection_feedback(previous, schema)
                     repair = self._reserve_repair(
                         job_id, stage, shard_key, operation_base
                     )
