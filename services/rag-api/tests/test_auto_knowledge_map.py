@@ -430,6 +430,8 @@ def test_private_upload_batch_builds_one_active_tree_and_spec(tmp_path: Path) ->
             "WHERE member.tree_version_id=? AND node.kind='ATOMIC'",
             (tree["id"],),
         ).fetchone()
+
+
         spec = connection.execute(
             "SELECT metadata.status,item.requirement,item.evidence_ids_json "
             "FROM teaching_spec_metadata AS metadata JOIN teaching_items AS item "
@@ -479,6 +481,134 @@ def test_private_upload_batch_builds_one_active_tree_and_spec(tmp_path: Path) ->
         },
     ]
     assert len(receipts) == 1 and receipts[0]["status"] == "READY"
+
+
+def test_staged_official_course_build_uses_an_internal_metering_workspace(
+    tmp_path: Path,
+) -> None:
+    settings = settings_at(tmp_path)
+    database = Database(settings)
+    database.initialize()
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO courses(id,name,course_type,visibility,publication_status) "
+            "VALUES('staged-campus','Staged campus','official','private','private')"
+        )
+    ready_document(
+        database,
+        document_id="staged-campus-doc",
+        chunk_id="staged-campus-chunk",
+        content="A staged campus course must build before public activation.",
+        course_id="staged-campus",
+    )
+    generator = FakeGenerator()
+    service = AutoKnowledgeMapService(
+        database,
+        settings,
+        learning=object(),  # type: ignore[arg-type]
+        generator=generator,
+    )
+
+    assert service.reconcile(force=True)["QUEUED"] == 1
+    result = service.run_once("staged-campus-worker")
+
+    assert result is not None and result["status"] == "READY"
+    assert generator.calls == 1
+    with database.connect() as connection:
+        course = connection.execute(
+            "SELECT visibility,publication_status FROM courses WHERE id='staged-campus'"
+        ).fetchone()
+        workspace = connection.execute(
+            "SELECT * FROM learning_workspaces WHERE course_id='staged-campus'"
+        ).fetchone()
+        corpus = connection.execute(
+            "SELECT owner_user_id,course_type,visibility,publication_status FROM courses "
+            "WHERE id=?",
+            (workspace["private_course_id"],),
+        ).fetchone()
+    assert tuple(course) == ("private", "private")
+    assert workspace["owner_user_id"] == "admin"
+    assert tuple(corpus) == ("admin", "user", "private", "private")
+
+
+def test_pre_dispatch_staged_course_access_failure_has_one_audited_recovery(
+    tmp_path: Path,
+) -> None:
+    settings = settings_at(tmp_path).model_copy(
+        update={
+            "auto_knowledge_map_enabled": True,
+            "auto_knowledge_map_allow_billable": True,
+        }
+    )
+    database = Database(settings)
+    database.initialize()
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO courses(id,name,course_type,visibility,publication_status) "
+            "VALUES('staged-recovery','Staged recovery','official','private','private')"
+        )
+    ready_document(
+        database,
+        document_id="staged-recovery-doc",
+        chunk_id="staged-recovery-chunk",
+        content="The old worker stopped before provider dispatch.",
+        course_id="staged-recovery",
+    )
+    generator = FakeGenerator()
+    service = AutoKnowledgeMapService(
+        database,
+        settings,
+        learning=object(),  # type: ignore[arg-type]
+        generator=generator,
+    )
+    assert service.reconcile(force=True)["QUEUED"] == 1
+    with database.connect() as connection:
+        job = connection.execute("SELECT * FROM auto_knowledge_jobs").fetchone()
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='BLOCKED',error_code='COURSE_NOT_FOUND',"
+            "error_message='The course was not found.',completed_at=? WHERE id=?",
+            ("2026-09-27T00:00:00.000Z", job["id"]),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_targets SET status='BLOCKED',"
+            "message='The course was not found.' WHERE target_key=?",
+            (job["target_key"],),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_job_receipts("
+            "job_id,target_key,corpus_fingerprint,status,source_snapshot_hash,"
+            "model_calls_made,detail_json) VALUES(?,?,?,'BLOCKED',?,0,?)",
+            (
+                job["id"],
+                job["target_key"],
+                job["corpus_fingerprint"],
+                digest(json.loads(job["source_snapshot_json"])),
+                json.dumps(
+                    {
+                        "error_code": "COURSE_NOT_FOUND",
+                        "error_message": "The course was not found.",
+                    }
+                ),
+            ),
+        )
+
+    reconciled = service.reconcile(force=True)
+    assert reconciled["RECOVERED_SAFE_FAILURE"] == 1
+    completed = service.run_once("staged-course-recovery-worker")
+    assert completed is not None and completed["status"] == "READY"
+
+    with database.connect() as connection:
+        recovery = connection.execute(
+            "SELECT reason,prior_receipt_json FROM auto_knowledge_job_recovery_receipts "
+            "WHERE job_id=?",
+            (job["id"],),
+        ).fetchone()
+        current = connection.execute(
+            "SELECT status,error_code FROM auto_knowledge_jobs WHERE id=?", (job["id"],)
+        ).fetchone()
+    assert recovery["reason"] == "STAGED_COURSE_WORKSPACE_V1"
+    assert json.loads(recovery["prior_receipt_json"])["status"] == "BLOCKED"
+    assert tuple(current) == ("READY", None)
 
 
 def test_explicit_multi_file_batch_waits_for_seal_then_builds_once(tmp_path: Path) -> None:

@@ -1568,11 +1568,13 @@ class AutoKnowledgeMapService:
             "receipt.created_at AS receipt_created_at "
             "FROM auto_knowledge_jobs AS job "
             "JOIN auto_knowledge_job_receipts AS receipt ON receipt.job_id=job.id "
-            "WHERE job.status='FAILED' "
+            "WHERE ((job.status='FAILED' "
             "AND job.error_code IN ("
             "'DAILY_MODEL_CALL_QUOTA','AUTO_REPAIR_LIMIT',"
             "'AUTO_SOURCE_COVERAGE_INCOMPLETE','AUTO_ARTIFACT_CONFLICT') "
-            "AND receipt.status='FAILED'"
+            "AND receipt.status='FAILED') OR ("
+            "job.status='BLOCKED' AND job.target_kind='AUTO_COURSE' "
+            "AND job.error_code='COURSE_NOT_FOUND' AND receipt.status='BLOCKED'))"
         ).fetchall()
         for row in rows:
             operation_prefix = f"akm-{digest(str(row['id']))[:16]}-%"
@@ -1583,7 +1585,42 @@ class AutoKnowledgeMapService:
             ).fetchone()
             if uncertain is not None:
                 continue
-            if row["error_code"] == "DAILY_MODEL_CALL_QUOTA":
+            if row["error_code"] == "COURSE_NOT_FOUND":
+                # V46 and earlier tried the public enrollment path before a
+                # staged official course was published.  This error happened
+                # before an operation, reservation, attempt or artifact could
+                # exist.  Recover only that exact private official-course case.
+                course = connection.execute(
+                    "SELECT course_type,visibility,publication_status FROM courses WHERE id=?",
+                    (row["course_id"],),
+                ).fetchone()
+                sent_evidence = any(
+                    (
+                        int(row["receipt_model_calls_made"] or 0) != 0,
+                        connection.execute(
+                            "SELECT 1 FROM auto_knowledge_model_attempts WHERE job_id=? LIMIT 1",
+                            (row["id"],),
+                        ).fetchone(),
+                        connection.execute(
+                            "SELECT 1 FROM auto_knowledge_job_artifacts WHERE job_id=? LIMIT 1",
+                            (row["id"],),
+                        ).fetchone(),
+                        connection.execute(
+                            "SELECT 1 FROM learning_operations WHERE id LIKE ? LIMIT 1",
+                            (operation_prefix,),
+                        ).fetchone(),
+                    )
+                )
+                if (
+                    course is None
+                    or tuple(course)
+                    != ("official", "private", "private")
+                    or sent_evidence
+                ):
+                    continue
+                blocked = []
+                reason = "STAGED_COURSE_WORKSPACE_V1"
+            elif row["error_code"] == "DAILY_MODEL_CALL_QUOTA":
                 blocked = connection.execute(
                     "SELECT operation.id FROM learning_operations AS operation "
                     "WHERE operation.id LIKE ? "
@@ -1730,17 +1767,18 @@ class AutoKnowledgeMapService:
             connection.execute(
                 "UPDATE auto_knowledge_jobs SET status='QUEUED',lease_owner=NULL,"
                 "lease_expires_at=NULL,error_code=NULL,error_message=NULL,completed_at=NULL,"
-                "updated_at=? WHERE id=? AND status='FAILED'",
-                (stamp(), row["id"]),
+                "updated_at=? WHERE id=? AND status=?",
+                (stamp(), row["id"], row["status"]),
             )
             connection.execute(
                 "UPDATE auto_knowledge_targets SET status='QUEUED',message=?,updated_at=? "
-                "WHERE target_key=? AND active_job_id=? AND status='FAILED'",
+                "WHERE target_key=? AND active_job_id=? AND status=?",
                 (
                     "Resuming the same frozen artifacts under a verified local recovery",
                     stamp(),
                     row["target_key"],
                     row["id"],
+                    row["status"],
                 ),
             )
             recovered += 1
@@ -2517,6 +2555,15 @@ class AutoKnowledgeMapService:
                 "AUTO_ADMIN_UNAVAILABLE",
                 "A configured administrator identity is required for a course-wide map.",
             )
+        with self.database.connect() as connection:
+            course = connection.execute(
+                "SELECT course_type,visibility,publication_status FROM courses WHERE id=?",
+                (job["course_id"],),
+            ).fetchone()
+        if course is None:
+            raise ApiError(404, "COURSE_NOT_FOUND", "The course was removed.")
+        if tuple(course) == ("official", "private", "private"):
+            return self._staged_official_workspace(str(job["course_id"]), admin)
         workspace = join_course(
             self.database,
             str(job["course_id"]),
@@ -2524,6 +2571,78 @@ class AutoKnowledgeMapService:
             self.settings.user_course_max_courses,
         )
         return str(workspace["id"])
+
+    def _staged_official_workspace(self, course_id: str, admin: str) -> str:
+        """Create the internal metering workspace without publishing the course.
+
+        Normal enrollment must keep using ``join_course`` and its visibility,
+        campus-access and quota checks.  This path is reachable only from a
+        leased ``AUTO_COURSE`` job after the caller verified a private official
+        course.  Deterministic ids make restart/race handling idempotent; the
+        private corpus contains no imported source material and remains an
+        audit anchor for model reservations.
+        """
+
+        identity = digest(["AUTO_COURSE_METERING", course_id, admin])[:32]
+        workspace_id = f"akm-workspace-{identity}"
+        corpus_id = f"akm-corpus-{identity}"
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            course = connection.execute(
+                "SELECT course_type,visibility,publication_status FROM courses WHERE id=?",
+                (course_id,),
+            ).fetchone()
+            if course is None or tuple(course) != ("official", "private", "private"):
+                raise ApiError(
+                    409,
+                    "AUTO_STAGED_COURSE_REQUIRED",
+                    "The internal workspace is restricted to a staged official course.",
+                )
+            current = connection.execute(
+                "SELECT id FROM learning_workspaces WHERE course_id=? AND owner_user_id=?",
+                (course_id, admin),
+            ).fetchone()
+            if current is not None:
+                return str(current["id"])
+            connection.execute(
+                "INSERT OR IGNORE INTO courses("
+                "id,name,owner_user_id,course_type,visibility,publication_status) "
+                "VALUES(?,?,?,'user','private','private')",
+                (corpus_id, "Automatic knowledge-map metering workspace", admin),
+            )
+            corpus = connection.execute(
+                "SELECT owner_user_id,course_type,visibility,publication_status "
+                "FROM courses WHERE id=?",
+                (corpus_id,),
+            ).fetchone()
+            if corpus is None or tuple(corpus) != (admin, "user", "private", "private"):
+                raise ApiError(
+                    409,
+                    "AUTO_WORKSPACE_CONFLICT",
+                    "The internal metering corpus identity is already in use.",
+                )
+            connection.execute(
+                "INSERT OR IGNORE INTO learning_workspaces("
+                "id,owner_user_id,course_id,private_course_id) VALUES(?,?,?,?)",
+                (workspace_id, admin, course_id, corpus_id),
+            )
+            workspace = connection.execute(
+                "SELECT id,owner_user_id,course_id,private_course_id "
+                "FROM learning_workspaces WHERE id=?",
+                (workspace_id,),
+            ).fetchone()
+            if workspace is None or tuple(workspace) != (
+                workspace_id,
+                admin,
+                course_id,
+                corpus_id,
+            ):
+                raise ApiError(
+                    409,
+                    "AUTO_WORKSPACE_CONFLICT",
+                    "The internal metering workspace identity is already in use.",
+                )
+        return workspace_id
 
     def _terminal_failure(
         self,
