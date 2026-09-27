@@ -192,6 +192,23 @@ def test_main_requires_a_db_restore_when_the_release_cannot_import(
     assert report["rollback_concerns"]
 
 
+def test_old_release_probe_does_not_inherit_the_current_service_pythonpath(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A full-suite PYTHONPATH must not let current code impersonate the release.
+
+    The probe is a release boundary.  If its child process inherits the current
+    service directory through PYTHONPATH, a synthetic or incomplete old release
+    can import today's ``app`` package and be reported rollback-safe.
+    """
+    monkeypatch.setenv("PYTHONPATH", str(CURRENT_SERVICE))
+    tree = _fake_release_tree(tmp_path, config="", db="")
+    code, report = _run_tool(monkeypatch, tree, tmp_path / "report.json")
+    assert code == 3
+    assert report["verdict"] == "ROLLBACK_REQUIRES_DB_RESTORE"
+    assert report["release_import_error"]
+
+
 def test_main_analyses_a_release_that_prints_non_locale_bytes(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

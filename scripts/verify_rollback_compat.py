@@ -147,7 +147,10 @@ def run_old_release(service: pathlib.Path, database_path: pathlib.Path) -> dict[
     script = database_path.parent / "old_release_probe.py"
     script.write_text(OLD_PROBE, encoding="utf-8")
     completed = subprocess.run(
-        [sys.executable, str(script), str(service), str(database_path)],
+        # ``-I`` is part of the trust boundary: a caller's PYTHONPATH (the full
+        # pytest suite sets it to the current service) must not let today's
+        # ``app`` package impersonate the release being probed.
+        [sys.executable, "-I", str(script), str(service), str(database_path)],
         capture_output=True,
         text=True,
         # The release's own code may print anything, and this machine's locale codec
