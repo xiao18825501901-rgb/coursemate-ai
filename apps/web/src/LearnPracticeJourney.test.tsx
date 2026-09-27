@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 // @ts-ignore delivered JSX module
 import { Learn } from './ui/pages.jsx';
 
@@ -7,6 +7,7 @@ const api = vi.hoisted(() => ({
   requestExerciseHint: vi.fn(),
   submitPracticeAttempt: vi.fn(),
   createExercise: vi.fn(),
+  getExercise: vi.fn(),
   configureLearningDiagnostic: vi.fn(),
   skipLearningDiagnostic: vi.fn(),
   markLearningDiagnosticUnsure: vi.fn(),
@@ -35,9 +36,46 @@ beforeEach(() => {
   api.requestExerciseHint.mockReset();
   api.submitPracticeAttempt.mockReset();
   api.createExercise.mockReset();
+  api.getExercise.mockReset();
   api.configureLearningDiagnostic.mockReset();
   api.skipLearningDiagnostic.mockReset();
   api.markLearningDiagnosticUnsure.mockReset();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+it('re-enables background reconciliation when StrictMode remounts the learning workspace', () => {
+  const instance = page();
+  instance.unmounted = true;
+  instance.load = vi.fn();
+
+  instance.componentDidMount();
+
+  expect(instance.unmounted).toBe(false);
+  expect(instance.load).toHaveBeenCalledTimes(1);
+  instance.componentWillUnmount();
+});
+
+it('polls a saved asynchronous attempt until the canonical evaluation is projected', async () => {
+  vi.useFakeTimers();
+  const instance = page();
+  instance.unmounted = false;
+  const base = { id: 'exercise-1', latest_attempt: { status: 'PENDING' } };
+  api.getExercise.mockResolvedValue({
+    id: 'exercise-1',
+    latest_attempt: { id: 'attempt-1', status: 'GRADED', feedback: 'Evaluated' },
+  });
+
+  const polling = instance.pollPracticeEvaluation('exercise-1', base);
+  await vi.advanceTimersByTimeAsync(1000);
+  await polling;
+
+  expect(api.getExercise).toHaveBeenCalledWith('exercise-1');
+  expect(instance.state.exercises['exercise-1'].latest_attempt).toMatchObject({
+    status: 'GRADED', feedback: 'Evaluated',
+  });
 });
 
 it('requests a real hint and submits a learner answer without touching the teaching lane', async () => {

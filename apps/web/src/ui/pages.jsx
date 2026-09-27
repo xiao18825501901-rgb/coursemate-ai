@@ -2,7 +2,7 @@ import { BRAND } from "../brand";
 import { RichText } from './richtext.jsx';
 import { DirectoryPicker } from './DirectoryPicker.jsx';
 import React from 'react';
-import { request, send, remove, download, key, streamEvents, listPairs, getPair, createPair, renamePair, deletePair, bindPair, createExercise, revealExercise, requestExerciseHint, submitPracticeAttempt, scheduleLearningFollowup, configureLearningDiagnostic, skipLearningDiagnostic, markLearningDiagnosticUnsure, createExplanation, getExplanation, postExplanationMessage, cancelExplanation, searchPeople, listShares, getShare, createShare, joinShare, getAssessment, getAssessmentSetup, startAssessment, getAssessmentSession, submitAssessment, abandonAssessment, saveAssessmentDraft, loadAssessmentDraft, cancelPreparation, resumePreparation, createAssessmentExplanation, submitFeedback } from './api.js';
+import { request, send, remove, download, key, streamEvents, listPairs, getPair, createPair, renamePair, deletePair, bindPair, createExercise, getExercise, revealExercise, requestExerciseHint, submitPracticeAttempt, scheduleLearningFollowup, configureLearningDiagnostic, skipLearningDiagnostic, markLearningDiagnosticUnsure, createExplanation, getExplanation, postExplanationMessage, cancelExplanation, searchPeople, listShares, getShare, createShare, joinShare, getAssessment, getAssessmentSetup, startAssessment, getAssessmentSession, submitAssessment, abandonAssessment, saveAssessmentDraft, loadAssessmentDraft, cancelPreparation, resumePreparation, createAssessmentExplanation, submitFeedback } from './api.js';
 import { dateKey, zonedParts, wallTimeToISO, formatBytes, formatTime, goto } from './utils.js';
 import { citationVerdict } from './citationSupport.js';
 import { referenceVerificationNote } from './referenceVerification.js';
@@ -387,7 +387,7 @@ export class Learn extends React.Component {
             const el=document.getElementById('messages-'+lane);if(el)el.scrollTop=el.scrollHeight;
         }
     }
-    componentDidMount() { this.load(); this.keyHandler = e => { if (e.key === 'Escape')
+    componentDidMount() { this.unmounted = false; this.load(); this.keyHandler = e => { if (e.key === 'Escape')
         this.setState({ fullscreen: false, expanded: false }); }; window.addEventListener('keydown', this.keyHandler); }
     componentWillUnmount() { this.unmounted = true; clearTimeout(this.knowledgePoll); window.removeEventListener('keydown', this.keyHandler); Object.values(this.controllers).forEach(c => c.abort()); Object.values(this.explanationControllers).forEach(c => c.abort()); if(this.onMove){window.removeEventListener('mousemove',this.onMove);window.removeEventListener('touchmove',this.onMove);}if(this.onUp){window.removeEventListener('mouseup',this.onUp);window.removeEventListener('touchend',this.onUp);window.removeEventListener('touchcancel',this.onUp);} }
     async load() { const revision=this.pairRevision || 0; try {

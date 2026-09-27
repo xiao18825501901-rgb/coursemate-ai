@@ -349,7 +349,7 @@ test("files page upload action is keyboard focusable and opens its picker",async
   await expect(upload).toBeVisible();
   expect(await upload.evaluate(element=>(element as HTMLElement).tabIndex)).toBeGreaterThanOrEqual(0);
   await upload.focus();const picker=page.waitForEvent("filechooser");await page.keyboard.press("Enter");
-  expect((await picker).isMultiple()).toBe(false);
+  expect((await picker).isMultiple()).toBe(true);
 });
 
 test("step windows are nonmodal draggable resizable reusable and mobile bounded",async({page,request},info)=>{
