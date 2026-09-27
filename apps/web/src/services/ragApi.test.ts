@@ -122,6 +122,11 @@ describe("private course API", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: "my-course" })))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: "my-course", name: "Updated" })))
       .mockResolvedValueOnce(new Response(JSON.stringify({
+        uploadId: "upl_1", method: "PUT", url: "https://objects.example/upl_1",
+        headers: { "content-type": "text/plain" }, expiresAt: "2026-09-28T00:00:00Z",
+      })))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
         document: { id: "doc_1" },
         job: { id: "job_1", status: "queued" },
       })))
@@ -142,7 +147,9 @@ describe("private course API", () => {
       .toEqual([
         [expect.stringContaining("/api/courses"), "POST"],
         [expect.stringContaining("/api/courses/my-course"), "PATCH"],
-        [expect.stringContaining("/api/courses/my-course/documents"), "POST"],
+        [expect.stringContaining("/api/courses/my-course/direct-uploads"), "POST"],
+        ["https://objects.example/upl_1", "PUT"],
+        [expect.stringContaining("/api/direct-uploads/upl_1/complete"), "POST"],
         [expect.stringContaining("/api/ingestion-jobs/job_1"), "GET"],
         [expect.stringContaining("/api/courses/my-course/documents/doc_1"), "DELETE"],
         [expect.stringContaining("/api/courses/my-course"), "DELETE"],

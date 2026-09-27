@@ -52,6 +52,7 @@ V3_MIGRATIONS = (
     "054_auto_knowledge_per_shard_evidence_recovery_receipts.sql",
     "055_auto_knowledge_evidence_scope_resume.sql",
     "056_compact_knowledge_tree_budget.sql",
+    "057_durable_object_storage.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -104,7 +105,7 @@ V3_REPLAY_SUPERSEDED_BY = {
     "055_auto_knowledge_evidence_scope_resume.sql": 55,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 56
+LATEST_V3_SCHEMA_VERSION = 57
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (
@@ -669,6 +670,21 @@ class Database:
                     "CREATE INDEX IF NOT EXISTS idx_model_call_interactive_owner_day "
                     "ON learning_model_call_reservations(owner_user_id,course_id,created_at) "
                     "WHERE quota_scope='INTERACTIVE'"
+                )
+                # Migration 057 keeps the existing path columns readable during
+                # dual-read migration and adds only an optional durable object link.
+                document_columns = {
+                    row["name"]
+                    for row in connection.execute("PRAGMA table_info(documents)")
+                }
+                if "storage_object_id" not in document_columns:
+                    connection.execute(
+                        "ALTER TABLE documents ADD COLUMN storage_object_id TEXT "
+                        "REFERENCES storage_objects(id)"
+                    )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_documents_storage_object "
+                    "ON documents(storage_object_id)"
                 )
 
     def is_ready(self) -> bool:

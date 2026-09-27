@@ -47,7 +47,7 @@ from app.learning.workspaces import (
     valid_preview_artifact,
     workspace_for,
 )
-from app.models import UploadAccepted
+from app.models import DirectUploadCreate, DirectUploadGrant, UploadAccepted
 
 router = APIRouter(prefix="/api/learning", dependencies=[Depends(require_user)])
 User = Annotated[AuthenticatedUser, Depends(require_user)]
@@ -372,6 +372,50 @@ async def upload(
     background_tasks.add_task(
         state.ingestion_service.process_document, accepted.document.id, accepted.job.id
     )
+    return cast(UploadAccepted, accepted)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/direct-uploads",
+    status_code=201,
+    response_model=DirectUploadGrant,
+)
+def begin_workspace_direct_upload(
+    workspace_id: str,
+    payload: DirectUploadCreate,
+    request: Request,
+    user: User,
+) -> DirectUploadGrant:
+    workspace = workspace_for(request.app.state.database, workspace_id, user.user_id)
+    return request.app.state.ingestion_service.begin_direct_upload(
+        course_id=workspace["private_course_id"],
+        payload=payload,
+        owner_user_id=user.user_id,
+        is_admin=False,
+    )
+
+
+@router.post(
+    "/direct-uploads/{upload_id}/complete",
+    status_code=202,
+    response_model=UploadAccepted,
+)
+def complete_workspace_direct_upload(
+    upload_id: str,
+    request: Request,
+    user: User,
+    background_tasks: BackgroundTasks,
+) -> UploadAccepted:
+    service = request.app.state.ingestion_service
+    accepted = service.finalize_direct_upload(
+        upload_id=upload_id,
+        owner_user_id=user.user_id,
+        is_admin=False,
+    )
+    if accepted.job.error_message != "WAITING_CAPACITY":
+        background_tasks.add_task(
+            service.process_document, accepted.document.id, accepted.job.id
+        )
     return cast(UploadAccepted, accepted)
 
 

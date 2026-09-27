@@ -1,7 +1,9 @@
 import hashlib
 import json
 import logging
+import shutil
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 from uuid import uuid4
@@ -16,6 +18,8 @@ from app.models import (
     CourseCreate,
     CoursePage,
     CourseUpdate,
+    DirectUploadCreate,
+    DirectUploadGrant,
     Document,
     DocumentPage,
     IngestionJob,
@@ -26,6 +30,10 @@ from app.rag.chunking import chunk_sections
 from app.rag.embeddings import EmbeddingProvider
 from app.rag.errors import DocumentLoadError
 from app.rag.loaders import LOADERS, load_document
+from app.storage.backends import AliyunOssStorageBackend, LocalStorageBackend, StorageBackend
+from app.storage.capacity import CapacityGuard, CapacityUnavailable
+from app.storage.factory import storage_backend_from_settings
+from app.storage.keys import canonical_object_key, quarantine_object_key
 
 LOGGER = logging.getLogger(__name__)
 EMBEDDING_BATCH_SIZE = 10
@@ -35,6 +43,14 @@ def _storage_owner_segment(owner_user_id: str) -> str:
     """Create a stable opaque path segment without exposing the identity provider subject."""
 
     return hashlib.sha256(owner_user_id.encode("utf-8")).hexdigest()[:32]
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
 
 
 class MissingEmbeddingProvider:
@@ -48,10 +64,505 @@ class IngestionService:
         database: Database,
         settings: Settings,
         embedding_provider: EmbeddingProvider,
+        storage_backend: StorageBackend | None = None,
     ) -> None:
         self.database = database
         self.settings = settings
         self.embedding_provider = embedding_provider
+        self.storage_backend = storage_backend or storage_backend_from_settings(settings)
+
+    def begin_direct_upload(
+        self,
+        *,
+        course_id: str,
+        payload: DirectUploadCreate,
+        owner_user_id: str,
+        is_admin: bool,
+    ) -> DirectUploadGrant:
+        course = self._require_course(
+            course_id, owner_user_id=owner_user_id, is_admin=is_admin, write=True
+        )
+        if not isinstance(self.storage_backend, AliyunOssStorageBackend):
+            raise ApiError(
+                409,
+                "DIRECT_UPLOAD_UNAVAILABLE",
+                "Direct object upload is not configured for this deployment.",
+            )
+        extension = Path(payload.filename).suffix.casefold()
+        if extension not in MEDIA_TYPES:
+            raise ApiError(400, "UNSUPPORTED_EXTENSION", "This file extension is not supported.")
+        if payload.media_type not in MEDIA_TYPES[extension]:
+            raise ApiError(
+                400, "INVALID_MEDIA_TYPE", "The media type does not match the file type."
+            )
+        if payload.byte_size > self.settings.max_upload_bytes:
+            raise ApiError(400, "FILE_TOO_LARGE", "The uploaded file exceeds the size limit.")
+        self._check_document_admission(
+            course=course,
+            course_id=course_id,
+            owner_user_id=owner_user_id,
+            is_admin=is_admin,
+            byte_size=payload.byte_size,
+            sha256=payload.sha256,
+        )
+        upload_id = f"upl_{uuid4().hex}"
+        object_id = f"obj_{uuid4().hex}"
+        key = quarantine_object_key(
+            owner_user_id=owner_user_id,
+            upload_id=upload_id,
+            extension=extension,
+        )
+        url, headers, expires_at = self.storage_backend.presign_quarantine_put(
+            key,
+            size=payload.byte_size,
+            sha256=payload.sha256,
+            content_type=payload.media_type,
+            ttl_seconds=self.settings.oss_presign_ttl_seconds,
+        )
+        expires = datetime.now(UTC) + timedelta(seconds=self.settings.oss_presign_ttl_seconds)
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                INSERT INTO storage_objects(
+                    id,backend,bucket,object_key,byte_size,sha256,media_type,state,
+                    owner_user_id,course_id
+                ) VALUES(?, 'ALIYUN_OSS', ?, ?, ?, ?, ?, 'QUARANTINE', ?, ?)
+                """,
+                (
+                    object_id,
+                    self.storage_backend.bucket,
+                    key,
+                    payload.byte_size,
+                    payload.sha256,
+                    payload.media_type,
+                    owner_user_id,
+                    course_id,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO storage_upload_sessions(
+                    id,owner_user_id,course_id,filename,extension,media_type,
+                    expected_size,expected_sha256,quarantine_object_id,status,expires_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,'CREATED',?)
+                """,
+                (
+                    upload_id,
+                    owner_user_id,
+                    course_id,
+                    payload.filename,
+                    extension,
+                    payload.media_type,
+                    payload.byte_size,
+                    payload.sha256,
+                    object_id,
+                    expires.isoformat(),
+                ),
+            )
+        return DirectUploadGrant(
+            upload_id=upload_id,
+            url=url,
+            headers=headers,
+            expires_at=datetime.fromisoformat(expires_at),
+        )
+
+    def finalize_direct_upload(
+        self,
+        *,
+        upload_id: str,
+        owner_user_id: str,
+        is_admin: bool,
+    ) -> UploadAccepted:
+        if not isinstance(self.storage_backend, AliyunOssStorageBackend):
+            raise ApiError(409, "DIRECT_UPLOAD_UNAVAILABLE", "Direct upload is unavailable.")
+        with self.database.connect() as connection:
+            session = connection.execute(
+                """
+                SELECT storage_upload_sessions.*, storage_objects.object_key
+                FROM storage_upload_sessions
+                JOIN storage_objects ON storage_objects.id=quarantine_object_id
+                WHERE storage_upload_sessions.id=? AND storage_upload_sessions.owner_user_id=?
+                """,
+                (upload_id, owner_user_id),
+            ).fetchone()
+        if session is None:
+            raise ApiError(404, "UPLOAD_NOT_FOUND", "The upload session was not found.")
+        self._require_course(
+            session["course_id"], owner_user_id=owner_user_id, is_admin=is_admin, write=True
+        )
+        if session["status"] == "FINALIZED":
+            with self.database.connect() as connection:
+                document = connection.execute(
+                    "SELECT id FROM documents WHERE storage_object_id=?",
+                    (session["canonical_object_id"],),
+                ).fetchone()
+                job = connection.execute(
+                    "SELECT id FROM ingestion_jobs WHERE document_id=? ORDER BY created_at LIMIT 1",
+                    (document["id"],),
+                ).fetchone() if document else None
+            if document and job:
+                return UploadAccepted(
+                    document=self._get_document(document["id"]),
+                    job=self.get_job(job["id"], owner_user_id=owner_user_id, is_admin=is_admin),
+                )
+            raise RuntimeError("Finalized upload has no document receipt")
+        if datetime.fromisoformat(session["expires_at"]) < datetime.now(UTC):
+            with self.database.connect() as connection:
+                connection.execute(
+                    "UPDATE storage_upload_sessions SET status='EXPIRED' WHERE id=?",
+                    (upload_id,),
+                )
+            raise ApiError(410, "UPLOAD_EXPIRED", "The upload session has expired.")
+        with self.database.connect() as connection:
+            changed = connection.execute(
+                "UPDATE storage_upload_sessions SET status='VERIFYING' "
+                "WHERE id=? AND status='CREATED'",
+                (upload_id,),
+            ).rowcount
+        if changed != 1:
+            raise ApiError(
+                409,
+                "UPLOAD_FINALIZATION_IN_PROGRESS",
+                "Upload verification is in progress.",
+            )
+        try:
+            content = self.storage_backend.read_range(
+                session["object_key"], start=0, end=session["expected_size"] - 1
+            )
+            self._validate_upload(session["filename"], session["media_type"], content)
+            if hashlib.sha256(content).hexdigest() != session["expected_sha256"]:
+                raise ApiError(
+                    409, "UPLOAD_HASH_MISMATCH", "The uploaded object failed verification."
+                )
+            document_id = f"doc_{uuid4().hex}"
+            job_id = f"job_{uuid4().hex}"
+            key = canonical_object_key(
+                owner_user_id=owner_user_id,
+                course_id=session["course_id"],
+                document_id=document_id,
+                sha256=session["expected_sha256"],
+                extension=session["extension"],
+            )
+            stored = self.storage_backend.promote_verified(
+                session["object_key"],
+                key,
+                expected_size=session["expected_size"],
+                expected_sha256=session["expected_sha256"],
+                content_type=session["media_type"],
+            )
+            canonical_id = f"obj_{uuid4().hex}"
+            cache_path = self.settings.storage_cache_dir / key
+            cache_available = self._cache_if_capacity_allows(key, content, cache_path)
+            with self.database.connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                self._check_document_admission_sql(
+                    connection=connection,
+                    course_id=session["course_id"],
+                    owner_user_id=owner_user_id,
+                    is_admin=is_admin,
+                    byte_size=session["expected_size"],
+                    sha256=session["expected_sha256"],
+                )
+                connection.execute(
+                    """
+                    INSERT INTO storage_objects(
+                        id,backend,bucket,object_key,version_id,byte_size,sha256,crc64,etag,
+                        media_type,state,owner_user_id,course_id,local_cache_path,
+                        verified_at
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,'CANONICAL',?,?,?,
+                        strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+                    """,
+                    (
+                        canonical_id, "ALIYUN_OSS", stored.bucket, stored.key,
+                        stored.version_id, stored.size, stored.sha256, stored.crc64,
+                        stored.etag, stored.content_type, owner_user_id,
+                        session["course_id"],
+                        str(cache_path) if cache_available else None,
+                    ),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO documents(
+                        id,course_id,filename,stored_path,media_type,extension,sha256,
+                        byte_size,status,error_message,storage_object_id
+                    ) VALUES(?,?,?,?,?,?,?,?, 'pending', ?, ?)
+                    """,
+                    (
+                        document_id, session["course_id"], session["filename"],
+                        str(cache_path), session["media_type"], session["extension"],
+                        session["expected_sha256"], session["expected_size"],
+                        None if cache_available else "WAITING_CAPACITY", canonical_id,
+                    ),
+                )
+                connection.execute(
+                    "UPDATE storage_objects SET document_id=? WHERE id=?",
+                    (document_id, canonical_id),
+                )
+                connection.execute(
+                    "INSERT INTO ingestion_jobs(id,document_id,status,error_message) "
+                    "VALUES(?,?,'queued',?)",
+                    (job_id, document_id, None if cache_available else "WAITING_CAPACITY"),
+                )
+                connection.execute(
+                    "UPDATE storage_upload_sessions SET status='FINALIZED',canonical_object_id=?,"
+                    "finalized_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),"
+                    "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
+                    (canonical_id, upload_id),
+                )
+                connection.execute(
+                    "UPDATE storage_objects SET verified_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                    "WHERE id=?",
+                    (session["quarantine_object_id"],),
+                )
+            return UploadAccepted(
+                document=self._get_document(document_id),
+                job=self.get_job(job_id, owner_user_id=owner_user_id, is_admin=is_admin),
+            )
+        except Exception:
+            with self.database.connect() as connection:
+                connection.execute(
+                    "UPDATE storage_upload_sessions SET status='INVALID',"
+                    "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                    "WHERE id=? AND status='VERIFYING'",
+                    (upload_id,),
+                )
+            raise
+
+    def _cache_if_capacity_allows(self, key: str, content: bytes, cache_path: Path) -> bool:
+        reservation_id = self._reserve_capacity(
+            peak_bytes=len(content), owner_kind="CACHE_WRITE", owner_id=key
+        )
+        if reservation_id is None:
+            return False
+        try:
+            local = LocalStorageBackend(self.settings.storage_cache_dir)
+            local.put_bytes(
+                key,
+                content,
+                expected_sha256=hashlib.sha256(content).hexdigest(),
+                content_type="application/octet-stream",
+            )
+            return cache_path.is_file()
+        finally:
+            self._release_capacity(reservation_id)
+
+    def _reserve_capacity(
+        self, *, peak_bytes: int, owner_kind: str, owner_id: str
+    ) -> str | None:
+        cache_root = self.settings.storage_cache_dir
+        existing = cache_root
+        while not existing.exists() and existing != existing.parent:
+            existing = existing.parent
+        usage = shutil.disk_usage(existing)
+        cache_bytes = 0
+        if cache_root.is_dir():
+            for path in cache_root.rglob("*"):
+                if path.is_file():
+                    try:
+                        cache_bytes += path.stat().st_size
+                    except OSError:
+                        continue
+        if cache_bytes + peak_bytes > self.settings.storage_cache_max_bytes:
+            return None
+        reservation_id = f"cap_{uuid4().hex}"
+        expires_at = (datetime.now(UTC) + timedelta(minutes=30)).isoformat()
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "UPDATE storage_capacity_reservations SET status='EXPIRED' "
+                "WHERE status='ACTIVE' AND expires_at <= ?",
+                (datetime.now(UTC).isoformat(),),
+            )
+            outstanding = connection.execute(
+                "SELECT COALESCE(SUM(peak_bytes),0) FROM storage_capacity_reservations "
+                "WHERE status='ACTIVE' AND expires_at > ?",
+                (datetime.now(UTC).isoformat(),),
+            ).fetchone()[0]
+            try:
+                CapacityGuard(
+                    total_bytes=usage.total,
+                    free_bytes=usage.free,
+                    outstanding_reservations=outstanding,
+                    reserve_min_bytes=self.settings.storage_reserve_min_bytes,
+                    reserve_fraction=self.settings.storage_reserve_fraction,
+                ).reserve(peak_bytes=peak_bytes)
+            except CapacityUnavailable:
+                return None
+            connection.execute(
+                "INSERT INTO storage_capacity_reservations("
+                "id,filesystem_id,owner_kind,owner_id,peak_bytes,status,expires_at"
+                ") VALUES(?,?,?,?,?,'ACTIVE',?)",
+                (
+                    reservation_id,
+                    str(existing.resolve().anchor),
+                    owner_kind,
+                    owner_id,
+                    peak_bytes,
+                    expires_at,
+                ),
+            )
+        return reservation_id
+
+    def _release_capacity(self, reservation_id: str) -> None:
+        with self.database.connect() as connection:
+            connection.execute(
+                "UPDATE storage_capacity_reservations SET status='RELEASED',"
+                "released_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                "WHERE id=? AND status='ACTIVE'",
+                (reservation_id,),
+            )
+
+    def _ensure_document_cache(self, document_id: str, job_id: str) -> bool:
+        if not self.database.v3_enabled:
+            with self.database.connect() as connection:
+                legacy = connection.execute(
+                    "SELECT stored_path FROM documents WHERE id=?", (document_id,)
+                ).fetchone()
+            return legacy is not None
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT documents.stored_path,documents.byte_size,documents.sha256,
+                    documents.media_type,storage_objects.object_key
+                FROM documents
+                LEFT JOIN storage_objects ON storage_objects.id=documents.storage_object_id
+                WHERE documents.id=?
+                """,
+                (document_id,),
+            ).fetchone()
+        if row is None or Path(row["stored_path"]).is_file():
+            return row is not None
+        if not row["object_key"] or not isinstance(
+            self.storage_backend, AliyunOssStorageBackend
+        ):
+            return True
+        reservation_id = self._reserve_capacity(
+            peak_bytes=row["byte_size"],
+            owner_kind="INGESTION_CACHE",
+            owner_id=document_id,
+        )
+        if reservation_id is None:
+            with self.database.connect() as connection:
+                connection.execute(
+                    "UPDATE documents SET status='pending',error_message='WAITING_CAPACITY' "
+                    "WHERE id=?",
+                    (document_id,),
+                )
+                connection.execute(
+                    "UPDATE ingestion_jobs SET status='queued',error_message='WAITING_CAPACITY' "
+                    "WHERE id=?",
+                    (job_id,),
+                )
+            return False
+        try:
+            content = self.storage_backend.read_range(
+                row["object_key"], start=0, end=row["byte_size"] - 1
+            )
+            if len(content) != row["byte_size"] or hashlib.sha256(content).hexdigest() != row["sha256"]:
+                raise RuntimeError("Durable object failed cache hydration verification")
+            destination = Path(row["stored_path"])
+            relative = destination.resolve().relative_to(
+                self.settings.storage_cache_dir.resolve()
+            ).as_posix()
+            LocalStorageBackend(self.settings.storage_cache_dir).put_bytes(
+                relative,
+                content,
+                expected_sha256=row["sha256"],
+                content_type=row["media_type"],
+            )
+            with self.database.connect() as connection:
+                connection.execute(
+                    "UPDATE storage_objects SET local_cache_path=?,updated_at="
+                    "strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=("
+                    "SELECT storage_object_id FROM documents WHERE id=?)",
+                    (str(destination), document_id),
+                )
+                connection.execute(
+                    "UPDATE documents SET error_message=NULL WHERE id=?", (document_id,)
+                )
+                connection.execute(
+                    "UPDATE ingestion_jobs SET error_message=NULL WHERE id=?", (job_id,)
+                )
+            return True
+        finally:
+            self._release_capacity(reservation_id)
+
+    def _check_document_admission(
+        self,
+        *,
+        course: sqlite3.Row,
+        course_id: str,
+        owner_user_id: str,
+        is_admin: bool,
+        byte_size: int,
+        sha256: str,
+    ) -> None:
+        with self.database.connect() as connection:
+            self._check_document_admission_sql(
+                connection=connection,
+                course_id=course_id,
+                owner_user_id=owner_user_id,
+                is_admin=is_admin,
+                byte_size=byte_size,
+                sha256=sha256,
+                course=course,
+            )
+
+    def _check_document_admission_sql(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        course_id: str,
+        owner_user_id: str,
+        is_admin: bool,
+        byte_size: int,
+        sha256: str,
+        course: sqlite3.Row | None = None,
+    ) -> None:
+        course = course or connection.execute(
+            "SELECT * FROM courses WHERE id=?", (course_id,)
+        ).fetchone()
+        if course is None:
+            raise ApiError(404, "COURSE_NOT_FOUND", "The course was not found.")
+        if not is_admin and course["course_type"] == "user":
+            document_count = connection.execute(
+                "SELECT COUNT(*) FROM documents WHERE course_id=?", (course_id,)
+            ).fetchone()[0]
+            if document_count >= self.settings.user_course_max_files:
+                raise ApiError(
+                    429,
+                    "COURSE_FILE_QUOTA_EXCEEDED",
+                    "The course file quota has been reached.",
+                    details={"limit": self.settings.user_course_max_files},
+                )
+            used_bytes = connection.execute(
+                "SELECT COALESCE(SUM(documents.byte_size),0) FROM documents "
+                "JOIN courses ON courses.id=documents.course_id "
+                "WHERE courses.owner_user_id=? AND courses.course_type='user'",
+                (owner_user_id,),
+            ).fetchone()[0]
+            if used_bytes + byte_size > self.settings.user_course_max_total_upload_bytes:
+                raise ApiError(
+                    413,
+                    "USER_STORAGE_QUOTA_EXCEEDED",
+                    "The total private-course upload quota would be exceeded.",
+                    details={
+                        "limitBytes": self.settings.user_course_max_total_upload_bytes,
+                        "usedBytes": used_bytes,
+                    },
+                )
+        duplicate = connection.execute(
+            "SELECT id FROM documents WHERE course_id=? AND sha256=?",
+            (course_id, sha256),
+        ).fetchone()
+        if duplicate is not None:
+            raise ApiError(
+                409,
+                "DUPLICATE_DOCUMENT",
+                "This course already contains a document with the same content.",
+                details={"documentId": duplicate["id"]},
+            )
 
     @staticmethod
     def _course(row: sqlite3.Row, *, owner_user_id: str | None, is_admin: bool) -> Course:
@@ -464,19 +975,32 @@ class IngestionService:
         self._remove_empty_upload_parents(paths)
 
     def _delete_stored_file(self, path: Path) -> None:
-        upload_root = self.settings.upload_dir.resolve()
         stored_path = path.resolve()
-        try:
-            stored_path.relative_to(upload_root)
-        except ValueError:
+        roots = (
+            self.settings.upload_dir.resolve(),
+            self.settings.storage_cache_dir.resolve(),
+        )
+        if not any(_is_relative_to(stored_path, root) for root in roots):
             LOGGER.error("Refused to delete document path outside upload root")
             return
         stored_path.unlink(missing_ok=True)
         stored_path.with_name(f"{stored_path.name}.ocr.md").unlink(missing_ok=True)
 
     def _remove_empty_upload_parents(self, paths: list[Path]) -> None:
-        upload_root = self.settings.upload_dir.resolve()
         for path in paths:
+            upload_root = next(
+                (
+                    root
+                    for root in (
+                        self.settings.upload_dir.resolve(),
+                        self.settings.storage_cache_dir.resolve(),
+                    )
+                    if _is_relative_to(path.resolve(), root)
+                ),
+                None,
+            )
+            if upload_root is None:
+                continue
             parent = path.resolve().parent
             while parent != upload_root:
                 try:
@@ -560,6 +1084,37 @@ class IngestionService:
             destination = (
                 self.settings.upload_dir / "official" / course_id / f"{document_id}{extension}"
             )
+        storage_object_id: str | None = None
+        storage_key: str | None = None
+        stored_object = None
+        cache_available = True
+        if isinstance(self.storage_backend, AliyunOssStorageBackend):
+            storage_key = canonical_object_key(
+                owner_user_id=owner_user_id or "official-system",
+                course_id=course_id,
+                document_id=document_id,
+                sha256=digest,
+                extension=extension,
+            )
+            destination = self.settings.storage_cache_dir / storage_key
+            storage_object_id = f"obj_{uuid4().hex}"
+            self._check_document_admission(
+                course=course,
+                course_id=course_id,
+                owner_user_id=owner_user_id or "official-system",
+                is_admin=is_admin,
+                byte_size=len(content),
+                sha256=digest,
+            )
+            stored_object = self.storage_backend.put_bytes(
+                storage_key,
+                content,
+                expected_sha256=digest,
+                content_type=media_type,
+            )
+            cache_available = self._cache_if_capacity_allows(
+                storage_key, content, destination
+            )
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             if not is_admin and course["course_type"] == "user":
@@ -602,36 +1157,90 @@ class IngestionService:
                     details={"documentId": duplicate["id"]},
                 )
             try:
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_bytes(content)
-                connection.execute(
-                    """
-                    INSERT INTO documents (
-                        id, course_id, filename, stored_path, media_type, extension, sha256,
-                        byte_size, status
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
-                    """,
-                    (
-                        document_id,
-                        course_id,
-                        filename,
-                        str(destination),
-                        media_type,
-                        extension,
-                        digest,
-                        len(content),
-                    ),
+                if stored_object is not None:
+                    connection.execute(
+                        """
+                        INSERT INTO storage_objects(
+                            id,backend,bucket,object_key,version_id,byte_size,sha256,
+                            crc64,etag,media_type,state,owner_user_id,course_id,
+                            local_cache_path,verified_at
+                        ) VALUES(?,?,?,?,?,?,?,?,?,?,'CANONICAL',?,?,?,
+                            strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+                        """,
+                        (
+                            storage_object_id,
+                            "ALIYUN_OSS",
+                            stored_object.bucket,
+                            stored_object.key,
+                            stored_object.version_id,
+                            stored_object.size,
+                            stored_object.sha256,
+                            stored_object.crc64,
+                            stored_object.etag,
+                            stored_object.content_type,
+                            owner_user_id or "official-system",
+                            course_id,
+                            str(destination) if cache_available else None,
+                        ),
+                    )
+                else:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_bytes(content)
+                document_values = (
+                    document_id,
+                    course_id,
+                    filename,
+                    str(destination),
+                    media_type,
+                    extension,
+                    digest,
+                    len(content),
                 )
+                if self.database.v3_enabled:
+                    connection.execute(
+                        """
+                        INSERT INTO documents (
+                            id,course_id,filename,stored_path,media_type,extension,sha256,
+                            byte_size,status,error_message,storage_object_id
+                        ) VALUES(?,?,?,?,?,?,?,?,'pending',?,?)
+                        """,
+                        (
+                            *document_values,
+                            None if cache_available else "WAITING_CAPACITY",
+                            storage_object_id,
+                        ),
+                    )
+                else:
+                    connection.execute(
+                        """
+                        INSERT INTO documents (
+                            id,course_id,filename,stored_path,media_type,extension,sha256,
+                            byte_size,status
+                        ) VALUES(?,?,?,?,?,?,?,?,'pending')
+                        """,
+                        document_values,
+                    )
                 connection.execute(
-                    "INSERT INTO ingestion_jobs (id, document_id, status) "
-                    "VALUES (?, ?, 'queued')",
-                    (job_id, document_id),
+                    "INSERT INTO ingestion_jobs (id, document_id, status,error_message) "
+                    "VALUES (?, ?, 'queued', ?)",
+                    (job_id, document_id, None if cache_available else "WAITING_CAPACITY"),
                 )
+                if storage_object_id is not None:
+                    connection.execute(
+                        "UPDATE storage_objects SET document_id=? WHERE id=?",
+                        (document_id, storage_object_id),
+                    )
                 # Make commit failures part of the same compensating boundary as inserts.
                 connection.commit()
             except Exception:
-                self._delete_stored_file(destination)
-                self._remove_empty_upload_parents([destination])
+                if stored_object is None:
+                    self._delete_stored_file(destination)
+                    self._remove_empty_upload_parents([destination])
+                else:
+                    LOGGER.exception(
+                        "Durable object %s exists without a committed document; retain for GC audit",
+                        storage_object.key,
+                    )
                 raise
 
         return UploadAccepted(
@@ -690,6 +1299,8 @@ class IngestionService:
 
     def process_document(self, document_id: str, job_id: str) -> None:
         try:
+            if not self._ensure_document_cache(document_id, job_id):
+                return
             with self.database.connect() as connection:
                 connection.execute(
                     """

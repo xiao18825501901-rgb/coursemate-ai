@@ -18,6 +18,8 @@ from app.models import (
     CourseCreate,
     CoursePage,
     CourseUpdate,
+    DirectUploadCreate,
+    DirectUploadGrant,
     DocumentPage,
     Health,
     IngestionJob,
@@ -167,6 +169,51 @@ async def upload_document(
     return accepted
 
 
+@router.post(
+    "/api/courses/{course_id}/direct-uploads",
+    response_model=DirectUploadGrant,
+    status_code=status.HTTP_201_CREATED,
+)
+def begin_direct_upload(
+    course_id: str,
+    payload: DirectUploadCreate,
+    request: Request,
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+) -> DirectUploadGrant:
+    return _service(request).begin_direct_upload(
+        course_id=course_id,
+        payload=payload,
+        owner_user_id=user.user_id,
+        is_admin=user.is_admin,
+    )
+
+
+@router.post(
+    "/api/direct-uploads/{upload_id}/complete",
+    response_model=UploadAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def complete_direct_upload(
+    upload_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+) -> UploadAccepted:
+    service = _service(request)
+    accepted = service.finalize_direct_upload(
+        upload_id=upload_id,
+        owner_user_id=user.user_id,
+        is_admin=user.is_admin,
+    )
+    if accepted.job.error_message != "WAITING_CAPACITY":
+        background_tasks.add_task(
+            service.process_document,
+            accepted.document.id,
+            accepted.job.id,
+        )
+    return accepted
+
+
 @router.get("/api/ingestion-jobs/{job_id}", response_model=IngestionJob)
 def get_ingestion_job(
     job_id: str,
@@ -176,3 +223,28 @@ def get_ingestion_job(
     return _service(request).get_job(
         job_id, owner_user_id=user.user_id, is_admin=user.is_admin
     )
+
+
+@router.post(
+    "/api/ingestion-jobs/{job_id}/resume",
+    response_model=IngestionJob,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def resume_waiting_ingestion_job(
+    job_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+) -> IngestionJob:
+    service = _service(request)
+    job = service.get_job(job_id, owner_user_id=user.user_id, is_admin=user.is_admin)
+    if job.status.value != "queued" or job.error_message != "WAITING_CAPACITY":
+        from app.errors import ApiError
+
+        raise ApiError(
+            409,
+            "INGESTION_NOT_WAITING_CAPACITY",
+            "Only a capacity-waiting ingestion job can be resumed.",
+        )
+    background_tasks.add_task(service.process_document, job.document_id, job.id)
+    return job

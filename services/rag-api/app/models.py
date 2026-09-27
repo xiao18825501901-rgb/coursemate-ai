@@ -202,6 +202,35 @@ class UploadAccepted(ApiModel):
     job: IngestionJob
 
 
+class DirectUploadCreate(ApiModel):
+    filename: str = Field(min_length=1, max_length=255)
+    media_type: str = Field(min_length=1, max_length=200)
+    byte_size: int = Field(gt=0, le=100 * 1024 * 1024)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("filename")
+    @classmethod
+    def safe_filename(cls, value: str) -> str:
+        normalized = value.strip()
+        if (
+            not normalized
+            or normalized in {".", ".."}
+            or "/" in normalized
+            or "\\" in normalized
+            or "\x00" in normalized
+        ):
+            raise ValueError("filename must be a plain basename")
+        return normalized
+
+
+class DirectUploadGrant(ApiModel):
+    upload_id: str
+    method: Literal["PUT"] = "PUT"
+    url: str
+    headers: dict[str, str]
+    expires_at: datetime
+
+
 class Health(ApiModel):
     status: str
     service: str

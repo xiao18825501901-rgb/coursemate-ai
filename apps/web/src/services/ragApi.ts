@@ -1,5 +1,6 @@
 import type { GetSessionToken } from "../auth/AuthProvider";
 import { authenticatedFetch, requireOk, requestJson } from "./http";
+import { uploadDirectOrFallback } from "./directUpload";
 import type {
   Citation,
   ConversationDetail,
@@ -200,12 +201,21 @@ export async function uploadDocument(
   courseId: string,
   file: File,
 ): Promise<UploadAccepted> {
-  const body = new FormData();
-  body.append("file", file);
-  return requestJson<UploadAccepted>(
+  const encodedCourse = encodeURIComponent(courseId);
+  return uploadDirectOrFallback(
     getToken,
-    `${RAG_API}/api/courses/${encodeURIComponent(courseId)}/documents`,
-    { method: "POST", body },
+    file,
+    `${RAG_API}/api/courses/${encodedCourse}/direct-uploads`,
+    (uploadId) => `${RAG_API}/api/direct-uploads/${encodeURIComponent(uploadId)}/complete`,
+    () => {
+      const body = new FormData();
+      body.append("file", file);
+      return requestJson<UploadAccepted>(
+        getToken,
+        `${RAG_API}/api/courses/${encodedCourse}/documents`,
+        { method: "POST", body },
+      );
+    },
   );
 }
 

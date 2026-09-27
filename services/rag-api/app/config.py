@@ -84,6 +84,28 @@ class Settings(BaseSettings):
         default=Path("../../data/uploads"),
         validation_alias=AliasChoices("RAG_UPLOAD_DIR", "UPLOAD_DIR"),
     )
+    storage_backend: Literal["local", "aliyun_oss"] = Field(
+        default="local", validation_alias=AliasChoices("STORAGE_BACKEND")
+    )
+    storage_cache_dir: Path = Field(
+        default=Path("../../data/storage-cache"),
+        validation_alias=AliasChoices("STORAGE_CACHE_DIR"),
+    )
+    storage_cache_max_bytes: int = Field(
+        default=10 * 1024**3, ge=0, le=100 * 1024**3
+    )
+    storage_reserve_min_bytes: int = Field(default=10 * 1024**3, ge=0)
+    storage_reserve_fraction: float = Field(default=0.20, ge=0.0, le=0.90)
+    oss_region: str = Field(default="", validation_alias=AliasChoices("OSS_REGION"))
+    oss_bucket: str = Field(default="", validation_alias=AliasChoices("OSS_BUCKET"))
+    oss_endpoint: str = Field(default="", validation_alias=AliasChoices("OSS_ENDPOINT"))
+    oss_public_endpoint: str = Field(
+        default="", validation_alias=AliasChoices("OSS_PUBLIC_ENDPOINT")
+    )
+    oss_object_prefix: str = Field(
+        default="coursejesus", validation_alias=AliasChoices("OSS_OBJECT_PREFIX")
+    )
+    oss_presign_ttl_seconds: int = Field(default=600, ge=60, le=900)
     chunk_size: int = Field(default=1_200, ge=200, le=12_000)
     chunk_overlap: int = Field(default=200, ge=0, le=4_000)
     top_k: int = Field(default=6, ge=1, le=30)
@@ -170,6 +192,14 @@ class Settings(BaseSettings):
     def validate_chunk_window(self) -> "Settings":
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError("chunk_overlap must be smaller than chunk_size")
+        if self.storage_backend == "aliyun_oss" and not (
+            self.oss_region and self.oss_bucket and self.oss_endpoint
+        ):
+            raise ValueError(
+                "OSS_REGION, OSS_BUCKET and OSS_ENDPOINT are required for aliyun_oss storage"
+            )
+        if self.storage_backend == "aliyun_oss" and not self.v3_enabled:
+            raise ValueError("aliyun_oss storage requires the V3 storage metadata schema")
         self.rag_chat_api_key = self.rag_chat_api_key or self.openai_api_key
         self.rag_chat_base_url = self.rag_chat_base_url or self.openai_base_url
         self.rag_chat_model = self.rag_chat_model or self.openai_chat_model

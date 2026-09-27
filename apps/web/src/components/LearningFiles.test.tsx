@@ -3,11 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TestAuthProvider } from "../auth/AuthProvider";
 import { authenticatedFetch, requestJson, requireOk } from "../services/http";
 import { LearningFiles } from "./LearningFiles";
+import { uploadDirectOrFallback } from "../services/directUpload";
 
 vi.mock("../services/http", () => ({
   authenticatedFetch: vi.fn(),
   requestJson: vi.fn(),
   requireOk: vi.fn(),
+}));
+vi.mock("../services/directUpload", () => ({
+  uploadDirectOrFallback: vi.fn(),
 }));
 
 const csvFile = {
@@ -26,6 +30,7 @@ const csvFile = {
 describe("LearningFiles", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(uploadDirectOrFallback).mockResolvedValue({} as never);
     vi.mocked(requestJson).mockResolvedValue({
       data: [
         csvFile,
@@ -91,10 +96,14 @@ describe("LearningFiles", () => {
     );
 
     fireEvent.change(screen.getByLabelText("添加私人资料"), {
-      target: { files: [new File(["image"], "question.png", { type: "image/png" })] },
+      target: { files: [
+        new File(["image"], "question.png", { type: "image/png" }),
+        new File(["notes"], "notes.txt", { type: "text/plain" }),
+      ] },
     });
 
     await waitFor(() => expect(onDocumentsChanged).toHaveBeenCalledTimes(1));
+    expect(uploadDirectOrFallback).toHaveBeenCalledTimes(2);
     expect(requestJson).toHaveBeenCalledTimes(2);
   });
 });

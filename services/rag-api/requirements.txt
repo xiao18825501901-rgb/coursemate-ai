@@ -1,4 +1,6 @@
 fastapi==0.141.1
+alibabacloud-oss-v2==1.4.0
+alibabacloud_credentials==1.0.12
 clerk-backend-api==6.0.1
 openai==2.53.0
 pydantic-settings==2.15.0

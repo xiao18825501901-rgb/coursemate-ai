@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useCourseMateAuth } from "../auth/AuthProvider";
 import { authenticatedFetch, requestJson, requireOk } from "../services/http";
 import { learningBase } from "../services/learningApi";
+import { uploadDirectOrFallback } from "../services/directUpload";
 
 type PreviewKind =
   | "INLINE_ORIGINAL"
@@ -241,21 +242,48 @@ export function LearningFiles({
     }
   }
 
-  async function upload(file: File) {
+  async function uploadOne(file: File) {
+    return uploadDirectOrFallback(
+      getToken,
+      file,
+      `${learningBase}/workspaces/${workspace}/direct-uploads`,
+      (uploadId) => `${learningBase}/direct-uploads/${encodeURIComponent(uploadId)}/complete`,
+      async () => {
+        const data = new FormData();
+        data.set("file", file);
+        const response = await requireOk(
+          await authenticatedFetch(
+            getToken,
+            `${learningBase}/workspaces/${workspace}/documents`,
+            { method: "POST", body: data },
+          ),
+        );
+        return response.json();
+      },
+    );
+  }
+
+  async function upload(selected: File[]) {
     setBusy(true);
     setError("");
     try {
-      const data = new FormData();
-      data.set("file", file);
-      await requireOk(
-        await authenticatedFetch(
-          getToken,
-          `${learningBase}/workspaces/${workspace}/documents`,
-          { method: "POST", body: data },
-        ),
-      );
+      const queue = [...selected];
+      const failures: string[] = [];
+      const worker = async () => {
+        for (;;) {
+          const file = queue.shift();
+          if (!file) return;
+          try {
+            await uploadOne(file);
+          } catch (caught: unknown) {
+            failures.push(`${file.name}: ${caught instanceof Error ? caught.message : "上传失败"}`);
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(2, queue.length) }, () => worker()));
       await load();
       await onDocumentsChanged?.();
+      if (failures.length) setError(failures.join("；"));
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : "上传失败");
     } finally {
@@ -279,11 +307,12 @@ export function LearningFiles({
         添加私人资料{" "}
         <input
           type="file"
+          multiple
           disabled={busy}
           accept=".pdf,.txt,.md,.markdown,.csv,.ipynb,.png,.jpg,.jpeg,.gif,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
           onChange={(event) => {
-            const selected = event.target.files?.[0];
-            if (selected) void upload(selected);
+            const selected = Array.from(event.target.files ?? []);
+            if (selected.length) void upload(selected);
             event.target.value = "";
           }}
         />
