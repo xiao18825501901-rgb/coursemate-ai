@@ -166,7 +166,11 @@ def test_live_sdk_transport_raises_not_configured_without_key() -> None:
 def test_live_sdk_transport_disables_hidden_retries_and_passes_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import typesafe_sdk
+    import sys
+    from types import SimpleNamespace
+
+    typesafe_sdk = SimpleNamespace()
+    monkeypatch.setitem(sys.modules, "typesafe_sdk", typesafe_sdk)
 
     from app.jev.models import JevCall, JevQuestion
 
@@ -196,9 +200,11 @@ def test_live_sdk_transport_disables_hidden_retries_and_passes_timeout(
                 },
             )()
 
-    monkeypatch.setattr(typesafe_sdk, "RetryPolicy", Retry)
-    monkeypatch.setattr(typesafe_sdk, "Noul", NoulQuestion)
-    monkeypatch.setattr(typesafe_sdk, "TypeSafeClient", Client)
+    monkeypatch.setattr(typesafe_sdk, "RetryPolicy", Retry, raising=False)
+    monkeypatch.setattr(typesafe_sdk, "Noul", NoulQuestion, raising=False)
+    monkeypatch.setattr(typesafe_sdk, "TypeSafeClient", Client, raising=False)
+    monkeypatch.setattr(typesafe_sdk, "Choice", object, raising=False)
+    monkeypatch.setattr(typesafe_sdk, "Score", object, raising=False)
 
     result = SdkTransport(api_key="protected-test-key", model="jev-latest").call(
         JevCall(

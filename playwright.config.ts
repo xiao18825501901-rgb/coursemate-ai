@@ -75,7 +75,7 @@ export default defineConfig({
       stderr: "ignore",
     },
     {
-      command: `"${nodeExecutable}" "${path.join(repositoryRoot, "node_modules", "vite", "bin", "vite.js")}" --host 127.0.0.1`,
+      command: `"${nodeExecutable}" "${path.join(repositoryRoot, "apps", "web", "node_modules", "vite", "bin", "vite.js")}" --host 127.0.0.1`,
       cwd: path.join(repositoryRoot, "apps", "web"),
       env: {
         ...process.env,

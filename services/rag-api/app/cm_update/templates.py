@@ -77,7 +77,10 @@ _SUPPORTED_VERSIONS = ("V1", "V2")
 
 
 def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    # Prompt manifests hash normalized UTF-8 text. Keep that identity stable on
+    # Windows checkouts where Git may materialize CRLF line endings.
+    normalized = path.read_text(encoding="utf-8")
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def _body_hash(text: str) -> str:

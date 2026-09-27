@@ -49,7 +49,7 @@ from app.learning.workspaces import (
     valid_preview_artifact,
     workspace_for,
 )
-from app.models import DirectUploadCreate, DirectUploadGrant, UploadAccepted
+from app.models import DirectUploadCreate, DirectUploadFallback, DirectUploadGrant, UploadAccepted
 
 router = APIRouter(prefix="/api/learning", dependencies=[Depends(require_user)])
 User = Annotated[AuthenticatedUser, Depends(require_user)]
@@ -237,8 +237,11 @@ def _version_preview(version: sqlite3.Row, request: Request, user: User) -> obje
 
 
 def _version_details(database: Database, version: sqlite3.Row) -> dict[str, object]:
-    source_available = stored_file_available(
-        database, version["stored_path"], version["byte_size"]
+    local_source = Path(version["stored_path"])
+    source_available = (
+        original_path(database, version) is not None
+        if local_source.is_file()
+        else stored_file_available(database, version["stored_path"], version["byte_size"])
     )
     artifact = valid_preview_artifact(database, version["id"])
     preview = _preview_descriptor(
@@ -460,14 +463,14 @@ async def upload(
 @router.post(
     "/workspaces/{workspace_id}/direct-uploads",
     status_code=201,
-    response_model=DirectUploadGrant,
+    response_model=DirectUploadGrant | DirectUploadFallback,
 )
 def begin_workspace_direct_upload(
     workspace_id: str,
     payload: DirectUploadCreate,
     request: Request,
     user: User,
-) -> DirectUploadGrant:
+) -> DirectUploadGrant | DirectUploadFallback:
     workspace = workspace_for(request.app.state.database, workspace_id, user.user_id)
     return request.app.state.ingestion_service.begin_direct_upload(
         course_id=workspace["private_course_id"],

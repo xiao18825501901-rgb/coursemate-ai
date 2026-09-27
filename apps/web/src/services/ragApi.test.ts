@@ -165,6 +165,30 @@ describe("private course API", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toContain("/api/courses/my%20course");
   });
 
+  it("uses the normal upload endpoint when the server advertises local storage", async () => {
+    const accepted = {
+      document: { id: "doc_local" },
+      job: { id: "job_local", status: "queued" },
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        method: "FALLBACK", reason: "LOCAL_STORAGE",
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify(accepted)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await uploadDocument(
+      vi.fn().mockResolvedValue("token-a"),
+      "my-course",
+      new File(["notes"], "notes.md", { type: "text/markdown" }),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/direct-uploads");
+    expect(fetchMock.mock.calls[1]?.[0]).toContain("/documents");
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toBeInstanceOf(FormData);
+  });
+
   it("does not send read-only prompt preview fields when saving a profile", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: "profile_1" })));
     vi.stubGlobal("fetch", fetchMock);

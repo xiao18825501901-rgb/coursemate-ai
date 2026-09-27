@@ -231,6 +231,11 @@ class DirectUploadGrant(ApiModel):
     expires_at: datetime
 
 
+class DirectUploadFallback(ApiModel):
+    method: Literal["FALLBACK"] = "FALLBACK"
+    reason: Literal["LOCAL_STORAGE"] = "LOCAL_STORAGE"
+
+
 class Health(ApiModel):
     status: str
     service: str

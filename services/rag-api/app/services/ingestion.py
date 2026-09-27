@@ -19,6 +19,7 @@ from app.models import (
     CoursePage,
     CourseUpdate,
     DirectUploadCreate,
+    DirectUploadFallback,
     DirectUploadGrant,
     Document,
     DocumentPage,
@@ -132,16 +133,12 @@ class IngestionService:
         payload: DirectUploadCreate,
         owner_user_id: str,
         is_admin: bool,
-    ) -> DirectUploadGrant:
+    ) -> DirectUploadGrant | DirectUploadFallback:
         course = self._require_course(
             course_id, owner_user_id=owner_user_id, is_admin=is_admin, write=True
         )
         if not isinstance(self.storage_backend, AliyunOssStorageBackend):
-            raise ApiError(
-                409,
-                "DIRECT_UPLOAD_UNAVAILABLE",
-                "Direct object upload is not configured for this deployment.",
-            )
+            return DirectUploadFallback()
         extension = Path(payload.filename).suffix.casefold()
         if extension not in MEDIA_TYPES:
             raise ApiError(400, "UNSUPPORTED_EXTENSION", "This file extension is not supported.")

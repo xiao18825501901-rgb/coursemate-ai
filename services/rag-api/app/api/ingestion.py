@@ -19,6 +19,7 @@ from app.models import (
     CoursePage,
     CourseUpdate,
     DirectUploadCreate,
+    DirectUploadFallback,
     DirectUploadGrant,
     DocumentPage,
     Health,
@@ -171,7 +172,7 @@ async def upload_document(
 
 @router.post(
     "/api/courses/{course_id}/direct-uploads",
-    response_model=DirectUploadGrant,
+    response_model=DirectUploadGrant | DirectUploadFallback,
     status_code=status.HTTP_201_CREATED,
 )
 def begin_direct_upload(
@@ -179,7 +180,7 @@ def begin_direct_upload(
     payload: DirectUploadCreate,
     request: Request,
     user: Annotated[AuthenticatedUser, Depends(require_user)],
-) -> DirectUploadGrant:
+) -> DirectUploadGrant | DirectUploadFallback:
     return _service(request).begin_direct_upload(
         course_id=course_id,
         payload=payload,

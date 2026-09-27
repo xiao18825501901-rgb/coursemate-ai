@@ -63,6 +63,10 @@ def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _normalized_file_sha256(path: Path) -> str:
+    return _sha256_bytes(path.read_text(encoding="utf-8").encode("utf-8"))
+
+
 def test_v2_registry_loads_15_entries_matching_manifest_hashes() -> None:
     reg = templates.registry("V2")
     assert set(reg) == {*_PROFESSIONAL_IDS, "OTHER"}
@@ -83,7 +87,7 @@ def test_v2_registry_loads_15_entries_matching_manifest_hashes() -> None:
 def test_exercise_prompt_v2_file_matches_manifest() -> None:
     path = _PROMPTS_DIR / "EXERCISE_PROMPT_V2.txt"
     assert path.is_file()
-    assert _sha256_bytes(path.read_bytes()) == _MANIFEST["EXERCISE"][0]
+    assert _normalized_file_sha256(path) == _MANIFEST["EXERCISE"][0]
 
     body = templates.exercise_prompt("V2")
     assert abs(len(body) - _MANIFEST["EXERCISE"][1]) <= 2

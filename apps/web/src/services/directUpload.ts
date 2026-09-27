@@ -10,6 +10,11 @@ interface DirectUploadGrant {
   expiresAt: string;
 }
 
+interface DirectUploadFallback {
+  method: "FALLBACK";
+  reason: "LOCAL_STORAGE";
+}
+
 async function sha256(file: File): Promise<string> {
   const bytes = await file.arrayBuffer();
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -23,9 +28,9 @@ export async function uploadDirectOrFallback(
   completeUrl: (uploadId: string) => string,
   fallback: () => Promise<UploadAccepted>,
 ): Promise<UploadAccepted> {
-  let grant: DirectUploadGrant;
+  let result: DirectUploadGrant | DirectUploadFallback;
   try {
-    grant = await requestJson<DirectUploadGrant>(getToken, beginUrl, {
+    result = await requestJson<DirectUploadGrant | DirectUploadFallback>(getToken, beginUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -41,6 +46,8 @@ export async function uploadDirectOrFallback(
     }
     throw error;
   }
+  if (result.method === "FALLBACK") return fallback();
+  const grant = result;
 
   const headers = new Headers();
   for (const [name, value] of Object.entries(grant.headers)) {

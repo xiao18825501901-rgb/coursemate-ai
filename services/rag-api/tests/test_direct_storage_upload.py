@@ -93,6 +93,36 @@ class _OssClient:
         return _Result(content_length=len(self.objects[request.key]))  # type: ignore[attr-defined]
 
 
+def test_local_storage_advertises_clean_upload_fallback(tmp_path: Path) -> None:
+    settings = Settings(
+        database_path=tmp_path / "rag.sqlite3",
+        upload_dir=tmp_path / "uploads",
+        storage_cache_dir=tmp_path / "cache",
+        storage_reserve_min_bytes=0,
+        storage_reserve_fraction=0,
+        app_env="test",
+        rag_provider_mode="deterministic",
+        v3_enabled=True,
+    )
+    app = create_app(settings=settings, embedding_provider=_Embedding(), auth_verifier=_Auth())
+    with TestClient(app) as client:
+        client.headers["Authorization"] = "Bearer owner"
+        assert client.post(
+            "/api/courses",
+            json={"id": "private-course", "name": "Private Course", "description": ""},
+        ).status_code == 201
+        response = client.post(
+            "/api/courses/private-course/direct-uploads",
+            json={
+                "filename": "storage.md",
+                "mediaType": "text/markdown",
+                "byteSize": 7,
+                "sha256": hashlib.sha256(b"content").hexdigest(),
+            },
+        )
+        assert response.status_code == 201
+        assert response.json() == {"method": "FALLBACK", "reason": "LOCAL_STORAGE"}
+
 def test_direct_upload_is_verified_promoted_and_ingested(tmp_path: Path) -> None:
     settings = Settings(
         database_path=tmp_path / "rag.sqlite3",

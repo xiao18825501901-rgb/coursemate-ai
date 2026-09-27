@@ -251,21 +251,28 @@ def bridge(tmp_path) -> Bridge:
 def test_no_column_of_the_local_bridge_could_hold_a_credential(bridge: Bridge) -> None:
     """The schema is where "the token never reaches CourseJesus" is actually enforced.
 
-    `code_hash` is checked explicitly: it is a SHA-256 of the one-time code, which is the only thing
-    about a credential this service ever holds.
+    `code_hash` and `bridge_token_hash` are checked explicitly: both are SHA-256
+    verifiers for CourseJesus-issued one-time material, never Canvas credentials.
     """
     offenders: list[str] = []
     for table in ("canvas_local_sessions", "canvas_local_files"):
         for row in bridge.query(f"PRAGMA table_info({table})"):
             column = str(row["name"]).casefold()
             markers = ("token", "secret", "password", "access", "refresh")
-            if any(marker in column for marker in markers):
-                offenders.append(f"{table}.{row['name']}")
+            safe_verifiers = {"canvas_local_sessions.bridge_token_hash"}
+            qualified = f"{table}.{row['name']}"
+            if any(marker in column for marker in markers) and qualified not in safe_verifiers:
+                offenders.append(qualified)
     assert offenders == [], f"a column could hold a credential: {offenders}"
 
     row = bridge.query("SELECT sql FROM sqlite_master WHERE name='canvas_local_sessions'")[0]
     assert "code_hash TEXT NOT NULL UNIQUE" in row["sql"]
-    assert "token" not in row["sql"].casefold().replace("token_status", "")
+    sql_without_verifiers = (
+        row["sql"].casefold()
+        .replace("token_status", "")
+        .replace("bridge_token_hash", "")
+    )
+    assert "token" not in sql_without_verifiers
 
 
 def test_a_request_that_carries_a_credential_is_refused_not_ignored(bridge: Bridge) -> None:
