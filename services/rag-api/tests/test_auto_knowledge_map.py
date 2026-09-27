@@ -2111,6 +2111,11 @@ def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_cal
         "details": {},
         "message": "A Teaching Spec cited evidence outside its atomic node.",
     }
+    r2_issue = {
+        "code": "AUTO_EVIDENCE_INVALID",
+        "details": {"attempt": "r2"},
+        "message": "A Teaching Spec cited evidence outside its atomic node.",
+    }
     instructions = "Build a grounded Teaching Spec for this frozen node batch."
     context = {
         "knowledge_nodes": [
@@ -2167,7 +2172,7 @@ def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_cal
                     str(ordinal) * 64,
                     rejected_json,
                     hashlib.sha256(rejected_json.encode()).hexdigest(),
-                    canonical_json(issue),
+                    canonical_json(r2_issue if ordinal == 2 else issue),
                 ),
             )
             if ordinal:
@@ -2224,7 +2229,7 @@ def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_cal
             instructions + "\nThe previous complete response was rejected. Correct these exact "
             "issues and return a shorter valid response without repeating invalid "
             "content: "
-            + canonical_json(issue)
+            + canonical_json(r2_issue)
             + "\nFinal atomic-evidence repair: for every specs[i].items[*] "
             "entry, cite only evidence IDs from the matching node_key's "
             "knowledge_nodes[i].evidence_ids. Never cite a neighbouring "
@@ -2253,9 +2258,6 @@ def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_cal
             "WHERE job_id=? ORDER BY created_at,reason",
             (job["id"],),
         ).fetchall()
-        connection.execute(
-            "UPDATE auto_knowledge_jobs SET status='RUNNING' WHERE id=?", (job["id"],)
-        )
     assert {row["reason"] for row in recovery} == {
         "EVIDENCE_SCOPE_NORMALIZATION_V1",
         "EVIDENCE_SCOPE_REPAIR_V1",
@@ -2264,6 +2266,50 @@ def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_cal
         row for row in recovery if row["reason"] == "EVIDENCE_SCOPE_NORMALIZATION_V1"
     )
     assert json.loads(normalization["blocked_operation_ids_json"])[-1] == r3
+
+    # V52 chose r3's rejection feedback when reconstructing the immutable r3
+    # request.  Model work was never dispatched and no artifact was written,
+    # so this exact terminal state gets one separately recorded retry.
+    conflict_receipt = {"error_code": "AUTO_ARTIFACT_CONFLICT"}
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='FAILED',"
+            "error_code='AUTO_ARTIFACT_CONFLICT',"
+            "error_message='The local evidence normalization no longer matches its "
+            "immutable recovery evidence.',completed_at=? WHERE id=?",
+            ("2026-09-27T12:46:00.000Z", job["id"]),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_targets SET status='FAILED' WHERE active_job_id=?",
+            (job["id"],),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_job_receipts("
+            "job_id,target_key,corpus_fingerprint,status,source_snapshot_hash,"
+            "model_calls_made,detail_json) VALUES(?,?,?,'FAILED',?,4,?)",
+            (
+                job["id"],
+                job["target_key"],
+                job["corpus_fingerprint"],
+                digest(json.loads(job["source_snapshot_json"])),
+                canonical_json(conflict_receipt),
+            ),
+        )
+    assert service.reconcile(force=True)["RECOVERED_SAFE_FAILURE"] == 1
+    with database.connect() as connection:
+        recovery = connection.execute(
+            "SELECT reason FROM auto_knowledge_job_recovery_receipts "
+            "WHERE job_id=? ORDER BY created_at,reason",
+            (job["id"],),
+        ).fetchall()
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='RUNNING' WHERE id=?", (job["id"],)
+        )
+    assert {row["reason"] for row in recovery} == {
+        "EVIDENCE_SCOPE_NORMALIZATION_RETRY_V1",
+        "EVIDENCE_SCOPE_NORMALIZATION_V1",
+        "EVIDENCE_SCOPE_REPAIR_V1",
+    }
 
     def validate_specs(value: Any) -> None:
         for spec in value.specs:

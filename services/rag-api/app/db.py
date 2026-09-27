@@ -48,6 +48,7 @@ V3_MIGRATIONS = (
     "050_auto_knowledge_unique_key_repair.sql",
     "051_auto_knowledge_evidence_scope_repair.sql",
     "052_auto_knowledge_evidence_scope_normalization.sql",
+    "053_auto_knowledge_evidence_scope_normalization_retry.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -89,9 +90,12 @@ V3_REPLAY_SUPERSEDED_BY = {
     # Migration 052 adds the only local-only recovery that may remove surplus
     # cross-node citations from a complete, already-metered r3 response.
     "052_auto_knowledge_evidence_scope_normalization.sql": 52,
+    # Migration 053 grants one retry only when V52's local normalization was
+    # stopped by an input-hash reconstruction defect before writing an artifact.
+    "053_auto_knowledge_evidence_scope_normalization_retry.sql": 53,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 52
+LATEST_V3_SCHEMA_VERSION = 53
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (

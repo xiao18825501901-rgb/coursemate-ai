@@ -765,7 +765,8 @@ class OrchestratorDraftGenerator:
                     "WHERE job_id=? AND reason IN ("
                     "'PER_SHARD_REPAIR_SCOPE_V1','REQUIRED_ITEM_REPAIR_V1',"
                     "'UNIQUE_KEY_REPAIR_V1','EVIDENCE_SCOPE_REPAIR_V1',"
-                    "'EVIDENCE_SCOPE_NORMALIZATION_V1')",
+                    "'EVIDENCE_SCOPE_NORMALIZATION_V1',"
+                    "'EVIDENCE_SCOPE_NORMALIZATION_RETRY_V1')",
                     (job_id,),
                 ).fetchall()
             }
@@ -773,8 +774,12 @@ class OrchestratorDraftGenerator:
             required_item_recovery = "REQUIRED_ITEM_REPAIR_V1" in recovery_reasons
             unique_key_recovery = "UNIQUE_KEY_REPAIR_V1" in recovery_reasons
             evidence_scope_recovery = "EVIDENCE_SCOPE_REPAIR_V1" in recovery_reasons
-            evidence_scope_normalization_recovery = (
-                "EVIDENCE_SCOPE_NORMALIZATION_V1" in recovery_reasons
+            evidence_scope_normalization_recovery = bool(
+                {
+                    "EVIDENCE_SCOPE_NORMALIZATION_V1",
+                    "EVIDENCE_SCOPE_NORMALIZATION_RETRY_V1",
+                }
+                & recovery_reasons
             )
             artifact = connection.execute(
                 "SELECT model_operation_id,created_at FROM auto_knowledge_job_artifacts "
@@ -848,13 +853,36 @@ class OrchestratorDraftGenerator:
                                 "for every affected item.",
                             )
                         validate(candidate)
-                        repair_feedback = self._durable_rejection_feedback(previous, schema)
+                        # r3 was originally sent as the final evidence-scope
+                        # repair. Its immutable request therefore includes the
+                        # r2 rejection feedback, not the later r3 rejection
+                        # feedback. Reconstructing it from r3 would change the
+                        # input hash and correctly be rejected by the durable
+                        # operation ledger.
+                        predecessor = connection.execute(
+                            "SELECT rejection_code,rejection_detail_json,output_text "
+                            "FROM auto_knowledge_model_attempts "
+                            "WHERE job_id=? AND stage=? AND shard_key=? "
+                            "AND operation_id=? AND status IN "
+                            "('BUSINESS_REJECTED','CONTRACT_REJECTED')",
+                            (job_id, stage, shard_key, f"{operation_base}-r2"),
+                        ).fetchone()
+                        if predecessor is None:
+                            raise ApiError(
+                                409,
+                                "AUTO_ARTIFACT_CONFLICT",
+                                "The local evidence normalization is missing its r2 "
+                                "request feedback.",
+                            )
+                        r2_feedback = self._durable_rejection_feedback(
+                            predecessor, schema
+                        )
                         effective_instructions = (
                             instructions
                             + "\nThe previous complete response was rejected. Correct these exact "
                             "issues and return a shorter valid response without repeating invalid "
                             "content: "
-                            + canonical_json(repair_feedback)
+                            + canonical_json(r2_feedback)
                             + "\nFinal atomic-evidence repair: for every specs[i].items[*] "
                             "entry, cite only evidence IDs from the matching node_key's "
                             "knowledge_nodes[i].evidence_ids. Never cite a neighbouring "
@@ -2106,6 +2134,108 @@ class AutoKnowledgeMapService:
                         )
                     )
                 )
+            elif (
+                row["error_code"] == "AUTO_ARTIFACT_CONFLICT"
+                and row["builder_version"] == BUILDER_VERSION
+                and row["error_message"]
+                == "The local evidence normalization no longer matches its "
+                "immutable recovery evidence."
+            ):
+                # V52 could reach this exact state without sending a model
+                # request: it reconstructed r3 from r3 feedback rather than
+                # the r2 feedback that was part of r3's original request.
+                # Permit one retry only when the entire frozen repair chain is
+                # still present and no local artifact was written.
+                scope_receipt = connection.execute(
+                    "SELECT blocked_operation_ids_json FROM "
+                    "auto_knowledge_job_recovery_receipts "
+                    "WHERE job_id=? AND reason='EVIDENCE_SCOPE_REPAIR_V1'",
+                    (row["id"],),
+                ).fetchone()
+                normalization_receipt = connection.execute(
+                    "SELECT blocked_operation_ids_json FROM "
+                    "auto_knowledge_job_recovery_receipts "
+                    "WHERE job_id=? AND reason='EVIDENCE_SCOPE_NORMALIZATION_V1'",
+                    (row["id"],),
+                ).fetchone()
+                if scope_receipt is None or normalization_receipt is None:
+                    continue
+                scope_operations = json.loads(
+                    str(scope_receipt["blocked_operation_ids_json"])
+                )
+                normalization_operations = json.loads(
+                    str(normalization_receipt["blocked_operation_ids_json"])
+                )
+                if (
+                    not isinstance(scope_operations, list)
+                    or len(scope_operations) != 3
+                    or not all(isinstance(item, str) for item in scope_operations)
+                ):
+                    continue
+                base_operation = scope_operations[0]
+                expected_scope_operations = [
+                    base_operation,
+                    f"{base_operation}-r1",
+                    f"{base_operation}-r2",
+                ]
+                expected_normalization_operations = [
+                    *expected_scope_operations,
+                    f"{base_operation}-r3",
+                ]
+                if (
+                    scope_operations != expected_scope_operations
+                    or normalization_operations != expected_normalization_operations
+                ):
+                    continue
+                attempts = connection.execute(
+                    "SELECT operation_id,stage,shard_key,status,rejection_code,"
+                    "output_text,output_hash FROM auto_knowledge_model_attempts "
+                    "WHERE job_id=? AND operation_id IN (?,?,?,?) "
+                    "ORDER BY operation_id",
+                    (row["id"], *expected_normalization_operations),
+                ).fetchall()
+                r3_operation = expected_normalization_operations[-1]
+                r3_attempt = next(
+                    (item for item in attempts if item["operation_id"] == r3_operation),
+                    None,
+                )
+                operation_rows = connection.execute(
+                    "SELECT request_hash,status,kind FROM learning_operations "
+                    "WHERE id=?",
+                    (r3_operation,),
+                ).fetchall()
+                artifact = (
+                    connection.execute(
+                        "SELECT 1 FROM auto_knowledge_job_artifacts "
+                        "WHERE job_id=? AND stage='TEACHING_SPEC' AND shard_key=?",
+                        (row["id"], r3_attempt["shard_key"] if r3_attempt else ""),
+                    ).fetchone()
+                    if r3_attempt is not None
+                    else None
+                )
+                exact_normalization_conflict = (
+                    len(attempts) == 4
+                    and [str(item["operation_id"]) for item in attempts]
+                    == sorted(expected_normalization_operations)
+                    and len({str(item["shard_key"]) for item in attempts}) == 1
+                    and all(
+                        str(item["stage"]) == "TEACHING_SPEC"
+                        and str(item["status"]) == "BUSINESS_REJECTED"
+                        and str(item["rejection_code"]) == "AUTO_EVIDENCE_INVALID"
+                        and bool(str(item["output_text"] or "").strip())
+                        and len(str(item["output_hash"] or "")) == 64
+                        for item in attempts
+                    )
+                    and len(operation_rows) == 1
+                    and operation_rows[0]["status"] == "FAILED"
+                    and operation_rows[0]["kind"] == "auto.knowledge.map"
+                    and artifact is None
+                    and r3_attempt is not None
+                )
+                if not exact_normalization_conflict:
+                    continue
+                blocked = attempts
+                reason = "EVIDENCE_SCOPE_NORMALIZATION_RETRY_V1"
             elif row["error_code"] == "AUTO_SOURCE_COVERAGE_INCOMPLETE":
                 # V4 had already persisted every accepted shard before this
                 # deterministic aggregate check. The hotfix only normalizes a
