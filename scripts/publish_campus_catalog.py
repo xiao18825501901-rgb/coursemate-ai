@@ -390,7 +390,14 @@ def import_bundle(
         "operationId": operation_id,
         "manifestSha256": manifest["manifestSha256"],
         "courses": [],
-        "summary": {"indexed": 0, "existing": 0, "failed": 0, "downloadOnly": 0, "withheld": 0},
+        "summary": {
+            "indexed": 0,
+            "existing": 0,
+            "failed": 0,
+            "downloadOnly": 0,
+            "withheld": 0,
+            "lockedReleaseSkipped": 0,
+        },
     }
 
     with database.connect() as connection:
@@ -415,10 +422,11 @@ def import_bundle(
             if current is None or current["course_type"] != "official":
                 raise PublicationBundleError(f"target course is not an official course: {target}")
 
+            immutable_release = str(current["publication_status"]) in {"pending", "published"}
             index_items = [item for item in course["files"] if item["action"] == "INDEX"]
             batch = None
             batch_items: list[dict[str, Any]] = []
-            if index_items:
+            if index_items and not immutable_release:
                 batch = auto_map.begin_upload_batch(
                     course_id=target,
                     source_course_id=target,
@@ -435,6 +443,7 @@ def import_bundle(
                 "failed": 0,
                 "downloadOnly": 0,
                 "withheld": 0,
+                "lockedReleaseSkipped": 0,
                 "batchStatus": str(batch.get("status")) if batch else "NOT_REQUIRED",
             }
             for item in course["files"]:
@@ -453,6 +462,42 @@ def import_bundle(
                     repository.upsert(row, decision, target_course_id=target)
                     course_result["downloadOnly"] += 1
                     receipt["summary"]["downloadOnly"] += 1
+                    continue
+                if immutable_release:
+                    # A pending/published course is an exact reviewed release.  The database
+                    # deliberately rejects document/chunk mutation.  Preserve that release and
+                    # record the frozen source instead of temporarily unpublishing it or bypassing
+                    # its immutable review snapshot.  Identical bytes already in the release may
+                    # still be linked without changing the reviewed object.
+                    _safe_bundle_file(bundle_dir, item)
+                    existing = connection.execute(
+                        "SELECT id FROM documents WHERE course_id=? AND sha256=?",
+                        (target, item["sha256"]),
+                    ).fetchone()
+                    document_id = str(existing["id"]) if existing else None
+                    if document_id is not None:
+                        documents_by_sha[str(item["sha256"])] = document_id
+                        decision = MaterialDecision(
+                            INGESTABLE,
+                            "identical content already belongs to the immutable release",
+                            APPROVED_REVIEW_STATUS,
+                        )
+                        course_result["existing"] += 1
+                        receipt["summary"]["existing"] += 1
+                    else:
+                        decision = MaterialDecision(
+                            DOWNLOAD_ONLY,
+                            "source preserved; immutable reviewed release requires a successor review",
+                            APPROVED_REVIEW_STATUS,
+                        )
+                        course_result["lockedReleaseSkipped"] += 1
+                        receipt["summary"]["lockedReleaseSkipped"] += 1
+                    repository.upsert(
+                        row,
+                        decision,
+                        target_course_id=target,
+                        document_id=document_id,
+                    )
                     continue
                 if action == "REUSE":
                     document_id = documents_by_sha.get(str(item["sha256"]))

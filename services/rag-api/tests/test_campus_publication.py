@@ -300,6 +300,59 @@ def test_import_is_private_idempotent_and_seals_one_batch_per_course(
     assert second["summary"]["existing"] == 1
 
 
+def test_import_preserves_an_immutable_published_release_and_records_new_sources(
+    tmp_path: pathlib.Path,
+) -> None:
+    digest = publication.sha256_bytes(b"lecture evidence")
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(json.dumps(_plan(tmp_path, digest=digest)), encoding="utf-8")
+    ledger_path = tmp_path / "ledger.sqlite3"
+    _ledger(ledger_path, digest=digest)
+    bundle = tmp_path / "bundle"
+    publication.prepare_bundle(
+        plan_path=plan_path,
+        ledger_path=ledger_path,
+        bundle_dir=bundle,
+        operation_id="campus-publication-test",
+    )
+    database, ingestion = _database(tmp_path / "runtime")
+    ingestion.create_course(
+        publication.course_create("ge2324", "Existing GE2324", "published release"),
+        is_admin=True,
+        publication_status=publication.PublicationStatus.PUBLISHED,
+    )
+    batches = _BatchRecorder()
+
+    receipt = publication.import_bundle(
+        bundle_dir=bundle,
+        database=database,
+        ingestion=ingestion,
+        auto_map=batches,
+        receipt_path=tmp_path / "receipt.json",
+    )
+
+    with database.connect() as connection:
+        course = connection.execute("SELECT * FROM courses WHERE id='ge2324'").fetchone()
+        records = connection.execute(
+            "SELECT relative_path,decision,document_id FROM campus_material_records "
+            "WHERE target_course_id='ge2324' ORDER BY relative_path"
+        ).fetchall()
+        assert connection.execute(
+            "SELECT COUNT(*) FROM documents WHERE course_id='ge2324'"
+        ).fetchone()[0] == 0
+    assert course["visibility"] == "public"
+    assert course["publication_status"] == "published"
+    assert [row["decision"] for row in records] == [
+        "DOWNLOAD_ONLY",
+        "DOWNLOAD_ONLY",
+        "BLOCKED",
+    ]
+    assert all(row["document_id"] is None for row in records)
+    assert batches.opened == batches.items == batches.sealed == []
+    assert receipt["summary"]["lockedReleaseSkipped"] == 2
+    assert receipt["courses"][0]["lockedReleaseSkipped"] == 2
+
+
 def test_activation_is_atomic_and_requires_terminal_auto_map_state(
     tmp_path: pathlib.Path,
 ) -> None:
