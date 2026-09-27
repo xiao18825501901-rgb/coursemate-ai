@@ -1772,6 +1772,12 @@ class AutoKnowledgeMapService:
                     "WHERE job_id=? AND reason='REPAIRED_ARTIFACT_REHYDRATION_V1'",
                     (row["id"],),
                 ).fetchone()
+                required_item_recovery = connection.execute(
+                    "SELECT blocked_operation_ids_json "
+                    "FROM auto_knowledge_job_recovery_receipts "
+                    "WHERE job_id=? AND reason='REQUIRED_ITEM_REPAIR_V1'",
+                    (row["id"],),
+                ).fetchone()
                 legacy_feedback = any(
                     item["rejected_status"] == "CONTRACT_REJECTED"
                     and bool(str(item["output_text"] or "").strip())
@@ -1780,6 +1786,66 @@ class AutoKnowledgeMapService:
                 )
                 if first_rehydration is None:
                     reason = "REPAIRED_ARTIFACT_REHYDRATION_V1"
+                elif required_item_recovery is not None:
+                    required_operation_ids = json.loads(
+                        str(required_item_recovery["blocked_operation_ids_json"])
+                    )
+                    required_attempts = connection.execute(
+                        "SELECT operation_id,status,output_text,output_hash,"
+                        "rejection_code,rejection_detail_json "
+                        "FROM auto_knowledge_model_attempts WHERE job_id=? "
+                        "AND operation_id IN ("
+                        + ",".join("?" for _ in required_operation_ids)
+                        + ") ORDER BY operation_id",
+                        (row["id"], *required_operation_ids),
+                    ).fetchall() if required_operation_ids else []
+                    required_message = (
+                        "Every atomic node needs at least one REQUIRED item"
+                    )
+                    exact_required_attempts = (
+                        bool(required_operation_ids)
+                        and len(required_attempts) == len(set(required_operation_ids))
+                        and any(
+                            str(item["operation_id"]).endswith("-r2")
+                            for item in required_attempts
+                        )
+                        and all(
+                            str(item["status"]) == "CONTRACT_REJECTED"
+                            and str(item["rejection_code"]) == "ValidationError"
+                            and bool(str(item["output_text"] or "").strip())
+                            and len(str(item["output_hash"] or "")) == 64
+                            and required_message
+                            in canonical_json(
+                                json.loads(
+                                    str(item["rejection_detail_json"] or "{}")
+                                )
+                            )
+                            for item in required_attempts
+                        )
+                    )
+                    third_send_evidence = any(
+                        (
+                            connection.execute(
+                                "SELECT 1 FROM auto_knowledge_model_attempts "
+                                "WHERE job_id=? AND operation_id GLOB '*-r3' LIMIT 1",
+                                (row["id"],),
+                            ).fetchone(),
+                            connection.execute(
+                                "SELECT 1 FROM auto_knowledge_repair_reservations "
+                                "WHERE job_id=? AND ordinal=3 LIMIT 1",
+                                (row["id"],),
+                            ).fetchone(),
+                            connection.execute(
+                                "SELECT 1 FROM auto_knowledge_job_artifacts "
+                                "WHERE job_id=? AND model_operation_id GLOB '*-r3' LIMIT 1",
+                                (row["id"],),
+                            ).fetchone(),
+                        )
+                    )
+                    if not exact_required_attempts or third_send_evidence:
+                        continue
+                    blocked = list(required_attempts)
+                    reason = "BASE_PROMPT_HASH_RESTORE_V1"
                 elif legacy_feedback:
                     reason = "LEGACY_REJECTION_FEEDBACK_REHYDRATION_V1"
                 else:

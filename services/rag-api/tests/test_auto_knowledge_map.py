@@ -1592,11 +1592,128 @@ def test_required_item_rejection_gets_one_audited_third_repair(
             "FROM auto_knowledge_job_recovery_receipts WHERE job_id=?",
             (job["id"],),
         ).fetchone()
+    assert recovery["reason"] == "REQUIRED_ITEM_REPAIR_V1"
+    assert json.loads(recovery["blocked_operation_ids_json"])[-1] == f"{base}-r2"
+
+    # A short-lived production build changed the common base Prompt before it
+    # reached r3. Accepted artifacts correctly rejected that replay by hash,
+    # and an older generic artifact-rehydration reason was consumed without a
+    # provider request. Preserve both receipts, then grant one local-only replay
+    # after the historical base Prompt has been restored.
+    drift_receipt = {
+        "job_id": job["id"],
+        "target_key": job["target_key"],
+        "corpus_fingerprint": job["corpus_fingerprint"],
+        "status": "FAILED",
+        "source_snapshot_hash": digest(json.loads(job["source_snapshot_json"])),
+        "model_calls_made": 3,
+        "detail": {"error_code": "AUTO_ARTIFACT_CONFLICT"},
+        "created_at": "2026-09-27T08:12:26.247Z",
+    }
+    drift_json = json.dumps(drift_receipt, sort_keys=True, separators=(",", ":"))
+    with database.connect() as connection:
+        # Preserve one accepted paid repair plus its rejected predecessor, as
+        # the production hash-conflict guard requires. This is a different
+        # shard from the exact missing-REQUIRED r2 authorization below.
+        accepted_base = f"akm-{digest(str(job['id']))[:16]}-s-00001"
+        rejected_output = "{}"
+        accepted_output = json.dumps({"specs": []}, separators=(",", ":"))
+        connection.execute(
+            "INSERT INTO auto_knowledge_model_attempts("
+            "operation_id,job_id,stage,shard_key,input_hash,status,"
+            "output_text,output_hash,rejection_code,rejection_detail_json) "
+            "VALUES(?,?,'TEACHING_SPEC','spec-00001',?,'CONTRACT_REJECTED',"
+            "?,?, 'ValidationError','{}')",
+            (
+                accepted_base,
+                job["id"],
+                "a" * 64,
+                rejected_output,
+                hashlib.sha256(rejected_output.encode()).hexdigest(),
+            ),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_model_attempts("
+            "operation_id,job_id,stage,shard_key,input_hash,status,"
+            "output_text,output_hash,rejection_detail_json) "
+            "VALUES(?,?,'TEACHING_SPEC','spec-00001',?,'ACCEPTED',?,?, '{}')",
+            (
+                f"{accepted_base}-r1",
+                job["id"],
+                "b" * 64,
+                accepted_output,
+                hashlib.sha256(accepted_output.encode()).hexdigest(),
+            ),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_repair_reservations("
+            "job_id,stage,shard_key,ordinal,operation_id) VALUES(?,?,?,?,?)",
+            (job["id"], "TEACHING_SPEC", "spec-00001", 1, f"{accepted_base}-r1"),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_job_artifacts("
+            "job_id,stage,shard_key,input_hash,model_operation_id,"
+            "output_json,output_hash) VALUES(?, 'TEACHING_SPEC','spec-00001',?,?,?,?)",
+            (
+                job["id"],
+                "b" * 64,
+                f"{accepted_base}-r1",
+                accepted_output,
+                hashlib.sha256(accepted_output.encode()).hexdigest(),
+            ),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_job_recovery_receipts("
+            "id,job_id,reason,prior_receipt_json,prior_receipt_hash,"
+            "blocked_operation_ids_json) VALUES(?,?,?,?,?,'[]')",
+            (
+                "prior-artifact-rehydration",
+                job["id"],
+                "REPAIRED_ARTIFACT_REHYDRATION_V1",
+                drift_json,
+                hashlib.sha256(drift_json.encode()).hexdigest(),
+            ),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='FAILED',"
+            "error_code='AUTO_ARTIFACT_CONFLICT',error_message=?,completed_at=? "
+            "WHERE id=?",
+            (
+                "A persisted generation shard no longer matches its frozen input.",
+                "2026-09-27T08:12:26.247Z",
+                job["id"],
+            ),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_targets SET status='FAILED' WHERE active_job_id=?",
+            (job["id"],),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_job_receipts("
+            "job_id,target_key,corpus_fingerprint,status,source_snapshot_hash,"
+            "model_calls_made,detail_json) VALUES(?,?,?,'FAILED',?,3,?)",
+            (
+                job["id"],
+                job["target_key"],
+                job["corpus_fingerprint"],
+                digest(json.loads(job["source_snapshot_json"])),
+                json.dumps({"error_code": "AUTO_ARTIFACT_CONFLICT"}),
+            ),
+        )
+
+    assert service.reconcile(force=True)["RECOVERED_SAFE_FAILURE"] == 1
+    with database.connect() as connection:
+        reasons = {
+            row[0]
+            for row in connection.execute(
+                "SELECT reason FROM auto_knowledge_job_recovery_receipts WHERE job_id=?",
+                (job["id"],),
+            )
+        }
         connection.execute(
             "UPDATE auto_knowledge_jobs SET status='RUNNING' WHERE id=?", (job["id"],)
         )
-    assert recovery["reason"] == "REQUIRED_ITEM_REPAIR_V1"
-    assert json.loads(recovery["blocked_operation_ids_json"])[-1] == f"{base}-r2"
+    assert "BASE_PROMPT_HASH_RESTORE_V1" in reasons
     output, dispatched = service.generator._run_with_repairs(  # type: ignore[attr-defined]
         job_id=str(job["id"]),
         stage="TEACHING_SPEC",
