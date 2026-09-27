@@ -46,6 +46,7 @@ V3_MIGRATIONS = (
     "048_auto_knowledge_required_item_repair.sql",
     "049_auto_knowledge_base_prompt_hash_restore.sql",
     "050_auto_knowledge_unique_key_repair.sql",
+    "051_auto_knowledge_evidence_scope_repair.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -82,9 +83,11 @@ V3_REPLAY_SUPERSEDED_BY = {
     "049_auto_knowledge_base_prompt_hash_restore.sql": 49,
     # Migration 050 grants one exact SECTION_MAP duplicate-key prompt repair.
     "050_auto_knowledge_unique_key_repair.sql": 50,
+    # Migration 051 grants one exact Teaching-Spec atomic-evidence prompt repair.
+    "051_auto_knowledge_evidence_scope_repair.sql": 51,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 50
+LATEST_V3_SCHEMA_VERSION = 51
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (

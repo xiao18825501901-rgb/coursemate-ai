@@ -516,7 +516,8 @@ class OrchestratorDraftGenerator:
                 "SELECT reason,blocked_operation_ids_json "
                 "FROM auto_knowledge_job_recovery_receipts "
                 "WHERE job_id=? AND reason IN ("
-                "'REQUIRED_ITEM_REPAIR_V1','UNIQUE_KEY_REPAIR_V1')",
+                "'REQUIRED_ITEM_REPAIR_V1','UNIQUE_KEY_REPAIR_V1',"
+                "'EVIDENCE_SCOPE_REPAIR_V1')",
                 (job_id,),
             ).fetchall()
             authorized_third_repairs = {
@@ -535,9 +536,14 @@ class OrchestratorDraftGenerator:
                 and f"{operation_base}-r2"
                 in authorized_third_repairs.get("UNIQUE_KEY_REPAIR_V1", set())
             )
+            evidence_scope_authorized = (
+                stage == "TEACHING_SPEC"
+                and f"{operation_base}-r2"
+                in authorized_third_repairs.get("EVIDENCE_SCOPE_REPAIR_V1", set())
+            )
             repair_limit = (
                 3
-                if required_authorized or unique_key_authorized
+                if required_authorized or unique_key_authorized or evidence_scope_authorized
                 else 2
             )
             if ordinal > repair_limit:
@@ -590,13 +596,14 @@ class OrchestratorDraftGenerator:
                     "SELECT reason FROM auto_knowledge_job_recovery_receipts "
                     "WHERE job_id=? AND reason IN ("
                     "'PER_SHARD_REPAIR_SCOPE_V1','REQUIRED_ITEM_REPAIR_V1',"
-                    "'UNIQUE_KEY_REPAIR_V1')",
+                    "'UNIQUE_KEY_REPAIR_V1','EVIDENCE_SCOPE_REPAIR_V1')",
                     (job_id,),
                 ).fetchall()
             }
             recovery = bool(recovery_reasons)
             required_item_recovery = "REQUIRED_ITEM_REPAIR_V1" in recovery_reasons
             unique_key_recovery = "UNIQUE_KEY_REPAIR_V1" in recovery_reasons
+            evidence_scope_recovery = "EVIDENCE_SCOPE_REPAIR_V1" in recovery_reasons
             artifact = connection.execute(
                 "SELECT model_operation_id,created_at FROM auto_knowledge_job_artifacts "
                 "WHERE job_id=? AND stage=? AND shard_key=?",
@@ -669,6 +676,13 @@ class OrchestratorDraftGenerator:
                     "duplicate deterministically, then update every parent_key, "
                     "prerequisite_keys and dispositions[*].node_keys reference to "
                     "the renamed key before returning the complete response."
+                )
+            if evidence_scope_recovery and repair == 3 and stage == "TEACHING_SPEC":
+                effective_instructions += (
+                    "\nFinal atomic-evidence repair: for every specs[i].items[*] "
+                    "entry, cite only evidence IDs from the matching node_key's "
+                    "knowledge_nodes[i].evidence_ids. Never cite a neighbouring "
+                    "node or any other source; recheck every item before returning."
                 )
             try:
                 return self._run(
@@ -1748,13 +1762,54 @@ class AutoKnowledgeMapService:
                     )
                     for item in blocked
                 ) and any(str(item["operation_id"]).endswith("-r2") for item in blocked)
+                evidence_scope_message = (
+                    "A Teaching Spec cited evidence outside its atomic node."
+                )
+                evidence_scope_operations = {
+                    str(item["operation_id"]) for item in blocked
+                }
+                evidence_scope_r2 = [
+                    operation
+                    for operation in evidence_scope_operations
+                    if operation.endswith("-r2")
+                ]
+                expected_evidence_scope_operations = (
+                    {
+                        evidence_scope_r2[0][:-3],
+                        evidence_scope_r2[0][:-3] + "-r1",
+                        evidence_scope_r2[0],
+                    }
+                    if len(evidence_scope_r2) == 1
+                    else set()
+                )
+                exact_evidence_scope_failure = (
+                    len(blocked) == 3
+                    and len({str(item["shard_key"]) for item in blocked}) == 1
+                    and evidence_scope_operations == expected_evidence_scope_operations
+                    and all(
+                        str(item["stage"]) == "TEACHING_SPEC"
+                        and str(item["status"]) == "BUSINESS_REJECTED"
+                        and str(item["rejection_code"]) == "AUTO_EVIDENCE_INVALID"
+                        and bool(str(item["output_text"] or "").strip())
+                        and len(str(item["output_hash"] or "")) == 64
+                        and evidence_scope_message
+                        in canonical_json(
+                            json.loads(str(item["rejection_detail_json"] or "{}"))
+                        )
+                        for item in blocked
+                    )
+                )
                 reason = (
                     "REQUIRED_ITEM_REPAIR_V1"
                     if exact_required_item_failure
                     else (
-                        "UNIQUE_KEY_REPAIR_V1"
-                        if exact_unique_key_failure
-                        else "PER_SHARD_REPAIR_SCOPE_V1"
+                        "EVIDENCE_SCOPE_REPAIR_V1"
+                        if exact_evidence_scope_failure
+                        else (
+                            "UNIQUE_KEY_REPAIR_V1"
+                            if exact_unique_key_failure
+                            else "PER_SHARD_REPAIR_SCOPE_V1"
+                        )
                     )
                 )
             elif row["error_code"] == "AUTO_SOURCE_COVERAGE_INCOMPLETE":
