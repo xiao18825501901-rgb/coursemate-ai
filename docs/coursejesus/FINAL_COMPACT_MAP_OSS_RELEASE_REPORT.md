@@ -1,8 +1,11 @@
 # CourseJesus compact-map and OSS release report
 
-Report date: 2026-09-28 (Asia/Shanghai)  
-Branch: `feature/compact-map-oss-20260928`  
-Application release SHA: `5a3c1070c2753083a1a9032de96d136c28eda6d7`  
+Report date: 2026-09-28 (Asia/Shanghai)
+
+Branch: `feature/compact-map-oss-20260928`
+
+Application release SHA: `5a3c1070c2753083a1a9032de96d136c28eda6d7`
+
 Production deployment: **BLOCKED — NOT DEPLOYED**
 
 ## Executive result

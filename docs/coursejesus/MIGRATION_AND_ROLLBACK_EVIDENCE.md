@@ -1,6 +1,7 @@
 # Compact-map and OSS migration / rollback evidence
 
-Status date: 2026-09-28  
+Status date: 2026-09-28
+
 Production mutation status: **NOT RUN**
 
 ## Additive schema sequence

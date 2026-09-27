@@ -1,7 +1,9 @@
 # Private OSS storage and upload runbook
 
-Status: source implemented; production resources not yet available  
-Production region: `cn-hangzhou`  
+Status: source implemented; production resources not yet available
+
+Production region: `cn-hangzhou`
+
 Application candidate: `5a3c1070c2753083a1a9032de96d136c28eda6d7`
 
 ## Hard gate
