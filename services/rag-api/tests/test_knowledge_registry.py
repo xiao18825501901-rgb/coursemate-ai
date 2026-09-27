@@ -68,6 +68,62 @@ def plan(
     )
 
 
+def test_tree_budget_accepts_50_members_and_rejects_51_in_service_and_database(
+    tmp_path: Path,
+) -> None:
+    with client_at(tmp_path) as client:
+        workspace, first = setup_workspace(client)
+        nodes = [first]
+        for index in range(1, 51):
+            nodes.append(private_node(client, workspace["id"], f"Compact unit {index:02d}"))
+
+        memberships = [
+            {"node_id": node["id"], "parent_node_id": None, "ordinal": index}
+            for index, node in enumerate(nodes)
+        ]
+        accepted = plan(
+            client,
+            workspace["id"],
+            memberships[:50],
+            operation_id="tree-budget-50",
+        )
+        assert accepted.status_code == 200, accepted.text
+
+        rejected = plan(
+            client,
+            workspace["id"],
+            memberships,
+            operation_id="tree-budget-51",
+        )
+        assert rejected.status_code == 422, rejected.text
+        assert rejected.json()["error"]["code"] == "TREE_NODE_LIMIT_EXCEEDED"
+
+        database = client.app.state.database
+        with database.connect() as connection:
+            connection.execute(
+                "INSERT INTO knowledge_tree_versions("
+                "id,course_id,workspace_id,owner_user_id,tree_kind,version,status,title,"
+                "change_reason,content_hash) VALUES("
+                "'tree-budget-db','cs3481',?,'a','PERSONALIZED',99,'DRAFT','Budget tree',"
+                "'Database boundary fixture',?)",
+                (workspace["id"], "f" * 64),
+            )
+            for ordinal, node in enumerate(nodes[:50]):
+                connection.execute(
+                    "INSERT INTO knowledge_tree_memberships("
+                    "tree_version_id,node_id,parent_node_id,ordinal,teaching_spec_version) "
+                    "VALUES('tree-budget-db',?,NULL,?,1)",
+                    (node["id"], ordinal),
+                )
+            with pytest.raises(sqlite3.IntegrityError, match="50 members"):
+                connection.execute(
+                    "INSERT INTO knowledge_tree_memberships("
+                    "tree_version_id,node_id,parent_node_id,ordinal,teaching_spec_version) "
+                    "VALUES('tree-budget-db',?,NULL,50,1)",
+                    (nodes[50]["id"],),
+                )
+
+
 def test_migration_014_backfills_normalized_specs_and_is_repeatable(tmp_path: Path) -> None:
     with client_at(tmp_path) as client:
         workspace, node = setup_workspace(client)

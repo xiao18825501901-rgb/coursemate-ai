@@ -51,6 +51,7 @@ V3_MIGRATIONS = (
     "053_auto_knowledge_evidence_scope_normalization_retry.sql",
     "054_auto_knowledge_per_shard_evidence_recovery_receipts.sql",
     "055_auto_knowledge_evidence_scope_resume.sql",
+    "056_compact_knowledge_tree_budget.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -103,7 +104,7 @@ V3_REPLAY_SUPERSEDED_BY = {
     "055_auto_knowledge_evidence_scope_resume.sql": 55,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 55
+LATEST_V3_SCHEMA_VERSION = 56
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (

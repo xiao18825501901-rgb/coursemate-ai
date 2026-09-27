@@ -9,6 +9,7 @@ from app.db import Database
 from app.errors import ApiError
 from app.jev import callsites
 from app.jev.service import SemanticDecisionService
+from app.learning.knowledge_policy import enforce_effective_node_budget
 from app.learning.models import PersonalPlanInput, TreeMembershipInput
 from app.learning.workspaces import workspace_for
 
@@ -226,6 +227,7 @@ class KnowledgeService:
         memberships: list[TreeMembershipInput],
         prerequisites: set[tuple[str, str]],
     ) -> None:
+        enforce_effective_node_budget(len(memberships))
         node_ids = set(nodes)
         parent_by_node = {member.node_id: member.parent_node_id for member in memberships}
         sibling_positions: set[tuple[str | None, int]] = set()

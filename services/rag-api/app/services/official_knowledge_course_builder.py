@@ -27,6 +27,7 @@ from app.config import Settings
 from app.db import Database
 from app.errors import ApiError
 from app.learning.knowledge import KnowledgeService
+from app.learning.knowledge_policy import MAX_EFFECTIVE_COURSE_NODES
 from app.learning.models import TreeMembershipInput
 from app.learning.orchestrator import LearningOrchestrator
 from app.learning.workspaces import join_course, workspace_for
@@ -44,7 +45,6 @@ from app.services.official_knowledge_draft_builder import (
 )
 
 COURSE_BUILDER_VERSION = "M6D4_COURSE_V1"
-MAX_COURSE_NODES = 60
 
 
 class OfficialKnowledgeCourseBuilder:
@@ -360,11 +360,13 @@ class OfficialKnowledgeCourseBuilder:
         admin_user_id: str,
     ) -> OfficialKnowledgeCourseBuildResult:
         plan = payload.plan
-        if len(plan.nodes) > MAX_COURSE_NODES:
+        effective_node_count = len(plan.modules) + len(plan.nodes)
+        if effective_node_count > MAX_EFFECTIVE_COURSE_NODES:
             raise ApiError(
                 422,
                 "OFFICIAL_COURSE_TOO_LARGE",
-                f"At most {MAX_COURSE_NODES} atomic targets per course plan.",
+                f"At most {MAX_EFFECTIVE_COURSE_NODES} effective nodes per course plan, "
+                "including composite chapters and any stored root.",
             )
         course = self._course(course_id)
         plan_hash = self._plan_hash(payload)

@@ -178,6 +178,45 @@ def test_dry_run_writes_nothing_and_makes_no_calls(client: TestClient) -> None:
     assert before == after
 
 
+def test_course_plan_budget_counts_composite_modules_and_atomic_nodes(
+    client: TestClient,
+) -> None:
+    seed_official_corpus(client)
+    plan = sample_plan()
+    plan["modules"] = [
+        {
+            "module_key": f"module-{index}",
+            "title": f"Module {index}",
+            "description": "A source-grounded course chapter.",
+            "major": "CS",
+            "parent_key": None,
+            "prerequisites": [],
+        }
+        for index in range(7)
+    ]
+    plan["nodes"] = [
+        {
+            "node_key": f"unit-{index}",
+            "title": f"Unit {index}",
+            "description": "A source-grounded learning unit.",
+            "major": "CS",
+            "parent_key": f"module-{index % 7}",
+            "prerequisites": [],
+            "evidence_queries": ["clustering"],
+        }
+        for index in range(44)
+    ]
+    payload = OfficialKnowledgeCourseBuild.model_validate(
+        build_payload(plan=plan, dry_run=True)
+    )
+
+    with pytest.raises(ApiError) as captured:
+        builder_for(client).build("cs3481", payload, admin_user_id="admin-author")
+
+    assert captured.value.code == "OFFICIAL_COURSE_TOO_LARGE"
+    assert "50" in captured.value.message
+
+
 def test_build_accumulates_into_one_final_tree(client: TestClient) -> None:
     seed_official_corpus(client)
     result = build(client)
