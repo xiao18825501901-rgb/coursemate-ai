@@ -1,37 +1,58 @@
 # CourseJesus 全课程自动知识点与 Teaching Spec 最终报告
 
-当前状态：`LOCAL RELEASE CANDIDATE — PRODUCTION ACCEPTANCE PENDING`
+结论：`PRODUCTION DEPLOYED / LIVE MODEL VERIFIED / T0 ELIGIBLE BACKFILL COMPLETE / AUTHENTICATED BROWSER NOT VERIFIED`
 
-## 已完成
+## 发布版本
 
-- 所有现有入库入口接入单一、持久、可恢复的自动准备服务。
-- 全量可读内容分段 map/reduce，逐来源处置，ATOMIC 节点逐一生成 Teaching Spec。
-- 私人、校园、共享快照与私人补充保持各自权限和发布语义。
-- resolver、学习、做一题与测评可以消费 active machine map。
-- 旧树在新版本准备期间可用；已有节点/历史不删除；人工官方树不被机器覆盖。
-- schema 42、worker、receipts、backfill CLI、用户状态 API 与页面状态已实现。
+- application/source SHA：`2d11587eb2f4037397ca654d2ee1b09558c94281`
+- branch：`feature/auto-knowledge-map-20260927`
+- production RAG schema：`46`
+- backend release：`/srv/coursemate/releases/2d11587`
+- Netlify deploy：`6ab866aedac313b9a4edcdc1`；当前 `coursejesus.com` 200
+- 生产开关：enabled=true、billable=true
 
-## 当前证据
+## 达成的产品结果
 
-详见：
+所有网页批量上传、旧单文件、Canvas/Local Bridge、管理员导入、共享接收、资料变更与存量对账统一进入持久自动准备管线。它冻结授权资料版本，完整分段，生成/去重/组织节点，为每个可学习 ATOMIC 建立带真实 evidence 的 Teaching Spec，经权限、来源、结构、revision 和 lease 校验后原子激活。
+
+私人图仅 owner 可用；校园机器图不冒充人工 OFFICIAL；分享只读接收时快照；已有官方树、node ID、Pair、覆盖、成绩、历史和进行中测评不重建、不清零。resolver 已接入学习、做一题和 N 题测评的节点/Spec 选择。
+
+## 真实生产结果
+
+- 存量 target：2 个已有有效图；4 个机器图完成（1 READY、3 READY_WITH_EXCEPTIONS）；28 个真实 WAITING_SOURCE。
+- T0 没有 QUEUED、RUNNING 或 UNKNOWN；资料充分的当前目标没有偷偷移出分母。
+- 机器图共有 1,413 个 ATOMIC，缺 Spec 0，REQUIRED 教学项 2,964。
+- 来源 hash、私人 owner scope、terminal tree revision mismatch 均为 0。
+- 2 个人工 official tree 行 hash 前后相同；学习 Pair、教学交付、成绩快照和测评 session 前后相同。
+- 真实 provider 回填 usage：263 attempts、1,093,539 input tokens、488,160 output tokens；美元结算没有被应用保存，故保持 UNKNOWN。
+
+## 新上传证明
+
+使用生产主机、部署的同一 release、真实 production provider/embedding 配置以及隔离 DB/存储，执行了真实 API 双文件私人课程链。seal 前没有 job；seal 后只生成一个 job；结果 READY、2 个 ATOMIC、缺 Spec 0、两个 attempt 均 ACCEPTED、无 UNKNOWN，并可由 KnowledgeService 读取。该证据证明“多文件一个批次只合并一次”和“新上传可自动生效”，未写入真实用户数据。
+
+生产只读抽样进一步证明 active machine map 被当前 resolver 消费：一个 PERSONALIZED snapshot 返回 404 个 ATOMIC，LearningOrchestrator 与 Assessment resolver 得到同一 Spec version。
+
+## 质量、恢复和监控
+
+- 本地最终回归：RAG 1897 passed/10 skipped/4 个已知既有失败；Web 133 passed/1 个旧 Bridge 命令期望失败；Agent 98 passed；构建和静态门通过。
+- 发布前 schema 副本演练和发布后三库/文件恢复演练均通过，integrity ok、FK 0、schema 46。
+- 最终恢复点：`/srv/coursemate/backups/post-auto-map-2d11587/coursemate-v2-20260927T025959.263575Z`。
+- 监控已从旧备份根切到该验证根，没有放宽 93,600 秒阈值；RAG、Agent、backup、disk 四项实时结果均 ok，timer active。
+- 发布暴露 Agent archive 未携带 ignored `dist`；源代码在相关 commits 间无变化，已显式复用已验证的同源只读构建产物并重启验证。后续 release 必须显式构建/打包所有服务 artifact。
+
+## 准确的未验证项
+
+当前没有 Owner Clerk 浏览器会话，因此没有冒称“真实生产账号在浏览器上传、点击节点、做题和提交 N>=5 测评”已通过。浏览器层标记 `NOT VERIFIED`；真实 API、真实模型、生产激活、生产 resolver、公开健康、备份恢复与监控分别有证据。
+
+## 原任务恢复
+
+五个恢复门均已满足并写入 `PAUSED_TASKS_AND_RESUME.json`。已按原顺序自动恢复第 1 项：最小未登录入口与 Canvas 操作卡 UI；随后才开始 `D:\Canvas`/`D:\Canvas-DG` 冻结批次，最后处理官方专业映射和权利受限的 Course Hero 来源。恢复任务必须继续使用本次已上线自动管线。
+
+详细证据：
 
 - `docs/auto-knowledge-map/IMPLEMENTATION_MAP.md`
 - `docs/auto-knowledge-map/CONTRACTS_AND_MIGRATION.md`
 - `docs/auto-knowledge-map/TEST_AND_PRODUCTION_EVIDENCE.md`
 - `docs/auto-knowledge-map/BACKFILL_INVENTORY_AND_RESULTS.jsonl`
 - `docs/auto-knowledge-map/PAUSED_TASKS_AND_RESUME.json`
-
-## 生产完成门
-
-以下全部满足后，本文状态才可改为 `PRODUCTION ACCEPTED`：
-
-1. 最新生产现场、三库/文件/配置与 service units 重新核验并备份。
-2. 生产数据副本 schema 41→42 隔离迁移与恢复验证通过。
-3. 新不可变后端和同站前端部署，健康检查与 Clerk 登录正常。
-4. 一个权限受控的私人课程完成真实模型代表链，reservation/usage/artifact/receipt 对账。
-5. 新上传自动生成并可学习、做题、进入 N>=5 测评。
-6. 全部 eligible 存量 target 到达 READY、READY_WITH_EXCEPTIONS、EXISTING_ACTIVE、WAITING_SOURCE、FAILED、BLOCKED 或 UNKNOWN 等真实 terminal/exception 分类；资料充分但 provider 失败仍保留在分母。
-7. 发布后备份、监控与回滚点完成，历史/权限抽样不变。
-8. `PAUSED_TASKS_AND_RESUME.json` 的五个 resume gate 全部为 true，随后按原顺序恢复暂停任务。
-
-当前未执行生产写入、真实模型调用或任务恢复，不虚报上线。
+- `docs/auto-knowledge-map/EXECUTION_CHECKPOINT_20260927.json`

@@ -1,1 +1,9 @@
-{"kind":"scope","status":"LOCAL_TOOL_READY_PRODUCTION_NOT_RUN","source":"existing_application_documents_only","external_directory_scan":false,"private_source_text_exported":false,"eligible_targets_terminal":false}
+{"kind":"scope","status":"PRODUCTION_BACKFILL_FINISHED","application_sha":"2d11587eb2f4037397ca654d2ee1b09558c94281","schema_version":46,"source":"existing_application_documents_only","external_directory_scan":false,"private_source_text_exported":false,"eligible_targets_terminal":true}
+{"kind":"target_status_counts","EXISTING_ACTIVE":2,"READY":1,"READY_WITH_EXCEPTIONS":3,"WAITING_SOURCE":28,"QUEUED":0,"RUNNING":0,"UNKNOWN":0}
+{"kind":"job_status_counts","READY":1,"READY_WITH_EXCEPTIONS":3,"SUPERSEDED":3,"FAILED_LEGACY_V2_PRESERVED":1}
+{"kind":"model_attempt_counts","ACCEPTED":500,"BUSINESS_REJECTED":38,"CONTRACT_REJECTED":16,"SEND_INTENT":0,"RESPONSE_UNKNOWN":0}
+{"kind":"activated_content","machine_atomic_nodes":1413,"atomic_nodes_missing_spec":0,"required_teaching_items":2964,"frozen_source_hash_mismatches":0,"private_owner_scope_mismatches":0,"terminal_tree_revision_mismatches":0}
+{"kind":"history_and_official_protection","human_official_tree_count":2,"human_official_rows_changed":0,"learning_pairs_changed":0,"teaching_delivery_evidence_changed":0,"grade_snapshots_changed":0,"assessment_sessions_changed":0}
+{"kind":"usage_after_jit_backup","attempts":263,"input_tokens":1093539,"output_tokens":488160,"provider_usd_amount":"UNKNOWN_NOT_STORED"}
+{"kind":"real_upload_canary","environment":"production_host_isolated_database_and_storage","files":2,"jobs_after_seal":1,"status":"READY","atomic_nodes":2,"missing_specs":0,"accepted_attempts":2,"unknown_attempts":0}
+{"kind":"exceptions","WAITING_SOURCE":28,"meaning":"no readable or sufficient authorized source; no placeholder nodes generated; future source events remain eligible","legacy_failed_receipts_preserved":1}

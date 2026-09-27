@@ -1,0 +1,18 @@
+{
+  "artifact_type": "AUTO_KNOWLEDGE_MAP_EXECUTION_CHECKPOINT",
+  "created_at": "2026-09-27T11:07:07+08:00",
+  "branch": "feature/auto-knowledge-map-20260927",
+  "application_sha": "2d11587eb2f4037397ca654d2ee1b09558c94281",
+  "working_tree_exception": "apps/web/public/downloads/ is a preserved user artifact and was not touched",
+  "production_release": "/srv/coursemate/releases/2d11587",
+  "production_schema": 46,
+  "netlify_deploy_id": "6ab866aedac313b9a4edcdc1",
+  "backfill_terminal": true,
+  "unknown_model_requests": 0,
+  "verified_backup": "/srv/coursemate/backups/post-auto-map-2d11587/coursemate-v2-20260927T025959.263575Z",
+  "restore_rehearsal": "/srv/coursemate/restore-rehearsals/post-auto-map-2d11587",
+  "monitor_timer_active": true,
+  "monitor_last_result": "success",
+  "authenticated_production_browser": "NOT_VERIFIED_NO_OWNER_CLERK_SESSION",
+  "paused_task_resume": "STARTED_ORDER_1"
+}

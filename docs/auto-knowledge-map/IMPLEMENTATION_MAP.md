@@ -1,55 +1,44 @@
 # CourseJesus 自动知识图实现映射
 
-状态：`SOURCE IMPLEMENTED / LOCAL VERIFIED / PRODUCTION PENDING`
+状态：`PRODUCTION DEPLOYED / LIVE PROVIDER VERIFIED / ELIGIBLE BACKFILL TERMINAL`
 
-## 基线与范围
+## 冻结版本
 
-- 工作分支：`feature/auto-knowledge-map-20260927`
+- 分支：`feature/auto-knowledge-map-20260927`
 - 源基线：`4492fc82253a55af4b6b9a45c9d1425d01349323`
-- 生产核验基线：后端 release `c32f1c2`、RAG schema 41；最终发布前必须重新核验。
-- 本轮不扫描 `D:\Canvas`、`D:\Canvas-DG`，不下载 Course Hero 内容，不改变域名、Clerk、Thinking、测评 N>=5、主题或 Windows Canvas Bridge。
-- 暂停任务与恢复顺序见 `PAUSED_TASKS_AND_RESUME.json`。
+- 应用候选与生产后端：`2d11587eb2f4037397ca654d2ee1b09558c94281`
+- 生产前端：Netlify deploy `6ab866aedac313b9a4edcdc1`，标题 `Auto knowledge map candidate 2cebd0e`。`apps/web` 与 `netlify.toml` 从 `2cebd0e` 到 `2d11587` 无差异。
+- RAG schema：`46`；生产 release：`/srv/coursemate/releases/2d11587`。
+- 本轮没有扫描 `D:\Canvas`、`D:\Canvas-DG`，没有获取 Course Hero 新资料。
 
-## 单一垂直流程
+## 需求到真实实现
 
-| 要求 | 真实实现 |
+| 需求 | 实现与证据边界 |
 |---|---|
-| 上传/导入完成后自动启动 | schema 42 的文档、显式上传批次、Canvas OAuth、Canvas Local Bridge 终态事件统一进入 `auto_knowledge_source_events` |
-| 多文件只生成一次 | `auto_knowledge_upload_batches` + item receipts + seal hash；前端仍复用单文件 API、并发数 2，所有项目终态后 seal |
-| 冻结资料版本 | job 保存 document version、SHA-256、scope、owner、chunk count 与 corpus fingerprint |
-| 全部可读内容分析 | 每个冻结 chunk 全量分段；每个模型输入小于 60k 字符；不以 top-k 代替整课扫描 |
-| 去重、分组与知识点 | bounded map shards + 本地确定性 reduce；稳定 key/ID；每段必须 MAPPED、DUPLICATE、NON_TEACHING 或 REVIEW_REQUIRED |
-| 每个 ATOMIC 生成 Teaching Spec | 最多 6 节点一批；每节点必须有 REQUIRED item 且只能引用该节点授权 evidence |
-| 有限修复 | 仅完整返回但结构/业务校验失败时最多 2 次新 operation；UNKNOWN transport 不自动重试 |
-| 持久恢复 | 每个 shard 的 input/output hash、operation ID 与结构化结果先落 `auto_knowledge_job_artifacts`；重启复用，不重复付费 |
-| 原子激活 | source revision、权限、lease、图闭包、无环、Spec 与 evidence 全部通过后在同一事务切换 |
-| 用户可见 | `knowledge-build-status` 只读接口；页面显示真实 QUEUED/BUILDING/WAITING/FAILED/UNKNOWN，不制造百分比或假节点 |
-| 学习/做题/测评可消费 | resolver、begin learning、Question Engine 与 Assessment 的可访问节点规则都接受当前 active machine map |
+| 持久触发 | schema 42 source events/targets/jobs/receipts；网页 batch、旧单文件、Canvas OAuth、Local Bridge、管理员导入、共享快照和文档变更均进入同一 reconcile 路径。 |
+| 多文件只生成一次 | begin/item/seal 固定 manifest；seal 前不派发，全部终态后仅一个 corpus revision。生产外隔离的双文件 API canary 得到一个 READY job。 |
+| 冻结资料 | job sources 保存 document version、SHA-256、scope、owner、chunk 与 corpus fingerprint；激活时再做 revision/permission fence。 |
+| 全量处理 | 每个冻结 chunk 进入有界 map shard；每段记录 MAPPED、DUPLICATE、NON_TEACHING 或 REVIEW_REQUIRED，不用 top-k 代替整课扫描。 |
+| 节点与 Spec | 确定性 reduce 建立 COMPOSITE/ATOMIC；所有可学习 ATOMIC 必须有有效 Teaching Spec 和 REQUIRED evidence。生产机器图 1,413 个 ATOMIC，缺 Spec 为 0。 |
+| 有限修复 | 完整但不合约的结果最多按 shard 两次 linked repair；UNKNOWN 禁止自动重发。schema 45/46 仅为有精确历史证据的两类兼容恢复各授权一次，不形成循环。 |
+| 计量 | 每次真实发送先写 reservation/attempt；完整 response/usage 先保存再解析；后台 scope 不消耗学生交互日配额，仍保留实际 usage。 |
+| 原子激活 | 图闭包、无环、Spec/evidence、来源、权限、lease、source revision 全部通过才短事务切换；旧版在构建期继续服务。 |
+| 私人权限 | PRIVATE 图只对 owner 激活；生产对账 owner-scope mismatch 为 0。 |
+| 校园政策 | 人工 `OFFICIAL/PUBLISHED` 始终优先且未被改写；缺图才使用标记为机器整理的候选图。两个人工发布树前后行 hash 完全相同。 |
+| 分享 | 只读接收时冻结的 document/map snapshot，不追随 sender 后续资料。 |
+| 消费入口 | `KnowledgeService.snapshot`、`LearningOrchestrator.node`、Question Engine 与 Assessment 的 ATOMIC resolver 均接受 active machine map。生产只读抽样中 snapshot 返回 PERSONALIZED 及 404 个 ATOMIC，学习与测评解析到相同 Spec 版本。 |
+| 历史保护 | 构图不写 LEARNED、教学覆盖或成绩。生产前后 Pair、教学交付、成绩快照、进行中测评表 hash/行数一致。 |
+| 状态展示 | `knowledge-build-status` 是只读接口；页面显示真实等待、构建、部分可用、失败、未知和排除原因，不用 GET 发起计费任务。 |
 
-## 课程与权限策略
+## 生产结果
 
-- 私人自建/Canvas 私人课程：生成 owner-only `PERSONALIZED` 树与 `PRIVATE_ACTIVE` Teaching Specs。
-- 校园课程缺人工发布图：生成 `OFFICIAL/DRAFT` 候选树，通过 `auto_course_tree_activations` 标记为“AI整理 · 未经人工审核”，不冒充人工发布。
-- 已有人工发布 `OFFICIAL/PUBLISHED`：始终权威，自动服务只登记并保留，不替换。
-- 校园私人补充：合并当前人工官方树或 active machine course map 与本人私人节点，不泄露给其他用户。
-- 共享课程：仅导入分享时冻结的文件快照；批次 seal 后生成，不读取 sender 后续资料。
-- 已有私人树：首次启用只登记为增量基线；后续资料变化时旧树保持 ACTIVE，验证完成后新树继承旧 memberships 并原子切换。
-- 自动生成不写 `LEARNED`、教学覆盖、正式成绩或测评结果；旧节点、Pair、历史、成绩记录不删除。
+- T0 target：`EXISTING_ACTIVE=2`、`READY=1`、`READY_WITH_EXCEPTIONS=3`、`WAITING_SOURCE=28`。
+- 资料充足 target 均已 terminal；没有 QUEUED、RUNNING 或 UNKNOWN。
+- 28 个 WAITING_SOURCE 是真实无可读来源/来源不足，不生成“第一章”等假节点；未来资料事件会重新对账。
+- 保留 1 个旧 V2 历史 FAILED receipt，不覆盖或伪造成 V4 成功；当前 V4 可处理目标已经完成。
+- 真实模型回填记录：263 attempts，input 1,093,539 tokens，output 488,160 tokens；应用未保存美元结算值，因此实际供应商金额保持 `UNKNOWN`。
 
-## 入口接线
+## 当前限制
 
-1. 新多文件创建课程与追加文件：显式 begin/item/seal。
-2. 旧单文件与管理员导入：文档 ready 事件 + 60 秒 quiet window。
-3. Canvas OAuth worker：import job 终态释放。
-4. Windows Canvas Bridge：local session 终态释放。
-5. 共享接收：固定快照使用一个显式 batch，全部导入后 seal。
-6. 后续资料版本变化与删除：document event 触发新的 corpus fingerprint。
-7. 存量课程：`scripts/auto_knowledge_map_backfill.py` 只读取现有 application DB/index，不扫描外部目录。
-
-## 可靠性与停止条件
-
-- 数据库全局 fence 同一时刻仅允许一个 RUNNING 自动建图 job。
-- job lease 过期转 `UNKNOWN` 并保留现场，绝不盲目重发可能收费的请求。
-- 每个模型请求使用既有 metering/reservation/transport ledger；SDK 自动重试为 0。
-- 资料在生成中变化则旧 job `SUPERSEDED` 或失败 revision fence；不会覆盖新版本。
-- 不可读资料进入 `READY_WITH_EXCEPTIONS` 或 `WAITING_SOURCE`，不会生成“第一章”等占位节点。
+- 已验证部署代码下的隔离真实模型双文件垂直链和生产 resolver，但没有可用 Owner Clerk 浏览器会话，所以“生产账号在浏览器亲手上传并点击学习/测评”的层级仍标 `NOT VERIFIED`。
+- 这不改变后端自动触发、真实模型生成、生产存量激活和消费者可读的已验证事实；不得把它写成浏览器验收通过。
