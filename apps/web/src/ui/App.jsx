@@ -41,6 +41,13 @@ export class App extends React.Component {
                     if (!this.authUnsubscribe)
                         this.authUnsubscribe = window.Clerk.addListener(() => this.authChanged());
                 }
+                const token = window.CourseMateAuth
+                    ? await window.CourseMateAuth.getToken()
+                    : await window.Clerk.session?.getToken?.();
+                if (!token) {
+                    this.setState({ user: null, verification: null, courses: [], loading: false, error: '' });
+                    return;
+                }
             }
             const user = await request('/me');
             const theme = await this.loadTheme(user);
@@ -54,6 +61,16 @@ export class App extends React.Component {
         }
     }
     async authChanged() { try {
+        if (['clerk', 'injected'].includes(this.state.config?.auth_mode)) {
+            const token = window.CourseMateAuth
+                ? await window.CourseMateAuth.getToken()
+                : await window.Clerk.session?.getToken?.();
+            if (!token) {
+                if (this.state.user)
+                    this.setState({ user: null, courses: [], drawer: null, modal: null, unread: 0 });
+                return;
+            }
+        }
         const user = await request('/me');
         if (user.id !== this.state.user?.id) {
             const theme = await this.loadTheme(user);

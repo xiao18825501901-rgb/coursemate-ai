@@ -68,7 +68,7 @@ function TestAuthBridge({ token }: { token: string }) {
  * bearer token is never handed to React through an environment variable.
  */
 function AuthBridge() {
-  const { getToken } = useAuth();
+  const { getToken, isLoaded } = useAuth();
   const clerk = useClerk();
   const [bridgeReady, setBridgeReady] = useState(false);
 
@@ -94,7 +94,7 @@ function AuthBridge() {
     };
   }, [clerk, getToken]);
 
-  return bridgeReady ? <CourseMateApp /> : null;
+  return bridgeReady && isLoaded ? <CourseMateApp /> : null;
 }
 
 export function CourseMateUi() {

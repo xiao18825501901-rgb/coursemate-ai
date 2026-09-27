@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -11,10 +11,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const getToken = vi.fn(async () => "clerk-session-token");
 const openSignIn = vi.fn();
 const signOut = vi.fn(async () => undefined);
+let clerkLoaded = true;
 
 vi.mock("@clerk/react", () => ({
   ClerkProvider: ({ children }: { children: React.ReactNode }) => children,
-  useAuth: () => ({ getToken }),
+  useAuth: () => ({ getToken, isLoaded: clerkLoaded }),
   useClerk: () => ({ openSignIn, signOut }),
 }));
 
@@ -39,6 +40,7 @@ import { CourseMateUi } from "./CourseMateUi";
  * is exactly the configuration these tests must exercise.
  */
 beforeEach(() => {
+  clerkLoaded = true;
   vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", "pk_test_coursemate");
   vi.stubEnv("VITE_AUTH_TEST_TOKEN", "");
 });
@@ -56,6 +58,17 @@ describe("production Clerk auth bridge", () => {
     await waitFor(() => expect(window.CourseMateAuth).toBeDefined());
     await expect(window.CourseMateAuth?.getToken()).resolves.toBe("clerk-session-token");
     expect(getToken).toHaveBeenCalled();
+  });
+
+  it("does not mount the API shell until Clerk has resolved the session", async () => {
+    clerkLoaded = false;
+    const view = render(<CourseMateUi />);
+
+    expect(screen.queryByTestId("course-mate-app")).not.toBeInTheDocument();
+
+    clerkLoaded = true;
+    view.rerender(<CourseMateUi />);
+    await waitFor(() => expect(screen.getByTestId("course-mate-app")).toBeVisible());
   });
 
   it("exposes an unsubscribe function from subscribe", async () => {

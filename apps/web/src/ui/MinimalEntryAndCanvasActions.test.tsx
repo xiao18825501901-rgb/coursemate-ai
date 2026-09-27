@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BRAND } from "../brand";
 import { App } from "./App.jsx";
+import { setTokenGetter } from "./api.js";
 
 function appFor(state: Record<string, unknown> = {}) {
   // App.jsx is intentionally plain JavaScript. Keep the test fixture flexible
@@ -24,6 +25,13 @@ function appFor(state: Record<string, unknown> = {}) {
 }
 
 describe("minimal signed-out entry", () => {
+  afterEach(() => {
+    delete window.CourseMateAuth;
+    delete window.COURSEMATE_CONFIG;
+    setTokenGetter(async () => null);
+    vi.unstubAllGlobals();
+  });
+
   it("shows only the brand, exact tagline, and Clerk sign-in action in its idle content", () => {
     const app = appFor({ error: "请登录" });
     const { container } = render(app.render());
@@ -35,6 +43,37 @@ describe("minimal signed-out entry", () => {
     expect(screen.queryByText("整理课程，学习知识，一步一步解题。")).not.toBeInTheDocument();
     expect(screen.queryByText("请登录")).not.toBeInTheDocument();
     expect(container.querySelectorAll(".login-card > :not(.error-text)")).toHaveLength(3);
+  });
+
+  it("does not call the protected /me endpoint when Clerk has no signed-in session", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/config")) {
+        return new Response(JSON.stringify({ auth_mode: "clerk", environment: "production" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      throw new Error(`unexpected signed-out request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    window.COURSEMATE_CONFIG = { apiBase: "https://api.example.test/ui" };
+    window.CourseMateAuth = {
+      getToken: vi.fn(async () => null),
+      subscribe: vi.fn(() => () => undefined),
+      signIn: vi.fn(),
+      signOut: vi.fn(async () => undefined),
+    };
+    const app = new App({}) as any;
+    app.setState = (patch: Record<string, unknown>) => {
+      app.state = { ...app.state, ...patch };
+    };
+
+    await app.boot();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/ui/config");
+    expect(app.state).toMatchObject({ loading: false, user: null, error: "" });
   });
 });
 
