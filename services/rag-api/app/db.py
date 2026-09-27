@@ -38,6 +38,7 @@ V3_MIGRATIONS = (
     "040_configurable_assessments.sql",
     "041_canvas_local_bridge_client.sql",
     "042_auto_knowledge_map.sql",
+    "043_auto_knowledge_model_attempts.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -56,7 +57,7 @@ V3_REPLAY_SUPERSEDED_BY = {
     "040_configurable_assessments.sql": 40,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 42
+LATEST_V3_SCHEMA_VERSION = 43
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (

@@ -1304,8 +1304,25 @@ class LearningOrchestrator:
             (encode({**previous, **values}), workspace_id),
         )
 
-    def reserve_model_call(self, workspace_id: str, operation: str, role: str) -> str:
+    def reserve_model_call(
+        self,
+        workspace_id: str,
+        operation: str,
+        role: str,
+        max_output_tokens: int | None = None,
+    ) -> str:
         reservation_id = identifier()
+        reserved_output_tokens = (
+            self.settings.v3_max_output_tokens
+            if max_output_tokens is None
+            else max_output_tokens
+        )
+        if not 500 <= reserved_output_tokens <= 8_000:
+            raise ApiError(
+                422,
+                "MODEL_OUTPUT_LIMIT_INVALID",
+                "The model output-token limit must be between 500 and 8000.",
+            )
         with self.db.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             workspace = db.execute(
@@ -1345,7 +1362,7 @@ class LearningOrchestrator:
                     workspace["owner_user_id"],
                     workspace["course_id"],
                     role,
-                    self.settings.v3_max_output_tokens,
+                    reserved_output_tokens,
                 ),
             )
         return reservation_id
@@ -1422,8 +1439,12 @@ class LearningOrchestrator:
         template_version: str,
         schema_version: str,
         images: list[ProviderImage] | None = None,
+        max_output_tokens: int | None = None,
+        transport_event_sink: Callable[[dict[str, Any]], None] | None = None,
     ) -> tuple[Output, dict[str, Any]]:
-        reservation_id = self.reserve_model_call(workspace_id, operation, role)
+        reservation_id = self.reserve_model_call(
+            workspace_id, operation, role, max_output_tokens
+        )
         try:
             output, run = self.provider.generate(
                 schema,
@@ -1433,6 +1454,8 @@ class LearningOrchestrator:
                 template_version=template_version,
                 schema_version=schema_version,
                 images=images,
+                max_output_tokens=max_output_tokens,
+                transport_event_sink=transport_event_sink,
             )
         except ProviderCallFailure as error:
             self.record_run(workspace_id, operation, error.run, reservation_id)

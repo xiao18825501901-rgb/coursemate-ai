@@ -36,6 +36,10 @@ def arguments() -> argparse.Namespace:
         default=f"backfill-{os.getpid()}",
         help="durable lease owner label",
     )
+    parser.add_argument(
+        "--target-key",
+        help="drain only the exact durable target key (operator canary/recovery)",
+    )
     return parser.parse_args()
 
 
@@ -72,7 +76,7 @@ def main() -> int:
             while True:
                 if args.max_jobs and drained >= args.max_jobs:
                     break
-                result = service.run_once(args.worker_id)
+                result = service.run_once(args.worker_id, args.target_key)
                 if result is None:
                     break
                 drained += 1

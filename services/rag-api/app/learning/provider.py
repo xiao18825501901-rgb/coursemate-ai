@@ -141,9 +141,36 @@ class LearningProvider:
         template_version: str = "UNVERSIONED",
         schema_version: str | None = None,
         images: list[ProviderImage] | None = None,
+        max_output_tokens: int | None = None,
+        transport_event_sink: Callable[[dict[str, Any]], None] | None = None,
     ) -> tuple[Output, dict[str, Any]]:
         settings = self.settings
         safe_images = images or []
+        effective_max_output_tokens = (
+            settings.v3_max_output_tokens
+            if max_output_tokens is None
+            else max_output_tokens
+        )
+        if not 500 <= effective_max_output_tokens <= 8_000:
+            raise ApiError(
+                422,
+                "MODEL_OUTPUT_LIMIT_INVALID",
+                "The model output-token limit must be between 500 and 8000.",
+            )
+
+        def emit(phase: str, **values: Any) -> None:
+            event = {"phase": phase, **values}
+            # A per-call durability sink is part of the request's safety
+            # boundary and therefore runs first.  An optional diagnostic sink
+            # may observe the same event but cannot replace durable evidence.
+            if transport_event_sink is not None:
+                transport_event_sink(event)
+            if (
+                self.transport_event_sink is not None
+                and self.transport_event_sink is not transport_event_sink
+            ):
+                self.transport_event_sink(event)
+
         serialized = _structured_input_payload(
             schema,
             context=context,
@@ -243,7 +270,7 @@ class LearningProvider:
                         for item in safe_images
                     )
                     provider_input = [{"role": "user", "content": content}]
-                self._transport_event(
+                emit(
                     "SEND_INTENT",
                     provider=run["provider"],
                     model=self.model,
@@ -252,7 +279,7 @@ class LearningProvider:
                     input_hash=run["input_hash"],
                     template_version=template_version,
                     schema_version=schema_version or schema.__name__,
-                    max_output_tokens=settings.v3_max_output_tokens,
+                    max_output_tokens=effective_max_output_tokens,
                 )
                 send_intent_recorded = True
                 if self.is_deepseek:
@@ -263,7 +290,7 @@ class LearningProvider:
                         model=self.model,
                         instructions=instructions,
                         input=provider_input,
-                        max_output_tokens=settings.v3_max_output_tokens,
+                        max_output_tokens=effective_max_output_tokens,
                         store=False,
                         tools=[],
                         stream=False,
@@ -282,7 +309,7 @@ class LearningProvider:
                         instructions=instructions
                         + "\nReturn only one valid JSON object matching the supplied schema.",
                         input=provider_input,
-                        max_output_tokens=settings.v3_max_output_tokens,
+                        max_output_tokens=effective_max_output_tokens,
                         store=False,
                         tools=[],
                         stream=False,
@@ -294,7 +321,7 @@ class LearningProvider:
                 run["input_tokens"] = usage.input_tokens if usage else 0
                 run["output_tokens"] = usage.output_tokens if usage else 0
                 raw_output_text = response.output_text
-                self._transport_event(
+                emit(
                     "RESPONSE_COMPLETE",
                     provider=run["provider"],
                     model=self.model,
@@ -308,7 +335,7 @@ class LearningProvider:
                     output_text=raw_output_text,
                 )
                 if response.status != "completed":
-                    self._transport_event(
+                    emit(
                         "CONTRACT_REJECTED",
                         role=role,
                         input_hash=run["input_hash"],
@@ -322,7 +349,7 @@ class LearningProvider:
                         "Incomplete output was not recorded as teaching coverage.",
                     )
                 output = schema.model_validate_json(raw_output_text)
-                self._transport_event(
+                emit(
                     "CONTRACT_VALID",
                     role=role,
                     input_hash=run["input_hash"],
@@ -331,29 +358,47 @@ class LearningProvider:
                 )
                 contract_terminal_recorded = True
         except Exception as error:
-            if send_intent_recorded and not response_received:
-                self._transport_event(
-                    "RESPONSE_UNKNOWN",
-                    role=role,
-                    input_hash=run["input_hash"],
-                    error_class=(
-                        error.code
-                        if isinstance(error, ApiError)
-                        else type(error).__name__
-                    ),
-                )
-            elif response_received and not contract_terminal_recorded:
-                self._transport_event(
-                    "CONTRACT_REJECTED",
-                    role=role,
-                    input_hash=run["input_hash"],
-                    provider_response_id=run["provider_response_id"],
-                    reason=(error.code if isinstance(error, ApiError) else type(error).__name__),
-                )
+            try:
+                if send_intent_recorded and not response_received:
+                    emit(
+                        "RESPONSE_UNKNOWN",
+                        role=role,
+                        input_hash=run["input_hash"],
+                        error_class=(
+                            error.code
+                            if isinstance(error, ApiError)
+                            else type(error).__name__
+                        ),
+                    )
+                elif response_received and not contract_terminal_recorded:
+                    emit(
+                        "CONTRACT_REJECTED",
+                        role=role,
+                        input_hash=run["input_hash"],
+                        provider_response_id=run["provider_response_id"],
+                        reason=(
+                            error.code
+                            if isinstance(error, ApiError)
+                            else type(error).__name__
+                        ),
+                    )
+            except Exception as evidence_error:
+                # A response whose durable evidence transition failed is
+                # uncertain even when the provider transport itself returned.
+                # Preserve that fact and never let an observer failure trigger
+                # an automatic paid retry.
+                error = evidence_error
+            ledger_failed = (
+                isinstance(error, ApiError)
+                and error.code == "AUTO_LEDGER_WRITE_FAILED"
+            )
             run.update(
                 finished_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                 latency_ms=max(0, round((perf_counter() - started) * 1000)),
                 status=(
+                    "UNKNOWN"
+                    if ledger_failed
+                    else
                     "BLOCKED"
                     if isinstance(error, ApiError)
                     and error.code in {"MODEL_LIVE_BLOCKED", "MODEL_ENDPOINT_INVALID"}

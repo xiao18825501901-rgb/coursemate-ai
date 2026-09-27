@@ -104,6 +104,8 @@ class RecordingLearning:
                 "operation": operation,
                 "schema": schema.__name__,
                 "context_size": len(serialized),
+                "instructions": kwargs["instructions"],
+                "max_output_tokens": kwargs.get("max_output_tokens"),
             }
         )
         if schema.__name__ == "AutoKnowledgeMapDraft":
@@ -173,7 +175,14 @@ class RepairingLearning(RecordingLearning):
     def generate(self, workspace_id, operation, schema, **kwargs):
         if schema.__name__ == "AutoKnowledgeMapDraft" and not self.rejected:
             self.rejected = True
-            self.calls.append({"operation": operation, "schema": schema.__name__})
+            self.calls.append(
+                {
+                    "operation": operation,
+                    "schema": schema.__name__,
+                    "instructions": kwargs["instructions"],
+                    "max_output_tokens": kwargs.get("max_output_tokens"),
+                }
+            )
             return schema.model_validate(
                 {"title": "Incomplete first response", "modules": [], "nodes": []}
             ), {"status": "COMPLETED"}
@@ -338,7 +347,8 @@ def test_private_upload_batch_builds_one_active_tree_and_spec(tmp_path: Path) ->
     )
 
     reconciled = service.reconcile(force=True)
-    result = service.run_once("test-worker")
+    assert service.run_once("wrong-target-worker", target_key="PRIVATE:not-present") is None
+    result = service.run_once("test-worker", target_key="PRIVATE:workspace-a")
 
     assert reconciled["QUEUED"] == 1
     assert result is not None and result["status"] == "READY"
@@ -1000,6 +1010,7 @@ def test_real_orchestrator_and_provider_complete_over_fake_http_upstream(
         assert str(request.url) == "https://api.deepseek.com/responses"
         assert body["reasoning"] == {"effort": "none"}
         assert body["store"] is False and body["tools"] == []
+        assert body["max_output_tokens"] == 8_000
         serialized = str(body["input"])
         assert len(serialized) < 60_000
         context = json.loads(serialized)["authorized_context"]
@@ -1095,10 +1106,18 @@ def test_real_orchestrator_and_provider_complete_over_fake_http_upstream(
             "SELECT stage,input_hash,output_hash FROM auto_knowledge_job_artifacts "
             "ORDER BY stage,shard_key"
         ).fetchall()
+        attempts = connection.execute(
+            "SELECT status,output_hash,rejection_code FROM auto_knowledge_model_attempts "
+            "ORDER BY created_at,operation_id"
+        ).fetchall()
     assert len(reservations) == len(requests)
     assert all(row["status"] == "COMPLETED" for row in reservations)
     assert len(artifacts) == len(requests)
     assert all(len(row["input_hash"]) == len(row["output_hash"]) == 64 for row in artifacts)
+    assert len(attempts) == len(requests)
+    assert all(row["status"] == "ACCEPTED" for row in attempts)
+    assert all(len(row["output_hash"]) == 64 for row in attempts)
+    assert all(row["rejection_code"] is None for row in attempts)
 
 
 def test_safe_validation_failure_uses_one_targeted_repair_and_reuses_stage_contract(
@@ -1139,6 +1158,135 @@ def test_safe_validation_failure_uses_one_targeted_repair_and_reuses_stage_contr
     assert job["repair_calls_made"] == 1
     assert [row["status"] for row in operations] == ["FAILED", "COMPLETED", "COMPLETED"]
     assert artifacts == 2
+    assert learning.calls[0]["max_output_tokens"] == 8_000
+    assert "previous complete response" in learning.calls[1]["instructions"].lower()
+    assert "AUTO_SOURCE_COVERAGE_INCOMPLETE" in learning.calls[1]["instructions"]
+
+
+def test_live_incomplete_response_is_saved_then_repaired_with_larger_bound(
+    tmp_path: Path,
+) -> None:
+    settings = settings_at(tmp_path).model_copy(
+        update={
+            "app_env": "development",
+            "rag_provider_mode": "openai",
+            "v3_model": "deepseek-flash",
+            "v3_model_api_key": SecretStr("offline-contract-only"),
+            "v3_model_base_url": "https://api.deepseek.com",
+            "v3_daily_model_calls_per_user": 30,
+            "v3_daily_model_calls_per_user_course": 30,
+        }
+    )
+    database = Database(settings)
+    database.initialize()
+    private_workspace(database)
+    ready_document(
+        database,
+        document_id="incomplete-doc",
+        chunk_id="incomplete-chunk",
+        content="One bounded concept for the incomplete-response regression.",
+    )
+    requests: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        requests.append(body)
+        context = json.loads(str(body["input"]))["authorized_context"]
+        schema_name = str(body["text"]["format"]["name"])
+        if schema_name == "AutoKnowledgeMapDraft":
+            ids = [item["id"] for item in context["frozen_source_segments"]]
+            output = {
+                "title": "Recovered map",
+                "modules": [
+                    {
+                        "key": "module",
+                        "title": "Recovered module",
+                        "description": "Grounded module",
+                        "major": "OTHER",
+                    }
+                ],
+                "nodes": [
+                    {
+                        "key": "node",
+                        "parent_key": "module",
+                        "title": "Recovered node",
+                        "description": "Grounded node",
+                        "major": "OTHER",
+                        "prerequisite_keys": [],
+                        "evidence_ids": ids,
+                    }
+                ],
+                "dispositions": [
+                    {
+                        "evidence_id": value,
+                        "status": "MAPPED",
+                        "reason": "Grounded",
+                        "node_keys": ["node"],
+                    }
+                    for value in ids
+                ],
+            }
+        else:
+            output = {
+                "specs": [
+                    {
+                        "node_key": context["knowledge_nodes"][0]["key"],
+                        "change_reason": "Recovered after a bounded response",
+                        "items": [
+                            {
+                                "item_id": "required",
+                                "requirement": "REQUIRED",
+                                "objective": "Explain the recovered concept",
+                                "acceptance": "Explain it correctly",
+                                "evidence_ids": context["knowledge_nodes"][0][
+                                    "evidence_ids"
+                                ][:1],
+                            }
+                        ],
+                    }
+                ]
+            }
+        payload = response_payload(output, len(requests))
+        if len(requests) == 1:
+            payload["status"] = "incomplete"
+            payload["incomplete_details"] = {"reason": "max_output_tokens"}
+        return httpx.Response(200, json=payload)
+
+    provider = LearningProvider(settings)
+    provider.client = OpenAI(
+        api_key="offline-contract-only",
+        base_url="https://api.deepseek.com",
+        max_retries=0,
+        timeout=60,
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    learning = LearningOrchestrator(
+        database,
+        settings,
+        HybridRetriever(ChunkRepository(database), FixedEmbeddingProvider()),
+    )
+    learning.provider = provider
+    service = AutoKnowledgeMapService(database, settings, learning)
+
+    service.reconcile(force=True)
+    result = service.run_once("incomplete-http-worker")
+
+    assert result is not None and result["status"] == "READY"
+    assert len(requests) == 3
+    assert all(request["max_output_tokens"] == 8_000 for request in requests)
+    assert "MODEL_INCOMPLETE" in requests[1]["instructions"]
+    with database.connect() as connection:
+        attempts = connection.execute(
+            "SELECT status,rejection_code,output_hash "
+            "FROM auto_knowledge_model_attempts ORDER BY created_at,operation_id"
+        ).fetchall()
+    assert [row["status"] for row in attempts] == [
+        "CONTRACT_REJECTED",
+        "ACCEPTED",
+        "ACCEPTED",
+    ]
+    assert attempts[0]["rejection_code"] == "MODEL_INCOMPLETE"
+    assert all(len(row["output_hash"]) == 64 for row in attempts)
 
 
 def test_provider_output_cannot_silently_drop_a_frozen_source_segment(tmp_path: Path) -> None:

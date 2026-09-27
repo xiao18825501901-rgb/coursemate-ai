@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, cast
 
+from pydantic import ValidationError
+
 from app.config import Settings
 from app.db import Database
 from app.errors import ApiError
@@ -34,7 +36,7 @@ from app.learning.models import (
 from app.learning.orchestrator import LearningOrchestrator
 from app.learning.workspaces import join_course
 
-BUILDER_VERSION = "AUTO_KNOWLEDGE_MAP_V2_SEGMENTED"
+BUILDER_VERSION = "AUTO_KNOWLEDGE_MAP_V3_DURABLE_OUTPUT"
 # Whole-build safety limits are deliberately separate from the per-request
 # provider limit.  Every readable byte below these bounds is segmented; it is
 # never silently truncated to make a single model call fit.
@@ -45,6 +47,7 @@ MODEL_SHARD_CHARS = 32_000
 MODEL_SHARD_SEGMENTS = 20
 SPEC_BATCH_NODES = 6
 SPEC_EVIDENCE_CHARS = 1_200
+AUTO_MODEL_MAX_OUTPUT_TOKENS = 8_000
 LEASE_SECONDS = 600
 
 
@@ -104,6 +107,109 @@ class OrchestratorDraftGenerator:
         self.database = database
         self.learning = learning
 
+    @staticmethod
+    def _safe_validation_detail(error: Exception) -> dict[str, object]:
+        if isinstance(error, ApiError):
+            return {
+                "code": error.code,
+                "message": error.message,
+                "details": error.details,
+            }
+        if isinstance(error, ValidationError):
+            return {
+                "code": "SCHEMA_INVALID",
+                "issues": [
+                    {
+                        "path": ".".join(str(part) for part in item["loc"]),
+                        "message": item["msg"],
+                        "type": item["type"],
+                    }
+                    for item in error.errors(include_input=False, include_url=False)[:30]
+                ],
+            }
+        return {"code": type(error).__name__[:100]}
+
+    def _attempt_sink(
+        self,
+        *,
+        job_id: str,
+        stage: str,
+        shard_key: str,
+        operation_id: str,
+    ) -> Callable[[dict[str, Any]], None]:
+        def persist(event: dict[str, Any]) -> None:
+            phase = str(event.get("phase") or "")
+            now = stamp()
+            with self.database.connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                if phase == "SEND_INTENT":
+                    try:
+                        connection.execute(
+                            "INSERT INTO auto_knowledge_model_attempts("
+                            "operation_id,job_id,stage,shard_key,input_hash,status,updated_at) "
+                            "VALUES(?,?,?,?,?,'SEND_INTENT',?)",
+                            (
+                                operation_id,
+                                job_id,
+                                stage,
+                                shard_key,
+                                str(event["input_hash"]),
+                                now,
+                            ),
+                        )
+                    except (KeyError, sqlite3.IntegrityError) as error:
+                        raise ApiError(
+                            503,
+                            "AUTO_LEDGER_WRITE_FAILED",
+                            "The automatic-map send intent could not be recorded; "
+                            "no call was sent.",
+                        ) from error
+                    return
+                if phase == "RESPONSE_COMPLETE":
+                    output_text = str(event.get("output_text") or "")
+                    changed = connection.execute(
+                        "UPDATE auto_knowledge_model_attempts SET status='RESPONSE_SAVED',"
+                        "provider_response_id=?,output_text=?,output_hash=?,updated_at=? "
+                        "WHERE operation_id=? AND status='SEND_INTENT'",
+                        (
+                            event.get("provider_response_id"),
+                            output_text,
+                            hashlib.sha256(output_text.encode("utf-8")).hexdigest(),
+                            now,
+                            operation_id,
+                        ),
+                    ).rowcount
+                elif phase == "CONTRACT_VALID":
+                    changed = connection.execute(
+                        "UPDATE auto_knowledge_model_attempts SET status='CONTRACT_VALID',"
+                        "updated_at=? WHERE operation_id=? AND status='RESPONSE_SAVED'",
+                        (now, operation_id),
+                    ).rowcount
+                elif phase == "CONTRACT_REJECTED":
+                    changed = connection.execute(
+                        "UPDATE auto_knowledge_model_attempts SET status='CONTRACT_REJECTED',"
+                        "rejection_code=?,updated_at=? WHERE operation_id=? "
+                        "AND status IN ('RESPONSE_SAVED','CONTRACT_VALID')",
+                        (str(event.get("reason") or "CONTRACT_REJECTED"), now, operation_id),
+                    ).rowcount
+                elif phase == "RESPONSE_UNKNOWN":
+                    changed = connection.execute(
+                        "UPDATE auto_knowledge_model_attempts SET status='RESPONSE_UNKNOWN',"
+                        "rejection_code=?,updated_at=? WHERE operation_id=? "
+                        "AND status='SEND_INTENT'",
+                        (str(event.get("error_class") or "RESPONSE_UNKNOWN"), now, operation_id),
+                    ).rowcount
+                else:
+                    return
+                if changed != 1:
+                    raise ApiError(
+                        503,
+                        "AUTO_LEDGER_WRITE_FAILED",
+                        "The automatic-map model response could not be checkpointed safely.",
+                    )
+
+        return persist
+
     def _run(
         self,
         *,
@@ -123,6 +229,7 @@ class OrchestratorDraftGenerator:
             "schema": schema.__name__,
             "instructions": instructions,
             "context": context,
+            "max_output_tokens": AUTO_MODEL_MAX_OUTPUT_TOKENS,
         }
         input_hash = digest(request_payload)
         request_hash = input_hash
@@ -174,6 +281,12 @@ class OrchestratorDraftGenerator:
                 ) from error
             raise
         provider_completed = False
+        attempt_sink = self._attempt_sink(
+            job_id=job_id,
+            stage=stage,
+            shard_key=shard_key,
+            operation_id=operation_id,
+        )
         try:
             output, _run = self.learning.generate(
                 workspace_id,
@@ -184,11 +297,18 @@ class OrchestratorDraftGenerator:
                 role="teacher",
                 template_version=BUILDER_VERSION,
                 schema_version=BUILDER_VERSION,
+                max_output_tokens=AUTO_MODEL_MAX_OUTPUT_TOKENS,
+                transport_event_sink=attempt_sink,
             )
             provider_completed = True
             if validate is not None:
                 validate(output)
         except Exception as error:
+            validation_detail = self._safe_validation_detail(error)
+            ledger_failed = (
+                isinstance(error, ApiError)
+                and error.code == "AUTO_LEDGER_WRITE_FAILED"
+            )
             # A complete but business-invalid structured response is safe to
             # repair with a fresh operation id. Transport uncertainty is not.
             with self.database.connect() as connection:
@@ -200,20 +320,41 @@ class OrchestratorDraftGenerator:
                 safely_failed = provider_completed or (
                     reservation is not None and reservation["status"] in {"FAILED", "BLOCKED"}
                 )
+                if provider_completed:
+                    connection.execute(
+                        "UPDATE auto_knowledge_model_attempts "
+                        "SET status='BUSINESS_REJECTED',rejection_code=?,"
+                        "rejection_detail_json=?,updated_at=? "
+                        "WHERE operation_id=? AND status='CONTRACT_VALID'",
+                        (
+                            str(validation_detail.get("code") or "BUSINESS_REJECTED"),
+                            canonical_json(validation_detail),
+                            stamp(),
+                            operation_id,
+                        ),
+                    )
                 connection.execute(
                     "UPDATE learning_operations SET status=? "
                     "WHERE workspace_id=? AND id=? AND status='RUNNING'",
                     (
-                        "FAILED" if safely_failed else "UNKNOWN",
+                        "UNKNOWN" if ledger_failed else "FAILED" if safely_failed else "UNKNOWN",
                         workspace_id,
                         operation_id,
                     ),
                 )
+            if ledger_failed:
+                raise ApiError(
+                    409,
+                    "AUTO_OPERATION_UNCERTAIN",
+                    "Automatic-map model evidence could not be checkpointed; "
+                    "the request will not be retried automatically.",
+                ) from error
             if safely_failed:
                 raise ApiError(
                     422,
                     "AUTO_STAGE_REJECTED",
                     "A bounded model stage failed validation and is eligible for targeted repair.",
+                    details={"validation": validation_detail},
                 ) from error
             raise
         output_json = canonical_json(output.model_dump())
@@ -244,6 +385,11 @@ class OrchestratorDraftGenerator:
                     "AUTO_OPERATION_UNCERTAIN",
                     "The model result was received after its operation lease changed.",
                 )
+            connection.execute(
+                "UPDATE auto_knowledge_model_attempts SET status='ACCEPTED',updated_at=? "
+                "WHERE operation_id=? AND status='CONTRACT_VALID'",
+                (stamp(), operation_id),
+            )
         return output, True
 
     def _reserve_repair(self, job_id: str) -> int:
@@ -280,8 +426,17 @@ class OrchestratorDraftGenerator:
         validate: Callable[[Any], None],
     ) -> tuple[Any, bool]:
         repair = 0
+        repair_feedback: dict[str, object] | None = None
         while True:
             operation_id = operation_base if repair == 0 else f"{operation_base}-r{repair}"
+            effective_instructions = instructions
+            if repair_feedback is not None:
+                effective_instructions += (
+                    "\nThe previous complete response was rejected. Correct these exact "
+                    "issues and return a shorter valid response without repeating invalid "
+                    "content: "
+                    + canonical_json(repair_feedback)
+                )
             try:
                 return self._run(
                     job_id=job_id,
@@ -290,13 +445,16 @@ class OrchestratorDraftGenerator:
                     workspace_id=workspace_id,
                     operation_id=operation_id,
                     schema=schema,
-                    instructions=instructions,
+                    instructions=effective_instructions,
                     context=context,
                     validate=validate,
                 )
             except ApiError as error:
                 if error.code != "AUTO_STAGE_REJECTED":
                     raise
+                repair_feedback = cast(
+                    dict[str, object], error.details.get("validation") or {}
+                )
                 repair = self._reserve_repair(job_id)
 
     @staticmethod
@@ -1278,7 +1436,7 @@ class AutoKnowledgeMapService:
 
     # --------------------------------------------------------------- job lease
 
-    def claim(self, worker_id: str) -> sqlite3.Row | None:
+    def claim(self, worker_id: str, target_key: str | None = None) -> sqlite3.Row | None:
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             # The policy permits one build worker. This database fence keeps
@@ -1290,10 +1448,17 @@ class AutoKnowledgeMapService:
             ).fetchone()
             if active is not None:
                 return None
-            row = connection.execute(
-                "SELECT * FROM auto_knowledge_jobs WHERE status='QUEUED' "
-                "ORDER BY created_at,id LIMIT 1"
-            ).fetchone()
+            if target_key is None:
+                row = connection.execute(
+                    "SELECT * FROM auto_knowledge_jobs WHERE status='QUEUED' "
+                    "ORDER BY created_at,id LIMIT 1"
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    "SELECT * FROM auto_knowledge_jobs WHERE status='QUEUED' "
+                    "AND target_key=? ORDER BY created_at,id LIMIT 1",
+                    (target_key,),
+                ).fetchone()
             if row is None:
                 return None
             until = stamp(datetime.now(UTC) + timedelta(seconds=LEASE_SECONDS))
@@ -1998,8 +2163,10 @@ class AutoKnowledgeMapService:
                 ),
             )
 
-    def run_once(self, worker_id: str) -> dict[str, Any] | None:
-        job = self.claim(worker_id)
+    def run_once(
+        self, worker_id: str, target_key: str | None = None
+    ) -> dict[str, Any] | None:
+        job = self.claim(worker_id, target_key)
         if job is None:
             return None
         model_calls = 0
