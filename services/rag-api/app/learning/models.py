@@ -382,7 +382,10 @@ class AutoKnowledgeAtomicDraft(Contract):
     description: Text
     major: Major = "OTHER"
     prerequisite_keys: list[Identifier] = Field(default_factory=list, max_length=20)
-    evidence_ids: list[Identifier] = Field(min_length=1, max_length=500)
+    # A final compact unit may be grounded by many source chunks. These are
+    # provenance bindings, not extra navigation nodes; the frozen corpus itself
+    # is bounded to 20,000 chunks by the automatic-map service.
+    evidence_ids: list[Identifier] = Field(min_length=1, max_length=20_000)
 
 
 class AutoKnowledgeSectionDisposition(Contract):

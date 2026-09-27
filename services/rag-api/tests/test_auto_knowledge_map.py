@@ -119,12 +119,16 @@ class RecordingLearning:
             }
         )
         if schema.__name__ == "AutoKnowledgeMapDraft":
-            assert len(context["frozen_source_segments"]) <= 6
-            assert all(
-                "source_evidence_id" not in item
-                for item in context["frozen_source_segments"]
-            )
-            ids = [item["id"] for item in context["frozen_source_segments"]]
+            if "provisional_concepts" in context:
+                concepts = context["provisional_concepts"]
+                ids = [item["key"] for item in concepts]
+            else:
+                assert len(context["frozen_source_segments"]) <= 6
+                assert all(
+                    "source_evidence_id" not in item
+                    for item in context["frozen_source_segments"]
+                )
+                ids = [item["id"] for item in context["frozen_source_segments"]]
             output = schema.model_validate(
                 {
                     "title": "Bounded shard",
@@ -180,6 +184,114 @@ class RecordingLearning:
                 }
             )
         return output, {"status": "COMPLETED"}
+
+
+class ManyConceptLearning(RecordingLearning):
+    """Produces more than fifty provisional concepts for compact-pipeline tests."""
+
+    def generate(self, workspace_id, operation, schema, **kwargs):
+        context = kwargs["context"]
+        if schema.__name__ == "AutoKnowledgeMapDraft" and "frozen_source_segments" in context:
+            self.calls.append(
+                {
+                    "operation": operation,
+                    "schema": schema.__name__,
+                    "context_size": len(
+                        json.dumps(context, ensure_ascii=False, sort_keys=True)
+                    ),
+                    "instructions": kwargs["instructions"],
+                    "max_output_tokens": kwargs.get("max_output_tokens"),
+                }
+            )
+            segments = context["frozen_source_segments"]
+            ids = [item["id"] for item in segments]
+            return schema.model_validate(
+                {
+                    "title": "Provisional source inventory",
+                    "modules": [
+                        {
+                            "key": "inventory",
+                            "title": "Inventory only",
+                            "description": "Not the final curriculum",
+                            "major": "OTHER",
+                        }
+                    ],
+                    "nodes": [
+                        {
+                            "key": f"concept-{index}",
+                            "parent_key": "inventory",
+                            "title": f"Distinct source concept {source_id}",
+                            "description": "A provisional concept extracted from one segment",
+                            "major": "OTHER",
+                            "prerequisite_keys": [],
+                            "evidence_ids": [source_id],
+                        }
+                        for index, source_id in enumerate(ids)
+                    ],
+                    "dispositions": [
+                        {
+                            "evidence_id": source_id,
+                            "status": "MAPPED",
+                            "reason": "Represented by a provisional source concept",
+                            "node_keys": [f"concept-{index}"],
+                        }
+                        for index, source_id in enumerate(ids)
+                    ],
+                }
+            ), {"status": "COMPLETED"}
+        if schema.__name__ == "AutoKnowledgeMapDraft" and "provisional_concepts" in context:
+            self.calls.append(
+                {
+                    "operation": operation,
+                    "schema": schema.__name__,
+                    "context_size": len(
+                        json.dumps(context, ensure_ascii=False, sort_keys=True)
+                    ),
+                    "instructions": kwargs["instructions"],
+                    "max_output_tokens": kwargs.get("max_output_tokens"),
+                }
+            )
+            concepts = context["provisional_concepts"]
+            groups = [concepts[index::30] for index in range(30)]
+            groups = [group for group in groups if group]
+            return schema.model_validate(
+                {
+                    "title": "Compact whole-course outline",
+                    "modules": [
+                        {
+                            "key": "course-outline",
+                            "title": "Course outline",
+                            "description": "A bounded whole-course grouping",
+                            "major": "OTHER",
+                        }
+                    ],
+                    "nodes": [
+                        {
+                            "key": f"unit-{index}",
+                            "parent_key": "course-outline",
+                            "title": f"Learning unit {index}",
+                            "description": "A compact unit covering related source concepts",
+                            "major": "OTHER",
+                            "prerequisite_keys": [],
+                            "evidence_ids": [item["key"] for item in group],
+                        }
+                        for index, group in enumerate(groups)
+                    ],
+                    "dispositions": [
+                        {
+                            "evidence_id": item["key"],
+                            "status": "MAPPED",
+                            "reason": "Mapped into the compact whole-course outline",
+                            "node_keys": [f"unit-{index}"],
+                        }
+                        for index, group in enumerate(groups)
+                        for item in group
+                    ],
+                }
+            ), {"status": "COMPLETED"}
+        if schema.__name__ == "AutoKnowledgeSpecSetDraft":
+            return super().generate(workspace_id, operation, schema, **kwargs)
+        raise AssertionError(f"Unexpected compact-pipeline request: {schema.__name__}")
 
 
 class RepairingLearning(RecordingLearning):
@@ -1176,6 +1288,53 @@ def test_complete_source_is_segmented_without_truncation_or_oversize_single_call
     assert dispatched == 0
     assert len(learning.calls) == calls_before_restart
 
+
+def test_many_source_concepts_are_compacted_before_teaching_specs(tmp_path: Path) -> None:
+    settings = settings_at(tmp_path)
+    database = Database(settings)
+    database.initialize()
+    private_workspace(database)
+    for index in range(60):
+        ready_document(
+            database,
+            document_id=f"compact-doc-{index:02d}",
+            chunk_id=f"compact-chunk-{index:02d}",
+            content=f"Distinct teachable concept number {index} with its own conditions.",
+        )
+    learning = ManyConceptLearning()
+    service = AutoKnowledgeMapService(database, settings, learning)  # type: ignore[arg-type]
+
+    assert service.reconcile(force=True)["QUEUED"] == 1
+    completed = service.run_once("compact-course-worker")
+
+    assert completed is not None and completed["status"] == "READY"
+    outline_calls = [
+        item for item in learning.calls if "whole-course outline" in item["instructions"]
+    ]
+    assert outline_calls
+    with database.connect() as connection:
+        job = connection.execute("SELECT * FROM auto_knowledge_jobs").fetchone()
+        member_count = connection.execute(
+            "SELECT COUNT(*) FROM knowledge_tree_memberships WHERE tree_version_id=?",
+            (job["result_tree_version_id"],),
+        ).fetchone()[0]
+        atomic_count = connection.execute(
+            "SELECT COUNT(*) FROM knowledge_tree_memberships AS member "
+            "JOIN knowledge_nodes AS node ON node.id=member.node_id "
+            "WHERE member.tree_version_id=? AND node.kind='ATOMIC'",
+            (job["result_tree_version_id"],),
+        ).fetchone()[0]
+        spec_count = connection.execute(
+            "SELECT COUNT(*) FROM knowledge_tree_memberships AS member "
+            "WHERE member.tree_version_id=? AND member.teaching_spec_version IS NOT NULL",
+            (job["result_tree_version_id"],),
+        ).fetchone()[0]
+    assert member_count <= 50
+    assert atomic_count == spec_count == 30
+    assert len(
+        [item for item in learning.calls if item["schema"] == "AutoKnowledgeSpecSetDraft"]
+    ) == 5
+
 def test_real_orchestrator_and_provider_complete_over_fake_http_upstream(
     tmp_path: Path,
 ) -> None:
@@ -1215,7 +1374,11 @@ def test_real_orchestrator_and_provider_complete_over_fake_http_upstream(
         context = json.loads(serialized)["authorized_context"]
         schema_name = str(body["text"]["format"]["name"])
         if schema_name == "AutoKnowledgeMapDraft":
-            ids = [item["id"] for item in context["frozen_source_segments"]]
+            ids = (
+                [item["id"] for item in context["frozen_source_segments"]]
+                if "frozen_source_segments" in context
+                else [item["key"] for item in context["provisional_concepts"]]
+            )
             output = {
                 "title": "HTTP bounded shard",
                 "modules": [
@@ -1291,7 +1454,7 @@ def test_real_orchestrator_and_provider_complete_over_fake_http_upstream(
     result = service.run_once("fake-http-worker")
 
     assert result is not None and result["status"] == "READY"
-    assert len(requests) >= 3  # segmented map shards plus one Teaching Spec batch
+    assert len(requests) >= 4  # inventories, whole-course outline, then final Specs
     assert [item["phase"] for item in transport_events] == [
         phase
         for _ in requests
@@ -2514,7 +2677,7 @@ def test_safe_validation_failure_uses_one_targeted_repair_and_reuses_stage_contr
     result = service.run_once("repair-worker")
 
     assert result is not None and result["status"] == "READY"
-    assert len(learning.calls) == 3
+    assert len(learning.calls) == 4
     with database.connect() as connection:
         job = connection.execute(
             "SELECT * FROM auto_knowledge_jobs"
@@ -2529,8 +2692,13 @@ def test_safe_validation_failure_uses_one_targeted_repair_and_reuses_stage_contr
             "SELECT COUNT(*) FROM auto_knowledge_job_artifacts"
         ).fetchone()[0]
     assert job["repair_calls_made"] == 1
-    assert [row["status"] for row in operations] == ["FAILED", "COMPLETED", "COMPLETED"]
-    assert artifacts == 2
+    assert [row["status"] for row in operations] == [
+        "FAILED",
+        "COMPLETED",
+        "COMPLETED",
+        "COMPLETED",
+    ]
+    assert artifacts == 3
     assert learning.calls[0]["max_output_tokens"] == 8_000
     assert "previous complete response" in learning.calls[1]["instructions"].lower()
     assert "AUTO_SOURCE_COVERAGE_INCOMPLETE" in learning.calls[1]["instructions"]
@@ -2776,7 +2944,11 @@ def test_live_incomplete_response_is_saved_then_repaired_with_larger_bound(
         context = json.loads(str(body["input"]))["authorized_context"]
         schema_name = str(body["text"]["format"]["name"])
         if schema_name == "AutoKnowledgeMapDraft":
-            ids = [item["id"] for item in context["frozen_source_segments"]]
+            ids = (
+                [item["id"] for item in context["frozen_source_segments"]]
+                if "frozen_source_segments" in context
+                else [item["key"] for item in context["provisional_concepts"]]
+            )
             output = {
                 "title": "Recovered map",
                 "modules": [
@@ -2854,7 +3026,7 @@ def test_live_incomplete_response_is_saved_then_repaired_with_larger_bound(
     result = service.run_once("incomplete-http-worker")
 
     assert result is not None and result["status"] == "READY"
-    assert len(requests) == 3
+    assert len(requests) == 4
     assert all(request["max_output_tokens"] == 8_000 for request in requests)
     assert "MODEL_INCOMPLETE" in requests[1]["instructions"]
     with database.connect() as connection:
@@ -2868,6 +3040,7 @@ def test_live_incomplete_response_is_saved_then_repaired_with_larger_bound(
         ).fetchone()
     assert [row["status"] for row in attempts] == [
         "CONTRACT_REJECTED",
+        "ACCEPTED",
         "ACCEPTED",
         "ACCEPTED",
     ]
