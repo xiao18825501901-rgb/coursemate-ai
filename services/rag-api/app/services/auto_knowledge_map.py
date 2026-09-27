@@ -513,14 +513,21 @@ class OrchestratorDraftGenerator:
             )
             ordinal = current + 1
             required_item_recovery = connection.execute(
-                "SELECT 1 FROM auto_knowledge_job_recovery_receipts "
+                "SELECT blocked_operation_ids_json "
+                "FROM auto_knowledge_job_recovery_receipts "
                 "WHERE job_id=? AND reason='REQUIRED_ITEM_REPAIR_V1'",
                 (job_id,),
             ).fetchone()
+            authorized_third_repairs = (
+                set(json.loads(str(required_item_recovery["blocked_operation_ids_json"])))
+                if required_item_recovery is not None
+                else set()
+            )
             repair_limit = (
                 3
                 if required_item_recovery is not None
                 and stage == "TEACHING_SPEC"
+                and f"{operation_base}-r2" in authorized_third_repairs
                 else 2
             )
             if ordinal > repair_limit:
@@ -1680,7 +1687,8 @@ class AutoKnowledgeMapService:
                     continue
                 blocked = connection.execute(
                     "SELECT attempt.operation_id,attempt.stage,attempt.shard_key,"
-                    "attempt.rejection_detail_json "
+                    "attempt.status,attempt.output_text,attempt.output_hash,"
+                    "attempt.rejection_code,attempt.rejection_detail_json "
                     "FROM auto_knowledge_model_attempts AS attempt "
                     "WHERE attempt.job_id=? "
                     "AND attempt.status IN ('BUSINESS_REJECTED','CONTRACT_REJECTED') "
@@ -1697,6 +1705,10 @@ class AutoKnowledgeMapService:
                 )
                 exact_required_item_failure = all(
                     str(item["stage"]) == "TEACHING_SPEC"
+                    and str(item["status"]) == "CONTRACT_REJECTED"
+                    and str(item["rejection_code"]) == "ValidationError"
+                    and bool(str(item["output_text"] or "").strip())
+                    and len(str(item["output_hash"] or "")) == 64
                     and required_message
                     in canonical_json(
                         json.loads(str(item["rejection_detail_json"] or "{}"))

@@ -4,11 +4,13 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import pytest
 from openai import OpenAI
 from pydantic import SecretStr
 
 from app.config import Settings
 from app.db import Database
+from app.errors import ApiError
 from app.learning.assessments import AssessmentService
 from app.learning.knowledge import KnowledgeService
 from app.learning.models import AutoKnowledgeMapDraft, AutoKnowledgeSpecSetDraft
@@ -1622,6 +1624,28 @@ def test_required_item_rejection_gets_one_audited_third_repair(
         (2, f"{base}-r2"),
         (3, f"{base}-r3"),
     ]
+
+    # The job-level recovery receipt must not expand a different Teaching Spec
+    # shard from two repairs to three.
+    other_base = f"akm-{digest(str(job['id']))[:16]}-s-00008"
+    with database.connect() as connection:
+        for ordinal in (1, 2):
+            connection.execute(
+                "INSERT INTO auto_knowledge_repair_reservations("
+                "job_id,stage,shard_key,ordinal,operation_id) VALUES(?,?,?,?,?)",
+                (
+                    job["id"],
+                    "TEACHING_SPEC",
+                    "spec-00008",
+                    ordinal,
+                    f"{other_base}-r{ordinal}",
+                ),
+            )
+    with pytest.raises(ApiError) as denied:
+        service.generator._reserve_repair(  # type: ignore[attr-defined]
+            str(job["id"]), "TEACHING_SPEC", "spec-00008", other_base
+        )
+    assert denied.value.code == "AUTO_REPAIR_LIMIT"
 
 
 def test_safe_validation_failure_uses_one_targeted_repair_and_reuses_stage_contract(
