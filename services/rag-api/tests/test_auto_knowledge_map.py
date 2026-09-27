@@ -2424,6 +2424,45 @@ def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_cal
         (base, f"{base}-r1", f"{base}-r2"),
         (second_base, f"{second_base}-r1", f"{second_base}-r2"),
     }
+    # V54's global recovery lookup can stop this second scope before r3 is
+    # reserved or sent. Its resume must remain separately receipted and must
+    # not touch the already-normalized first scope.
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='FAILED',"
+            "error_code='AUTO_ARTIFACT_CONFLICT',"
+            "error_message='The local evidence normalization lacks its exact r3 "
+            "evidence.',completed_at=? WHERE id=?",
+            ("2026-09-27T12:45:45.000Z", job["id"]),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_targets SET status='FAILED' WHERE active_job_id=?",
+            (job["id"],),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_job_receipts("
+            "job_id,target_key,corpus_fingerprint,status,source_snapshot_hash,"
+            "model_calls_made,detail_json) VALUES(?,?,?,'FAILED',?,4,?)",
+            (
+                job["id"],
+                job["target_key"],
+                job["corpus_fingerprint"],
+                digest(json.loads(job["source_snapshot_json"])),
+                canonical_json({"error_code": "AUTO_ARTIFACT_CONFLICT"}),
+            ),
+        )
+    assert service.reconcile(force=True)["RECOVERED_SAFE_FAILURE"] == 1
+    with database.connect() as connection:
+        resumed = connection.execute(
+            "SELECT blocked_operation_ids_json FROM auto_knowledge_job_recovery_receipts "
+            "WHERE job_id=? AND reason='EVIDENCE_SCOPE_RESUME_V1'",
+            (job["id"],),
+        ).fetchone()
+    assert tuple(json.loads(resumed["blocked_operation_ids_json"])) == (
+        second_base,
+        f"{second_base}-r1",
+        f"{second_base}-r2",
+    )
     with database.connect() as connection:
         connection.execute(
             "UPDATE auto_knowledge_jobs SET status='RUNNING' WHERE id=?", (job["id"],)

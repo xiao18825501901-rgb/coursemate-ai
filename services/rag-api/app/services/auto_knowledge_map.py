@@ -2152,6 +2152,89 @@ class AutoKnowledgeMapService:
                 row["error_code"] == "AUTO_ARTIFACT_CONFLICT"
                 and row["builder_version"] == BUILDER_VERSION
                 and row["error_message"]
+                == "The local evidence normalization lacks its exact r3 evidence."
+            ):
+                # V54's global normalization lookup could stop a later shard
+                # before reserving r3 or contacting the provider. Resume only
+                # the still-intact scope that has no r3 attempt or artifact.
+                selected_attempts: list[sqlite3.Row] | None = None
+                for scope_receipt in connection.execute(
+                    "SELECT blocked_operation_ids_json FROM "
+                    "auto_knowledge_job_recovery_receipts "
+                    "WHERE job_id=? AND reason='EVIDENCE_SCOPE_REPAIR_V1' "
+                    "ORDER BY created_at,id",
+                    (row["id"],),
+                ).fetchall():
+                    operations = json.loads(str(scope_receipt["blocked_operation_ids_json"]))
+                    if (
+                        not isinstance(operations, list)
+                        or len(operations) != 3
+                        or not all(isinstance(item, str) for item in operations)
+                    ):
+                        continue
+                    base_operation = operations[0]
+                    expected_operations = [
+                        base_operation,
+                        f"{base_operation}-r1",
+                        f"{base_operation}-r2",
+                    ]
+                    if operations != expected_operations:
+                        continue
+                    attempts = connection.execute(
+                        "SELECT operation_id,stage,shard_key,status,rejection_code,"
+                        "output_text,output_hash FROM auto_knowledge_model_attempts "
+                        "WHERE job_id=? AND operation_id IN (?,?,?) "
+                        "ORDER BY operation_id",
+                        (row["id"], *expected_operations),
+                    ).fetchall()
+                    if (
+                        len(attempts) != 3
+                        or [str(item["operation_id"]) for item in attempts]
+                        != expected_operations
+                        or len({str(item["shard_key"]) for item in attempts}) != 1
+                        or any(
+                            str(item["stage"]) != "TEACHING_SPEC"
+                            or str(item["status"]) != "BUSINESS_REJECTED"
+                            or str(item["rejection_code"])
+                            != "AUTO_EVIDENCE_INVALID"
+                            or not str(item["output_text"] or "").strip()
+                            or len(str(item["output_hash"] or "")) != 64
+                            for item in attempts
+                        )
+                    ):
+                        continue
+                    shard_key = str(attempts[0]["shard_key"])
+                    has_r3_evidence = any(
+                        (
+                            connection.execute(
+                                "SELECT 1 FROM auto_knowledge_model_attempts "
+                                "WHERE job_id=? AND operation_id=?",
+                                (row["id"], f"{base_operation}-r3"),
+                            ).fetchone(),
+                            connection.execute(
+                                "SELECT 1 FROM auto_knowledge_repair_reservations "
+                                "WHERE job_id=? AND stage='TEACHING_SPEC' "
+                                "AND shard_key=? AND ordinal=3",
+                                (row["id"], shard_key),
+                            ).fetchone(),
+                            connection.execute(
+                                "SELECT 1 FROM auto_knowledge_job_artifacts "
+                                "WHERE job_id=? AND stage='TEACHING_SPEC' AND shard_key=?",
+                                (row["id"], shard_key),
+                            ).fetchone(),
+                        )
+                    )
+                    if not has_r3_evidence:
+                        selected_attempts = attempts
+                        break
+                if selected_attempts is None:
+                    continue
+                blocked = selected_attempts
+                reason = "EVIDENCE_SCOPE_RESUME_V1"
+            elif (
+                row["error_code"] == "AUTO_ARTIFACT_CONFLICT"
+                and row["builder_version"] == BUILDER_VERSION
+                and row["error_message"]
                 == "The local evidence normalization no longer matches its "
                 "immutable recovery evidence."
             ):
@@ -2383,6 +2466,7 @@ class AutoKnowledgeMapService:
                 "EVIDENCE_SCOPE_REPAIR_V1",
                 "EVIDENCE_SCOPE_NORMALIZATION_V1",
                 "EVIDENCE_SCOPE_NORMALIZATION_RETRY_V1",
+                "EVIDENCE_SCOPE_RESUME_V1",
             }
             existing_recovery = connection.execute(
                 "SELECT 1 FROM auto_knowledge_job_recovery_receipts "
