@@ -34,6 +34,7 @@ from app.learning.assessment_question_slots import (
 )
 from app.learning.blind_solve import BlindSolveError, run_blind_solve
 from app.learning.models import Contract, Identifier, Text
+from app.learning.learning_loop import LearningLoopError, LearningLoopService
 from app.learning.practice_feedback import (
     PracticeInteractionError,
     generate_practice_feedback,
@@ -255,11 +256,13 @@ class QuestionEngineRuntime:
         provider: Any,
         semantic_decisions: SemanticDecisionService | None,
         metered_generate: Callable[..., tuple[Any, dict[str, Any]]] | None = None,
+        learning_loop: LearningLoopService | None = None,
     ) -> None:
         self.database = database
         self.provider = provider
         self.semantic_decisions = semantic_decisions
         self.metered_generate = metered_generate
+        self.learning_loop = learning_loop or LearningLoopService(database)
 
     def _provider_for_operation(
         self,
@@ -606,6 +609,7 @@ class QuestionEngineRuntime:
         workspace_id: str,
         question_revision_id: str,
         operation_id: str,
+        assignment_id: str | None = None,
     ) -> dict[str, Any]:
         context = self._practice_context(
             owner_user_id=owner_user_id,
@@ -613,6 +617,19 @@ class QuestionEngineRuntime:
             question_revision_id=question_revision_id,
         )
         input_hash = _hash("HINT", question_revision_id, context)
+        exposure_key = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()
+        try:
+            self.learning_loop.record_exposure(
+                owner_user_id=owner_user_id,
+                operation_id=f"hint-request-{exposure_key}",
+                question_revision_id=question_revision_id,
+                kind="HINT_REQUEST",
+                channel="PROBLEM_PANE",
+                receipt=f"hint-request:{operation_id}",
+                assignment_id=assignment_id,
+            )
+        except LearningLoopError as error:
+            raise QuestionEngineRuntimeError(error.code, str(error)) from error
         replay = self._claim_practice_operation(
             owner_user_id=owner_user_id,
             workspace_id=workspace_id,
@@ -641,6 +658,18 @@ class QuestionEngineRuntime:
                 "strategy": output.strategy,
                 "usage": _public_run(run),
             }
+            try:
+                self.learning_loop.record_exposure(
+                    owner_user_id=owner_user_id,
+                    operation_id=f"hint-result-{exposure_key}",
+                    question_revision_id=question_revision_id,
+                    kind="HINT",
+                    channel="PROBLEM_PANE",
+                    receipt=f"hint-result:{operation_id}",
+                    assignment_id=assignment_id,
+                )
+            except LearningLoopError as error:
+                raise QuestionEngineRuntimeError(error.code, str(error)) from error
             encoded_result = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
             with self.database.connect() as connection:
                 connection.execute("BEGIN IMMEDIATE")
@@ -679,6 +708,422 @@ class QuestionEngineRuntime:
                 error_code=error.code,
             )
             raise QuestionEngineRuntimeError(error.code, str(error)) from error
+
+    def submit_practice_attempt(
+        self,
+        *,
+        owner_user_id: str,
+        workspace_id: str,
+        question_revision_id: str,
+        operation_id: str,
+        submitted_answer: str,
+        assignment_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist the learner's answer and help snapshot before model grading.
+
+        This method performs no provider call.  A durable evaluation job is
+        committed with the canonical submission, so reveal/history traffic that
+        happens after this method returns cannot rewrite the frozen assistance
+        fact.
+        """
+
+        answer = submitted_answer.strip()
+        if not 1 <= len(answer) <= 6000:
+            raise QuestionEngineRuntimeError(
+                "PRACTICE_ANSWER_INVALID",
+                "A practice answer between 1 and 6000 characters is required.",
+            )
+        self._practice_context(
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            question_revision_id=question_revision_id,
+        )
+        if not 8 <= len(operation_id.strip()) <= 100:
+            raise QuestionEngineRuntimeError(
+                "PRACTICE_OPERATION_REQUIRED",
+                "A stable practice operation id between 8 and 100 characters is required.",
+            )
+        answer_hash = hashlib.sha256(answer.encode("utf-8")).hexdigest()
+        with self.database.connect() as connection:
+            existing = connection.execute(
+                "SELECT submission.*,job.status AS job_status,operation.result_json "
+                "FROM practice_submission_revisions AS submission "
+                "JOIN practice_evaluation_jobs AS job ON job.submission_id=submission.id "
+                "JOIN practice_interaction_operations AS operation "
+                "ON operation.workspace_id=submission.workspace_id "
+                "AND operation.operation_id=submission.operation_id "
+                "WHERE submission.workspace_id=? AND submission.operation_id=?",
+                (workspace_id, operation_id),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    existing["owner_user_id"] != owner_user_id
+                    or existing["question_revision_id"] != question_revision_id
+                    or existing["answer_hash"] != answer_hash
+                ):
+                    raise QuestionEngineRuntimeError(
+                        "PRACTICE_IDEMPOTENCY_CONFLICT",
+                        "The practice operation id is already bound to different input.",
+                    )
+                if existing["result_json"]:
+                    return cast(dict[str, Any], json.loads(existing["result_json"]))
+                return {
+                    "id": existing["id"],
+                    "canonical_submission_id": existing["id"],
+                    "question_revision_id": question_revision_id,
+                    "status": existing["job_status"],
+                    "assistance": existing["assistance"],
+                    "independent": existing["assistance"] == "NONE",
+                    "feedback": None,
+                }
+        if assignment_id:
+            try:
+                linked = self.learning_loop.record_submission(
+                    owner_user_id=owner_user_id,
+                    operation_id=operation_id,
+                    assignment_id=assignment_id,
+                    answer=answer,
+                )
+            except LearningLoopError as error:
+                raise QuestionEngineRuntimeError(error.code, str(error)) from error
+            return {
+                "id": linked["canonical_submission_id"],
+                "canonical_submission_id": linked["canonical_submission_id"],
+                "question_revision_id": question_revision_id,
+                "status": "PENDING",
+                "assistance": linked["assistance"],
+                "independent": bool(linked["independent_at_submission"]),
+                "eligibility_reasons": linked["eligibility_reasons"],
+                "feedback": None,
+            }
+
+        # Legacy/non-loop practice still gains the same durable ordering.  It is
+        # not inserted into a learning cycle or counted in cycle metrics.
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            question = self.learning_loop._question(
+                connection,
+                owner_user_id=owner_user_id,
+                workspace_id=workspace_id,
+                question_revision_id=question_revision_id,
+            )
+            frozen_sequence = int(
+                connection.execute(
+                    "SELECT COALESCE(MAX(sequence),0) FROM learning_loop_exposures "
+                    "WHERE owner_user_id=? AND workspace_id=?",
+                    (owner_user_id, workspace_id),
+                ).fetchone()[0]
+            )
+            exposures = connection.execute(
+                "SELECT kind FROM learning_loop_exposures WHERE owner_user_id=? "
+                "AND workspace_id=? AND sequence<=? "
+                "AND (question_revision_id=? OR family_id=? OR question_content_hash=?)",
+                (
+                    owner_user_id, workspace_id, frozen_sequence, question_revision_id,
+                    question["family_id"], question["content_hash"],
+                ),
+            ).fetchall()
+            kinds = {str(row["kind"]) for row in exposures if row["kind"] != "STEM"}
+            assistance = (
+                "ANSWER_REVEALED"
+                if kinds & {"SOLUTION", "DETAIL"}
+                else "HINT" if kinds else "NONE"
+            )
+            input_hash = _hash(
+                "ATTEMPT_SUBMISSION",
+                question_revision_id,
+                answer_hash,
+                question["rubric_revision"],
+                frozen_sequence,
+            )
+            inserted = connection.execute(
+                "INSERT OR IGNORE INTO practice_interaction_operations("
+                "workspace_id,operation_id,question_revision_id,owner_user_id,kind,input_hash,status) "
+                "VALUES(?,?,?,?,?,?,'CLAIMED')",
+                (
+                    workspace_id, operation_id, question_revision_id, owner_user_id,
+                    "ATTEMPT", input_hash,
+                ),
+            ).rowcount
+            if inserted != 1:
+                raise QuestionEngineRuntimeError(
+                    "PRACTICE_IDEMPOTENCY_CONFLICT",
+                    "The practice operation id is already bound to different input.",
+                )
+            connection.execute(
+                "INSERT INTO practice_operation_metering_guards("
+                "workspace_id,operation_id,guard_version) VALUES(?,?,'metered-practice.v1')",
+                (workspace_id, operation_id),
+            )
+            submission_id = f"ps_{uuid4().hex}"
+            connection.execute(
+                "INSERT INTO practice_submission_revisions("
+                "id,workspace_id,question_revision_id,owner_user_id,operation_id,"
+                "submitted_answer,answer_hash,rubric_revision,assistance,exposure_sequence,"
+                "substantive) VALUES(?,?,?,?,?,?,?,?,?,?,1)",
+                (
+                    submission_id, workspace_id, question_revision_id, owner_user_id,
+                    operation_id, answer, answer_hash, question["rubric_revision"],
+                    assistance, frozen_sequence,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO practice_evaluation_jobs("
+                "submission_id,workspace_id,operation_id,status) VALUES(?,?,?,'PENDING')",
+                (submission_id, workspace_id, operation_id),
+            )
+        return {
+            "id": submission_id,
+            "canonical_submission_id": submission_id,
+            "question_revision_id": question_revision_id,
+            "status": "PENDING",
+            "assistance": assistance,
+            "independent": assistance == "NONE",
+            "feedback": None,
+        }
+
+    def evaluate_practice_attempt(
+        self,
+        *,
+        owner_user_id: str,
+        workspace_id: str,
+        question_revision_id: str,
+        operation_id: str,
+    ) -> dict[str, Any]:
+        """Claim and evaluate one durable submission exactly once per operation."""
+
+        context = self._practice_context(
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            question_revision_id=question_revision_id,
+        )
+        lease_owner = f"practice-evaluator-{uuid4().hex}"
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            submission = connection.execute(
+                "SELECT submission.*,job.status AS job_status,job.lease_expires_at "
+                "FROM practice_submission_revisions AS submission "
+                "JOIN practice_evaluation_jobs AS job ON job.submission_id=submission.id "
+                "WHERE submission.workspace_id=? AND submission.operation_id=? "
+                "AND submission.owner_user_id=? AND submission.question_revision_id=?",
+                (workspace_id, operation_id, owner_user_id, question_revision_id),
+            ).fetchone()
+            if submission is None:
+                raise QuestionEngineRuntimeError(
+                    "PRACTICE_SUBMISSION_NOT_FOUND", "The saved practice submission was not found."
+                )
+            operation = connection.execute(
+                "SELECT status,result_json,error_code FROM practice_interaction_operations "
+                "WHERE workspace_id=? AND operation_id=?",
+                (workspace_id, operation_id),
+            ).fetchone()
+            if operation["status"] == "COMPLETED":
+                return cast(dict[str, Any], json.loads(operation["result_json"]))
+            if operation["status"] == "FAILED":
+                raise QuestionEngineRuntimeError(
+                    str(operation["error_code"]), "The saved practice evaluation failed."
+                )
+            claimed = connection.execute(
+                "UPDATE practice_evaluation_jobs SET status='RUNNING',lease_owner=?,"
+                "lease_expires_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','+15 minutes'),"
+                "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                "WHERE submission_id=? AND (status='PENDING' OR (status='RUNNING' "
+                "AND lease_expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now'))) ",
+                (lease_owner, submission["id"]),
+            ).rowcount
+            if claimed != 1:
+                raise QuestionEngineRuntimeError(
+                    "PRACTICE_EVALUATION_IN_PROGRESS",
+                    "The saved practice submission is already being evaluated.",
+                )
+        provider_context = {
+            **context,
+            "submitted_answer": str(submission["submitted_answer"]),
+            "assistance": str(submission["assistance"]),
+        }
+        try:
+            output, run = generate_practice_feedback(
+                self._provider_for_operation(
+                    workspace_id=workspace_id,
+                    operation_id=operation_id,
+                ),
+                context=provider_context,
+            )
+            expected = {str(item["criterion_id"]) for item in context["rubric"]}
+            actual = {item.criterion_id for item in output.criteria}
+            if actual != expected:
+                raise PracticeInteractionError(
+                    "PRACTICE_FEEDBACK_RUBRIC_MISMATCH",
+                    "The feedback did not cover the immutable practice rubric.",
+                )
+            attempt_id = f"pa_{uuid4().hex}"
+            status = "NEEDS_REVIEW" if output.verdict == "NEEDS_REVIEW" else "GRADED"
+            result = {
+                "id": attempt_id,
+                "canonical_submission_id": submission["id"],
+                "question_revision_id": question_revision_id,
+                "verdict": output.verdict,
+                "feedback": output.feedback,
+                "strengths": output.strengths,
+                "gaps": output.gaps,
+                "next_step": output.next_step,
+                "criteria": [item.model_dump(mode="json") for item in output.criteria],
+                "assistance": submission["assistance"],
+                "independent": submission["assistance"] == "NONE",
+                "status": status,
+                "usage": _public_run(run),
+            }
+            encoded_result = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+            with self.database.connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                owned = connection.execute(
+                    "SELECT 1 FROM practice_evaluation_jobs WHERE submission_id=? "
+                    "AND status='RUNNING' AND lease_owner=?",
+                    (submission["id"], lease_owner),
+                ).fetchone()
+                if owned is None:
+                    raise QuestionEngineRuntimeError(
+                        "PRACTICE_EVALUATION_LEASE_LOST",
+                        "The practice evaluation lease was lost before the result was saved.",
+                    )
+                input_hash = connection.execute(
+                    "SELECT input_hash FROM practice_interaction_operations "
+                    "WHERE workspace_id=? AND operation_id=?",
+                    (workspace_id, operation_id),
+                ).fetchone()[0]
+                connection.execute(
+                    "INSERT INTO practice_question_attempts("
+                    "id,workspace_id,question_revision_id,owner_user_id,operation_id,input_hash,"
+                    "submitted_answer,assistance,status,feedback_json,provider_run_json) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        attempt_id, workspace_id, question_revision_id, owner_user_id,
+                        operation_id, input_hash, submission["submitted_answer"],
+                        submission["assistance"], status,
+                        json.dumps(output.model_dump(mode="json"), ensure_ascii=False),
+                        json.dumps(run.model_dump(mode="json"), ensure_ascii=False),
+                    ),
+                )
+                updated = connection.execute(
+                    "UPDATE practice_interaction_operations SET status='COMPLETED',result_json=?,"
+                    "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                    "WHERE workspace_id=? AND operation_id=? AND status='CLAIMED'",
+                    (encoded_result, workspace_id, operation_id),
+                ).rowcount
+                if updated != 1:
+                    raise QuestionEngineRuntimeError(
+                        "PRACTICE_OPERATION_LOST", "The attempt operation receipt was lost."
+                    )
+                connection.execute(
+                    "UPDATE practice_evaluation_jobs SET status='COMPLETED',lease_owner=NULL,"
+                    "lease_expires_at=NULL,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                    "WHERE submission_id=? AND lease_owner=?",
+                    (submission["id"], lease_owner),
+                )
+                self.learning_loop.attach_evaluation_in_transaction(
+                    connection,
+                    owner_user_id=owner_user_id,
+                    canonical_submission_id=str(submission["id"]),
+                    canonical_evaluation_id=attempt_id,
+                    outcome=str(output.verdict),
+                )
+            return result
+        except QuestionEngineRuntimeError as error:
+            self._mark_evaluation_unknown(
+                submission_id=str(submission["id"]),
+                lease_owner=lease_owner,
+                error_code=error.code,
+            )
+            raise
+        except PracticeInteractionError as error:
+            if error.code.endswith("_PROVIDER_FAILED"):
+                self._mark_evaluation_unknown(
+                    submission_id=str(submission["id"]),
+                    lease_owner=lease_owner,
+                    error_code=error.code,
+                )
+                raise QuestionEngineRuntimeError(
+                    "PRACTICE_EVALUATION_UNKNOWN",
+                    "The provider outcome is unknown; no automatic paid retry was made.",
+                ) from error
+            try:
+                with self.database.connect() as connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    connection.execute(
+                        "UPDATE practice_evaluation_jobs SET status='FAILED',error_code=?,"
+                        "lease_owner=NULL,lease_expires_at=NULL,"
+                        "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                        "WHERE submission_id=? AND lease_owner=?",
+                        (error.code[:100], submission["id"], lease_owner),
+                    )
+                    connection.execute(
+                        "UPDATE practice_interaction_operations SET status='FAILED',error_code=?,"
+                        "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                        "WHERE workspace_id=? AND operation_id=? AND status='CLAIMED'",
+                        (error.code[:100], workspace_id, operation_id),
+                    )
+                    link = connection.execute(
+                        "SELECT link.cycle_id,link.owner_user_id FROM learning_loop_submission_links "
+                        "AS link WHERE link.canonical_submission_id=?",
+                        (submission["id"],),
+                    ).fetchone()
+                    if link is not None:
+                        self.learning_loop._record_reliability_in_connection(
+                            connection,
+                            owner_user_id=str(link["owner_user_id"]),
+                            cycle_id=str(link["cycle_id"]),
+                            operation_id=str(operation_id),
+                            stage="GRADE",
+                            status="FAILED",
+                        )
+            finally:
+                raise QuestionEngineRuntimeError(error.code, str(error)) from error
+        except Exception as error:
+            self._mark_evaluation_unknown(
+                submission_id=str(submission["id"]),
+                lease_owner=lease_owner,
+                error_code="PRACTICE_EVALUATION_UNKNOWN",
+            )
+            raise QuestionEngineRuntimeError(
+                "PRACTICE_EVALUATION_UNKNOWN",
+                "The evaluation outcome is unknown; no automatic paid retry was made.",
+            ) from error
+
+    def _mark_evaluation_unknown(
+        self, *, submission_id: str, lease_owner: str, error_code: str
+    ) -> None:
+        try:
+            with self.database.connect() as connection:
+                submission = connection.execute(
+                    "SELECT owner_user_id,operation_id FROM practice_submission_revisions "
+                    "WHERE id=?",
+                    (submission_id,),
+                ).fetchone()
+                connection.execute(
+                    "UPDATE practice_evaluation_jobs SET status='UNKNOWN',error_code=?,"
+                    "lease_owner=NULL,lease_expires_at=NULL,"
+                    "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                    "WHERE submission_id=? AND status='RUNNING' AND lease_owner=?",
+                    (error_code[:100], submission_id, lease_owner),
+                )
+                link = connection.execute(
+                    "SELECT cycle_id,owner_user_id FROM learning_loop_submission_links "
+                    "WHERE canonical_submission_id=?",
+                    (submission_id,),
+                ).fetchone()
+                if submission is not None and link is not None:
+                    self.learning_loop._record_reliability_in_connection(
+                        connection,
+                        owner_user_id=str(link["owner_user_id"]),
+                        cycle_id=str(link["cycle_id"]),
+                        operation_id=str(submission["operation_id"]),
+                        stage="GRADE",
+                        status="UNKNOWN",
+                    )
+        except Exception:
+            # Preserve the original exception. A remaining lease expires into
+            # explicit reconciliation; this function never starts a paid retry.
+            return
 
     def practice_state(
         self,
@@ -720,13 +1165,75 @@ class QuestionEngineRuntime:
                 "ORDER BY item.created_at DESC,item.rowid DESC LIMIT 1",
                 (workspace_id, question_revision_id),
             ).fetchone()
+            pending = connection.execute(
+                "SELECT submission.id,submission.operation_id,submission.assistance,"
+                "job.status,job.error_code "
+                "FROM practice_submission_revisions AS submission "
+                "JOIN practice_evaluation_jobs AS job ON job.submission_id=submission.id "
+                "WHERE submission.workspace_id=? AND submission.question_revision_id=? "
+                "ORDER BY submission.created_at DESC,submission.rowid DESC LIMIT 1",
+                (workspace_id, question_revision_id),
+            ).fetchone()
+        latest_attempt = json.loads(attempt["result_json"]) if attempt else None
+        if latest_attempt is None and pending is not None:
+            latest_attempt = {
+                "id": pending["id"],
+                "canonical_submission_id": pending["id"],
+                "operation_id": pending["operation_id"],
+                "question_revision_id": question_revision_id,
+                "status": pending["status"],
+                "assistance": pending["assistance"],
+                "independent": pending["assistance"] == "NONE",
+                "feedback": None,
+                "error_code": pending["error_code"],
+            }
         return {
             "hint_count": hint_count,
             "latest_hint": json.loads(hint["result_json"]) if hint else None,
-            "latest_attempt": json.loads(attempt["result_json"]) if attempt else None,
+            "latest_attempt": latest_attempt,
         }
 
     def grade_practice_attempt(
+        self,
+        *,
+        owner_user_id: str,
+        workspace_id: str,
+        question_revision_id: str,
+        operation_id: str,
+        submitted_answer: str,
+        answer_revealed: bool = False,
+    ) -> dict[str, Any]:
+        # Kept for trusted non-HTTP internal callers. The browser path records
+        # reveal before calling submit. Compatibility callers used to pass the
+        # same server-known fact directly, so append that fact to the unified
+        # exposure ledger before freezing the submission instead of discarding it.
+        if answer_revealed:
+            try:
+                self.learning_loop.record_exposure(
+                    owner_user_id=owner_user_id,
+                    operation_id=f"{operation_id}:reveal",
+                    question_revision_id=question_revision_id,
+                    kind="SOLUTION",
+                    channel="QUESTION",
+                    receipt=f"compat-reveal:{workspace_id}:{operation_id}",
+                )
+            except LearningLoopError as error:
+                raise QuestionEngineRuntimeError(error.code, str(error)) from error
+        self.submit_practice_attempt(
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            question_revision_id=question_revision_id,
+            operation_id=operation_id,
+            submitted_answer=submitted_answer,
+        )
+        return self.evaluate_practice_attempt(
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            question_revision_id=question_revision_id,
+            operation_id=operation_id,
+        )
+
+    def _grade_practice_attempt_legacy(
         self,
         *,
         owner_user_id: str,

@@ -25,6 +25,7 @@ from app.learning.compiler import (
 )
 from app.learning.course_policy import course_policy
 from app.learning.knowledge import KnowledgeService
+from app.learning.learning_loop import LearningLoopService
 from app.learning.models import (
     AssessmentAbandonInput,
     AssessmentAnswer,
@@ -94,11 +95,17 @@ class LearningOrchestrator:
         self.plans = TeachingPlanRepository(database)
         self.problems = ProblemRepository(database)
         self.assessments = AssessmentService(database, jev)
+        self.learning_loop = LearningLoopService(
+            database,
+            internal_user_ids=settings.admin_user_id_set,
+            test_environment=settings.app_env == "test",
+        )
         self.question_engine = QuestionEngineRuntime(
             database=database,
             provider=self.provider,
             semantic_decisions=jev,
             metered_generate=self.generate,
+            learning_loop=self.learning_loop,
         )
 
     def problem_index(
