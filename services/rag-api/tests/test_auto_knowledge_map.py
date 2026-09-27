@@ -109,6 +109,11 @@ class RecordingLearning:
             }
         )
         if schema.__name__ == "AutoKnowledgeMapDraft":
+            assert len(context["frozen_source_segments"]) <= 6
+            assert all(
+                "source_evidence_id" not in item
+                for item in context["frozen_source_segments"]
+            )
             ids = [item["id"] for item in context["frozen_source_segments"]]
             output = schema.model_validate(
                 {
