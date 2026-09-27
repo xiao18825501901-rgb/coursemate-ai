@@ -777,14 +777,25 @@ class OrchestratorDraftGenerator:
             recovery = bool(recovery_reasons)
             required_item_recovery = "REQUIRED_ITEM_REPAIR_V1" in recovery_reasons
             unique_key_recovery = "UNIQUE_KEY_REPAIR_V1" in recovery_reasons
-            evidence_scope_recovery = "EVIDENCE_SCOPE_REPAIR_V1" in recovery_reasons
-            evidence_scope_normalization_recovery = bool(
-                {
-                    "EVIDENCE_SCOPE_NORMALIZATION_V1",
-                    "EVIDENCE_SCOPE_NORMALIZATION_RETRY_V1",
-                }
-                & recovery_reasons
-            )
+            evidence_scope_operations = [
+                operation_base,
+                f"{operation_base}-r1",
+                f"{operation_base}-r2",
+            ]
+            evidence_scope_recovery = connection.execute(
+                "SELECT 1 FROM auto_knowledge_job_recovery_receipts "
+                "WHERE job_id=? AND reason='EVIDENCE_SCOPE_REPAIR_V1' "
+                "AND blocked_operation_ids_json=?",
+                (job_id, canonical_json(evidence_scope_operations)),
+            ).fetchone() is not None
+            evidence_scope_normalization_recovery = connection.execute(
+                "SELECT 1 FROM auto_knowledge_job_recovery_receipts "
+                "WHERE job_id=? AND reason IN ("
+                "'EVIDENCE_SCOPE_NORMALIZATION_V1',"
+                "'EVIDENCE_SCOPE_NORMALIZATION_RETRY_V1') "
+                "AND blocked_operation_ids_json=?",
+                (job_id, canonical_json([*evidence_scope_operations, f"{operation_base}-r3"])),
+            ).fetchone() is not None
             artifact = connection.execute(
                 "SELECT model_operation_id,created_at FROM auto_knowledge_job_artifacts "
                 "WHERE job_id=? AND stage=? AND shard_key=?",

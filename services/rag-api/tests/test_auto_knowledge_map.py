@@ -2424,6 +2424,26 @@ def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_cal
         (base, f"{base}-r1", f"{base}-r2"),
         (second_base, f"{second_base}-r1", f"{second_base}-r2"),
     }
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='RUNNING' WHERE id=?", (job["id"],)
+        )
+    _, second_dispatched = service.generator._run_with_repairs(  # type: ignore[attr-defined]
+        job_id=str(job["id"]),
+        stage="TEACHING_SPEC",
+        shard_key="spec-00061",
+        operation_base=second_base,
+        workspace_id="workspace-a",
+        schema=AutoKnowledgeSpecSetDraft,
+        instructions=instructions,
+        context=context,
+        validate=validate_specs,
+        normalize_local_recovery=lambda value: service.generator._normalize_atomic_evidence(  # type: ignore[attr-defined]
+            value, {"core-a": {"e1"}, "core-b": {"e2"}}
+        ),
+    )
+    assert second_dispatched is True
+    assert learning.calls[-1]["operation"] == f"{second_base}-r3"
 
 
 def test_safe_validation_failure_uses_one_targeted_repair_and_reuses_stage_contract(
