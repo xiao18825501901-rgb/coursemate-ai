@@ -513,10 +513,39 @@ class OrchestratorDraftGenerator:
                 (job_id,),
             ).fetchone()
             artifact = connection.execute(
-                "SELECT 1 FROM auto_knowledge_job_artifacts "
+                "SELECT model_operation_id,created_at FROM auto_knowledge_job_artifacts "
                 "WHERE job_id=? AND stage=? AND shard_key=?",
                 (job_id, stage, shard_key),
             ).fetchone()
+            if artifact is not None:
+                # A durable artifact can have been produced by a repaired
+                # operation. Reconstruct that exact request identity and the
+                # exact rejection feedback that formed its instructions;
+                # replaying the base request would report a false input-hash
+                # conflict and could strand a fully paid, accepted shard.
+                repaired = re.fullmatch(
+                    re.escape(operation_base) + r"-r([12])",
+                    str(artifact["model_operation_id"]),
+                )
+                if repaired is not None:
+                    repair = int(repaired.group(1))
+                    previous = connection.execute(
+                        "SELECT rejection_detail_json FROM auto_knowledge_model_attempts "
+                        "WHERE job_id=? AND stage=? AND shard_key=? "
+                        "AND status IN ('BUSINESS_REJECTED','CONTRACT_REJECTED') "
+                        "AND updated_at<=? ORDER BY updated_at DESC,operation_id DESC LIMIT 1",
+                        (job_id, stage, shard_key, artifact["created_at"]),
+                    ).fetchone()
+                    if previous is None:
+                        raise ApiError(
+                            409,
+                            "AUTO_ARTIFACT_CONFLICT",
+                            "A repaired generation shard is missing its rejection evidence.",
+                        )
+                    repair_feedback = cast(
+                        dict[str, object],
+                        json.loads(str(previous["rejection_detail_json"]) or "{}"),
+                    )
             if recovery is not None and artifact is None:
                 previous = connection.execute(
                     "SELECT operation_id,rejection_detail_json "
@@ -706,6 +735,24 @@ class OrchestratorDraftGenerator:
                 )
                 current["status"] = "MAPPED"
                 current["node_keys"].add(node["key"])
+        cited_sources = {
+            str(source_id)
+            for node in nodes.values()
+            for source_id in node["evidence_ids"]
+        }
+        for source_id, disposition in dispositions.items():
+            if disposition["status"] == "MAPPED" and source_id not in cited_sources:
+                # MAPPED is only true when a surviving ATOMIC node cites the
+                # source. A provider-supplied label alone is not evidence of a
+                # mapping. Preserve the source in the result as an explicit
+                # review exception instead of inventing a node or failing the
+                # entire otherwise-valid course after every paid shard ran.
+                disposition["status"] = "REVIEW_REQUIRED"
+                disposition["reason"] = (
+                    "Provider marked this source as mapped without a surviving "
+                    "atomic-node citation; review is required"
+                )
+                disposition["node_keys"].clear()
         # Grouping modules are navigational structure, not learnable evidence.
         # A provider may return an extra empty heading; retaining it would make
         # KnowledgeService correctly reject the tree as EMPTY_COMPOSITE. Keep
@@ -1482,12 +1529,17 @@ class AutoKnowledgeMapService:
             "FROM auto_knowledge_jobs AS job "
             "JOIN auto_knowledge_job_receipts AS receipt ON receipt.job_id=job.id "
             "WHERE job.status='FAILED' "
-            "AND job.error_code IN ('DAILY_MODEL_CALL_QUOTA','AUTO_REPAIR_LIMIT') "
+            "AND job.error_code IN ("
+            "'DAILY_MODEL_CALL_QUOTA','AUTO_REPAIR_LIMIT',"
+            "'AUTO_SOURCE_COVERAGE_INCOMPLETE','AUTO_ARTIFACT_CONFLICT') "
             "AND receipt.status='FAILED' AND NOT EXISTS("
             "SELECT 1 FROM auto_knowledge_job_recovery_receipts AS recovery "
             "WHERE recovery.job_id=job.id AND recovery.reason=CASE job.error_code "
             "WHEN 'DAILY_MODEL_CALL_QUOTA' THEN 'BACKGROUND_QUOTA_SCOPE_V1' "
-            "ELSE 'PER_SHARD_REPAIR_SCOPE_V1' END)"
+            "WHEN 'AUTO_REPAIR_LIMIT' THEN 'PER_SHARD_REPAIR_SCOPE_V1' "
+            "WHEN 'AUTO_SOURCE_COVERAGE_INCOMPLETE' "
+            "THEN 'FINAL_DISPOSITION_NORMALIZATION_V1' "
+            "ELSE 'REPAIRED_ARTIFACT_REHYDRATION_V1' END)"
         ).fetchall()
         for row in rows:
             operation_prefix = f"akm-{digest(str(row['id']))[:16]}-%"
@@ -1520,7 +1572,7 @@ class AutoKnowledgeMapService:
                 reason = "BACKGROUND_QUOTA_SCOPE_V1"
                 if len(blocked) != 1:
                     continue
-            else:
+            elif row["error_code"] == "AUTO_REPAIR_LIMIT":
                 # Only V4 jobs have the durable pre-parse evidence needed to
                 # prove that a rejected shard is safe to repair. Legacy V2
                 # failures remain terminal and visible.
@@ -1537,6 +1589,48 @@ class AutoKnowledgeMapService:
                     (row["id"],),
                 ).fetchall()
                 reason = "PER_SHARD_REPAIR_SCOPE_V1"
+                if not blocked:
+                    continue
+            elif row["error_code"] == "AUTO_SOURCE_COVERAGE_INCOMPLETE":
+                # V4 had already persisted every accepted shard before this
+                # deterministic aggregate check. The hotfix only normalizes a
+                # provider's unsupported MAPPED label to REVIEW_REQUIRED; it
+                # neither invents a node nor sends another request.
+                if (
+                    row["builder_version"] != BUILDER_VERSION
+                    or row["error_message"]
+                    != "A mapped source disposition must be cited by an atomic node."
+                ):
+                    continue
+                blocked = []
+                reason = "FINAL_DISPOSITION_NORMALIZATION_V1"
+            else:
+                # The old resume path replayed a repaired artifact as its base
+                # operation. Resume only when the accepted repaired artifact
+                # and the rejected predecessor are both durable and there is no
+                # uncertain send evidence (checked above).
+                if (
+                    row["builder_version"] != BUILDER_VERSION
+                    or row["error_message"]
+                    != "A persisted generation shard no longer matches its frozen input."
+                ):
+                    continue
+                blocked = connection.execute(
+                    "SELECT artifact.model_operation_id "
+                    "FROM auto_knowledge_job_artifacts AS artifact "
+                    "JOIN auto_knowledge_model_attempts AS accepted "
+                    "ON accepted.operation_id=artifact.model_operation_id "
+                    "WHERE artifact.job_id=? AND accepted.status='ACCEPTED' "
+                    "AND artifact.model_operation_id GLOB '*-r[12]' "
+                    "AND EXISTS(SELECT 1 FROM auto_knowledge_model_attempts AS rejected "
+                    "WHERE rejected.job_id=artifact.job_id "
+                    "AND rejected.stage=artifact.stage "
+                    "AND rejected.shard_key=artifact.shard_key "
+                    "AND rejected.status IN ('BUSINESS_REJECTED','CONTRACT_REJECTED')) "
+                    "ORDER BY artifact.model_operation_id",
+                    (row["id"],),
+                ).fetchall()
+                reason = "REPAIRED_ARTIFACT_REHYDRATION_V1"
                 if not blocked:
                     continue
             receipt = {
@@ -1582,7 +1676,7 @@ class AutoKnowledgeMapService:
                 "UPDATE auto_knowledge_targets SET status='QUEUED',message=?,updated_at=? "
                 "WHERE target_key=? AND active_job_id=? AND status='FAILED'",
                 (
-                    "Resuming frozen artifacts under the background metering scope",
+                    "Resuming the same frozen artifacts under a verified local recovery",
                     stamp(),
                     row["target_key"],
                     row["id"],
@@ -2310,7 +2404,7 @@ class AutoKnowledgeMapService:
                     tree_id,
                     "Automatic map active"
                     if terminal == "READY"
-                    else "Automatic map active; some sources were unreadable",
+                    else "Automatic map active; some sources require review",
                     stamp(),
                     target.key,
                     job["id"],

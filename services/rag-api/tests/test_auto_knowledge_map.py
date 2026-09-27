@@ -192,10 +192,36 @@ class RepairingLearning(RecordingLearning):
                     "max_output_tokens": kwargs.get("max_output_tokens"),
                 }
             )
-            return schema.model_validate(
+            output = schema.model_validate(
                 {"title": "Incomplete first response", "modules": [], "nodes": []}
-            ), {"status": "COMPLETED"}
-        return super().generate(workspace_id, operation, schema, **kwargs)
+            )
+            sink = kwargs.get("transport_event_sink")
+            if sink is not None:
+                output_text = json.dumps(output.model_dump(), sort_keys=True)
+                sink({"phase": "SEND_INTENT", "input_hash": "a" * 64})
+                sink(
+                    {
+                        "phase": "RESPONSE_COMPLETE",
+                        "provider_response_id": "repairing-learning-1",
+                        "output_text": output_text,
+                    }
+                )
+                sink({"phase": "CONTRACT_VALID"})
+            return output, {"status": "COMPLETED"}
+        output, run = super().generate(workspace_id, operation, schema, **kwargs)
+        sink = kwargs.get("transport_event_sink")
+        if sink is not None:
+            output_text = json.dumps(output.model_dump(), sort_keys=True)
+            sink({"phase": "SEND_INTENT", "input_hash": "b" * 64})
+            sink(
+                {
+                    "phase": "RESPONSE_COMPLETE",
+                    "provider_response_id": f"repairing-learning-{operation}",
+                    "output_text": output_text,
+                }
+            )
+            sink({"phase": "CONTRACT_VALID"})
+        return output, run
 
 
 class MultiShardRepairingLearning(RecordingLearning):
@@ -1014,7 +1040,6 @@ def test_complete_source_is_segmented_without_truncation_or_oversize_single_call
     assert dispatched == 0
     assert len(learning.calls) == calls_before_restart
 
-
 def test_real_orchestrator_and_provider_complete_over_fake_http_upstream(
     tmp_path: Path,
 ) -> None:
@@ -1339,7 +1364,12 @@ def test_legacy_job_level_repair_limit_resumes_only_known_rejected_shard(
 def test_safe_validation_failure_uses_one_targeted_repair_and_reuses_stage_contract(
     tmp_path: Path,
 ) -> None:
-    settings = settings_at(tmp_path)
+    settings = settings_at(tmp_path).model_copy(
+        update={
+            "auto_knowledge_map_enabled": True,
+            "auto_knowledge_map_allow_billable": True,
+        }
+    )
     database = Database(settings)
     database.initialize()
     private_workspace(database)
@@ -1363,7 +1393,10 @@ def test_safe_validation_failure_uses_one_targeted_repair_and_reuses_stage_contr
     assert len(learning.calls) == 3
     with database.connect() as connection:
         job = connection.execute(
-            "SELECT repair_calls_made FROM auto_knowledge_jobs"
+            "SELECT * FROM auto_knowledge_jobs"
+        ).fetchone()
+        course = connection.execute(
+            "SELECT * FROM courses WHERE id=?", (job["course_id"],)
         ).fetchone()
         operations = connection.execute(
             "SELECT status FROM learning_operations ORDER BY created_at,rowid"
@@ -1377,6 +1410,54 @@ def test_safe_validation_failure_uses_one_targeted_repair_and_reuses_stage_contr
     assert learning.calls[0]["max_output_tokens"] == 8_000
     assert "previous complete response" in learning.calls[1]["instructions"].lower()
     assert "AUTO_SOURCE_COVERAGE_INCOMPLETE" in learning.calls[1]["instructions"]
+
+    # A repaired shard is still a completed durable artifact. Reopening the
+    # same frozen job must reconstruct the exact repaired request identity and
+    # reuse it without another provider dispatch or an artifact-hash conflict.
+    calls_before_restart = len(learning.calls)
+    restarted = AutoKnowledgeMapService(database, settings, learning)  # type: ignore[arg-type]
+    _map, _specs, dispatched = restarted.generator.generate(
+        job_id=str(job["id"]),
+        workspace_id="workspace-a",
+        course=dict(course),
+        evidence=restarted._evidence(job),
+    )
+    assert dispatched == 0
+    assert len(learning.calls) == calls_before_restart
+
+    # Production exposed this exact historical failure before the repaired
+    # artifact rehydration fix was deployed. It is recoverable only when the
+    # accepted repaired artifact and its rejected predecessor are both durable.
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='FAILED',"
+            "error_code='AUTO_ARTIFACT_CONFLICT',error_message=?,completed_at=? "
+            "WHERE id=?",
+            (
+                "A persisted generation shard no longer matches its frozen input.",
+                "2026-09-27T00:00:00.000Z",
+                job["id"],
+            ),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_targets SET status='FAILED' WHERE active_job_id=?",
+            (job["id"],),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_job_receipts SET status='FAILED' WHERE job_id=?",
+            (job["id"],),
+        )
+    assert restarted.reconcile(force=True)["RECOVERED_SAFE_FAILURE"] == 1
+    with database.connect() as connection:
+        recovered = connection.execute(
+            "SELECT status,error_code FROM auto_knowledge_jobs WHERE id=?", (job["id"],)
+        ).fetchone()
+        reason = connection.execute(
+            "SELECT reason FROM auto_knowledge_job_recovery_receipts WHERE job_id=?",
+            (job["id"],),
+        ).fetchone()[0]
+    assert dict(recovered) == {"status": "QUEUED", "error_code": None}
+    assert reason == "REPAIRED_ARTIFACT_REHYDRATION_V1"
 
 
 def test_targeted_repair_budget_is_bounded_per_shard_not_per_course(
@@ -1570,18 +1651,92 @@ def test_merge_prunes_empty_model_groupings_without_dropping_grounded_nodes() ->
                     "status": "MAPPED",
                     "reason": "Mapped",
                     "node_keys": ["atomic"],
-                }
+                },
+                {
+                    "evidence_id": "seg_two",
+                    "status": "MAPPED",
+                    "reason": "Provider claimed a mapping without citing the segment",
+                    "node_keys": ["atomic"],
+                },
             ],
         }
     )
 
     merged = OrchestratorDraftGenerator._merge_maps(
-        {"name": "Course"}, [(draft, {"seg_one": "chunk_one"})]
+        {
+            "name": "Course",
+        },
+        [(draft, {"seg_one": "chunk_one", "seg_two": "chunk_two"})],
     )
 
     assert [module.title for module in merged.modules] == ["Used module"]
     assert len(merged.nodes) == 1
     assert merged.nodes[0].evidence_ids == ["chunk_one"]
+    dispositions = {item.evidence_id: item for item in merged.dispositions}
+    assert dispositions["chunk_one"].status == "MAPPED"
+    assert dispositions["chunk_two"].status == "REVIEW_REQUIRED"
+    assert dispositions["chunk_two"].node_keys == []
+
+
+def test_final_mapped_disposition_failure_gets_one_audited_local_recovery(
+    tmp_path: Path,
+) -> None:
+    settings = settings_at(tmp_path).model_copy(
+        update={
+            "auto_knowledge_map_enabled": True,
+            "auto_knowledge_map_allow_billable": True,
+        }
+    )
+    database = Database(settings)
+    database.initialize()
+    private_workspace(database)
+    ready_document(
+        database,
+        document_id="final-disposition-doc",
+        chunk_id="final-disposition-chunk",
+        content="One grounded concept for deterministic final validation.",
+    )
+    learning = RecordingLearning()
+    service = AutoKnowledgeMapService(database, settings, learning)  # type: ignore[arg-type]
+    service.reconcile(force=True)
+    completed = service.run_once("final-disposition-worker")
+    assert completed is not None and completed["status"] == "READY"
+    calls_before_recovery = len(learning.calls)
+
+    with database.connect() as connection:
+        job = connection.execute("SELECT * FROM auto_knowledge_jobs").fetchone()
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='FAILED',"
+            "error_code='AUTO_SOURCE_COVERAGE_INCOMPLETE',error_message=?,completed_at=? "
+            "WHERE id=?",
+            (
+                "A mapped source disposition must be cited by an atomic node.",
+                "2026-09-27T00:00:00.000Z",
+                job["id"],
+            ),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_targets SET status='FAILED' WHERE active_job_id=?",
+            (job["id"],),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_job_receipts SET status='FAILED' WHERE job_id=?",
+            (job["id"],),
+        )
+
+    assert service.reconcile(force=True)["RECOVERED_SAFE_FAILURE"] == 1
+    assert service.reconcile(force=True).get("RECOVERED_SAFE_FAILURE", 0) == 0
+    with database.connect() as connection:
+        recovered = connection.execute(
+            "SELECT status,error_code FROM auto_knowledge_jobs WHERE id=?", (job["id"],)
+        ).fetchone()
+        reason = connection.execute(
+            "SELECT reason FROM auto_knowledge_job_recovery_receipts WHERE job_id=?",
+            (job["id"],),
+        ).fetchone()[0]
+    assert dict(recovered) == {"status": "QUEUED", "error_code": None}
+    assert reason == "FINAL_DISPOSITION_NORMALIZATION_V1"
+    assert len(learning.calls) == calls_before_recovery
 
 
 def test_provider_output_cannot_silently_drop_a_frozen_source_segment(tmp_path: Path) -> None:
