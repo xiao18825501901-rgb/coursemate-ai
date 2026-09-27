@@ -19,8 +19,11 @@ from app.learning.provider import LearningProvider
 from app.rag.retrieval import HybridRetriever
 from app.repositories.chunks import ChunkRepository
 from app.services.auto_knowledge_map import (
+    AUTO_MODEL_MAX_OUTPUT_TOKENS,
+    BUILDER_VERSION,
     AutoKnowledgeMapService,
     OrchestratorDraftGenerator,
+    canonical_json,
     digest,
 )
 
@@ -2067,6 +2070,248 @@ def test_teaching_spec_evidence_scope_gets_one_exact_audited_third_repair(
             str(job["id"]), "TEACHING_SPEC", "spec-00061", other_base
         )
     assert denied.value.code == "AUTO_REPAIR_LIMIT"
+
+
+def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_call(
+    tmp_path: Path,
+) -> None:
+    """An exhausted exact r3 may remove only surplus foreign evidence locally.
+
+    The original provider response stays BUSINESS_REJECTED.  This is a narrow
+    recovery for a complete, saved r3 response where every affected item still
+    has at least one citation from its own atomic node; it must never reserve
+    r4 or send another request.
+    """
+
+    settings = settings_at(tmp_path).model_copy(
+        update={
+            "auto_knowledge_map_enabled": True,
+            "auto_knowledge_map_allow_billable": True,
+        }
+    )
+    database = Database(settings)
+    database.initialize()
+    private_workspace(database)
+    ready_document(
+        database,
+        document_id="evidence-normalization-doc",
+        chunk_id="e1",
+        content="The local recovery must preserve each node's own evidence.",
+    )
+    learning = RecordingLearning()
+    service = AutoKnowledgeMapService(
+        database,
+        settings,
+        learning,  # type: ignore[arg-type]
+    )
+    assert service.reconcile(force=True)["QUEUED"] == 1
+
+    issue = {
+        "code": "AUTO_EVIDENCE_INVALID",
+        "details": {},
+        "message": "A Teaching Spec cited evidence outside its atomic node.",
+    }
+    instructions = "Build a grounded Teaching Spec for this frozen node batch."
+    context = {
+        "knowledge_nodes": [
+            {"key": "core-a", "evidence_ids": ["e1"]},
+            {"key": "core-b", "evidence_ids": ["e2"]},
+        ]
+    }
+    rejected_payload = {
+        "specs": [
+            {
+                "node_key": "core-a",
+                "change_reason": "First frozen node",
+                "items": [
+                    {
+                        "item_id": "a-required",
+                        "requirement": "REQUIRED",
+                        "objective": "Explain the first node",
+                        "acceptance": "Use its primary source",
+                        "evidence_ids": ["e1", "e2"],
+                    }
+                ],
+            },
+            {
+                "node_key": "core-b",
+                "change_reason": "Second frozen node",
+                "items": [
+                    {
+                        "item_id": "b-required",
+                        "requirement": "REQUIRED",
+                        "objective": "Explain the second node",
+                        "acceptance": "Use its primary source",
+                        "evidence_ids": ["e2"],
+                    }
+                ],
+            },
+        ]
+    }
+    rejected_json = canonical_json(rejected_payload)
+    with database.connect() as connection:
+        job = connection.execute("SELECT * FROM auto_knowledge_jobs").fetchone()
+        base = f"akm-{digest(str(job['id']))[:16]}-s-00060"
+        r3 = f"{base}-r3"
+        for ordinal, suffix in enumerate(("", "-r1", "-r2", "-r3")):
+            operation = f"{base}{suffix}"
+            connection.execute(
+                "INSERT INTO auto_knowledge_model_attempts("
+                "operation_id,job_id,stage,shard_key,input_hash,status,output_text,"
+                "output_hash,rejection_code,rejection_detail_json) "
+                "VALUES(?,?,'TEACHING_SPEC','spec-00060',?,'BUSINESS_REJECTED',"
+                "?,?, 'AUTO_EVIDENCE_INVALID',?)",
+                (
+                    operation,
+                    job["id"],
+                    str(ordinal) * 64,
+                    rejected_json,
+                    hashlib.sha256(rejected_json.encode()).hexdigest(),
+                    canonical_json(issue),
+                ),
+            )
+            if ordinal:
+                connection.execute(
+                    "INSERT INTO auto_knowledge_repair_reservations("
+                    "job_id,stage,shard_key,ordinal,operation_id) VALUES(?,?,?,?,?)",
+                    (job["id"], "TEACHING_SPEC", "spec-00060", ordinal, operation),
+                )
+        original_receipt = {"error_code": "AUTO_REPAIR_LIMIT"}
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='FAILED',model_calls_made=4,"
+            "repair_calls_made=2,error_code='AUTO_REPAIR_LIMIT',"
+            "error_message='The 3 targeted repairs for this automatic-map shard were exhausted.',"
+            "completed_at=? WHERE id=?",
+            ("2026-09-27T12:45:00.000Z", job["id"]),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_targets SET status='FAILED' WHERE active_job_id=?",
+            (job["id"],),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_job_receipts("
+            "job_id,target_key,corpus_fingerprint,status,source_snapshot_hash,"
+            "model_calls_made,detail_json) VALUES(?,?,?,'FAILED',?,4,?)",
+            (
+                job["id"],
+                job["target_key"],
+                job["corpus_fingerprint"],
+                digest(json.loads(job["source_snapshot_json"])),
+                canonical_json(original_receipt),
+            ),
+        )
+        prior_json = canonical_json(
+            {
+                "job_id": job["id"],
+                "status": "FAILED",
+                "detail": original_receipt,
+            }
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_job_recovery_receipts("
+            "id,job_id,reason,prior_receipt_json,prior_receipt_hash,"
+            "blocked_operation_ids_json) VALUES(?,?,?,?,?,?)",
+            (
+                "evidence-scope-r3-authorized",
+                job["id"],
+                "EVIDENCE_SCOPE_REPAIR_V1",
+                prior_json,
+                hashlib.sha256(prior_json.encode()).hexdigest(),
+                canonical_json([base, f"{base}-r1", f"{base}-r2"]),
+            ),
+        )
+        effective_instructions = (
+            instructions + "\nThe previous complete response was rejected. Correct these exact "
+            "issues and return a shorter valid response without repeating invalid "
+            "content: "
+            + canonical_json(issue)
+            + "\nFinal atomic-evidence repair: for every specs[i].items[*] "
+            "entry, cite only evidence IDs from the matching node_key's "
+            "knowledge_nodes[i].evidence_ids. Never cite a neighbouring "
+            "node or any other source; recheck every item before returning."
+        )
+        request_hash = digest(
+            {
+                "builder": BUILDER_VERSION,
+                "operation": r3,
+                "schema": "AutoKnowledgeSpecSetDraft",
+                "instructions": effective_instructions,
+                "context": context,
+                "max_output_tokens": AUTO_MODEL_MAX_OUTPUT_TOKENS,
+            }
+        )
+        connection.execute(
+            "INSERT INTO learning_operations(workspace_id,id,request_hash,kind,status) "
+            "VALUES('workspace-a',?,?,'auto.knowledge.map','FAILED')",
+            (r3, request_hash),
+        )
+
+    assert service.reconcile(force=True)["RECOVERED_SAFE_FAILURE"] == 1
+    with database.connect() as connection:
+        recovery = connection.execute(
+            "SELECT reason,blocked_operation_ids_json FROM auto_knowledge_job_recovery_receipts "
+            "WHERE job_id=? ORDER BY created_at,reason",
+            (job["id"],),
+        ).fetchall()
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='RUNNING' WHERE id=?", (job["id"],)
+        )
+    assert {row["reason"] for row in recovery} == {
+        "EVIDENCE_SCOPE_NORMALIZATION_V1",
+        "EVIDENCE_SCOPE_REPAIR_V1",
+    }
+    normalization = next(
+        row for row in recovery if row["reason"] == "EVIDENCE_SCOPE_NORMALIZATION_V1"
+    )
+    assert json.loads(normalization["blocked_operation_ids_json"])[-1] == r3
+
+    def validate_specs(value: Any) -> None:
+        for spec in value.specs:
+            allowed = {"core-a": {"e1"}, "core-b": {"e2"}}[spec.node_key]
+            for item in spec.items:
+                assert set(item.evidence_ids) <= allowed
+                assert item.evidence_ids
+
+    output, dispatched = service.generator._run_with_repairs(  # type: ignore[attr-defined]
+        job_id=str(job["id"]),
+        stage="TEACHING_SPEC",
+        shard_key="spec-00060",
+        operation_base=base,
+        workspace_id="workspace-a",
+        schema=AutoKnowledgeSpecSetDraft,
+        instructions=instructions,
+        context=context,
+        validate=validate_specs,
+        normalize_local_recovery=lambda value: service.generator._normalize_atomic_evidence(  # type: ignore[attr-defined]
+            value, {"core-a": {"e1"}, "core-b": {"e2"}}
+        ),
+    )
+    assert dispatched is False
+    assert learning.calls == []
+    assert output.specs[0].items[0].evidence_ids == ["e1"]
+
+    with database.connect() as connection:
+        raw_attempt = connection.execute(
+            "SELECT status,output_hash FROM auto_knowledge_model_attempts WHERE operation_id=?",
+            (r3,),
+        ).fetchone()
+        artifact = connection.execute(
+            "SELECT model_operation_id,output_json FROM auto_knowledge_job_artifacts "
+            "WHERE job_id=? AND stage='TEACHING_SPEC' AND shard_key='spec-00060'",
+            (job["id"],),
+        ).fetchone()
+        repairs = connection.execute(
+            "SELECT ordinal FROM auto_knowledge_repair_reservations WHERE job_id=? "
+            "AND stage='TEACHING_SPEC' AND shard_key='spec-00060' ORDER BY ordinal",
+            (job["id"],),
+        ).fetchall()
+    assert tuple(raw_attempt) == (
+        "BUSINESS_REJECTED",
+        hashlib.sha256(rejected_json.encode()).hexdigest(),
+    )
+    assert artifact["model_operation_id"] == r3
+    assert json.loads(artifact["output_json"])["specs"][0]["items"][0]["evidence_ids"] == ["e1"]
+    assert [row["ordinal"] for row in repairs] == [1, 2, 3]
 
 
 def test_safe_validation_failure_uses_one_targeted_repair_and_reuses_stage_contract(

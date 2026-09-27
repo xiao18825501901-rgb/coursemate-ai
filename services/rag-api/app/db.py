@@ -47,6 +47,7 @@ V3_MIGRATIONS = (
     "049_auto_knowledge_base_prompt_hash_restore.sql",
     "050_auto_knowledge_unique_key_repair.sql",
     "051_auto_knowledge_evidence_scope_repair.sql",
+    "052_auto_knowledge_evidence_scope_normalization.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -85,9 +86,12 @@ V3_REPLAY_SUPERSEDED_BY = {
     "050_auto_knowledge_unique_key_repair.sql": 50,
     # Migration 051 grants one exact Teaching-Spec atomic-evidence prompt repair.
     "051_auto_knowledge_evidence_scope_repair.sql": 51,
+    # Migration 052 adds the only local-only recovery that may remove surplus
+    # cross-node citations from a complete, already-metered r3 response.
+    "052_auto_knowledge_evidence_scope_normalization.sql": 52,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 51
+LATEST_V3_SCHEMA_VERSION = 52
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (

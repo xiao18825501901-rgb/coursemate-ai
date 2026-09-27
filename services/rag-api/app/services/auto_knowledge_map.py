@@ -160,6 +160,31 @@ class OrchestratorDraftGenerator:
             )
             return operation_id if sent_evidence else f"{operation_id}-q1"
 
+    def _request_identity(
+        self,
+        *,
+        job_id: str,
+        workspace_id: str,
+        operation_id: str,
+        schema: type,
+        instructions: str,
+        context: dict[str, Any],
+    ) -> tuple[str, str]:
+        """Return the immutable operation id and request hash for one shard."""
+
+        effective_operation_id = self._effective_operation_id(
+            job_id, workspace_id, operation_id
+        )
+        request_payload = {
+            "builder": BUILDER_VERSION,
+            "operation": effective_operation_id,
+            "schema": schema.__name__,
+            "instructions": instructions,
+            "context": context,
+            "max_output_tokens": AUTO_MODEL_MAX_OUTPUT_TOKENS,
+        }
+        return effective_operation_id, digest(request_payload)
+
     @staticmethod
     def _safe_validation_detail(error: Exception) -> dict[str, object]:
         if isinstance(error, ApiError):
@@ -305,18 +330,14 @@ class OrchestratorDraftGenerator:
         context: dict[str, Any],
         validate: Callable[[Any], None] | None = None,
     ) -> tuple[Any, bool]:
-        operation_id = self._effective_operation_id(
-            job_id, workspace_id, operation_id
+        operation_id, input_hash = self._request_identity(
+            job_id=job_id,
+            workspace_id=workspace_id,
+            operation_id=operation_id,
+            schema=schema,
+            instructions=instructions,
+            context=context,
         )
-        request_payload = {
-            "builder": BUILDER_VERSION,
-            "operation": operation_id,
-            "schema": schema.__name__,
-            "instructions": instructions,
-            "context": context,
-            "max_output_tokens": AUTO_MODEL_MAX_OUTPUT_TOKENS,
-        }
-        input_hash = digest(request_payload)
         request_hash = input_hash
         with self.database.connect() as connection:
             artifact = connection.execute(
@@ -574,6 +595,152 @@ class OrchestratorDraftGenerator:
             )
             return ordinal
 
+    @staticmethod
+    def _normalize_atomic_evidence(value: Any, authorized: dict[str, set[str]]) -> bool:
+        """Remove only surplus foreign evidence when every item stays grounded.
+
+        This deliberately does not infer, replace or add evidence.  The caller
+        enables it only for the one audited local-recovery path after a complete
+        r3 response was retained.  A partial normalization is never allowed.
+        """
+
+        draft = cast(AutoKnowledgeSpecSetDraft, value)
+        updates: list[tuple[Any, list[str]]] = []
+        for spec in draft.specs:
+            permitted = authorized.get(spec.node_key)
+            if permitted is None:
+                return False
+            for item in spec.items:
+                foreign = set(item.evidence_ids) - permitted
+                if not foreign:
+                    continue
+                retained = [
+                    evidence_id for evidence_id in item.evidence_ids if evidence_id in permitted
+                ]
+                if not retained:
+                    return False
+                updates.append((item, retained))
+        if not updates:
+            return False
+        for item, retained in updates:
+            item.evidence_ids = retained
+        return True
+
+    def _persist_local_evidence_normalization(
+        self,
+        *,
+        job_id: str,
+        stage: str,
+        shard_key: str,
+        workspace_id: str,
+        operation_id: str,
+        schema: type,
+        instructions: str,
+        context: dict[str, Any],
+        raw_output_hash: str,
+        value: Any,
+    ) -> None:
+        """Attach one normalized local artifact without rewriting model evidence."""
+
+        if not operation_id.endswith("-r3"):
+            raise ApiError(
+                409,
+                "AUTO_ARTIFACT_CONFLICT",
+                "The local evidence normalization is restricted to the recorded r3 operation.",
+            )
+        operation_id, input_hash = self._request_identity(
+            job_id=job_id,
+            workspace_id=workspace_id,
+            operation_id=operation_id,
+            schema=schema,
+            instructions=instructions,
+            context=context,
+        )
+        output_json = canonical_json(value.model_dump())
+        base_operation = operation_id[:-3]
+        expected_scope_operations = [
+            base_operation,
+            f"{base_operation}-r1",
+            f"{base_operation}-r2",
+        ]
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            running = connection.execute(
+                "SELECT 1 FROM auto_knowledge_jobs WHERE id=? AND status='RUNNING'",
+                (job_id,),
+            ).fetchone()
+            existing = connection.execute(
+                "SELECT input_hash,model_operation_id FROM auto_knowledge_job_artifacts "
+                "WHERE job_id=? AND stage=? AND shard_key=?",
+                (job_id, stage, shard_key),
+            ).fetchone()
+            operation = connection.execute(
+                "SELECT request_hash,status,kind FROM learning_operations "
+                "WHERE workspace_id=? AND id=?",
+                (workspace_id, operation_id),
+            ).fetchone()
+            attempt = connection.execute(
+                "SELECT status,rejection_code,output_hash FROM auto_knowledge_model_attempts "
+                "WHERE operation_id=? AND job_id=? AND stage=? AND shard_key=?",
+                (operation_id, job_id, stage, shard_key),
+            ).fetchone()
+            scope_receipt = connection.execute(
+                "SELECT blocked_operation_ids_json FROM auto_knowledge_job_recovery_receipts "
+                "WHERE job_id=? AND reason='EVIDENCE_SCOPE_REPAIR_V1'",
+                (job_id,),
+            ).fetchone()
+            normalization_receipt = connection.execute(
+                "SELECT 1 FROM auto_knowledge_job_recovery_receipts "
+                "WHERE job_id=? AND reason='EVIDENCE_SCOPE_NORMALIZATION_V1'",
+                (job_id,),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    existing["input_hash"] != input_hash
+                    or existing["model_operation_id"] != operation_id
+                ):
+                    raise ApiError(
+                        409,
+                        "AUTO_ARTIFACT_CONFLICT",
+                        "A local normalization artifact conflicts with the frozen r3 request.",
+                    )
+                return
+            if (
+                running is None
+                or operation is None
+                or operation["request_hash"] != input_hash
+                or operation["status"] != "FAILED"
+                or operation["kind"] != "auto.knowledge.map"
+                or attempt is None
+                or attempt["status"] != "BUSINESS_REJECTED"
+                or attempt["rejection_code"] != "AUTO_EVIDENCE_INVALID"
+                or attempt["output_hash"] != raw_output_hash
+                or scope_receipt is None
+                or normalization_receipt is None
+                or json.loads(str(scope_receipt["blocked_operation_ids_json"]))
+                != expected_scope_operations
+            ):
+                raise ApiError(
+                    409,
+                    "AUTO_ARTIFACT_CONFLICT",
+                    "The local evidence normalization no longer matches its "
+                    "immutable recovery evidence.",
+                )
+            connection.execute(
+                "INSERT INTO auto_knowledge_job_artifacts("
+                "job_id,stage,shard_key,input_hash,model_operation_id,output_json,output_hash) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (
+                    job_id,
+                    stage,
+                    shard_key,
+                    input_hash,
+                    operation_id,
+                    output_json,
+                    hashlib.sha256(output_json.encode("utf-8")).hexdigest(),
+                ),
+            )
+
     def _run_with_repairs(
         self,
         *,
@@ -586,6 +753,7 @@ class OrchestratorDraftGenerator:
         instructions: str,
         context: dict[str, Any],
         validate: Callable[[Any], None],
+        normalize_local_recovery: Callable[[Any], bool] | None = None,
     ) -> tuple[Any, bool]:
         repair = 0
         repair_feedback: dict[str, object] | None = None
@@ -596,7 +764,8 @@ class OrchestratorDraftGenerator:
                     "SELECT reason FROM auto_knowledge_job_recovery_receipts "
                     "WHERE job_id=? AND reason IN ("
                     "'PER_SHARD_REPAIR_SCOPE_V1','REQUIRED_ITEM_REPAIR_V1',"
-                    "'UNIQUE_KEY_REPAIR_V1','EVIDENCE_SCOPE_REPAIR_V1')",
+                    "'UNIQUE_KEY_REPAIR_V1','EVIDENCE_SCOPE_REPAIR_V1',"
+                    "'EVIDENCE_SCOPE_NORMALIZATION_V1')",
                     (job_id,),
                 ).fetchall()
             }
@@ -604,6 +773,9 @@ class OrchestratorDraftGenerator:
             required_item_recovery = "REQUIRED_ITEM_REPAIR_V1" in recovery_reasons
             unique_key_recovery = "UNIQUE_KEY_REPAIR_V1" in recovery_reasons
             evidence_scope_recovery = "EVIDENCE_SCOPE_REPAIR_V1" in recovery_reasons
+            evidence_scope_normalization_recovery = (
+                "EVIDENCE_SCOPE_NORMALIZATION_V1" in recovery_reasons
+            )
             artifact = connection.execute(
                 "SELECT model_operation_id,created_at FROM auto_knowledge_job_artifacts "
                 "WHERE job_id=? AND stage=? AND shard_key=?",
@@ -636,9 +808,10 @@ class OrchestratorDraftGenerator:
                             "A repaired generation shard is missing its rejection evidence.",
                         )
                     repair_feedback = self._durable_rejection_feedback(previous, schema)
-            if recovery is not None and artifact is None:
+            if recovery and artifact is None:
                 previous = connection.execute(
-                    "SELECT operation_id,rejection_code,rejection_detail_json,output_text "
+                    "SELECT operation_id,status,rejection_code,rejection_detail_json,"
+                    "output_text,output_hash "
                     "FROM auto_knowledge_model_attempts "
                     "WHERE job_id=? AND stage=? AND shard_key=? "
                     "AND status IN ('BUSINESS_REJECTED','CONTRACT_REJECTED') "
@@ -646,6 +819,60 @@ class OrchestratorDraftGenerator:
                     (job_id, stage, shard_key),
                 ).fetchone()
                 if previous is not None:
+                    if evidence_scope_normalization_recovery:
+                        if (
+                            not evidence_scope_recovery
+                            or stage != "TEACHING_SPEC"
+                            or previous["operation_id"] != f"{operation_base}-r3"
+                            or previous["status"] != "BUSINESS_REJECTED"
+                            or previous["rejection_code"] != "AUTO_EVIDENCE_INVALID"
+                            or not str(previous["output_hash"] or "")
+                        ):
+                            raise ApiError(
+                                409,
+                                "AUTO_ARTIFACT_CONFLICT",
+                                "The local evidence normalization lacks its exact r3 evidence.",
+                            )
+                        if normalize_local_recovery is None:
+                            raise ApiError(
+                                409,
+                                "AUTO_ARTIFACT_CONFLICT",
+                                "The local evidence normalization has no Teaching-Spec validator.",
+                            )
+                        candidate = schema.model_validate_json(str(previous["output_text"]))
+                        if not normalize_local_recovery(candidate):
+                            raise ApiError(
+                                422,
+                                "AUTO_LOCAL_NORMALIZATION_REJECTED",
+                                "The saved r3 response cannot retain authorized evidence "
+                                "for every affected item.",
+                            )
+                        validate(candidate)
+                        repair_feedback = self._durable_rejection_feedback(previous, schema)
+                        effective_instructions = (
+                            instructions
+                            + "\nThe previous complete response was rejected. Correct these exact "
+                            "issues and return a shorter valid response without repeating invalid "
+                            "content: "
+                            + canonical_json(repair_feedback)
+                            + "\nFinal atomic-evidence repair: for every specs[i].items[*] "
+                            "entry, cite only evidence IDs from the matching node_key's "
+                            "knowledge_nodes[i].evidence_ids. Never cite a neighbouring "
+                            "node or any other source; recheck every item before returning."
+                        )
+                        self._persist_local_evidence_normalization(
+                            job_id=job_id,
+                            stage=stage,
+                            shard_key=shard_key,
+                            workspace_id=workspace_id,
+                            operation_id=str(previous["operation_id"]),
+                            schema=schema,
+                            instructions=effective_instructions,
+                            context=context,
+                            raw_output_hash=str(previous["output_hash"]),
+                            value=candidate,
+                        )
+                        return candidate, False
                     repair_feedback = self._durable_rejection_feedback(previous, schema)
                     repair = self._reserve_repair(
                         job_id, stage, shard_key, operation_base
@@ -1055,6 +1282,9 @@ class OrchestratorDraftGenerator:
                     "authorized_evidence": bounded_evidence,
                 },
                 validate=validate_specs,
+                normalize_local_recovery=lambda value, authorized=node_evidence: (
+                    self._normalize_atomic_evidence(value, authorized)
+                ),
             )
             model_calls += int(dispatched)
             specs.extend(cast(AutoKnowledgeSpecSetDraft, output).model_dump()["specs"])
@@ -1799,16 +2029,80 @@ class AutoKnowledgeMapService:
                         for item in blocked
                     )
                 )
+                evidence_scope_r3 = [
+                    operation
+                    for operation in evidence_scope_operations
+                    if operation.endswith("-r3")
+                ]
+                expected_evidence_scope_normalization_operations = (
+                    expected_evidence_scope_operations | {evidence_scope_r3[0]}
+                    if len(evidence_scope_r3) == 1
+                    else set()
+                )
+                scope_repair_receipt = connection.execute(
+                    "SELECT blocked_operation_ids_json FROM auto_knowledge_job_recovery_receipts "
+                    "WHERE job_id=? AND reason='EVIDENCE_SCOPE_REPAIR_V1'",
+                    (row["id"],),
+                ).fetchone()
+                original_scope_operations = (
+                    [
+                        evidence_scope_r2[0][:-3],
+                        evidence_scope_r2[0][:-3] + "-r1",
+                        evidence_scope_r2[0],
+                    ]
+                    if len(evidence_scope_r2) == 1
+                    else []
+                )
+                r3_reservation = (
+                    connection.execute(
+                        "SELECT 1 FROM auto_knowledge_repair_reservations "
+                        "WHERE job_id=? AND stage='TEACHING_SPEC' AND shard_key=? "
+                        "AND ordinal=3 AND operation_id=?",
+                        (
+                            row["id"],
+                            blocked[0]["shard_key"],
+                            evidence_scope_r3[0] if len(evidence_scope_r3) == 1 else "",
+                        ),
+                    ).fetchone()
+                    if blocked
+                    else None
+                )
+                exact_evidence_scope_normalization_failure = (
+                    len(blocked) == 4
+                    and len({str(item["shard_key"]) for item in blocked}) == 1
+                    and evidence_scope_operations
+                    == expected_evidence_scope_normalization_operations
+                    and scope_repair_receipt is not None
+                    and json.loads(str(scope_repair_receipt["blocked_operation_ids_json"]))
+                    == original_scope_operations
+                    and r3_reservation is not None
+                    and all(
+                        str(item["stage"]) == "TEACHING_SPEC"
+                        and str(item["status"]) == "BUSINESS_REJECTED"
+                        and str(item["rejection_code"]) == "AUTO_EVIDENCE_INVALID"
+                        and bool(str(item["output_text"] or "").strip())
+                        and len(str(item["output_hash"] or "")) == 64
+                        and evidence_scope_message
+                        in canonical_json(
+                            json.loads(str(item["rejection_detail_json"] or "{}"))
+                        )
+                        for item in blocked
+                    )
+                )
                 reason = (
-                    "REQUIRED_ITEM_REPAIR_V1"
-                    if exact_required_item_failure
+                    "EVIDENCE_SCOPE_NORMALIZATION_V1"
+                    if exact_evidence_scope_normalization_failure
                     else (
-                        "EVIDENCE_SCOPE_REPAIR_V1"
-                        if exact_evidence_scope_failure
+                        "REQUIRED_ITEM_REPAIR_V1"
+                        if exact_required_item_failure
                         else (
-                            "UNIQUE_KEY_REPAIR_V1"
-                            if exact_unique_key_failure
-                            else "PER_SHARD_REPAIR_SCOPE_V1"
+                            "EVIDENCE_SCOPE_REPAIR_V1"
+                            if exact_evidence_scope_failure
+                            else (
+                                "UNIQUE_KEY_REPAIR_V1"
+                                if exact_unique_key_failure
+                                else "PER_SHARD_REPAIR_SCOPE_V1"
+                            )
                         )
                     )
                 )
