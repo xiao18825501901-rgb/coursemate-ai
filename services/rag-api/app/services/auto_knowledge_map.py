@@ -1572,14 +1572,7 @@ class AutoKnowledgeMapService:
             "AND job.error_code IN ("
             "'DAILY_MODEL_CALL_QUOTA','AUTO_REPAIR_LIMIT',"
             "'AUTO_SOURCE_COVERAGE_INCOMPLETE','AUTO_ARTIFACT_CONFLICT') "
-            "AND receipt.status='FAILED' AND NOT EXISTS("
-            "SELECT 1 FROM auto_knowledge_job_recovery_receipts AS recovery "
-            "WHERE recovery.job_id=job.id AND recovery.reason=CASE job.error_code "
-            "WHEN 'DAILY_MODEL_CALL_QUOTA' THEN 'BACKGROUND_QUOTA_SCOPE_V1' "
-            "WHEN 'AUTO_REPAIR_LIMIT' THEN 'PER_SHARD_REPAIR_SCOPE_V1' "
-            "WHEN 'AUTO_SOURCE_COVERAGE_INCOMPLETE' "
-            "THEN 'FINAL_DISPOSITION_NORMALIZATION_V1' "
-            "ELSE 'REPAIRED_ARTIFACT_REHYDRATION_V1' END)"
+            "AND receipt.status='FAILED'"
         ).fetchall()
         for row in rows:
             operation_prefix = f"akm-{digest(str(row['id']))[:16]}-%"
@@ -1655,24 +1648,52 @@ class AutoKnowledgeMapService:
                     != "A persisted generation shard no longer matches its frozen input."
                 ):
                     continue
-                blocked = connection.execute(
-                    "SELECT artifact.model_operation_id "
+                blocked_rows = connection.execute(
+                    "SELECT artifact.model_operation_id,"
+                    "rejected.status AS rejected_status,"
+                    "rejected.rejection_detail_json,"
+                    "rejected.output_text "
                     "FROM auto_knowledge_job_artifacts AS artifact "
                     "JOIN auto_knowledge_model_attempts AS accepted "
                     "ON accepted.operation_id=artifact.model_operation_id "
-                    "WHERE artifact.job_id=? AND accepted.status='ACCEPTED' "
-                    "AND artifact.model_operation_id GLOB '*-r[12]' "
-                    "AND EXISTS(SELECT 1 FROM auto_knowledge_model_attempts AS rejected "
-                    "WHERE rejected.job_id=artifact.job_id "
+                    "JOIN auto_knowledge_model_attempts AS rejected "
+                    "ON rejected.job_id=artifact.job_id "
                     "AND rejected.stage=artifact.stage "
                     "AND rejected.shard_key=artifact.shard_key "
-                    "AND rejected.status IN ('BUSINESS_REJECTED','CONTRACT_REJECTED')) "
+                    "WHERE artifact.job_id=? AND accepted.status='ACCEPTED' "
+                    "AND artifact.model_operation_id GLOB '*-r[12]' "
+                    "AND rejected.status IN ('BUSINESS_REJECTED','CONTRACT_REJECTED') "
                     "ORDER BY artifact.model_operation_id",
                     (row["id"],),
                 ).fetchall()
-                reason = "REPAIRED_ARTIFACT_REHYDRATION_V1"
+                blocked = list(
+                    {str(item["model_operation_id"]): item for item in blocked_rows}.values()
+                )
                 if not blocked:
                     continue
+                first_rehydration = connection.execute(
+                    "SELECT 1 FROM auto_knowledge_job_recovery_receipts "
+                    "WHERE job_id=? AND reason='REPAIRED_ARTIFACT_REHYDRATION_V1'",
+                    (row["id"],),
+                ).fetchone()
+                legacy_feedback = any(
+                    item["rejected_status"] == "CONTRACT_REJECTED"
+                    and bool(str(item["output_text"] or "").strip())
+                    and json.loads(str(item["rejection_detail_json"] or "{}")) == {}
+                    for item in blocked_rows
+                )
+                if first_rehydration is None:
+                    reason = "REPAIRED_ARTIFACT_REHYDRATION_V1"
+                elif legacy_feedback:
+                    reason = "LEGACY_REJECTION_FEEDBACK_REHYDRATION_V1"
+                else:
+                    continue
+            if connection.execute(
+                "SELECT 1 FROM auto_knowledge_job_recovery_receipts "
+                "WHERE job_id=? AND reason=?",
+                (row["id"], reason),
+            ).fetchone() is not None:
+                continue
             receipt = {
                 "job_id": row["id"],
                 "target_key": row["target_key"],

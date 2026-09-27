@@ -41,6 +41,7 @@ V3_MIGRATIONS = (
     "043_auto_knowledge_model_attempts.sql",
     "044_auto_knowledge_background_budget_scope.sql",
     "045_auto_knowledge_local_recovery_reasons.sql",
+    "046_auto_knowledge_legacy_feedback_recovery.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -63,9 +64,12 @@ V3_REPLAY_SUPERSEDED_BY = {
     # Migration 045 rebuilds an immutable ledger to widen a CHECK enum and is
     # intentionally one-shot. Once its own ledger row exists, never replay it.
     "045_auto_knowledge_local_recovery_reasons.sql": 45,
+    # Migration 046 widens the same immutable recovery ledger for a second,
+    # narrowly proven historical replay. Never rebuild it after 046 commits.
+    "046_auto_knowledge_legacy_feedback_recovery.sql": 46,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 45
+LATEST_V3_SCHEMA_VERSION = 46
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (

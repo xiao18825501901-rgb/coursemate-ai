@@ -1,0 +1,56 @@
+-- A V45 repaired-artifact recovery could expose one more historical local
+-- incompatibility: older CONTRACT_REJECTED rows retained their complete model
+-- output but not the normalized validation detail used to hash a repair input.
+-- V46 adds one separately auditable, one-shot recovery reason. It does not
+-- alter jobs, sources, model attempts, artifacts, trees, progress or grades.
+
+DROP TRIGGER IF EXISTS immutable_auto_knowledge_recovery_update;
+DROP TRIGGER IF EXISTS immutable_auto_knowledge_recovery_delete;
+
+CREATE TABLE auto_knowledge_job_recovery_receipts_new (
+    id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL REFERENCES auto_knowledge_jobs(id) ON DELETE RESTRICT,
+    reason TEXT NOT NULL CHECK(reason IN (
+        'BACKGROUND_QUOTA_SCOPE_V1',
+        'PER_SHARD_REPAIR_SCOPE_V1',
+        'FINAL_DISPOSITION_NORMALIZATION_V1',
+        'REPAIRED_ARTIFACT_REHYDRATION_V1',
+        'LEGACY_REJECTION_FEEDBACK_REHYDRATION_V1'
+    )),
+    prior_receipt_json TEXT NOT NULL CHECK(json_valid(prior_receipt_json)),
+    prior_receipt_hash TEXT NOT NULL CHECK(
+        length(prior_receipt_hash)=64
+        AND prior_receipt_hash NOT GLOB '*[^0-9a-f]*'
+    ),
+    blocked_operation_ids_json TEXT NOT NULL CHECK(json_valid(blocked_operation_ids_json)),
+    created_at TEXT NOT NULL DEFAULT(strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    UNIQUE(job_id,reason)
+);
+
+INSERT INTO auto_knowledge_job_recovery_receipts_new(
+    id,job_id,reason,prior_receipt_json,prior_receipt_hash,
+    blocked_operation_ids_json,created_at
+)
+SELECT
+    id,job_id,reason,prior_receipt_json,prior_receipt_hash,
+    blocked_operation_ids_json,created_at
+FROM auto_knowledge_job_recovery_receipts;
+
+DROP TABLE auto_knowledge_job_recovery_receipts;
+ALTER TABLE auto_knowledge_job_recovery_receipts_new
+RENAME TO auto_knowledge_job_recovery_receipts;
+
+CREATE TRIGGER immutable_auto_knowledge_recovery_update
+BEFORE UPDATE ON auto_knowledge_job_recovery_receipts
+BEGIN
+    SELECT RAISE(ABORT, 'Automatic-map recovery receipts are immutable');
+END;
+
+CREATE TRIGGER immutable_auto_knowledge_recovery_delete
+BEFORE DELETE ON auto_knowledge_job_recovery_receipts
+BEGIN
+    SELECT RAISE(ABORT, 'Automatic-map recovery receipts are immutable');
+END;
+
+INSERT OR IGNORE INTO schema_migrations(version,name)
+VALUES(46,'automatic knowledge-map legacy rejection feedback recovery');

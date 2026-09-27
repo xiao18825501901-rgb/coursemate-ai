@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -1458,6 +1459,137 @@ def test_safe_validation_failure_uses_one_targeted_repair_and_reuses_stage_contr
         ).fetchone()[0]
     assert dict(recovered) == {"status": "QUEUED", "error_code": None}
     assert reason == "REPAIRED_ARTIFACT_REHYDRATION_V1"
+
+
+def test_legacy_rejection_feedback_allows_one_second_exact_recovery(
+    tmp_path: Path,
+) -> None:
+    """A historical empty rejection detail can be repaired once after V45.
+
+    Production can already contain the first immutable rehydration receipt:
+    that recovery exposed that older CONTRACT_REJECTED attempts did not retain
+    their normalized validation feedback.  The reconstructed feedback fix is a
+    distinct, bounded recovery and must never make the job generally retryable.
+    """
+
+    settings = settings_at(tmp_path).model_copy(
+        update={
+            "auto_knowledge_map_enabled": True,
+            "auto_knowledge_map_allow_billable": True,
+        }
+    )
+    database = Database(settings)
+    database.initialize()
+    private_workspace(database)
+    ready_document(
+        database,
+        document_id="legacy-feedback-doc",
+        chunk_id="legacy-feedback-chunk",
+        content="Legacy validation feedback must be reconstructed deterministically.",
+    )
+    learning = RepairingLearning()
+    service = AutoKnowledgeMapService(database, settings, learning)  # type: ignore[arg-type]
+    service.reconcile(force=True)
+    completed = service.run_once("legacy-feedback-worker")
+    assert completed is not None and completed["status"] == "READY"
+
+    with database.connect() as connection:
+        job = connection.execute("SELECT * FROM auto_knowledge_jobs").fetchone()
+        rejected = connection.execute(
+            "SELECT operation_id FROM auto_knowledge_model_attempts "
+            "WHERE job_id=? AND status='BUSINESS_REJECTED'",
+            (job["id"],),
+        ).fetchone()
+        connection.execute(
+            "UPDATE auto_knowledge_model_attempts SET status='CONTRACT_REJECTED',"
+            "output_text='{}',output_hash=?,rejection_code='ValidationError',"
+            "rejection_detail_json='{}' WHERE operation_id=?",
+            (hashlib.sha256(b"{}").hexdigest(), rejected["operation_id"]),
+        )
+        prior_receipt = {
+            "job_id": job["id"],
+            "target_key": job["target_key"],
+            "corpus_fingerprint": job["corpus_fingerprint"],
+            "status": "FAILED",
+            "source_snapshot_hash": digest(json.loads(job["source_snapshot_json"])),
+        }
+        prior_json = json.dumps(prior_receipt, sort_keys=True, separators=(",", ":"))
+        connection.execute(
+            "INSERT INTO auto_knowledge_job_recovery_receipts("
+            "id,job_id,reason,prior_receipt_json,prior_receipt_hash,"
+            "blocked_operation_ids_json) VALUES(?,?,?,?,?,'[]')",
+            (
+                "prior-repaired-artifact-recovery",
+                job["id"],
+                "REPAIRED_ARTIFACT_REHYDRATION_V1",
+                prior_json,
+                hashlib.sha256(prior_json.encode()).hexdigest(),
+            ),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='FAILED',"
+            "error_code='AUTO_ARTIFACT_CONFLICT',error_message=?,completed_at=? "
+            "WHERE id=?",
+            (
+                "A persisted generation shard no longer matches its frozen input.",
+                "2026-09-27T00:00:00.000Z",
+                job["id"],
+            ),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_targets SET status='FAILED' WHERE active_job_id=?",
+            (job["id"],),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_job_receipts SET status='FAILED',detail_json=? "
+            "WHERE job_id=?",
+            (json.dumps({"error_code": "AUTO_ARTIFACT_CONFLICT"}), job["id"]),
+        )
+
+    assert service.reconcile(force=True)["RECOVERED_SAFE_FAILURE"] == 1
+    with database.connect() as connection:
+        reasons = {
+            row[0]
+            for row in connection.execute(
+                "SELECT reason FROM auto_knowledge_job_recovery_receipts WHERE job_id=?",
+                (job["id"],),
+            ).fetchall()
+        }
+    assert reasons == {
+        "REPAIRED_ARTIFACT_REHYDRATION_V1",
+        "LEGACY_REJECTION_FEEDBACK_REHYDRATION_V1",
+    }
+
+    # The new recovery reason is immutable and one-shot. A repeat of the same
+    # terminal state remains visible instead of silently reopening again.
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='FAILED',"
+            "error_code='AUTO_ARTIFACT_CONFLICT',error_message=?,completed_at=? "
+            "WHERE id=?",
+            (
+                "A persisted generation shard no longer matches its frozen input.",
+                "2026-09-27T00:01:00.000Z",
+                job["id"],
+            ),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_targets SET status='FAILED' WHERE active_job_id=?",
+            (job["id"],),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_job_receipts("
+            "job_id,target_key,corpus_fingerprint,status,source_snapshot_hash,"
+            "model_calls_made,detail_json) VALUES(?,?,?,'FAILED',?,0,?)",
+            (
+                job["id"],
+                job["target_key"],
+                job["corpus_fingerprint"],
+                digest(json.loads(job["source_snapshot_json"])),
+                json.dumps({"error_code": "AUTO_ARTIFACT_CONFLICT"}),
+            ),
+        )
+    assert service.reconcile(force=True).get("RECOVERED_SAFE_FAILURE", 0) == 0
 
 
 def test_targeted_repair_budget_is_bounded_per_shard_not_per_course(
