@@ -1518,8 +1518,9 @@ def test_required_item_rejection_gets_one_audited_third_repair(
         chunk_id="required-repair-chunk",
         content="A grounded Teaching Spec still needs an explicit REQUIRED item.",
     )
+    learning = RecordingLearning()
     service = AutoKnowledgeMapService(
-        database, settings, RecordingLearning()  # type: ignore[arg-type]
+        database, settings, learning  # type: ignore[arg-type]
     )
     assert service.reconcile(force=True)["QUEUED"] == 1
 
@@ -1594,9 +1595,20 @@ def test_required_item_rejection_gets_one_audited_third_repair(
         )
     assert recovery["reason"] == "REQUIRED_ITEM_REPAIR_V1"
     assert json.loads(recovery["blocked_operation_ids_json"])[-1] == f"{base}-r2"
-    assert service.generator._reserve_repair(  # type: ignore[attr-defined]
-        str(job["id"]), "TEACHING_SPEC", "spec-00007", base
-    ) == 3
+    output, dispatched = service.generator._run_with_repairs(  # type: ignore[attr-defined]
+        job_id=str(job["id"]),
+        stage="TEACHING_SPEC",
+        shard_key="spec-00007",
+        operation_base=base,
+        workspace_id="workspace-a",
+        schema=AutoKnowledgeSpecSetDraft,
+        instructions="Historical Teaching Spec prompt that must remain byte-stable.",
+        context={"knowledge_nodes": [{"key": "core", "evidence_ids": ["e1"]}]},
+        validate=lambda _value: None,
+    )
+    assert dispatched is True
+    assert output.specs[0].items[0].requirement == "REQUIRED"
+    assert '"requirement": "REQUIRED"' in learning.calls[-1]["instructions"]
 
     with database.connect() as connection:
         repairs = connection.execute(
