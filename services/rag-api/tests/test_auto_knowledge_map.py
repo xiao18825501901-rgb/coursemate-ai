@@ -1492,6 +1492,126 @@ def test_legacy_job_level_repair_limit_resumes_only_known_rejected_shard(
     ]
 
 
+def test_required_item_rejection_gets_one_audited_third_repair(
+    tmp_path: Path,
+) -> None:
+    """A repeated, exact REQUIRED-item schema defect gets one final prompt repair.
+
+    The normal per-shard budget remains two.  This recovery is deliberately
+    narrower: all three rejected attempts are complete responses for the same
+    Teaching Spec shard, the latest one is ``-r2``, and every rejection records
+    the exact missing-REQUIRED-item validation issue observed in production.
+    """
+
+    settings = settings_at(tmp_path).model_copy(
+        update={
+            "auto_knowledge_map_enabled": True,
+            "auto_knowledge_map_allow_billable": True,
+        }
+    )
+    database = Database(settings)
+    database.initialize()
+    private_workspace(database)
+    ready_document(
+        database,
+        document_id="required-repair-doc",
+        chunk_id="required-repair-chunk",
+        content="A grounded Teaching Spec still needs an explicit REQUIRED item.",
+    )
+    service = AutoKnowledgeMapService(
+        database, settings, RecordingLearning()  # type: ignore[arg-type]
+    )
+    assert service.reconcile(force=True)["QUEUED"] == 1
+
+    issue = {
+        "code": "SCHEMA_INVALID",
+        "issues": [
+            {
+                "message": "Value error, Every atomic node needs at least one REQUIRED item",
+                "path": "specs.5",
+                "type": "value_error",
+            }
+        ],
+    }
+    with database.connect() as connection:
+        job = connection.execute("SELECT * FROM auto_knowledge_jobs").fetchone()
+        base = f"akm-{digest(str(job['id']))[:16]}-s-00007"
+        for ordinal, suffix in enumerate(("", "-r1", "-r2")):
+            operation = f"{base}{suffix}"
+            connection.execute(
+                "INSERT INTO auto_knowledge_model_attempts("
+                "operation_id,job_id,stage,shard_key,input_hash,status,"
+                "output_text,output_hash,rejection_code,rejection_detail_json) "
+                "VALUES(?,?,'TEACHING_SPEC','spec-00007',?,'CONTRACT_REJECTED',"
+                "'{}',?,'ValidationError',?)",
+                (
+                    operation,
+                    job["id"],
+                    str(ordinal) * 64,
+                    hashlib.sha256(b"{}").hexdigest(),
+                    json.dumps(issue),
+                ),
+            )
+            if ordinal:
+                connection.execute(
+                    "INSERT INTO auto_knowledge_repair_reservations("
+                    "job_id,stage,shard_key,ordinal,operation_id) VALUES(?,?,?,?,?)",
+                    (job["id"], "TEACHING_SPEC", "spec-00007", ordinal, operation),
+                )
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='FAILED',model_calls_made=3,"
+            "repair_calls_made=2,error_code='AUTO_REPAIR_LIMIT',"
+            "error_message='The two targeted repairs for this automatic-map shard "
+            "were exhausted.',completed_at=? WHERE id=?",
+            ("2026-09-27T07:10:28.902Z", job["id"]),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_targets SET status='FAILED' WHERE active_job_id=?",
+            (job["id"],),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_job_receipts("
+            "job_id,target_key,corpus_fingerprint,status,source_snapshot_hash,"
+            "model_calls_made,detail_json) VALUES(?,?,?,'FAILED',?,3,?)",
+            (
+                job["id"],
+                job["target_key"],
+                job["corpus_fingerprint"],
+                digest(json.loads(job["source_snapshot_json"])),
+                json.dumps({"error_code": "AUTO_REPAIR_LIMIT"}),
+            ),
+        )
+
+    assert service.reconcile(force=True)["RECOVERED_SAFE_FAILURE"] == 1
+    with database.connect() as connection:
+        recovery = connection.execute(
+            "SELECT reason,blocked_operation_ids_json "
+            "FROM auto_knowledge_job_recovery_receipts WHERE job_id=?",
+            (job["id"],),
+        ).fetchone()
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='RUNNING' WHERE id=?", (job["id"],)
+        )
+    assert recovery["reason"] == "REQUIRED_ITEM_REPAIR_V1"
+    assert json.loads(recovery["blocked_operation_ids_json"])[-1] == f"{base}-r2"
+    assert service.generator._reserve_repair(  # type: ignore[attr-defined]
+        str(job["id"]), "TEACHING_SPEC", "spec-00007", base
+    ) == 3
+
+    with database.connect() as connection:
+        repairs = connection.execute(
+            "SELECT ordinal,operation_id FROM auto_knowledge_repair_reservations "
+            "WHERE job_id=? AND stage='TEACHING_SPEC' AND shard_key='spec-00007' "
+            "ORDER BY ordinal",
+            (job["id"],),
+        ).fetchall()
+    assert [tuple(row) for row in repairs] == [
+        (1, f"{base}-r1"),
+        (2, f"{base}-r2"),
+        (3, f"{base}-r3"),
+    ]
+
+
 def test_safe_validation_failure_uses_one_targeted_repair_and_reuses_stage_contract(
     tmp_path: Path,
 ) -> None:

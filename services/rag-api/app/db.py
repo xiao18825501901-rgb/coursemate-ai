@@ -43,6 +43,7 @@ V3_MIGRATIONS = (
     "045_auto_knowledge_local_recovery_reasons.sql",
     "046_auto_knowledge_legacy_feedback_recovery.sql",
     "047_auto_knowledge_staged_course_workspace_recovery.sql",
+    "048_auto_knowledge_required_item_repair.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -71,9 +72,12 @@ V3_REPLAY_SUPERSEDED_BY = {
     # Migration 047 adds the only safe recovery reason for staged official
     # courses that were blocked before provider dispatch.
     "047_auto_knowledge_staged_course_workspace_recovery.sql": 47,
+    # Migration 048 grants one exact Teaching-Spec REQUIRED-item prompt repair
+    # and must never replay after its immutable receipt enum has been widened.
+    "048_auto_knowledge_required_item_repair.sql": 48,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 47
+LATEST_V3_SCHEMA_VERSION = 48
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (
