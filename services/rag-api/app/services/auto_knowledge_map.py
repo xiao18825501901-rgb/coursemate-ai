@@ -512,22 +512,32 @@ class OrchestratorDraftGenerator:
                 ).fetchone()[0]
             )
             ordinal = current + 1
-            required_item_recovery = connection.execute(
-                "SELECT blocked_operation_ids_json "
+            third_recovery_rows = connection.execute(
+                "SELECT reason,blocked_operation_ids_json "
                 "FROM auto_knowledge_job_recovery_receipts "
-                "WHERE job_id=? AND reason='REQUIRED_ITEM_REPAIR_V1'",
+                "WHERE job_id=? AND reason IN ("
+                "'REQUIRED_ITEM_REPAIR_V1','UNIQUE_KEY_REPAIR_V1')",
                 (job_id,),
-            ).fetchone()
-            authorized_third_repairs = (
-                set(json.loads(str(required_item_recovery["blocked_operation_ids_json"])))
-                if required_item_recovery is not None
-                else set()
+            ).fetchall()
+            authorized_third_repairs = {
+                str(row["reason"]): set(
+                    json.loads(str(row["blocked_operation_ids_json"]))
+                )
+                for row in third_recovery_rows
+            }
+            required_authorized = (
+                stage == "TEACHING_SPEC"
+                and f"{operation_base}-r2"
+                in authorized_third_repairs.get("REQUIRED_ITEM_REPAIR_V1", set())
+            )
+            unique_key_authorized = (
+                stage == "SECTION_MAP"
+                and f"{operation_base}-r2"
+                in authorized_third_repairs.get("UNIQUE_KEY_REPAIR_V1", set())
             )
             repair_limit = (
                 3
-                if required_item_recovery is not None
-                and stage == "TEACHING_SPEC"
-                and f"{operation_base}-r2" in authorized_third_repairs
+                if required_authorized or unique_key_authorized
                 else 2
             )
             if ordinal > repair_limit:
@@ -579,12 +589,14 @@ class OrchestratorDraftGenerator:
                 for row in connection.execute(
                     "SELECT reason FROM auto_knowledge_job_recovery_receipts "
                     "WHERE job_id=? AND reason IN ("
-                    "'PER_SHARD_REPAIR_SCOPE_V1','REQUIRED_ITEM_REPAIR_V1')",
+                    "'PER_SHARD_REPAIR_SCOPE_V1','REQUIRED_ITEM_REPAIR_V1',"
+                    "'UNIQUE_KEY_REPAIR_V1')",
                     (job_id,),
                 ).fetchall()
             }
             recovery = bool(recovery_reasons)
             required_item_recovery = "REQUIRED_ITEM_REPAIR_V1" in recovery_reasons
+            unique_key_recovery = "UNIQUE_KEY_REPAIR_V1" in recovery_reasons
             artifact = connection.execute(
                 "SELECT model_operation_id,created_at FROM auto_knowledge_job_artifacts "
                 "WHERE job_id=? AND stage=? AND shard_key=?",
@@ -649,6 +661,14 @@ class OrchestratorDraftGenerator:
                     "\nFinal REQUIRED-item repair: in every specs[i].items array, at "
                     "least one item must contain the exact field/value "
                     "\"requirement\": \"REQUIRED\". Check every supplied node."
+                )
+            if unique_key_recovery and repair == 3 and stage == "SECTION_MAP":
+                effective_instructions += (
+                    "\nFinal duplicate-key repair: every modules[i].key and "
+                    "nodes[i].key must be unique across this response. Rename each "
+                    "duplicate deterministically, then update every parent_key, "
+                    "prerequisite_keys and dispositions[*].node_keys reference to "
+                    "the renamed key before returning the complete response."
                 )
             try:
                 return self._run(
@@ -1715,10 +1735,27 @@ class AutoKnowledgeMapService:
                     )
                     for item in blocked
                 ) and any(str(item["operation_id"]).endswith("-r2") for item in blocked)
+                unique_key_message = "Automatic knowledge-map keys must be unique"
+                exact_unique_key_failure = all(
+                    str(item["stage"]) == "SECTION_MAP"
+                    and str(item["status"]) == "CONTRACT_REJECTED"
+                    and str(item["rejection_code"]) == "ValidationError"
+                    and bool(str(item["output_text"] or "").strip())
+                    and len(str(item["output_hash"] or "")) == 64
+                    and unique_key_message
+                    in canonical_json(
+                        json.loads(str(item["rejection_detail_json"] or "{}"))
+                    )
+                    for item in blocked
+                ) and any(str(item["operation_id"]).endswith("-r2") for item in blocked)
                 reason = (
                     "REQUIRED_ITEM_REPAIR_V1"
                     if exact_required_item_failure
-                    else "PER_SHARD_REPAIR_SCOPE_V1"
+                    else (
+                        "UNIQUE_KEY_REPAIR_V1"
+                        if exact_unique_key_failure
+                        else "PER_SHARD_REPAIR_SCOPE_V1"
+                    )
                 )
             elif row["error_code"] == "AUTO_SOURCE_COVERAGE_INCOMPLETE":
                 # V4 had already persisted every accepted shard before this

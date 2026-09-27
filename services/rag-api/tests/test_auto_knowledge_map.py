@@ -1765,6 +1765,159 @@ def test_required_item_rejection_gets_one_audited_third_repair(
     assert denied.value.code == "AUTO_REPAIR_LIMIT"
 
 
+def test_duplicate_map_keys_get_one_exact_audited_third_repair(tmp_path: Path) -> None:
+    """Only the exact repeated SECTION_MAP key defect may reserve r3."""
+
+    settings = settings_at(tmp_path).model_copy(
+        update={
+            "auto_knowledge_map_enabled": True,
+            "auto_knowledge_map_allow_billable": True,
+        }
+    )
+    database = Database(settings)
+    database.initialize()
+    private_workspace(database)
+    ready_document(
+        database,
+        document_id="duplicate-key-doc",
+        chunk_id="duplicate-key-chunk",
+        content="A complete section map must use unique stable keys.",
+    )
+    learning = RecordingLearning()
+    service = AutoKnowledgeMapService(
+        database, settings, learning  # type: ignore[arg-type]
+    )
+    assert service.reconcile(force=True)["QUEUED"] == 1
+
+    issue = {
+        "code": "SCHEMA_INVALID",
+        "issues": [
+            {
+                "message": "Value error, Automatic knowledge-map keys must be unique",
+                "path": "",
+                "type": "value_error",
+            }
+        ],
+    }
+    with database.connect() as connection:
+        job = connection.execute("SELECT * FROM auto_knowledge_jobs").fetchone()
+        base = f"akm-{digest(str(job['id']))[:16]}-m-00052"
+        for ordinal, suffix in enumerate(("", "-r1", "-r2")):
+            operation = f"{base}{suffix}"
+            connection.execute(
+                "INSERT INTO auto_knowledge_model_attempts("
+                "operation_id,job_id,stage,shard_key,input_hash,status,"
+                "output_text,output_hash,rejection_code,rejection_detail_json) "
+                "VALUES(?,?,'SECTION_MAP','map-00052',?,'CONTRACT_REJECTED',"
+                "'{}',?,'ValidationError',?)",
+                (
+                    operation,
+                    job["id"],
+                    str(ordinal) * 64,
+                    hashlib.sha256(b"{}").hexdigest(),
+                    json.dumps(issue),
+                ),
+            )
+            if ordinal:
+                connection.execute(
+                    "INSERT INTO auto_knowledge_repair_reservations("
+                    "job_id,stage,shard_key,ordinal,operation_id) VALUES(?,?,?,?,?)",
+                    (job["id"], "SECTION_MAP", "map-00052", ordinal, operation),
+                )
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='FAILED',model_calls_made=3,"
+            "repair_calls_made=2,error_code='AUTO_REPAIR_LIMIT',"
+            "error_message='The 2 targeted repairs for this automatic-map shard "
+            "were exhausted.',completed_at=? WHERE id=?",
+            ("2026-09-27T08:18:40.125Z", job["id"]),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_targets SET status='FAILED' WHERE active_job_id=?",
+            (job["id"],),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_job_receipts("
+            "job_id,target_key,corpus_fingerprint,status,source_snapshot_hash,"
+            "model_calls_made,detail_json) VALUES(?,?,?,'FAILED',?,3,?)",
+            (
+                job["id"],
+                job["target_key"],
+                job["corpus_fingerprint"],
+                digest(json.loads(job["source_snapshot_json"])),
+                json.dumps({"error_code": "AUTO_REPAIR_LIMIT"}),
+            ),
+        )
+
+    assert service.reconcile(force=True)["RECOVERED_SAFE_FAILURE"] == 1
+    with database.connect() as connection:
+        recovery = connection.execute(
+            "SELECT reason,blocked_operation_ids_json "
+            "FROM auto_knowledge_job_recovery_receipts WHERE job_id=?",
+            (job["id"],),
+        ).fetchone()
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='RUNNING' WHERE id=?", (job["id"],)
+        )
+    assert recovery["reason"] == "UNIQUE_KEY_REPAIR_V1"
+    assert json.loads(recovery["blocked_operation_ids_json"])[-1] == f"{base}-r2"
+
+    output, dispatched = service.generator._run_with_repairs(  # type: ignore[attr-defined]
+        job_id=str(job["id"]),
+        stage="SECTION_MAP",
+        shard_key="map-00052",
+        operation_base=base,
+        workspace_id="workspace-a",
+        schema=AutoKnowledgeMapDraft,
+        instructions="Build a grounded map for this frozen section shard.",
+        context={
+            "frozen_source_segments": [
+                {
+                    "id": "segment-1",
+                    "content": "Unique keys are required.",
+                }
+            ]
+        },
+        validate=lambda _value: None,
+    )
+    assert dispatched is True
+    assert output.nodes[0].key == "core"
+    assert "unique" in learning.calls[-1]["instructions"].lower()
+    assert "parent_key" in learning.calls[-1]["instructions"]
+
+    with database.connect() as connection:
+        repairs = connection.execute(
+            "SELECT ordinal,operation_id FROM auto_knowledge_repair_reservations "
+            "WHERE job_id=? AND stage='SECTION_MAP' AND shard_key='map-00052' "
+            "ORDER BY ordinal",
+            (job["id"],),
+        ).fetchall()
+    assert [tuple(row) for row in repairs] == [
+        (1, f"{base}-r1"),
+        (2, f"{base}-r2"),
+        (3, f"{base}-r3"),
+    ]
+
+    other_base = f"akm-{digest(str(job['id']))[:16]}-m-00053"
+    with database.connect() as connection:
+        for ordinal in (1, 2):
+            connection.execute(
+                "INSERT INTO auto_knowledge_repair_reservations("
+                "job_id,stage,shard_key,ordinal,operation_id) VALUES(?,?,?,?,?)",
+                (
+                    job["id"],
+                    "SECTION_MAP",
+                    "map-00053",
+                    ordinal,
+                    f"{other_base}-r{ordinal}",
+                ),
+            )
+    with pytest.raises(ApiError) as denied:
+        service.generator._reserve_repair(  # type: ignore[attr-defined]
+            str(job["id"]), "SECTION_MAP", "map-00053", other_base
+        )
+    assert denied.value.code == "AUTO_REPAIR_LIMIT"
+
+
 def test_safe_validation_failure_uses_one_targeted_repair_and_reuses_stage_contract(
     tmp_path: Path,
 ) -> None:
