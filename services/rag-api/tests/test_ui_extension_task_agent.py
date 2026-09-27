@@ -52,9 +52,15 @@ class _TaskStore:
         self.seen_credentials: list[str] = []
         self.chat_calls: list[dict[str, object]] = []
         self.create_bodies: list[dict[str, object]] = []
+        self.request_keys: dict[tuple[str, str], str] = {}
 
     def create(self, owner: str, body: dict[str, object]) -> dict[str, object]:
         self.create_bodies.append(dict(body))
+        request_key = body.get("idempotencyKey")
+        if isinstance(request_key, str):
+            existing_id = self.request_keys.get((owner, request_key))
+            if existing_id is not None:
+                return self.tasks[existing_id]
         self.counter += 1
         task_id = f"task_{self.counter:04d}"
         task = {
@@ -72,6 +78,8 @@ class _TaskStore:
         }
         self.tasks[task_id] = task
         self.owners[task_id] = owner
+        if isinstance(request_key, str):
+            self.request_keys[(owner, request_key)] = task_id
         return task
 
     def owned(self, owner: str) -> list[dict[str, object]]:
@@ -125,11 +133,19 @@ def _handler(store: _TaskStore):
             TypeScript type suggests it is optional.
             """
 
-            allowed = {"title", "notes", "courseId", "priority", "dueDate", "sourceCitation"}
+            allowed = {
+                "title", "idempotencyKey", "notes", "courseId", "priority",
+                "dueDate", "sourceCitation",
+            }
             if set(body) - allowed:
                 return False
             title = body.get("title")
             if not isinstance(title, str) or not 1 <= len(title) <= 200:
+                return False
+            request_key = body.get("idempotencyKey")
+            if request_key is not None and (
+                not isinstance(request_key, str) or not 8 <= len(request_key) <= 120
+            ):
                 return False
             if "priority" in body and body["priority"] not in {"low", "medium", "high"}:
                 return False
@@ -332,7 +348,9 @@ def test_optional_fields_are_omitted_rather_than_sent_as_invalid_nulls(
     task = next(iter(store.tasks.values()))
     assert task["priority"] is None
     assert "priority" not in store.create_bodies[0]
-    assert set(store.create_bodies[0]) <= {"title", "courseId", "dueDate"}
+    assert set(store.create_bodies[0]) <= {
+        "title", "idempotencyKey", "courseId", "dueDate"
+    }
     assert "notes" not in store.create_bodies[0]
 
 

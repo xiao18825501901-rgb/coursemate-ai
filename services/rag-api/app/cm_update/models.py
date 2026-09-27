@@ -145,6 +145,8 @@ class ShareCreate(Input):
 class ExerciseCreate(Input):
     pair_id: str|None=None
     node: str|None=None
+    cycle_id: str|None=Field(default=None,min_length=8,max_length=100)
+    purpose: Literal['TRANSFER','RECHECK']|None=None
     request_id: str=Field(min_length=8,max_length=100)
 
 class PracticeHintCreate(Input):
@@ -152,6 +154,31 @@ class PracticeHintCreate(Input):
 
 class PracticeAttemptCreate(Input):
     answer: str=Field(min_length=1,max_length=6000)
+    request_id: str=Field(min_length=8,max_length=100)
+
+class LearningLoopFollowupCreate(Input):
+    request_id: str=Field(min_length=8,max_length=100)
+    explicit_opt_in: Literal[True]
+    timezone: str=Field(min_length=1,max_length=80)
+    due_at: datetime|None=None
+    @field_validator('timezone')
+    @classmethod
+    def valid_followup_timezone(cls,v):
+        try: ZoneInfo(v)
+        except Exception: raise ValueError('Unknown timezone') from None
+        return v
+    @field_validator('due_at')
+    @classmethod
+    def aware_followup_due(cls,v):
+        if v is not None and v.tzinfo is None: raise ValueError('Timezone-aware timestamp required')
+        return v
+
+class LearningLoopDiagnosticCreate(Input):
+    request_id: str=Field(min_length=8,max_length=100)
+
+class LearningLoopCorrectionCreate(Input):
+    target_ref: str=Field(min_length=1,max_length=200)
+    reason_ref: str=Field(min_length=8,max_length=200)
     request_id: str=Field(min_length=8,max_length=100)
 
 class ExplanationCreate(Input):

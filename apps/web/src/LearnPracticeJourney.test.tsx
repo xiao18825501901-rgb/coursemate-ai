@@ -7,6 +7,9 @@ const api = vi.hoisted(() => ({
   requestExerciseHint: vi.fn(),
   submitPracticeAttempt: vi.fn(),
   createExercise: vi.fn(),
+  configureLearningDiagnostic: vi.fn(),
+  skipLearningDiagnostic: vi.fn(),
+  markLearningDiagnosticUnsure: vi.fn(),
 }));
 vi.mock('./ui/api.js', async original => ({ ...await original<object>(), ...api }));
 
@@ -32,6 +35,9 @@ beforeEach(() => {
   api.requestExerciseHint.mockReset();
   api.submitPracticeAttempt.mockReset();
   api.createExercise.mockReset();
+  api.configureLearningDiagnostic.mockReset();
+  api.skipLearningDiagnostic.mockReset();
+  api.markLearningDiagnosticUnsure.mockReset();
 });
 
 it('requests a real hint and submits a learner answer without touching the teaching lane', async () => {
@@ -82,7 +88,7 @@ it('renders accessible attempt, hint, reveal controls and re-practices the same 
   api.createExercise.mockResolvedValue({ id: 'run-2' });
   instance.watchExercise = vi.fn().mockResolvedValue(undefined);
   await instance.doExercise('node-1');
-  expect(api.createExercise).toHaveBeenCalledWith('course-1', 'node-1', 'pair-1');
+  expect(api.createExercise).toHaveBeenCalledWith('course-1', 'node-1', 'pair-1', null, null);
   instance.state.busy.problem = false;
 
   message.exercise_state.revealed = true;
@@ -91,5 +97,51 @@ it('renders accessible attempt, hint, reveal controls and re-practices the same 
   const again = screen.getByRole('button', { name: '再练同一目标' });
   fireEvent.click(again);
   await waitFor(() => expect(api.createExercise).toHaveBeenCalledTimes(2));
-  expect(api.createExercise).toHaveBeenLastCalledWith('course-1', 'node-1', 'pair-1');
+  expect(api.createExercise).toHaveBeenLastCalledWith('course-1', 'node-1', 'pair-1', null, null);
+});
+
+it('offers a skippable three-item diagnostic and records unsure without a formal grade', async () => {
+  const instance = page();
+  const base: any = {
+    id: 'exercise-1', node: 'node-1', learning_cycle_id: 'cycle-1', revealed: false,
+    evidence_card: {
+      diagnostic: {
+        status: 'NOT_STARTED', purpose: 'PRACTICE_NOT_FORMAL_ASSESSMENT',
+        skippable: true, items: [],
+      },
+    },
+  };
+  const first = render(instance.renderExercise({ exercise: 'exercise-1', exercise_state: base }));
+  expect(screen.getByRole('region', { name: '可选三题短诊断' })).toBeVisible();
+  expect(screen.getByRole('button', { name: '开始短诊断' })).toBeVisible();
+  expect(screen.getByRole('button', { name: '跳过' })).toBeVisible();
+  first.unmount();
+
+  const items = [1, 2, 3].map(index => ({
+    id: `assignment-${index}`,
+    question_revision_id: `question-${index}`,
+    prompt: `Diagnostic ${index}`,
+    response: null,
+  }));
+  api.configureLearningDiagnostic.mockResolvedValue({
+    status: 'AVAILABLE', purpose: 'PRACTICE_NOT_FORMAL_ASSESSMENT',
+    skippable: true, items,
+  });
+  await instance.startDiagnostic('exercise-1', base);
+  expect(api.configureLearningDiagnostic).toHaveBeenCalledWith('course-1', 'cycle-1');
+  expect(instance.state.exercises['exercise-1'].evidence_card.diagnostic.items).toHaveLength(3);
+
+  const configured = instance.state.exercises['exercise-1'];
+  api.markLearningDiagnosticUnsure.mockResolvedValue({
+    status: 'AVAILABLE',
+    responses: { 'question-1': 'UNSURE' },
+    formal_assessment_changed: false,
+  });
+  await instance.diagnosticUnsure('exercise-1', configured, 'assignment-1');
+  expect(api.markLearningDiagnosticUnsure).toHaveBeenCalledWith(
+    'course-1', 'cycle-1', 'assignment-1',
+  );
+  expect(
+    instance.state.exercises['exercise-1'].evidence_card.diagnostic.items[0].response,
+  ).toBe('UNSURE');
 });

@@ -40,6 +40,7 @@ const createValidator = ajv.compile({
   type: "object",
   properties: {
     title: taskProperties.title,
+    idempotencyKey: { type: "string", minLength: 8, maxLength: 120 },
     notes: taskProperties.notes,
     courseId: taskProperties.courseId,
     priority: taskProperties.priority,

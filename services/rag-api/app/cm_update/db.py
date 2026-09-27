@@ -17,10 +17,10 @@ def now() -> str:
 def uid(prefix: str = '') -> str:
     return prefix + uuid4().hex
 
-# Schema 14 retains the Schema-6 dual-lane model, the later account/theme
-# amendments, and adds the owner-scoped Question Engine revision trace for an
-# exercise. initialize() refuses a newer database.
-SCHEMA_VERSION = 14
+# Schema 15 adds only references into the authoritative RAG learning-loop
+# ledgers.  It deliberately does not copy cycle, assignment or evidence data
+# into the UI database.
+SCHEMA_VERSION = 15
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS cmui_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -256,6 +256,8 @@ CREATE TABLE IF NOT EXISTS cmui_exercises (
   verification_status TEXT NOT NULL DEFAULT 'unverified',
   generation_version TEXT NOT NULL DEFAULT 'V1',
   question_revision_id TEXT,
+  learning_cycle_id TEXT,
+  learning_assignment_id TEXT,
   run TEXT, created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS cmui_message_attachments (
@@ -369,6 +371,10 @@ class Database:
             exercise_columns = {r[1] for r in c.execute("PRAGMA table_info(cmui_exercises)")}
             if 'question_revision_id' not in exercise_columns:
                 c.execute("ALTER TABLE cmui_exercises ADD COLUMN question_revision_id TEXT")
+            if 'learning_cycle_id' not in exercise_columns:
+                c.execute("ALTER TABLE cmui_exercises ADD COLUMN learning_cycle_id TEXT")
+            if 'learning_assignment_id' not in exercise_columns:
+                c.execute("ALTER TABLE cmui_exercises ADD COLUMN learning_assignment_id TEXT")
             layout_columns = {r[1] for r in c.execute("PRAGMA table_info(cmui_layout)")}
             if 'teach_strength' not in layout_columns:
                 c.execute("ALTER TABLE cmui_layout ADD COLUMN teach_strength TEXT NOT NULL DEFAULT 'max' "

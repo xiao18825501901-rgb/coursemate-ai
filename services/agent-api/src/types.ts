@@ -25,6 +25,7 @@ export interface Task {
 
 export interface CreateTaskInput {
   title: string;
+  idempotencyKey?: string;
   notes?: string | null;
   courseId?: string | null;
   priority?: TaskPriority;

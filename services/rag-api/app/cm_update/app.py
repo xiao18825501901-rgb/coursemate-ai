@@ -10,7 +10,7 @@ import secrets
 import sqlite3
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import timezone
 from pathlib import Path
 from typing import Annotated
 
@@ -31,6 +31,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.errors import ApiError
 from app.jev import callsites
 from app.jev.capability_router import (
     CapabilityRequest,
@@ -61,6 +62,9 @@ from .models import (
     ExplanationCreate,
     ExplanationMessage,
     Layout,
+    LearningLoopFollowupCreate,
+    LearningLoopDiagnosticCreate,
+    LearningLoopCorrectionCreate,
     MessageCreate,
     PairBind,
     PairCreate,
@@ -489,6 +493,42 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
 
     async def remote(operation,user,payload,request):
         return await domain.call(operation,user['id'],payload,request.headers.get('authorization',''))
+
+    async def exercise_exposure(row,user,request,kind,channel,receipt):
+        if domain is None or not row.get('question_revision_id'):
+            return None
+        operation_hash=hashlib.sha256(
+            f'{kind}\0{channel}\0{receipt}'.encode()
+        ).hexdigest()
+        return await remote('knowledge.exercise.exposure',user,{
+            'course':row['course'],
+            'question_revision_id':row['question_revision_id'],
+            'assignment_id':row.get('learning_assignment_id'),
+            'operation_id':'ui-exposure-'+operation_hash,
+            'kind':kind,'channel':channel,'receipt':receipt,
+        },request)
+
+    async def evaluate_practice_job(job_key,user_id,course_id,question_revision_id,operation_id):
+        try:
+            await domain.call('knowledge.exercise.attempt.evaluate',user_id,{
+                'course':course_id,
+                'question_revision_id':question_revision_id,
+                'operation_id':operation_id,
+            },'')
+        except Exception:
+            # The authoritative job/operation ledgers retain FAILED versus
+            # UNKNOWN. Browser polling projects that state; there is no hidden
+            # paid retry here.
+            pass
+        finally:
+            jobs.pop(job_key,None)
+
+    def schedule_practice_evaluation(user_id,course_id,question_revision_id,operation_id):
+        job_key='practice-evaluation:'+operation_id
+        if job_key not in jobs:
+            jobs[job_key]=asyncio.create_task(evaluate_practice_job(
+                job_key,user_id,course_id,question_revision_id,operation_id,
+            ))
 
     async def course(user,cid,request,*,metadata=False):
         row=await remote('course.get',user,{'id':cid},request) if domain else get_course(db,user['id'],cid)
@@ -1144,12 +1184,29 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         source='generated' if (str(row['generation_version']).startswith('exercise.') or
             (run and run['user_text']=='做一题') or message.get('text')==row['question']) else 'user_problem'
         practice={'hint_count':0,'latest_hint':None,'latest_attempt':None}
+        evidence_card=None
         if domain is not None and row.get('question_revision_id'):
+            if revealed:
+                await exercise_exposure(
+                    row,user,request,'SOLUTION','HISTORY',
+                    'history:'+row['id'],
+                )
             practice=await remote('knowledge.exercise.state',user,{
                 'course':row['course'],'question_revision_id':row['question_revision_id']},request)
+            if row.get('learning_cycle_id'):
+                await remote('knowledge.learning_loop.reliability',user,{
+                    'course':row['course'],'cycle_id':row['learning_cycle_id'],
+                    'operation_id':'first-render-'+row['id'],
+                    'stage':'FIRST_RENDER','status':'SUCCEEDED',
+                },request)
+                evidence_card=await remote('knowledge.learning_loop.card',user,{
+                    'course':row['course'],'cycle_id':row['learning_cycle_id']},request)
         return {'id':row['id'],'source':source,'node':row['node'],'revealed':revealed,
                 'steps':json.loads(row['answer_steps']) if revealed else [],
                 'generation_version':row['generation_version'],'verification_status':row['verification_status'],
+                'learning_cycle_id':row.get('learning_cycle_id'),
+                'learning_assignment_id':row.get('learning_assignment_id'),
+                'evidence_card':evidence_card,
                 **practice}
 
     @r.get('/conversations/{conv_id}')
@@ -2306,7 +2363,10 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 return dict(n,review=True)
         raise HTTPException(409,'请先准备课程知识树或选择有效知识点')
 
-    async def generate_exercise_run(run_id,user,course_data,pair,node,node_title,sources,estimate_audit=None):
+    async def generate_exercise_run(
+        run_id,user,course_data,pair,node,node_title,sources,estimate_audit=None,
+        cycle_id=None,purpose=None,
+    ):
         if domain is not None:
             usages=[estimate_audit] if estimate_audit else []
             try:
@@ -2335,6 +2395,35 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 question_text=generated.public.question_text
                 steps=[step.model_dump(mode='json') for step in generated.private.steps]
                 references=[reference.model_dump(mode='json') for reference in generated.references]
+                loop_cycle_id=None
+                loop_assignment_id=None
+                if cycle_id:
+                    assignment=await domain.call('knowledge.learning_loop.assign',user['id'],{
+                        'course':course_data['id'],
+                        'cycle_id':cycle_id,
+                        'question_revision_id':generated.question_revision_id,
+                        'purpose':purpose or 'TRANSFER',
+                        'operation_id':run_id+'-loop-assign',
+                    },'')
+                    loop_cycle_id=assignment['cycle_id']
+                    loop_assignment_id=assignment['id']
+                else:
+                    try:
+                        cycle=await domain.call('knowledge.learning_loop.start',user['id'],{
+                            'course':course_data['id'],
+                            'pair_ref':pair['id'],
+                            'node_id':(node or {}).get('id') if isinstance(node,dict) else node,
+                            'question_revision_id':generated.question_revision_id,
+                            'operation_id':run_id+'-loop-start',
+                        },'')
+                        loop_cycle_id=cycle['id']
+                        loop_assignment_id=cycle['initial_assignment']['id']
+                    except ApiError as error:
+                        if error.code!='LEARNING_LOOP_NOT_ACTIVE_FOR_TARGET':
+                            raise
+                    except HTTPException as error:
+                        if str(error.detail)!='LEARNING_LOOP_NOT_ACTIVE_FOR_TARGET':
+                            raise
                 exercise_id=uid('exercise_')
                 with db.connect(True) as c:
                     claimed=c.execute(
@@ -2347,15 +2436,16 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                         'INSERT INTO cmui_exercises('
                         'id,owner,course,pair,node,target_node,question,answer_steps,'
                         'references_json,verification_status,generation_version,'
-                        'question_revision_id,run,created_at) '
-                        'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                        'question_revision_id,learning_cycle_id,learning_assignment_id,'
+                        'run,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                         (
                             exercise_id,user['id'],course_data['id'],pair['id'],
                             (node or {}).get('id') if isinstance(node,dict) else node,
                             node_title,question_text,json.dumps(steps,ensure_ascii=False),
                             json.dumps(references,ensure_ascii=False),
                             generated.verification_status,generated.generation_version,
-                            generated.question_revision_id,run_id,now(),
+                            generated.question_revision_id,loop_cycle_id,loop_assignment_id,
+                            run_id,now(),
                         ),
                     )
                     message_id=uid('message_')
@@ -2485,6 +2575,8 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
     async def exercise_create(cid:str,data:ExerciseCreate,user:User,request:Request):
         course_data=await course(user,cid,request)
         course_gate(course_data,user)
+        if data.purpose and not data.cycle_id:
+            raise HTTPException(422,'迁移题用途必须绑定学习闭环')
         old=db.one('SELECT * FROM cmui_runs WHERE owner=? AND request_id=?',(user['id'],data.request_id))
         digest=hashlib.sha256(json.dumps({'course':cid,**data.model_dump(exclude={'request_id'})},sort_keys=True).encode()).hexdigest()
         if old:
@@ -2534,7 +2626,10 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 (rid,user['id'],conv_id,data.request_id,'queued','做一题','normal',strength,str(budget.baseline_usd) if budget and budget.baseline_usd is not None else None,str(budget.estimated_usd) if budget and budget.estimated_usd is not None else None,str(budget.application_usd_cap) if budget and budget.application_usd_cap is not None else None,json.dumps([estimate.audit()]) if estimate else '[]',worker_id,str(time.time()),now(),now()))
             c.execute('INSERT INTO cmui_run_inputs VALUES (?,?,?)',(rid,digest,'[]'))
         event(rid,'status',{'status':'queued','label':'正在思考中'})
-        task=asyncio.create_task(generate_exercise_run(rid,user,course_data,pair,node,node_title,sources,estimate.audit() if estimate else None))
+        task=asyncio.create_task(generate_exercise_run(
+            rid,user,course_data,pair,node,node_title,sources,
+            estimate.audit() if estimate else None,data.cycle_id,data.purpose,
+        ))
         jobs[rid]=task
         return {'id':rid,'status':'queued'}
 
@@ -2560,13 +2655,88 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         source='generated' if (str(row['generation_version']).startswith('exercise.') or
             (run and run['user_text']=='做一题') or (message and message['text']==row['question'])) else 'user_problem'
         practice={'hint_count':0,'latest_hint':None,'latest_attempt':None}
+        evidence_card=None
         if domain is not None and row.get('question_revision_id'):
+            if revealed:
+                await exercise_exposure(
+                    row,user,request,'SOLUTION','PROBLEM_PANE',
+                    'problem-pane:'+exercise_id,
+                )
             practice=await remote('knowledge.exercise.state',user,{
                 'course':row['course'],'question_revision_id':row['question_revision_id']},request)
+            pending=practice.get('latest_attempt') or {}
+            if pending.get('status')=='PENDING' and pending.get('operation_id'):
+                schedule_practice_evaluation(
+                    user['id'],row['course'],row['question_revision_id'],pending['operation_id'],
+                )
+            if row.get('learning_cycle_id'):
+                await remote('knowledge.learning_loop.reliability',user,{
+                    'course':row['course'],'cycle_id':row['learning_cycle_id'],
+                    'operation_id':'first-render-'+row['id'],
+                    'stage':'FIRST_RENDER','status':'SUCCEEDED',
+                },request)
+                evidence_card=await remote('knowledge.learning_loop.card',user,{
+                    'course':row['course'],'cycle_id':row['learning_cycle_id']},request)
         return {'id':row['id'],'course':row['course'],'node':row['node'],'target_node':row['target_node'],
             'question':row['question'],'source':source,'revealed':revealed,'verification_status':row['verification_status'],
             'generation_version':row['generation_version'],'created_at':row['created_at'],
+            'learning_cycle_id':row.get('learning_cycle_id'),
+            'learning_assignment_id':row.get('learning_assignment_id'),
+            'evidence_card':evidence_card,
             'steps':json.loads(row['answer_steps']) if revealed else [],**practice}
+
+    @r.post('/courses/{cid}/learning-loops/{cycle_id}/followups',status_code=202)
+    async def learning_loop_followup(cid:str,cycle_id:str,data:LearningLoopFollowupCreate,user:User,request:Request):
+        course_data=await course(user,cid,request)
+        course_gate(course_data,user)
+        return await remote('knowledge.learning_loop.followup',user,{
+            'course':cid,'cycle_id':cycle_id,'operation_id':data.request_id,
+            'explicit_opt_in':data.explicit_opt_in,'timezone':data.timezone,
+            'due_at':data.due_at.isoformat() if data.due_at else None,
+        },request)
+
+    @r.post('/courses/{cid}/learning-loops/{cycle_id}/diagnostic')
+    async def learning_loop_diagnostic(cid:str,cycle_id:str,data:LearningLoopDiagnosticCreate,user:User,request:Request):
+        course_data=await course(user,cid,request)
+        course_gate(course_data,user)
+        return await remote('knowledge.learning_loop.diagnostic.configure',user,{
+            'course':cid,'cycle_id':cycle_id,'operation_id':data.request_id,
+        },request)
+
+    @r.post('/courses/{cid}/learning-loops/{cycle_id}/diagnostic/skip')
+    async def learning_loop_diagnostic_skip(cid:str,cycle_id:str,data:LearningLoopDiagnosticCreate,user:User,request:Request):
+        course_data=await course(user,cid,request)
+        course_gate(course_data,user)
+        return await remote('knowledge.learning_loop.diagnostic.skip',user,{
+            'course':cid,'cycle_id':cycle_id,'operation_id':data.request_id,
+        },request)
+
+    @r.post('/courses/{cid}/learning-loops/{cycle_id}/diagnostic/{assignment_id}/unsure')
+    async def learning_loop_diagnostic_unsure(cid:str,cycle_id:str,assignment_id:str,data:LearningLoopDiagnosticCreate,user:User,request:Request):
+        course_data=await course(user,cid,request)
+        course_gate(course_data,user)
+        return await remote('knowledge.learning_loop.diagnostic.unsure',user,{
+            'course':cid,'cycle_id':cycle_id,'assignment_id':assignment_id,
+            'operation_id':data.request_id,
+        },request)
+
+    @r.get('/admin/learning-loops/metrics')
+    async def learning_loop_metrics(user:User,request:Request):
+        if not is_admin(user): raise HTTPException(403,'仅管理员可以查看学习闭环运营指标')
+        return await remote('knowledge.learning_loop.metrics',user,{},request)
+
+    @r.get('/admin/learning-loops/dependencies')
+    async def learning_loop_dependencies(user:User,request:Request,target_ref:str=Query(min_length=1,max_length=200)):
+        if not is_admin(user): raise HTTPException(403,'仅管理员可以预览更正影响')
+        return await remote('knowledge.learning_loop.dependencies',user,{'target_ref':target_ref},request)
+
+    @r.post('/admin/learning-loops/corrections')
+    async def learning_loop_correction(data:LearningLoopCorrectionCreate,user:User,request:Request):
+        if not is_admin(user): raise HTTPException(403,'仅管理员可以执行学习证据更正')
+        return await remote('knowledge.learning_loop.withdraw',user,{
+            'operation_id':data.request_id,'target_ref':data.target_ref,
+            'reason_ref':data.reason_ref,
+        },request)
 
     def practice_question(row):
         if not row:
@@ -2592,20 +2762,24 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         await practice_billable_gate(user,row['course'])
         return await remote('knowledge.exercise.hint',user,{
             'course':row['course'],'question_revision_id':row['question_revision_id'],
+            'assignment_id':row.get('learning_assignment_id'),
             'operation_id':data.request_id},request)
 
-    @r.post('/exercises/{exercise_id}/attempts')
+    @r.post('/exercises/{exercise_id}/attempts',status_code=202)
     async def exercise_attempt(exercise_id:str,data:PracticeAttemptCreate,user:User,request:Request):
         row=db.one('SELECT * FROM cmui_exercises WHERE id=? AND owner=?',(exercise_id,user['id']))
         practice_question(row)
         course_data=await course(user,row['course'],request)
         course_gate(course_data,user)
-        revealed=bool(db.one('SELECT 1 FROM cmui_answer_reveals WHERE owner=? AND exercise=?',(user['id'],exercise_id)))
         await practice_billable_gate(user,row['course'])
-        return await remote('knowledge.exercise.attempt',user,{
+        pending=await remote('knowledge.exercise.attempt',user,{
             'course':row['course'],'question_revision_id':row['question_revision_id'],
             'operation_id':data.request_id,'submitted_answer':data.answer,
-            'answer_revealed':revealed},request)
+            'assignment_id':row.get('learning_assignment_id')},request)
+        schedule_practice_evaluation(
+            user['id'],row['course'],row['question_revision_id'],data.request_id,
+        )
+        return pending
 
     @r.post('/exercises/{exercise_id}/reveal')
     async def exercise_reveal(exercise_id:str,user:User,request:Request):
@@ -2624,12 +2798,15 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         response={'id':row['id'],'revealed':True,'steps':steps,'verification_status':row['verification_status']}
         with db.connect(True) as c:
             replay=action_receipt(c,user['id'],request_id,digest)
-            if replay is not None: return replay
-            if c.execute('SELECT 1 FROM cmui_runs WHERE owner=? AND request_id=?',(user['id'],request_id)).fetchone():
-                raise HTTPException(409,'重复请求 ID 的内容不同')
-            c.execute('INSERT OR IGNORE INTO cmui_answer_reveals(owner,exercise,revealed_at) VALUES (?,?,?)',(user['id'],exercise_id,now()))
-            action_receipt(c,user['id'],request_id,digest,response)
-        return response
+            if replay is None:
+                if c.execute('SELECT 1 FROM cmui_runs WHERE owner=? AND request_id=?',(user['id'],request_id)).fetchone():
+                    raise HTTPException(409,'重复请求 ID 的内容不同')
+                c.execute('INSERT OR IGNORE INTO cmui_answer_reveals(owner,exercise,revealed_at) VALUES (?,?,?)',(user['id'],exercise_id,now()))
+                action_receipt(c,user['id'],request_id,digest,response)
+        await exercise_exposure(
+            row,user,request,'SOLUTION','PROBLEM_PANE','reveal:'+exercise_id,
+        )
+        return replay if replay is not None else response
 
     # =========================================================== explanations
 
@@ -2710,6 +2887,10 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         steps=json.loads(row['answer_steps'])
         step=next((s for s in steps if s['step_id']==step_id),None)
         if not step: raise HTTPException(404,'该步骤不存在')
+        await exercise_exposure(
+            row,user,request,'DETAIL','DETAIL_WINDOW',
+            'detail:'+exercise_id+':'+step_id,
+        )
         digest=hashlib.sha256(json.dumps(['explanation',exercise_id,step_id,row['generation_version']]).encode()).hexdigest()
         replay=explanation_replay(user,data.request_id,digest)
         if replay: return replay

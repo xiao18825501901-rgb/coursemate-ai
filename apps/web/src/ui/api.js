@@ -81,11 +81,15 @@ export const renamePair = (id, title) => send('/pairs/' + id, { title }, 'PATCH'
 export const deletePair = (id) => remove('/pairs/' + id);
 export const bindPair = (id, node) => send(`/pairs/${id}/bind`, { node });
 // Exercises (做一题) and reveals.
-export const createExercise = (courseId, node = null, pairId = null) => send(`/courses/${courseId}/exercises`, { request_id: key(), node, pair_id: pairId });
+export const createExercise = (courseId, node = null, pairId = null, cycleId = null, purpose = null) => send(`/courses/${courseId}/exercises`, { request_id: key(), node, pair_id: pairId, cycle_id: cycleId, purpose });
 export const getExercise = (id) => request('/exercises/' + id);
 export const revealExercise = (id) => send(`/exercises/${id}/reveal`, { request_id: key() });
 export const requestExerciseHint = (id) => send(`/exercises/${id}/hints`, { request_id: key() });
 export const submitPracticeAttempt = (id, answer) => send(`/exercises/${id}/attempts`, { answer, request_id: key() });
+export const scheduleLearningFollowup = (courseId, cycleId, timezone) => send(`/courses/${courseId}/learning-loops/${cycleId}/followups`, { request_id: key(), explicit_opt_in: true, timezone });
+export const configureLearningDiagnostic = (courseId, cycleId) => send(`/courses/${courseId}/learning-loops/${cycleId}/diagnostic`, { request_id: key() });
+export const skipLearningDiagnostic = (courseId, cycleId) => send(`/courses/${courseId}/learning-loops/${cycleId}/diagnostic/skip`, { request_id: key() });
+export const markLearningDiagnosticUnsure = (courseId, cycleId, assignmentId) => send(`/courses/${courseId}/learning-loops/${cycleId}/diagnostic/${assignmentId}/unsure`, { request_id: key() });
 // Step explanations (详解) and follow-ups.
 export const createExplanation = (exerciseId, stepId) => send(`/exercises/${exerciseId}/steps/${stepId}/explanation`, { request_id: key() });
 export const getExplanation = (id) => request('/explanations/' + id);

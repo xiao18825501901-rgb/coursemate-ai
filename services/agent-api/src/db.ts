@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   completed_at TEXT
+  ,request_key TEXT
 );
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -63,6 +64,9 @@ export class AgentDatabase {
         `ALTER TABLE tasks ADD COLUMN owner_user_id TEXT NOT NULL DEFAULT '${LEGACY_OWNER_USER_ID}'`,
       );
     }
+    if (!columns.some((column) => column.name === "request_key")) {
+      this.connection.exec("ALTER TABLE tasks ADD COLUMN request_key TEXT");
+    }
     this.connection.exec(`
       CREATE INDEX IF NOT EXISTS idx_tasks_owner_status_due
       ON tasks(owner_user_id, status, due_date);
@@ -70,13 +74,17 @@ export class AgentDatabase {
       ON tasks(owner_user_id, course_id, status);
       INSERT OR IGNORE INTO schema_migrations (version, name)
       VALUES (1, 'task ownership and per-user limits');
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_owner_request_key
+      ON tasks(owner_user_id, request_key) WHERE request_key IS NOT NULL;
+      INSERT OR IGNORE INTO schema_migrations (version, name)
+      VALUES (2, 'idempotent task creation key');
     `);
   }
 
   isReady(): boolean {
     try {
       const migration = this.connection
-        .prepare("SELECT 1 AS ready FROM schema_migrations WHERE version = 1")
+        .prepare("SELECT 1 AS ready FROM schema_migrations WHERE version = 2")
         .get() as { ready: number } | undefined;
       return migration?.ready === 1;
     } catch {

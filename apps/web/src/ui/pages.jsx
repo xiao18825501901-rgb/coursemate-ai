@@ -2,7 +2,7 @@ import { BRAND } from "../brand";
 import { RichText } from './richtext.jsx';
 import { DirectoryPicker } from './DirectoryPicker.jsx';
 import React from 'react';
-import { request, send, remove, download, key, streamEvents, listPairs, getPair, createPair, renamePair, deletePair, bindPair, createExercise, revealExercise, requestExerciseHint, submitPracticeAttempt, createExplanation, getExplanation, postExplanationMessage, cancelExplanation, searchPeople, listShares, getShare, createShare, joinShare, getAssessment, getAssessmentSetup, startAssessment, getAssessmentSession, submitAssessment, abandonAssessment, saveAssessmentDraft, loadAssessmentDraft, cancelPreparation, resumePreparation, createAssessmentExplanation, submitFeedback } from './api.js';
+import { request, send, remove, download, key, streamEvents, listPairs, getPair, createPair, renamePair, deletePair, bindPair, createExercise, revealExercise, requestExerciseHint, submitPracticeAttempt, scheduleLearningFollowup, configureLearningDiagnostic, skipLearningDiagnostic, markLearningDiagnosticUnsure, createExplanation, getExplanation, postExplanationMessage, cancelExplanation, searchPeople, listShares, getShare, createShare, joinShare, getAssessment, getAssessmentSetup, startAssessment, getAssessmentSession, submitAssessment, abandonAssessment, saveAssessmentDraft, loadAssessmentDraft, cancelPreparation, resumePreparation, createAssessmentExplanation, submitFeedback } from './api.js';
 import { dateKey, zonedParts, wallTimeToISO, formatBytes, formatTime, goto } from './utils.js';
 import { citationVerdict } from './citationSupport.js';
 import { referenceVerificationNote } from './referenceVerification.js';
@@ -758,9 +758,9 @@ export class Learn extends React.Component {
     }
     async stop(lane) { const rid = this.state.run[lane]; if (rid)
         await send('/runs/' + rid + '/cancel', {}); }
-    async doExercise(explicitNode = null) { const lane = 'problem'; if (this.state.busy.problem)
+    async doExercise(explicitNode = null, cycleId = null, purpose = null) { const lane = 'problem'; if (this.state.busy.problem)
         return; this.follow.problem = true; this.setLane('busy', lane, true); this.setLane('partial', lane, ''); this.setLane('status', lane, '正在出题…'); try {
-        const run = await createExercise(this.props.course.id, explicitNode, this.state.pair?.id || this.state.pair);
+        const run = await createExercise(this.props.course.id, explicitNode, this.state.pair?.id || this.state.pair, cycleId, purpose);
         this.setLane('run', lane, run.id);
         await this.watchExercise(run.id);
     }
@@ -823,7 +823,21 @@ export class Learn extends React.Component {
         this.setPracticeBusy(exerciseId, true); try {
             const attempt = await submitPracticeAttempt(exerciseId, answer);
             this.mergeExercise(exerciseId, base, { latest_attempt: attempt });
+            if (['PENDING','RUNNING'].includes(attempt.status)) this.pollPracticeEvaluation(exerciseId, base);
         } catch (e) { this.props.toast(e.message); } finally { this.setPracticeBusy(exerciseId, false); }
+    }
+    async pollPracticeEvaluation(exerciseId, base) {
+        for (let n = 0; n < 120 && !this.unmounted; n += 1) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            try {
+                const current = await getExercise(exerciseId);
+                this.mergeExercise(exerciseId, base, current);
+                const status = current.latest_attempt?.status;
+                if (!['PENDING','RUNNING'].includes(status)) return;
+            } catch (error) {
+                if (n === 119) this.props.toast(error.message);
+            }
+        }
     }
     async revealSteps(exerciseId, base = null) { try {
         const revealed = await revealExercise(exerciseId);
@@ -832,13 +846,70 @@ export class Learn extends React.Component {
     catch (e) {
         this.props.toast(e.message);
     } }
+    mergeDiagnostic(exerciseId, ex, update) {
+        const current = ex.evidence_card?.diagnostic || {};
+        const responses = update.responses || {};
+        const items = (update.items || current.items || []).map(item => ({
+            ...item,
+            response: responses[item.question_revision_id] || item.response || null,
+        }));
+        this.mergeExercise(exerciseId, ex, {
+            evidence_card: {
+                ...(ex.evidence_card || {}),
+                diagnostic: { ...current, ...update, items },
+            },
+        });
+    }
+    async startDiagnostic(exerciseId, ex) { if (this.state.practiceBusy[exerciseId]) return;
+        this.setPracticeBusy(exerciseId, true); try {
+            const diagnostic = await configureLearningDiagnostic(this.props.course.id, ex.learning_cycle_id);
+            this.mergeDiagnostic(exerciseId, ex, diagnostic);
+        } catch (e) { this.props.toast(e.message); } finally { this.setPracticeBusy(exerciseId, false); }
+    }
+    async skipDiagnostic(exerciseId, ex) { if (this.state.practiceBusy[exerciseId]) return;
+        this.setPracticeBusy(exerciseId, true); try {
+            const diagnostic = await skipLearningDiagnostic(this.props.course.id, ex.learning_cycle_id);
+            this.mergeDiagnostic(exerciseId, ex, diagnostic);
+        } catch (e) { this.props.toast(e.message); } finally { this.setPracticeBusy(exerciseId, false); }
+    }
+    async diagnosticUnsure(exerciseId, ex, assignmentId) { if (this.state.practiceBusy[exerciseId]) return;
+        this.setPracticeBusy(exerciseId, true); try {
+            const diagnostic = await markLearningDiagnosticUnsure(this.props.course.id, ex.learning_cycle_id, assignmentId);
+            this.mergeDiagnostic(exerciseId, ex, diagnostic);
+        } catch (e) { this.props.toast(e.message); } finally { this.setPracticeBusy(exerciseId, false); }
+    }
+    renderDiagnostic(exerciseId, ex, busy) {
+        const diagnostic = ex.evidence_card?.diagnostic;
+        if (!ex.learning_cycle_id || !diagnostic) return null;
+        if (diagnostic.status === 'NOT_STARTED') return <section className="practice-feedback learning-loop-diagnostic" aria-label="可选三题短诊断"><div className="practice-feedback-title"><strong>可选三题短诊断</strong><span>练习，不计入正式测评</span></div><p>三题分别关注规则与条件、基本应用和典型误区。可以直接开始，也可以跳过，不会锁定课程。</p><div className="practice-controls"><button type="button" className="btn practice-submit" disabled={busy} onClick={() => this.startDiagnostic(exerciseId, ex)}>开始短诊断</button><button type="button" className="btn" disabled={busy} onClick={() => this.skipDiagnostic(exerciseId, ex)}>跳过</button></div></section>;
+        if (diagnostic.status === 'SKIPPED') return <p className="helper-note" role="status">已跳过短诊断，可继续当前练习。</p>;
+        const items = diagnostic.items || [];
+        return <section className="practice-feedback learning-loop-diagnostic" aria-label="三题短诊断"><div className="practice-feedback-title"><strong>三题短诊断</strong><span>{diagnostic.status === 'COMPLETED' ? '已完成' : '可随时跳过'}</span></div><ol>{items.map(item => <li key={item.id}><p>{item.prompt}</p>{item.response ? <span className="helper-note">已记录：不确定（不计为0分）</span> : <button type="button" className="btn" disabled={busy} onClick={() => this.diagnosticUnsure(exerciseId, ex, item.id)}>我不确定</button>}</li>)}</ol>{diagnostic.status !== 'COMPLETED' && <button type="button" className="btn" disabled={busy} onClick={() => this.skipDiagnostic(exerciseId, ex)}>跳过剩余诊断</button>}</section>;
+    }
+    async optInFollowup(exerciseId, ex) { if (this.state.practiceBusy[exerciseId]) return;
+        this.setPracticeBusy(exerciseId, true); try {
+            const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Hong_Kong';
+            const followup = await scheduleLearningFollowup(this.props.course.id, ex.learning_cycle_id, timezone);
+            this.mergeExercise(exerciseId, ex, { followup });
+            this.props.toast(followup.status === 'BOUND' ? '7天复查已加入学习计划' : '复查意愿已保存，任务状态待核对');
+        } catch (e) { this.props.toast(e.message); } finally { this.setPracticeBusy(exerciseId, false); }
+    }
     renderExercise(m) {
         const ex = this.state.exercises[m.exercise] || m.exercise_state || {};
         const revealed = !!ex.revealed, busy = !!this.state.practiceBusy[m.exercise];
         const hint = ex.latest_hint, attempt = ex.latest_attempt;
+        const evaluationPending = attempt && ['PENDING','RUNNING'].includes(attempt.status);
+        const evaluationFailed = attempt && ['FAILED','UNKNOWN'].includes(attempt.status);
         return <div className="exercise-actions">
+            {this.renderDiagnostic(m.exercise, ex, busy)}
             {hint && <div className="practice-hint" role="status"><strong>提示</strong><p>{hint.hint}</p><small>{hint.strategy}</small></div>}
-            {attempt && <div className={'practice-feedback verdict-' + String(attempt.verdict || '').toLowerCase()} role="status"><div className="practice-feedback-title"><strong>{attempt.verdict === 'CORRECT' ? '回答正确' : attempt.verdict === 'PARTIAL' ? '部分正确' : attempt.verdict === 'INCORRECT' ? '需要修正' : '需要复核'}</strong><span>{attempt.independent ? '独立作答' : attempt.assistance === 'ANSWER_REVEALED' ? '答案揭晓后作答' : '提示后作答'}</span></div><p>{attempt.feedback}</p>{attempt.strengths?.length > 0 && <p><b>做得好：</b>{attempt.strengths.join('；')}</p>}{attempt.gaps?.length > 0 && <p><b>还需补充：</b>{attempt.gaps.join('；')}</p>}<p><b>下一步：</b>{attempt.next_step}</p></div>}
+            {evaluationPending && <div className="practice-feedback" role="status"><div className="practice-feedback-title"><strong>作答已保存，正在异步评价</strong><span>{attempt.independent ? '提交时未观察到平台内帮助' : '提交前已有平台内帮助'}</span></div><p>现在可以继续浏览或查看答案；后续操作不会改写本次提交时冻结的帮助事实。</p></div>}
+            {evaluationFailed && <div className="practice-feedback verdict-needs_review" role="alert"><div className="practice-feedback-title"><strong>{attempt.status === 'UNKNOWN' ? '评价结果待核对' : '评价未完成'}</strong></div><p>你的作答已保存。系统没有自动发起付费重试，可稍后恢复。</p></div>}
+            {attempt && !evaluationPending && !evaluationFailed && <div className={'practice-feedback verdict-' + String(attempt.verdict || '').toLowerCase()} role="status"><div className="practice-feedback-title"><strong>{attempt.verdict === 'CORRECT' ? '回答正确' : attempt.verdict === 'PARTIAL' ? '部分正确' : attempt.verdict === 'INCORRECT' ? '需要修正' : '需要复核'}</strong><span>{attempt.independent ? '独立作答' : attempt.assistance === 'ANSWER_REVEALED' ? '答案揭晓后作答' : '提示后作答'}</span></div><p>{attempt.feedback}</p>{attempt.strengths?.length > 0 && <p><b>做得好：</b>{attempt.strengths.join('；')}</p>}{attempt.gaps?.length > 0 && <p><b>还需补充：</b>{attempt.gaps.join('；')}</p>}<p><b>下一步：</b>{attempt.next_step}</p></div>}
+            {ex.evidence_card && <div className="practice-feedback learning-loop-card" aria-label="学习闭环证据卡"><div className="practice-feedback-title"><strong>学习证据卡</strong><span>{ex.evidence_card.currently_valid_closure ? '当前闭环有效' : ex.evidence_card.historical_closure_exists ? '保留历史闭环，当前需复核' : '闭环进行中'}</span></div><p>{ex.evidence_card.label_zh}</p><small>有效作答 {ex.evidence_card.attempts?.filter(x => x.currently_eligible).length || 0} / 全部 {ex.evidence_card.attempts?.length || 0}</small></div>}
+            {attempt?.feedback && ex.learning_cycle_id && !ex.evidence_card?.historical_closure_exists && <button type="button" className="btn" disabled={this.state.busy.problem} onClick={() => this.doExercise(ex.node || this.state.activeNode, ex.learning_cycle_id, 'TRANSFER')}>分配未见迁移题</button>}
+            {ex.evidence_card?.currently_valid_closure && !(ex.followup || ex.evidence_card.followups?.length) && <button type="button" className="btn" disabled={busy} onClick={() => this.optInFollowup(m.exercise, ex)}>自愿安排7天复查</button>}
+            {(ex.followup || ex.evidence_card?.followups?.at(-1)) && <small className="helper-note">复查任务：{(ex.followup || ex.evidence_card.followups.at(-1)).status}</small>}
             {!revealed ? <div className="practice-response"><label htmlFor={'practice-answer-' + m.exercise}>写下你的解答</label><textarea id={'practice-answer-' + m.exercise} aria-label="练习答案" maxLength="6000" value={this.state.practiceAnswers[m.exercise] || ''} onChange={e => this.setState(s => ({ practiceAnswers: { ...s.practiceAnswers, [m.exercise]: e.target.value } }))} placeholder="先写思路、步骤或结论，再提交获得针对性反馈…"/><div className="practice-controls"><button type="button" className="btn practice-submit" disabled={busy || !(this.state.practiceAnswers[m.exercise] || '').trim()} onClick={() => this.submitPracticeAnswer(m.exercise, ex)}>提交作答</button><button type="button" className="btn" disabled={busy} onClick={() => this.requestPracticeHint(m.exercise, ex)}>给我提示</button><button type="button" className="show-answer-link" disabled={busy} onClick={() => this.revealSteps(m.exercise, ex)}>显示答案</button></div></div> : <><div className="exercise-steps">{(ex.steps || []).map(s => <div className="exercise-step" key={s.step_id}><div className="step-title">{s.ordinal}. {s.title}</div><div className="step-text">{s.text}</div><button className="step-explain-link" onClick={() => this.openExplanation(m.exercise, s, s.ordinal)}>详解</button></div>)}</div><button type="button" className="btn repractice-button" disabled={this.state.busy.problem} onClick={() => this.doExercise(ex.node || this.state.activeNode)}>再练同一目标</button></>}
         </div>;
     }

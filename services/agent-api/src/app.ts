@@ -10,7 +10,7 @@ import {
   validateCreateTask,
   validateUpdateTask,
 } from "./http/validation.js";
-import type { TaskRepository } from "./repositories/tasks.js";
+import { TaskIdempotencyConflict, type TaskRepository } from "./repositories/tasks.js";
 import type { ModelRateLimiter } from "./rate-limit.js";
 import type { AgentService } from "./services/agent.js";
 import type { TaskListQuery, TaskStatus } from "./types.js";
@@ -123,7 +123,18 @@ export function createApp(dependencies: AppDependencies): express.Express {
   application.post("/api/tasks", (request, response) => {
     const userId = requireUser(request, dependencies.authStrategy);
     const input = validateCreateTask(request.body);
-    response.status(201).json(dependencies.repository.create(userId, input));
+    try {
+      response.status(201).json(dependencies.repository.create(userId, input));
+    } catch (error) {
+      if (error instanceof TaskIdempotencyConflict) {
+        throw new HttpError(
+          409,
+          "TASK_IDEMPOTENCY_CONFLICT",
+          "The idempotency key was already used with different task content.",
+        );
+      }
+      throw error;
+    }
   });
 
   application.patch("/api/tasks/:taskId", (request, response) => {

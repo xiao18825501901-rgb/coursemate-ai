@@ -160,6 +160,33 @@ describe("Agent API", () => {
     expect(repository.list("user-a", { page: 1, pageSize: 10 }).total).toBe(0);
   });
 
+  it("replays task creation by owner-scoped idempotency key", async () => {
+    const app = createApp({
+      repository,
+      agentService: new AgentService(new FakeModelClient([]), new ToolExecutor(repository), {
+        model: "test-model", maxToolRounds: 4,
+      }),
+      webOrigin: "http://localhost:5173", authStrategy,
+      modelRateLimiter: allowModelRequests, readinessCheck: () => true,
+    });
+    const payload = {
+      title: "7-day voluntary review", courseId: "cs3481",
+      dueDate: "2026-08-20", idempotencyKey: "learning-loop-followup-0001",
+    };
+    const first = await request(app).post("/api/tasks")
+      .set("Authorization", "Bearer token-a").send(payload);
+    const replay = await request(app).post("/api/tasks")
+      .set("Authorization", "Bearer token-a").send(payload);
+    const otherOwner = await request(app).post("/api/tasks")
+      .set("Authorization", "Bearer token-b").send(payload);
+
+    expect(first.status).toBe(201);
+    expect(replay.status).toBe(201);
+    expect(replay.body.id).toBe(first.body.id);
+    expect(otherOwner.body.id).not.toBe(first.body.id);
+    expect(repository.list("user-a", { page: 1, pageSize: 10 }).total).toBe(1);
+  });
+
   it("runs agent chat through function calling and persistence", async () => {
     const createArguments = {
       title: "Read heritage notes",
@@ -232,6 +259,32 @@ describe("Agent API", () => {
     expect(missing.body.error.code).toBe("TASK_NOT_FOUND");
     expect(badQuery.status).toBe(400);
     expect(badQuery.body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("rejects reuse of a task idempotency key with different content", async () => {
+    const app = createApp({
+      repository,
+      agentService: new AgentService(new FakeModelClient([]), new ToolExecutor(repository), {
+        model: "test-model",
+        maxToolRounds: 4,
+      }),
+      webOrigin: "http://localhost:5173",
+      authStrategy,
+      modelRateLimiter: allowModelRequests,
+      readinessCheck: () => true,
+    });
+    const headers = { Authorization: "Bearer token-a" };
+    const first = await request(app).post("/api/tasks").set(headers).send({
+      title: "First",
+      idempotencyKey: "followup-cycle-0001",
+    });
+    const conflict = await request(app).post("/api/tasks").set(headers).send({
+      title: "Changed",
+      idempotencyKey: "followup-cycle-0001",
+    });
+    expect(first.status).toBe(201);
+    expect(conflict.status).toBe(409);
+    expect(conflict.body.error.code).toBe("TASK_IDEMPOTENCY_CONFLICT");
   });
 
   it("rejects missing and invalid bearer tokens", async () => {

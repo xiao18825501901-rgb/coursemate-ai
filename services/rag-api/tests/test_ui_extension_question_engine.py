@@ -153,6 +153,31 @@ def seed_objective(client: TestClient, course_id: str) -> str:
     return node_id
 
 
+def activate_learning_loop_pack(client: TestClient, course_id: str, node_id: str) -> None:
+    database = client.app.state.database
+    manifest_hash = hashlib.sha256(b"synthetic-pack-source").hexdigest()
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO learning_loop_pack_revisions("
+            "id,course_id,offering_id,revision,source_manifest_hash,source_refs_json,"
+            "rights_status,review_status,status,created_by_user_id) "
+            "VALUES(?,?,?,1,?,'[]','OWNER_PRIVATE','AI_ORGANIZED','ACTIVE',?)",
+            ("pack-mounted-r1", course_id, course_id, manifest_hash, SUBJECT),
+        )
+        connection.execute(
+            "INSERT INTO learning_loop_pack_targets("
+            "pack_revision_id,node_id,spec_version,objective_id) VALUES(?, ?, 1, ?)",
+            ("pack-mounted-r1", node_id, "objective-density"),
+        )
+        connection.execute(
+            "INSERT INTO learning_loop_course_flags("
+            "course_id,enabled,enabled_by_user_id,enabled_at,history_complete_from) "
+            "VALUES(?,1,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),"
+            "'1970-01-01T00:00:00.000Z')",
+            (course_id, SUBJECT),
+        )
+
+
 def wait_terminal(client: TestClient, run_id: str) -> dict[str, Any]:
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
@@ -163,6 +188,18 @@ def wait_terminal(client: TestClient, run_id: str) -> dict[str, Any]:
             return row
         time.sleep(0.05)
     raise AssertionError("exercise run did not become terminal")
+
+
+def wait_practice_evaluation(client: TestClient, exercise_id: str) -> dict[str, Any]:
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        response = client.get(f"{UI}/exercises/{exercise_id}", headers=auth())
+        assert response.status_code == 200, response.text
+        attempt = response.json().get("latest_attempt")
+        if attempt and attempt.get("status") not in {"PENDING", "RUNNING"}:
+            return attempt
+        time.sleep(0.05)
+    raise AssertionError("saved practice submission did not finish evaluation")
 
 
 def test_mounted_do_one_question_uses_ready_revision_and_keeps_answer_private(
@@ -263,16 +300,21 @@ def test_mounted_do_one_question_uses_ready_revision_and_keeps_answer_private(
             ),
         },
     )
-    assert attempted.status_code == 200, attempted.text
+    assert attempted.status_code == 202, attempted.text
+    assert attempted.json()["status"] == "PENDING"
     assert attempted.json()["assistance"] == "HINT"
     assert attempted.json()["independent"] is False
-    assert attempted.json()["feedback"]
+    assert attempted.json()["feedback"] is None
+    evaluated = wait_practice_evaluation(test_client, exercise["id"])
+    assert evaluated["assistance"] == "HINT"
+    assert evaluated["independent"] is False
+    assert evaluated["feedback"]
 
     restored = test_client.get(f"{UI}/exercises/{exercise['id']}", headers=auth())
     assert restored.status_code == 200, restored.text
     assert restored.json()["hint_count"] == 1
     assert restored.json()["latest_hint"]["id"] == hint.json()["id"]
-    assert restored.json()["latest_attempt"]["id"] == attempted.json()["id"]
+    assert restored.json()["latest_attempt"]["id"] == evaluated["id"]
     conversation_id = ui_database.one(
         "SELECT conversation FROM cmui_messages WHERE exercise=?", (exercise["id"],)
     )["conversation"]
@@ -283,7 +325,7 @@ def test_mounted_do_one_question_uses_ready_revision_and_keeps_answer_private(
         for item in history.json()["messages"]
         if item.get("exercise") == exercise["id"]
     )
-    assert historical["latest_attempt"]["id"] == attempted.json()["id"]
+    assert historical["latest_attempt"]["id"] == evaluated["id"]
 
     with test_client.app.state.database.connect() as connection:
         provenance = connection.execute(
@@ -317,9 +359,12 @@ def test_mounted_do_one_question_uses_ready_revision_and_keeps_answer_private(
             "answer": "This response was written after the worked answer was shown.",
         },
     )
-    assert assisted_after_reveal.status_code == 200, assisted_after_reveal.text
+    assert assisted_after_reveal.status_code == 202, assisted_after_reveal.text
     assert assisted_after_reveal.json()["assistance"] == "ANSWER_REVEALED"
     assert assisted_after_reveal.json()["independent"] is False
+    assisted_evaluated = wait_practice_evaluation(test_client, exercise["id"])
+    assert assisted_evaluated["assistance"] == "ANSWER_REVEALED"
+    assert assisted_evaluated["independent"] is False
 
     repeated = test_client.post(
         f"{UI}/courses/{course_id}/exercises",
@@ -333,6 +378,27 @@ def test_mounted_do_one_question_uses_ready_revision_and_keeps_answer_private(
     assert repeated.status_code == 202, repeated.text
     repeated_run = wait_terminal(test_client, repeated.json()["id"])
     assert repeated_run["status"] == "completed", repeated_run
+    second_exercise = ui_database.one(
+        "SELECT * FROM cmui_exercises WHERE run=?", (repeated.json()["id"],)
+    )
+    submitted_before_reveal = test_client.post(
+        f"{UI}/exercises/{second_exercise['id']}/attempts",
+        headers=auth(),
+        json={
+            "request_id": "question-engine-attempt-before-reveal",
+            "answer": "A substantive independent answer saved before opening the solution.",
+        },
+    )
+    assert submitted_before_reveal.status_code == 202
+    assert submitted_before_reveal.json()["independent"] is True
+    assert test_client.post(
+        f"{UI}/exercises/{second_exercise['id']}/reveal",
+        headers=auth(),
+        json={"request_id": "question-engine-reveal-after-submit"},
+    ).status_code == 200
+    frozen = wait_practice_evaluation(test_client, second_exercise["id"])
+    assert frozen["independent"] is True
+    assert frozen["assistance"] == "NONE"
     with test_client.app.state.database.connect() as connection:
         families = connection.execute(
             "SELECT question.family_id FROM question_engine_provenance AS provenance "
@@ -402,3 +468,67 @@ def test_mounted_do_one_question_fails_closed_when_semantic_review_is_unavailabl
         ).fetchall()
     assert statuses
     assert {row["publication_status"] for row in statuses} == {"NEEDS_REVIEW"}
+
+
+def test_mounted_learning_loop_closes_on_unseen_valid_transfer_and_projects_card(
+    client: tuple[TestClient, ForbiddenLegacyExerciseProvider],
+) -> None:
+    test_client, _legacy = client
+    course = test_client.post(
+        f"{UI}/courses", headers=auth(),
+        json={"name": "Synthetic loop course", "description": "offline fixture"},
+    ).json()
+    node_id = seed_objective(test_client, course["id"])
+    activate_learning_loop_pack(test_client, course["id"], node_id)
+    pair = test_client.post(
+        f"{UI}/pairs", headers=auth(), json={"course": course["id"]}
+    ).json()
+
+    initial_run = test_client.post(
+        f"{UI}/courses/{course['id']}/exercises", headers=auth(),
+        json={"pair_id": pair["id"], "node": node_id,
+              "request_id": "mounted-loop-initial-question"},
+    ).json()["id"]
+    assert wait_terminal(test_client, initial_run)["status"] == "completed"
+    ui_database = test_client.app.state.ui_extension_app.state.db
+    initial = ui_database.one("SELECT * FROM cmui_exercises WHERE run=?", (initial_run,))
+    assert initial["learning_cycle_id"]
+    assert initial["learning_assignment_id"]
+
+    submitted = test_client.post(
+        f"{UI}/exercises/{initial['id']}/attempts", headers=auth(),
+        json={"request_id": "mounted-loop-initial-attempt",
+              "answer": "A substantive initial answer that may still be incorrect."},
+    )
+    assert submitted.status_code == 202
+    wait_practice_evaluation(test_client, initial["id"])
+    projected = test_client.get(f"{UI}/exercises/{initial['id']}", headers=auth()).json()
+    assert projected["evidence_card"]["state"] == "INTERVENTION_DELIVERED"
+
+    transfer_run = test_client.post(
+        f"{UI}/courses/{course['id']}/exercises", headers=auth(),
+        json={"pair_id": pair["id"], "node": node_id,
+              "cycle_id": initial["learning_cycle_id"], "purpose": "TRANSFER",
+              "request_id": "mounted-loop-transfer-question"},
+    ).json()["id"]
+    assert wait_terminal(test_client, transfer_run)["status"] == "completed"
+    transfer = ui_database.one("SELECT * FROM cmui_exercises WHERE run=?", (transfer_run,))
+    assert transfer["learning_cycle_id"] == initial["learning_cycle_id"]
+    assert transfer["learning_assignment_id"] != initial["learning_assignment_id"]
+
+    saved = test_client.post(
+        f"{UI}/exercises/{transfer['id']}/attempts", headers=auth(),
+        json={"request_id": "mounted-loop-transfer-attempt",
+              "answer": "A real transfer attempt saved before any help was opened."},
+    )
+    assert saved.status_code == 202
+    assert saved.json()["independent"] is True
+    test_client.post(
+        f"{UI}/exercises/{transfer['id']}/reveal", headers=auth(),
+        json={"request_id": "mounted-loop-transfer-reveal"},
+    )
+    wait_practice_evaluation(test_client, transfer["id"])
+    final = test_client.get(f"{UI}/exercises/{transfer['id']}", headers=auth()).json()
+    assert final["evidence_card"]["historical_closure_exists"] is True
+    assert final["evidence_card"]["currently_valid_closure"] is True
+    assert final["evidence_card"]["attempts"][-1]["original_within_platform_unassisted"] is True

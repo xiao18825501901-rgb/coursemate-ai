@@ -10,7 +10,7 @@ describe("AgentDatabase readiness", () => {
       database.initialize();
       expect(database.isReady()).toBe(true);
 
-      database.connection.exec("DELETE FROM schema_migrations WHERE version = 1");
+      database.connection.exec("DELETE FROM schema_migrations WHERE version = 2");
       expect(database.isReady()).toBe(false);
     } finally {
       database.close();

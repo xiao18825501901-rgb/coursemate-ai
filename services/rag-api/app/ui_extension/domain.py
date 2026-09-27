@@ -63,6 +63,8 @@ from app.learning.models import (
 from app.learning.orchestrator import LearningOrchestrator
 from app.learning.previews import IMAGE_MEDIA_TYPES
 from app.learning.problems import ProblemRepository
+from app.learning.learning_loop import LearningLoopError
+from app.learning.learning_loop_reporting import current_observation
 from app.learning.question_runtime import QuestionEngineRuntimeError
 from app.learning.retrieval_orchestrator import (
     ScopedCandidates,
@@ -223,6 +225,7 @@ class V3DomainAdapter:
         # Jev entirely; the deterministic path is byte-identical to before.
         self.jev = jev
         self.question_engine = learning.question_engine if learning is not None else None
+        self.learning_loop = learning.learning_loop if learning is not None else None
         self.auto_knowledge_map = auto_knowledge_map
         # Course-scope entity resolution over already-authorized fused candidates.
         # Query expansion is deterministic (never reaches Jev); relation resolution
@@ -1414,6 +1417,8 @@ class V3DomainAdapter:
 
     def _task_create(self, credential: str, payload: dict[str, Any]) -> dict[str, Any]:
         body: dict[str, Any] = {"title": payload.get("title")}
+        if payload.get("request_id"):
+            body["idempotencyKey"] = str(payload["request_id"])
         # Note: the agent's `validateCreateTask` schema is narrower than its TypeScript
         # typing — `priority` is an enum with no null member, and every other optional
         # field accepts null. Only fields this UI actually sets are sent, so an
@@ -1703,6 +1708,7 @@ class V3DomainAdapter:
                 workspace_id=str(workspace["id"]),
                 question_revision_id=str(payload["question_revision_id"]),
                 operation_id=str(payload["operation_id"]),
+                assignment_id=(str(payload["assignment_id"]) if payload.get("assignment_id") else None),
             )
         except QuestionEngineRuntimeError as error:
             status = 503 if "PROVIDER" in error.code else 409
@@ -1711,28 +1717,222 @@ class V3DomainAdapter:
     def _practice_attempt(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
         _, workspace = self._practice_scope(subject, payload)
         try:
-            return self.question_engine.grade_practice_attempt(
+            return self.question_engine.submit_practice_attempt(
                 owner_user_id=subject,
                 workspace_id=str(workspace["id"]),
                 question_revision_id=str(payload["question_revision_id"]),
                 operation_id=str(payload["operation_id"]),
                 submitted_answer=str(payload["submitted_answer"]),
-                answer_revealed=bool(payload.get("answer_revealed")),
+                assignment_id=(str(payload["assignment_id"]) if payload.get("assignment_id") else None),
             )
         except QuestionEngineRuntimeError as error:
             status = 503 if "PROVIDER" in error.code else 409
             raise ApiError(status, error.code, str(error)) from error
 
+    def _practice_evaluate(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        _, workspace = self._practice_scope(subject, payload)
+        try:
+            return self.question_engine.evaluate_practice_attempt(
+                owner_user_id=subject,
+                workspace_id=str(workspace["id"]),
+                question_revision_id=str(payload["question_revision_id"]),
+                operation_id=str(payload["operation_id"]),
+            )
+        except QuestionEngineRuntimeError as error:
+            status = 503 if "PROVIDER" in error.code else 409
+            raise ApiError(status, error.code, str(error)) from error
+
+    def _practice_exposure(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self._practice_scope(subject, payload)
+        if self.learning_loop is None:
+            raise ApiError(503, "LEARNING_LOOP_DISABLED", "The learning loop is disabled.")
+        try:
+            return self.learning_loop.record_exposure(
+                owner_user_id=subject,
+                operation_id=str(payload["operation_id"]),
+                question_revision_id=str(payload["question_revision_id"]),
+                kind=str(payload["kind"]),
+                channel=str(payload["channel"]),
+                receipt=str(payload["receipt"]),
+                assignment_id=(str(payload["assignment_id"]) if payload.get("assignment_id") else None),
+                ordering=str(payload.get("ordering") or "SERVER_ORDERED"),
+            )
+        except LearningLoopError as error:
+            raise ApiError(409, error.code, str(error)) from error
+
+    def _learning_loop_start(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self._practice_scope(subject, payload)
+        if self.learning_loop is None:
+            raise ApiError(503, "LEARNING_LOOP_DISABLED", "The learning loop is disabled.")
+        try:
+            return self.learning_loop.start(
+                owner_user_id=subject,
+                operation_id=str(payload["operation_id"]),
+                course_id=str(payload["course"]),
+                pair_ref=str(payload["pair_ref"]),
+                node_id=str(payload["node_id"]),
+                initial_question_revision_id=str(payload["question_revision_id"]),
+            )
+        except LearningLoopError as error:
+            raise ApiError(409, error.code, str(error)) from error
+
+    def _learning_loop_assign(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self._practice_scope(subject, payload)
+        if self.learning_loop is None:
+            raise ApiError(503, "LEARNING_LOOP_DISABLED", "The learning loop is disabled.")
+        try:
+            return self.learning_loop.assign(
+                owner_user_id=subject,
+                operation_id=str(payload["operation_id"]),
+                cycle_id=str(payload["cycle_id"]),
+                question_revision_id=str(payload["question_revision_id"]),
+                purpose=str(payload.get("purpose") or "TRANSFER"),
+            )
+        except LearningLoopError as error:
+            raise ApiError(409, error.code, str(error)) from error
+
+    def _learning_loop_card(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self._practice_scope(subject, payload)
+        if self.learning_loop is None:
+            raise ApiError(503, "LEARNING_LOOP_DISABLED", "The learning loop is disabled.")
+        try:
+            return self.learning_loop.evidence_card(
+                owner_user_id=subject, cycle_id=str(payload["cycle_id"])
+            )
+        except LearningLoopError as error:
+            raise ApiError(404, error.code, str(error)) from error
+
+    def _learning_loop_diagnostic(
+        self, subject: str, payload: dict[str, Any], *, skip: bool = False
+    ) -> dict[str, Any]:
+        self._practice_scope(subject, payload)
+        if self.learning_loop is None:
+            raise ApiError(503, "LEARNING_LOOP_DISABLED", "The learning loop is disabled.")
+        try:
+            method = self.learning_loop.skip_diagnostic if skip else self.learning_loop.configure_diagnostic
+            return method(
+                owner_user_id=subject,
+                operation_id=str(payload["operation_id"]),
+                cycle_id=str(payload["cycle_id"]),
+            )
+        except LearningLoopError as error:
+            raise ApiError(409, error.code, str(error)) from error
+
+    def _learning_loop_diagnostic_unsure(
+        self, subject: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        self._practice_scope(subject, payload)
+        if self.learning_loop is None:
+            raise ApiError(503, "LEARNING_LOOP_DISABLED", "The learning loop is disabled.")
+        try:
+            return self.learning_loop.record_diagnostic_unsure(
+                owner_user_id=subject,
+                operation_id=str(payload["operation_id"]),
+                cycle_id=str(payload["cycle_id"]),
+                assignment_id=str(payload["assignment_id"]),
+            )
+        except LearningLoopError as error:
+            raise ApiError(409, error.code, str(error)) from error
+
+    def _learning_loop_followup(
+        self, subject: str, credential: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        self._practice_scope(subject, payload)
+        if self.learning_loop is None:
+            raise ApiError(503, "LEARNING_LOOP_DISABLED", "The learning loop is disabled.")
+        try:
+            scheduled = self.learning_loop.schedule_followup(
+                owner_user_id=subject,
+                operation_id=str(payload["operation_id"]),
+                cycle_id=str(payload["cycle_id"]),
+                explicit_opt_in=payload.get("explicit_opt_in") is True,
+                timezone=str(payload["timezone"]),
+                due_at=(str(payload["due_at"]) if payload.get("due_at") else None),
+            )
+            claimed = self.learning_loop.claim_followup(
+                owner_user_id=subject, followup_id=str(scheduled["id"])
+            )
+            if not claimed.get("claimed"):
+                return claimed
+            try:
+                task = self._task_create(
+                    credential,
+                    {
+                        "title": "7天自愿复查 · " + str(scheduled["course_id"]),
+                        "course": scheduled["course_id"],
+                        "due_at": scheduled["due_at"],
+                        "request_id": scheduled["idempotency_key"],
+                    },
+                )
+            except Exception:
+                return self.learning_loop.finish_followup(
+                    owner_user_id=subject, followup_id=str(scheduled["id"]),
+                    task_ref=None, uncertain=True,
+                )
+            return self.learning_loop.finish_followup(
+                owner_user_id=subject, followup_id=str(scheduled["id"]),
+                task_ref=str(task["id"]),
+            ) | {"task": task}
+        except LearningLoopError as error:
+            raise ApiError(409, error.code, str(error)) from error
+
+    def _learning_loop_reliability(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self._practice_scope(subject, payload)
+        try:
+            return self.learning_loop.record_reliability(
+                owner_user_id=subject,
+                cycle_id=(str(payload["cycle_id"]) if payload.get("cycle_id") else None),
+                operation_id=str(payload["operation_id"]),
+                stage=str(payload["stage"]),
+                status=str(payload["status"]),
+                latency_ms=(int(payload["latency_ms"]) if payload.get("latency_ms") is not None else None),
+            )
+        except LearningLoopError as error:
+            raise ApiError(409, error.code, str(error)) from error
+
+    def _learning_loop_metrics(self, subject: str) -> dict[str, Any]:
+        if not self._is_admin(subject):
+            raise ApiError(403, "ADMIN_REQUIRED", "Administrator access is required.")
+        return current_observation(self.database)
+
+    def _learning_loop_dependencies(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if not self._is_admin(subject):
+            raise ApiError(403, "ADMIN_REQUIRED", "Administrator access is required.")
+        return self.learning_loop.dependency_scan(target_ref=str(payload["target_ref"]))
+
+    def _learning_loop_withdraw(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if not self._is_admin(subject):
+            raise ApiError(403, "ADMIN_REQUIRED", "Administrator access is required.")
+        try:
+            return self.learning_loop.withdraw(
+                actor_user_id=subject,
+                operation_id=str(payload["operation_id"]),
+                target_ref=str(payload["target_ref"]),
+                reason_ref=str(payload["reason_ref"]),
+                editor_authorized=True,
+            )
+        except LearningLoopError as error:
+            raise ApiError(409, error.code, str(error)) from error
+
     def _practice_state(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
         _, workspace = self._practice_scope(subject, payload)
         try:
-            return self.question_engine.practice_state(
+            state = self.question_engine.practice_state(
                 owner_user_id=subject,
                 workspace_id=str(workspace["id"]),
                 question_revision_id=str(payload["question_revision_id"]),
             )
+            latest = state.get("latest_attempt") or {}
+            if latest.get("feedback") and latest.get("canonical_submission_id"):
+                self.learning_loop.project_feedback_for_submission(
+                    owner_user_id=subject,
+                    canonical_submission_id=str(latest["canonical_submission_id"]),
+                )
+            return state
         except QuestionEngineRuntimeError as error:
             raise ApiError(404, error.code, str(error)) from error
+        except LearningLoopError as error:
+            raise ApiError(409, error.code, str(error)) from error
 
     # ----------------------------------------- V3 learning state (write paths)
 
@@ -1776,12 +1976,15 @@ class V3DomainAdapter:
             start_operation = operation_id or (
                 f"node-start:{workspace['id']}:{node_id}:{journey['spec_version']}"
             )
+            start_digest = hashlib.sha256(
+                f"{workspace['id']}|{node_id}|{journey['spec_version']}|{start_operation}".encode()
+            ).hexdigest()[:24]
             connection.execute(
                 "INSERT OR IGNORE INTO learning_start_events"
                 "(id,workspace_id,node_id,spec_version,operation_id,source,accepted_at) "
                 "VALUES(?,?,?,?,?,'UI_RUN',strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
                 (
-                    f"start-{hashlib.sha256(f'{workspace['id']}|{node_id}|{journey['spec_version']}|{start_operation}'.encode()).hexdigest()[:24]}",
+                    f"start-{start_digest}",
                     workspace["id"],
                     node_id,
                     journey["spec_version"],
@@ -2221,7 +2424,20 @@ class V3DomainAdapter:
             "knowledge.exercise.generate",
             "knowledge.exercise.hint",
             "knowledge.exercise.attempt",
+            "knowledge.exercise.attempt.evaluate",
+            "knowledge.exercise.exposure",
             "knowledge.exercise.state",
+            "knowledge.learning_loop.start",
+            "knowledge.learning_loop.assign",
+            "knowledge.learning_loop.card",
+            "knowledge.learning_loop.diagnostic.configure",
+            "knowledge.learning_loop.diagnostic.skip",
+            "knowledge.learning_loop.diagnostic.unsure",
+            "knowledge.learning_loop.followup",
+            "knowledge.learning_loop.reliability",
+            "knowledge.learning_loop.metrics",
+            "knowledge.learning_loop.dependencies",
+            "knowledge.learning_loop.withdraw",
             "knowledge.begin_learning",
             "knowledge.assessment.start",
             "knowledge.assessment.setup",
@@ -2316,8 +2532,36 @@ class V3DomainAdapter:
             return await asyncio.to_thread(self._practice_hint, subject, payload)
         if operation == "knowledge.exercise.attempt":
             return await asyncio.to_thread(self._practice_attempt, subject, payload)
+        if operation == "knowledge.exercise.attempt.evaluate":
+            return await asyncio.to_thread(self._practice_evaluate, subject, payload)
+        if operation == "knowledge.exercise.exposure":
+            return await asyncio.to_thread(self._practice_exposure, subject, payload)
         if operation == "knowledge.exercise.state":
             return await asyncio.to_thread(self._practice_state, subject, payload)
+        if operation == "knowledge.learning_loop.start":
+            return await asyncio.to_thread(self._learning_loop_start, subject, payload)
+        if operation == "knowledge.learning_loop.assign":
+            return await asyncio.to_thread(self._learning_loop_assign, subject, payload)
+        if operation == "knowledge.learning_loop.card":
+            return await asyncio.to_thread(self._learning_loop_card, subject, payload)
+        if operation == "knowledge.learning_loop.diagnostic.configure":
+            return await asyncio.to_thread(self._learning_loop_diagnostic, subject, payload)
+        if operation == "knowledge.learning_loop.diagnostic.skip":
+            return await asyncio.to_thread(self._learning_loop_diagnostic, subject, payload, skip=True)
+        if operation == "knowledge.learning_loop.diagnostic.unsure":
+            return await asyncio.to_thread(self._learning_loop_diagnostic_unsure, subject, payload)
+        if operation == "knowledge.learning_loop.followup":
+            return await asyncio.to_thread(
+                self._learning_loop_followup, subject, credential, payload
+            )
+        if operation == "knowledge.learning_loop.reliability":
+            return await asyncio.to_thread(self._learning_loop_reliability, subject, payload)
+        if operation == "knowledge.learning_loop.metrics":
+            return await asyncio.to_thread(self._learning_loop_metrics, subject)
+        if operation == "knowledge.learning_loop.dependencies":
+            return await asyncio.to_thread(self._learning_loop_dependencies, subject, payload)
+        if operation == "knowledge.learning_loop.withdraw":
+            return await asyncio.to_thread(self._learning_loop_withdraw, subject, payload)
         if operation == "knowledge.begin_learning":
             return self._begin_learning(subject, payload)
         if operation == "knowledge.submit_delivery":

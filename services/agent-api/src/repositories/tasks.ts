@@ -26,11 +26,19 @@ interface TaskRow {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  request_key: string | null;
 }
 
 interface RepositoryOptions {
   clock?: () => Date;
   idFactory?: () => string;
+}
+
+export class TaskIdempotencyConflict extends Error {
+  constructor() {
+    super("The idempotency key was already used with different task content.");
+    this.name = "TaskIdempotencyConflict";
+  }
 }
 
 function parseCitation(value: string | null): SourceCitation | null {
@@ -86,14 +94,30 @@ export class TaskRepository {
   }
 
   create(ownerUserId: string, input: CreateTaskInput): Task {
+    if (input.idempotencyKey !== undefined) {
+      const existing = this.database
+        .prepare("SELECT * FROM tasks WHERE owner_user_id = ? AND request_key = ?")
+        .get(ownerUserId, input.idempotencyKey) as TaskRow | undefined;
+      if (existing !== undefined) {
+        const task = mapTask(existing);
+        const same = task.title === input.title
+          && task.notes === (input.notes ?? null)
+          && task.courseId === (input.courseId ?? null)
+          && task.priority === (input.priority ?? "medium")
+          && task.dueDate === (input.dueDate ?? null)
+          && JSON.stringify(task.sourceCitation) === JSON.stringify(input.sourceCitation ?? null);
+        if (!same) throw new TaskIdempotencyConflict();
+        return task;
+      }
+    }
     const now = this.clock().toISOString();
     const id = this.idFactory();
     this.database
       .prepare(
         `INSERT INTO tasks (
           id, owner_user_id, title, notes, course_id, status, priority, due_date,
-          source_citation, created_at, updated_at, completed_at
-        ) VALUES (?, ?, ?, ?, ?, 'todo', ?, ?, ?, ?, ?, NULL)`,
+          source_citation, created_at, updated_at, completed_at, request_key
+        ) VALUES (?, ?, ?, ?, ?, 'todo', ?, ?, ?, ?, ?, NULL, ?)`,
       )
       .run(
         id,
@@ -108,6 +132,7 @@ export class TaskRepository {
           : JSON.stringify(input.sourceCitation),
         now,
         now,
+        input.idempotencyKey ?? null,
       );
     const task = this.get(ownerUserId, id);
     if (task === null) {
