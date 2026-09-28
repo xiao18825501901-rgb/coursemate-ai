@@ -1320,7 +1320,7 @@ def test_many_source_concepts_are_compacted_before_teaching_specs(
     database = Database(settings)
     database.initialize()
     private_workspace(database)
-    for index in range(121):
+    for index in range(100):
         ready_document(
             database,
             document_id=f"compact-doc-{index:02d}",

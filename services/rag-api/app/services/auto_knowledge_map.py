@@ -39,7 +39,7 @@ from app.learning.models import (
 from app.learning.orchestrator import LearningOrchestrator
 from app.learning.workspaces import join_course
 
-BUILDER_VERSION = "AUTO_KNOWLEDGE_MAP_V11_REDUCIBLE_COMPACT_OUTLINE"
+BUILDER_VERSION = "AUTO_KNOWLEDGE_MAP_V12_REDUCIBLE_COMPACT_OUTLINE"
 # Whole-build safety limits are deliberately separate from the per-request
 # provider limit.  Every readable byte below these bounds is segmented; it is
 # never silently truncated to make a single model call fit.
@@ -55,6 +55,7 @@ OUTLINE_BATCH_CONTEXT_CHARS = 42_000
 OUTLINE_MAX_REDUCTION_PASSES = 8
 OUTLINE_MAX_MODULES = 8
 OUTLINE_MAX_ATOMIC_NODES = 36
+OUTLINE_FINAL_INPUT_CONCEPTS = 64
 AUTO_MODEL_MAX_OUTPUT_TOKENS = 8_000
 LEASE_SECONDS = 600
 
@@ -1263,7 +1264,10 @@ class OrchestratorDraftGenerator:
             if not batches:
                 break
             next_candidates: list[dict[str, Any]] = []
-            final_level = len(batches) == 1
+            final_level = (
+                len(batches) == 1
+                and len(candidates) <= OUTLINE_FINAL_INPUT_CONCEPTS
+            )
             for batch_index, model_candidates in enumerate(batches):
                 if heartbeat:
                     heartbeat()
