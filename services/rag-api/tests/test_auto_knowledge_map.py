@@ -258,7 +258,8 @@ class ManyConceptLearning(RecordingLearning):
                 }
             )
             concepts = context["provisional_concepts"]
-            groups = [concepts[index::30] for index in range(30)]
+            group_count = 45 if len(concepts) > 60 else 30
+            groups = [concepts[index::group_count] for index in range(group_count)]
             groups = [group for group in groups if group]
             return schema.model_validate(
                 {
@@ -1310,7 +1311,7 @@ def test_many_source_concepts_are_compacted_before_teaching_specs(
     database = Database(settings)
     database.initialize()
     private_workspace(database)
-    for index in range(60):
+    for index in range(121):
         ready_document(
             database,
             document_id=f"compact-doc-{index:02d}",
@@ -1349,9 +1350,14 @@ def test_many_source_concepts_are_compacted_before_teaching_specs(
     assert member_count <= 50
     assert atomic_count == spec_count == 30
     assert atomic_count <= 36
-    assert all(
-        "Return no more than 8 COMPOSITE chapters and no more than 36 ATOMIC "
-        "learning units" in item["instructions"]
+    assert any(
+        "final reduction pass: return no more than 8 COMPOSITE chapters and no more "
+        "than 36 ATOMIC learning units" in item["instructions"]
+        for item in outline_calls
+    )
+    assert any(
+        "intermediate reduction shard: return materially fewer ATOMIC learning units"
+        in item["instructions"]
         for item in outline_calls
     )
     assert (

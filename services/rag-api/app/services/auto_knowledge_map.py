@@ -39,7 +39,7 @@ from app.learning.models import (
 from app.learning.orchestrator import LearningOrchestrator
 from app.learning.workspaces import join_course
 
-BUILDER_VERSION = "AUTO_KNOWLEDGE_MAP_V7_BOUNDED_COMPACT_OUTLINE"
+BUILDER_VERSION = "AUTO_KNOWLEDGE_MAP_V8_REDUCIBLE_COMPACT_OUTLINE"
 # Whole-build safety limits are deliberately separate from the per-request
 # provider limit.  Every readable byte below these bounds is segmented; it is
 # never silently truncated to make a single model call fit.
@@ -1281,9 +1281,10 @@ class OrchestratorDraftGenerator:
                     value: Any,
                     *,
                     allowed_keys: set[str] = allowed,
+                    is_final_level: bool = final_level,
                 ) -> None:
                     draft = cast(AutoKnowledgeCompactOutlineDraft, value)
-                    if (
+                    if is_final_level and (
                         len(draft.modules) > OUTLINE_MAX_MODULES
                         or len(draft.nodes) > OUTLINE_MAX_ATOMIC_NODES
                     ):
@@ -1299,7 +1300,7 @@ class OrchestratorDraftGenerator:
                                 "atomicLimit": OUTLINE_MAX_ATOMIC_NODES,
                             },
                         )
-                    if len(draft.modules) + len(draft.nodes) > node_budget:
+                    if is_final_level and len(draft.modules) + len(draft.nodes) > node_budget:
                         raise ApiError(
                             422,
                             "TREE_NODE_LIMIT_EXCEEDED",
@@ -1333,9 +1334,17 @@ class OrchestratorDraftGenerator:
                         "ATOMIC learning units, and any stored root, must contain no more than "
                         f"{node_budget} nodes. Prefer 5-8 chapters and 20-36 "
                         "complete learning units when the material supports that scale; use "
-                        "fewer for a short course. Return no more than 8 COMPOSITE chapters "
-                        "and no more than 36 ATOMIC learning units. These are hard independent "
-                        "limits: count both arrays before returning. Keep titles, descriptions, "
+                        "fewer for a short course. "
+                        + (
+                            "This is the final reduction pass: return no more than 8 COMPOSITE "
+                            "chapters and no more than 36 ATOMIC learning units. These are hard "
+                            "independent limits; count both arrays before returning. "
+                            if final_level
+                            else "This is an intermediate reduction shard: return materially "
+                            "fewer ATOMIC learning units than the supplied concepts so a later "
+                            "pass can enforce the final 8-chapter/36-unit course shape. "
+                        )
+                        + "Keep titles, descriptions, "
                         "and disposition reasons concise enough to finish the complete JSON "
                         "within the output-token boundary. Use only supplied concept keys as "
                         "evidence ids and account for every key exactly once: cite it from one "

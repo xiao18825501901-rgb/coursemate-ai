@@ -468,8 +468,16 @@ class AutoKnowledgeCompactOutlineDraft(Contract):
     """
 
     title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
-    modules: list[AutoKnowledgeCompactModuleDraft] = Field(default_factory=list, max_length=8)
-    nodes: list[AutoKnowledgeCompactAtomicDraft] = Field(default_factory=list, max_length=36)
+    # Intermediate reduction shards may legitimately return more units than
+    # the final course budget. The service validates the final stage at 8/36
+    # and refuses activation above 50; these wider transport bounds let a
+    # complete intermediate JSON response survive for the next reduction pass.
+    modules: list[AutoKnowledgeCompactModuleDraft] = Field(
+        default_factory=list, max_length=120
+    )
+    nodes: list[AutoKnowledgeCompactAtomicDraft] = Field(
+        default_factory=list, max_length=120
+    )
     unmapped_evidence_ids: list[Identifier] = Field(default_factory=list, max_length=120)
 
     @model_validator(mode="after")
