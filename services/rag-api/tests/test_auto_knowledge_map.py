@@ -277,7 +277,11 @@ class ManyConceptLearning(RecordingLearning):
                             "key": f"unit-{index}",
                             "parent_key": "course-outline",
                             "title": f"Learning unit {index}",
-                            "description": "A compact unit covering related source concepts",
+                            "description": (
+                                "x" * 632
+                                if len(concepts) > 60 and index == 0
+                                else "A compact unit covering related source concepts"
+                            ),
                             "major": "OTHER",
                             "prerequisite_keys": [],
                             "evidence_ids": [item["key"] for item in group],

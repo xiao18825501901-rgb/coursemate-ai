@@ -449,7 +449,7 @@ class AutoKnowledgeCompactAtomicDraft(Contract):
     parent_key: Identifier | None = None
     title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=150)]
     description: Annotated[
-        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=420)
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=700)
     ]
     major: Major = "OTHER"
     prerequisite_keys: list[Identifier] = Field(default_factory=list, max_length=20)
