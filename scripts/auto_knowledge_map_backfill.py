@@ -38,7 +38,10 @@ def arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "--target-key",
-        help="drain only the exact durable target key (operator canary/recovery)",
+        help=(
+            "reconcile and drain only the exact durable target key "
+            "(operator canary/recovery)"
+        ),
     )
     return parser.parse_args()
 
@@ -70,7 +73,14 @@ def main() -> int:
         args.inventory.parent.mkdir(parents=True, exist_ok=True)
         handle = args.inventory.open("a", encoding="utf-8", newline="\n")
     try:
-        emit(handle, {"kind": "reconcile", "counts": service.reconcile(force=True)})
+        emit(
+            handle,
+            {
+                "kind": "reconcile",
+                "target_key": args.target_key,
+                "counts": service.reconcile(force=True, target_key=args.target_key),
+            },
+        )
         drained = 0
         if args.drain:
             while True:

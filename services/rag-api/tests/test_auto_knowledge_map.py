@@ -1559,6 +1559,57 @@ def test_existing_target_record_does_not_mask_over_limit_tree_compaction(
     assert target["status"] == "QUEUED"
     assert target["active_job_id"] is not None
 
+
+def test_targeted_reconcile_freezes_only_the_requested_target(tmp_path: Path) -> None:
+    database, service, _generator = service_at(tmp_path)
+    ready_document(
+        database,
+        document_id="workspace-a-doc",
+        chunk_id="workspace-a-chunk",
+        content="The first workspace has readable teaching material.",
+    )
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO courses(id,name,owner_user_id,course_type,visibility,publication_status) "
+            "VALUES('private-course-b','Private course B','owner-b','user','private','private')"
+        )
+        connection.execute(
+            "INSERT INTO courses(id,name,owner_user_id,course_type,visibility,publication_status) "
+            "VALUES('private-corpus-b','Private corpus B','owner-b','user','private','private')"
+        )
+        connection.execute(
+            "INSERT INTO learning_workspaces(id,owner_user_id,course_id,private_course_id) "
+            "VALUES('workspace-b','owner-b','private-course-b','private-corpus-b')"
+        )
+    ready_document(
+        database,
+        document_id="workspace-b-doc",
+        chunk_id="workspace-b-chunk",
+        content="The second workspace also has readable teaching material.",
+        course_id="private-corpus-b",
+    )
+
+    reconciled = service.reconcile(force=True, target_key="PRIVATE:workspace-a")
+
+    assert reconciled == {"EVENTS_CONSUMED": 1, "QUEUED": 1}
+    with database.connect() as connection:
+        jobs = connection.execute(
+            "SELECT target_key,status FROM auto_knowledge_jobs ORDER BY target_key"
+        ).fetchall()
+        targets = connection.execute(
+            "SELECT target_key,status FROM auto_knowledge_targets ORDER BY target_key"
+        ).fetchall()
+        pending_source_courses = connection.execute(
+            "SELECT source_course_id FROM auto_knowledge_source_events "
+            "WHERE status='PENDING' ORDER BY source_course_id"
+        ).fetchall()
+    assert [tuple(row) for row in jobs] == [("PRIVATE:workspace-a", "QUEUED")]
+    assert [tuple(row) for row in targets] == [("PRIVATE:workspace-a", "QUEUED")]
+    assert [row["source_course_id"] for row in pending_source_courses] == [
+        "private-corpus-b"
+    ]
+
+
 def test_real_orchestrator_and_provider_complete_over_fake_http_upstream(
     tmp_path: Path,
 ) -> None:

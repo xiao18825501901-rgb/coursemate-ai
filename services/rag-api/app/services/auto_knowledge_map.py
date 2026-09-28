@@ -2423,7 +2423,9 @@ class AutoKnowledgeMapService:
         return "QUEUED"
 
     @staticmethod
-    def _recover_safe_blocked_jobs(connection: sqlite3.Connection) -> int:
+    def _recover_safe_blocked_jobs(
+        connection: sqlite3.Connection, target_key: str | None = None
+    ) -> int:
         """Resume only failures proven to have stopped before provider dispatch.
 
         Completed shard artifacts stay attached to the same frozen job.  The
@@ -2450,7 +2452,9 @@ class AutoKnowledgeMapService:
             "'AUTO_SOURCE_COVERAGE_INCOMPLETE','AUTO_ARTIFACT_CONFLICT') "
             "AND receipt.status='FAILED') OR ("
             "job.status='BLOCKED' AND job.target_kind='AUTO_COURSE' "
-            "AND job.error_code='COURSE_NOT_FOUND' AND receipt.status='BLOCKED'))"
+            "AND job.error_code='COURSE_NOT_FOUND' AND receipt.status='BLOCKED')) "
+            + ("AND job.target_key=?" if target_key is not None else ""),
+            (() if target_key is None else (target_key,)),
         ).fetchall()
         for row in rows:
             operation_prefix = f"akm-{digest(str(row['id']))[:16]}-%"
@@ -3065,29 +3069,65 @@ class AutoKnowledgeMapService:
             recovered += 1
         return recovered
 
-    def reconcile(self, *, force: bool = False, full: bool = False) -> dict[str, int]:
+    def reconcile(
+        self,
+        *,
+        force: bool = False,
+        full: bool = False,
+        target_key: str | None = None,
+    ) -> dict[str, int]:
         """Queue missing/stale targets and consume due source events.
 
         ``force`` bypasses only the event quiet window for an operator/backfill;
         it does not bypass any source, permission, validation or revision fence.
+        ``target_key`` scopes every reconciliation mutation to one exact durable
+        target so a canary cannot enqueue or recover unrelated courses.
         """
 
         counts: defaultdict[str, int] = defaultdict(int)
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            targets = self._targets(connection)
+            if target_key is not None:
+                targets = [target for target in targets if target.key == target_key]
+                if not targets:
+                    raise ApiError(
+                        404,
+                        "AUTO_TARGET_NOT_FOUND",
+                        "The requested automatic knowledge-map target does not exist.",
+                    )
+            scoped_course_ids = tuple(
+                sorted(
+                    {
+                        course_id
+                        for target in targets
+                        for course_id in self._source_course_ids(connection, target)
+                    }
+                )
+            )
+            scope_clause = (
+                " AND source_course_id IN ("
+                + ",".join("?" for _ in scoped_course_ids)
+                + ")"
+                if target_key is not None
+                else ""
+            )
             # A browser may close before sealing. Expiry releases the corpus for
             # reconciliation, while retaining all accepted item receipts.
             connection.execute(
                 "UPDATE auto_knowledge_upload_batches SET status='ABANDONED',sealed_at=? "
-                "WHERE status='OPEN' AND expires_at<=?",
-                (stamp(), stamp()),
+                "WHERE status='OPEN' AND expires_at<=?" + scope_clause,
+                (stamp(), stamp(), *scoped_course_ids)
+                if target_key is not None
+                else (stamp(), stamp()),
             )
             # An expired RUNNING lease may conceal a paid request. It becomes
             # UNKNOWN and is never automatically replayed.
             expired = connection.execute(
                 "SELECT id,target_key,corpus_fingerprint,source_snapshot_json,model_calls_made "
-                "FROM auto_knowledge_jobs WHERE status='RUNNING' AND lease_expires_at<?",
-                (stamp(),),
+                "FROM auto_knowledge_jobs WHERE status='RUNNING' AND lease_expires_at<?"
+                + (" AND target_key=?" if target_key is not None else ""),
+                (stamp(), target_key) if target_key is not None else (stamp(),),
             ).fetchall()
             for row in expired:
                 connection.execute(
@@ -3125,19 +3165,24 @@ class AutoKnowledgeMapService:
                 and self.settings.auto_knowledge_map_allow_billable
             ):
                 counts["RECOVERED_SAFE_FAILURE"] += self._recover_safe_blocked_jobs(
-                    connection
+                    connection, target_key
                 )
             due = connection.execute(
                 "SELECT id FROM auto_knowledge_source_events WHERE status='PENDING' "
                 + ("" if force else "AND not_before<=? ")
+                + scope_clause
                 + "ORDER BY id",
-                (() if force else (stamp(),)),
+                (
+                    (() if force else (stamp(),)) + scoped_course_ids
+                    if target_key is not None
+                    else (() if force else (stamp(),))
+                ),
             ).fetchall()
             # Full reconciliation is the legacy/backfill path and never re-reads
             # D:\\Canvas or an external source. Normal source events keep their
             # quiet window; polling early must not start a build.
             if force or full or due:
-                for target in self._targets(connection):
+                for target in targets:
                     source_courses = self._source_course_ids(connection, target)
                     placeholders = ",".join("?" for _ in source_courses)
                     open_batch = connection.execute(
