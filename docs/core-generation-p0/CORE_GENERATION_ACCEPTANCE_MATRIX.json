@@ -1,9 +1,10 @@
 {
   "task_id": "COURSE_GENERATION_CORE_RELIABILITY_20260928",
   "priority": "P0",
-  "status": "IN_PROGRESS",
-  "application_candidate_sha": null,
-  "production_application_sha": "b63401e479829eac9c6e25884e5fc5f155396145",
+  "status": "DEPLOYED_WITH_OPEN_QUALITY_AND_IDENTITY_ACCEPTANCE_BLOCKERS",
+  "application_candidate_sha": "916b76ce0534e4ce50a589521b0b618850df6956",
+  "production_application_sha": "916b76ce0534e4ce50a589521b0b618850df6956",
+  "netlify_production_deploy_id": "6abacab3d2f4fb9cbfb7d8e9",
   "map50_remaining_over_limit_trees": 13,
   "checks": [
     {
@@ -11,21 +12,21 @@
       "requirement": "campus normal and Thinking teaching health control",
       "source": "implemented",
       "offline_contract": "passed",
-      "authenticated_live": "pending"
+      "authenticated_live": "not_run_clerk_backend_api_403"
     },
     {
       "id": "B",
       "requirement": "owner private normal, Thinking and node teaching",
       "source": "implemented",
       "offline_contract": "passed",
-      "authenticated_live": "pending"
+      "authenticated_live": "not_run_clerk_backend_api_403"
     },
     {
       "id": "C",
       "requirement": "new private course upload and teaching",
       "source": "implemented",
       "offline_contract": "passed",
-      "authenticated_live": "pending"
+      "authenticated_live": "not_run_clerk_backend_api_403"
     },
     {
       "id": "D",
@@ -39,7 +40,7 @@
       "requirement": "private text/image problem explanation",
       "source": "preserved",
       "offline_contract": "covered_by_existing_regression",
-      "authenticated_live": "pending"
+      "authenticated_live": "not_run_clerk_backend_api_403"
     },
     {
       "id": "F",
@@ -53,28 +54,28 @@
       "requirement": "another campus objective and N greater than five",
       "source": "implemented",
       "offline_contract": "passed",
-      "authenticated_live": "pending"
+      "authenticated_live": "not_run_clerk_backend_api_403"
     },
     {
       "id": "H",
       "requirement": "two panes, course switch, refresh, disconnect and relogin",
       "source": "implemented",
       "offline_contract": "passed",
-      "authenticated_live": "pending"
+      "authenticated_live": "not_run_clerk_backend_api_403"
     },
     {
       "id": "I",
       "requirement": "stored result recovery with zero new model calls",
       "source": "implemented",
       "offline_contract": "passed",
-      "authenticated_live": "pending"
+      "authenticated_live": "not_run_clerk_backend_api_403"
     },
     {
       "id": "J",
       "requirement": "two-user isolation and immutable history/grades",
       "source": "preserved",
       "offline_contract": "passed",
-      "authenticated_live": "pending"
+      "authenticated_live": "not_run_clerk_backend_api_403"
     }
   ],
   "test_evidence": {
@@ -86,12 +87,19 @@
     "production_build": "passed locally and with Netlify production context preflight",
     "rag_full": "2006 passed, 3 platform/retired-SDK skips, 0 failed",
     "openjev_service": "8 passed; npm production dependency audit found 0 vulnerabilities",
-    "schema_63_to_64_rehearsal": "integrity ok, 0 foreign-key violations, historical row hashes unchanged, restart idempotence passed"
+    "schema_63_to_64_rehearsal": "integrity ok, 0 foreign-key violations, historical row hashes unchanged, restart idempotence passed",
+    "production_schema_64": "integrity ok, 0 foreign-key violations, 87 courses, 850 documents, 22909 chunks",
+    "public_production": "coursejesus.com 200 with exact release SHA; RAG, UI extension and Agent health 200; Canvas Bridge ZIP 200 application/zip",
+    "monitor": "fresh production run status ok; recurring timer active"
   },
   "production_inventory": {
-    "schema": 63,
+    "schema": 64,
     "configured_preparations": {"READY": 4, "BLOCKED": 7},
     "question_revisions": {"VALIDATED_AI_REVIEWED": 49, "NEEDS_REVIEW_MODEL_ONLY": 5},
     "sql_private_configurations": {"count": 2, "slots_each": 5, "bound_families_each": 0}
+  },
+  "external_blockers": {
+    "openjev": "hard Question Engine definitions remain disabled after 0.50 held-out accuracy in each scoped subgroup",
+    "clerk": "installed Backend API credential returned HTTP 403 for synthetic-user create and read-only user list; no production test identity was created"
   }
 }

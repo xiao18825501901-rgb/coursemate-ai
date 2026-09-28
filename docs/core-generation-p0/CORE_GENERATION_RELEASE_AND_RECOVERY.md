@@ -1,6 +1,6 @@
 # Core generation release and recovery
 
-Status: `PRE_DEPLOYMENT`
+Status: `DEPLOYED_WITH_OPEN_ACCEPTANCE_BLOCKERS`
 
 ## Candidate boundary
 
@@ -55,4 +55,45 @@ the pre-release database must never be copied over live data as a routine rollba
   the rehearsal tool (including 87 courses, 850 documents and 22,909 chunks).
 - A second startup against the migrated copy was idempotent. The previous
   `b63401e` readiness query filters to versions `<=63`, so a code-only rollback
-  remains compatible with the additive Schema 64 without overwriting new data.
+remains compatible with the additive Schema 64 without overwriting new data.
+
+## Executed production release
+
+- Application SHA: `916b76ce0534e4ce50a589521b0b618850df6956`.
+- Immutable backend release: `/srv/coursemate/releases/916b76c`; current symlink
+  resolves to this directory.
+- Release archive SHA-256:
+  `004738cdfd03bf9526ccad61a6f42a2052563191b348d098fea9514cb424f23b`.
+- Pre-release backup:
+  `/srv/coursemate/backups/coursemate-v2-20260928T200126.170700Z`.
+  Its manifest, checksums, three SQLite databases, uploads and share archives
+  were verified, and an isolated restore completed successfully before cutover.
+- Only `coursemate-rag` was restarted for the backend cutover.  Agent and OpenJev
+  remained running.  Public RAG, integrated UI-extension and Agent health all
+  returned 200 afterward.
+- Netlify production deploy: `6abacab3d2f4fb9cbfb7d8e9`; the custom domain
+  returned the matching build SHA.
+- The monitor backup root had retained an obsolete path and could not traverse
+  the root-only backup parent.  The previous monitor configuration was saved as
+  `/etc/coursemate/monitor.env.pre-916b76c`; the root now points at the real
+  backup collection and is restricted to `root:coursemate`.  The newest verified
+  backup is `750` with `640` artifacts.  A fresh monitor run returned `status=ok`
+  and the timer remains active.
+
+## Rollback
+
+Use a code-only symlink switch to `/srv/coursemate/releases/b63401e`, restart only
+the RAG service, and read back health and Schema 64 compatibility.  This is the
+normal rollback because it retains new chats, submissions, grades and files.
+Use the verified pre-release backup only for an actual data-corruption incident,
+with an explicit merge/preservation plan for post-release user data.
+
+## Remaining release gates
+
+1. OpenJev is operational but not semantically qualified for the four hard
+   Question Engine decisions; new do-one and cold Assessment publication remain
+   fail-closed.
+2. The production Clerk Backend API credential returns HTTP 403, so an automated
+   synthetic authenticated browser acceptance could not be created.  Existing
+   real users were not impersonated.
+3. Thirteen Map50 trees remain paused exactly as handed off.

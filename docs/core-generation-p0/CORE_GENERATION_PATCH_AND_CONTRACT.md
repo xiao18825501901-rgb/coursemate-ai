@@ -62,3 +62,16 @@ measured candidate must not publish new READY questions.  Full live closure of
 new “做一题” and cold-start Assessment therefore requires a separately qualified
 semantic reviewer or independently reviewed compatible questions; it cannot be
 manufactured by changing an application flag.
+
+## Released boundary
+
+- Application release: `916b76ce0534e4ce50a589521b0b618850df6956`.
+- RAG migration: additive Schema 64; the previous `b63401e` code remains able to
+  open it for a data-preserving code-only rollback.
+- Web production deploy: `6abacab3d2f4fb9cbfb7d8e9` on the existing
+  `coursejesus.com` Netlify site.
+- Runtime OpenJev provider: private loopback service, one model process, q4 local
+  snapshot.  All hard definition modes remain off because the qualification is
+  `UNSET_PENDING_SCOPED_RISK_THRESHOLD_AND_REVIEW`.
+- Soft routing, reference parsing and classification use deterministic behavior;
+  they do not make TypeSafe calls and do not promote Question Engine items.
