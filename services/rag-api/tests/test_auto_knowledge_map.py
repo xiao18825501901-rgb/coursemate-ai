@@ -1342,6 +1342,12 @@ def test_many_source_concepts_are_compacted_before_teaching_specs(tmp_path: Path
         ).fetchone()[0]
     assert member_count <= 50
     assert atomic_count == spec_count == 30
+    assert atomic_count <= 36
+    assert all(
+        "Return no more than 8 COMPOSITE chapters and no more than 36 ATOMIC "
+        "learning units" in item["instructions"]
+        for item in outline_calls
+    )
     assert len(
         [item for item in learning.calls if item["schema"] == "AutoKnowledgeSpecSetDraft"]
     ) == 5
