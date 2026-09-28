@@ -2635,6 +2635,183 @@ def test_local_spec_projection_refuses_to_remove_the_only_required_item() -> Non
     assert [item.item_id for item in draft.specs[0].items] == ["required-foreign"]
 
 
+def test_failed_spec_batch_recovers_only_invalid_node_and_reuses_receipt(
+    tmp_path: Path,
+) -> None:
+    settings = settings_at(tmp_path).model_copy(
+        update={
+            "auto_knowledge_map_enabled": True,
+            "auto_knowledge_map_allow_billable": True,
+        }
+    )
+    database = Database(settings)
+    database.initialize()
+    private_workspace(database)
+    ready_document(
+        database,
+        document_id="split-recovery-doc",
+        chunk_id="e1",
+        content="The first unit has grounded evidence.",
+    )
+    learning = RecordingLearning()
+    service = AutoKnowledgeMapService(database, settings, learning)  # type: ignore[arg-type]
+    assert service.reconcile(force=True)["QUEUED"] == 1
+
+    draft = AutoKnowledgeMapDraft.model_validate(
+        {
+            "title": "Recovered compact map",
+            "modules": [
+                {
+                    "key": "module",
+                    "title": "Module",
+                    "description": "Grounded module",
+                    "major": "OTHER",
+                }
+            ],
+            "nodes": [
+                {
+                    "key": "core-a",
+                    "parent_key": "module",
+                    "title": "First unit",
+                    "description": "First grounded unit",
+                    "major": "OTHER",
+                    "prerequisite_keys": [],
+                    "evidence_ids": ["e1"],
+                },
+                {
+                    "key": "core-b",
+                    "parent_key": "module",
+                    "title": "Second unit",
+                    "description": "Second grounded unit",
+                    "major": "OTHER",
+                    "prerequisite_keys": ["core-a"],
+                    "evidence_ids": ["e2"],
+                },
+            ],
+        }
+    )
+    rejected = AutoKnowledgeSpecSetDraft.model_validate(
+        {
+            "specs": [
+                {
+                    "node_key": "core-a",
+                    "change_reason": "Already grounded",
+                    "items": [
+                        {
+                            "item_id": "a-required",
+                            "requirement": "REQUIRED",
+                            "objective": "Explain the first unit",
+                            "acceptance": "Use the first source",
+                            "evidence_ids": ["e1"],
+                        }
+                    ],
+                },
+                {
+                    "node_key": "core-b",
+                    "change_reason": "Required item crossed node scope",
+                    "items": [
+                        {
+                            "item_id": "b-required-foreign",
+                            "requirement": "REQUIRED",
+                            "objective": "Unsupported neighbouring objective",
+                            "acceptance": "Must be regenerated, not promoted locally",
+                            "evidence_ids": ["e1"],
+                        },
+                        {
+                            "item_id": "b-recommended-grounded",
+                            "requirement": "RECOMMENDED",
+                            "objective": "Describe the second unit",
+                            "acceptance": "Use the second source",
+                            "evidence_ids": ["e2"],
+                        },
+                    ],
+                },
+            ]
+        }
+    )
+    rejected_json = canonical_json(rejected.model_dump())
+    with database.connect() as connection:
+        job = connection.execute("SELECT * FROM auto_knowledge_jobs").fetchone()
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='RUNNING',lease_owner='split-worker',"
+            "lease_expires_at='2099-01-01T00:00:00.000Z' WHERE id=?",
+            (job["id"],),
+        )
+        operation_base = f"akm-{digest(str(job['id']))[:16]}-s-00000"
+        r3 = f"{operation_base}-r3"
+        connection.execute(
+            "INSERT INTO auto_knowledge_model_attempts("
+            "operation_id,job_id,stage,shard_key,input_hash,status,output_text,"
+            "output_hash,rejection_code,rejection_detail_json) "
+            "VALUES(?,?,'TEACHING_SPEC','spec-00000',?,'BUSINESS_REJECTED',"
+            "?,?, 'AUTO_EVIDENCE_INVALID','{}')",
+            (
+                r3,
+                job["id"],
+                "3" * 64,
+                rejected_json,
+                hashlib.sha256(rejected_json.encode()).hexdigest(),
+            ),
+        )
+
+    context = {
+        "course": {"id": "private-course", "name": "Private course"},
+        "policy": {"every_atomic_node_requires_evidence": True},
+    }
+    evidence = [
+        {"id": "e1", "content": "The first unit has grounded evidence."},
+        {"id": "e2", "content": "The second unit has its own grounded evidence."},
+    ]
+
+    first, dispatched = service.generator._recover_split_spec_batch(  # type: ignore[attr-defined]
+        job_id=str(job["id"]),
+        shard_key="spec-00000",
+        operation_base=operation_base,
+        workspace_id="workspace-a",
+        course_context=context,
+        nodes=draft.nodes,
+        evidence_by_id={item["id"]: item for item in evidence},
+    )
+    assert dispatched == 1
+    assert len(learning.calls) == 1
+    assert learning.calls[0]["operation"].startswith(operation_base + "-split-")
+    assert [item.node_key for item in first.specs] == ["core-a", "core-b"]
+    assert first.specs[0].items[0].item_id == "a-required"
+    assert first.specs[1].items[0].requirement == "REQUIRED"
+    assert first.specs[1].items[0].evidence_ids == ["e2"]
+
+    second, repeated_dispatches = service.generator._recover_split_spec_batch(  # type: ignore[attr-defined]
+        job_id=str(job["id"]),
+        shard_key="spec-00000",
+        operation_base=operation_base,
+        workspace_id="workspace-a",
+        course_context=context,
+        nodes=draft.nodes,
+        evidence_by_id={item["id"]: item for item in evidence},
+    )
+    assert repeated_dispatches == 0
+    assert len(learning.calls) == 1
+    assert second == first
+
+    with database.connect() as connection:
+        receipt = connection.execute(
+            "SELECT source_operation_id,source_output_hash,invalid_node_keys_json,"
+            "split_operation_ids_json FROM auto_knowledge_spec_split_receipts "
+            "WHERE job_id=? AND shard_key='spec-00000'",
+            (job["id"],),
+        ).fetchone()
+        raw = connection.execute(
+            "SELECT status,output_hash FROM auto_knowledge_model_attempts "
+            "WHERE operation_id=?",
+            (r3,),
+        ).fetchone()
+    assert receipt["source_operation_id"] == r3
+    assert receipt["source_output_hash"] == hashlib.sha256(rejected_json.encode()).hexdigest()
+    assert json.loads(receipt["invalid_node_keys_json"]) == ["core-b"]
+    assert len(json.loads(receipt["split_operation_ids_json"])) == 1
+    assert raw["status"] == "BUSINESS_REJECTED"
+
+
 def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_call(
     tmp_path: Path,
 ) -> None:

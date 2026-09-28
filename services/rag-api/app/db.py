@@ -56,6 +56,7 @@ V3_MIGRATIONS = (
     "058_compact_tree_lineage.sql",
     "059_storage_document_versions.sql",
     "060_learning_loop_delivery.sql",
+    "061_auto_knowledge_spec_split_recovery.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
