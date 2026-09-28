@@ -1120,6 +1120,50 @@ def test_upload_event_respects_quiet_window_and_status_get_only_reads(
         )
 
 
+def test_background_reconcile_can_pause_legacy_backfill_without_scanning_inventory(
+    tmp_path: Path,
+) -> None:
+    database, service, _generator = service_at(tmp_path)
+    ready_document(
+        database,
+        document_id="legacy-only-doc",
+        chunk_id="legacy-only-chunk",
+        content="An existing corpus must not be swept while handoff freeze is active.",
+    )
+    with database.connect() as connection:
+        connection.execute("DELETE FROM auto_knowledge_source_events")
+
+    service.settings.auto_knowledge_map_legacy_backfill_enabled = False
+    assert service.reconcile_background() == {}
+    with database.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM auto_knowledge_jobs").fetchone()[0] == 0
+
+    service.settings.auto_knowledge_map_legacy_backfill_enabled = True
+    assert service.reconcile_background()["QUEUED"] == 1
+
+
+def test_background_reconcile_still_consumes_due_new_source_events_during_freeze(
+    tmp_path: Path,
+) -> None:
+    database, service, _generator = service_at(tmp_path)
+    ready_document(
+        database,
+        document_id="new-upload-doc",
+        chunk_id="new-upload-chunk",
+        content="A new upload must still receive an automatic compact knowledge map.",
+    )
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE auto_knowledge_source_events SET not_before='2000-01-01T00:00:00Z'"
+        )
+
+    service.settings.auto_knowledge_map_legacy_backfill_enabled = False
+    result = service.reconcile_background()
+
+    assert result["QUEUED"] == 1
+    assert result["EVENTS_CONSUMED"] == 1
+
+
 def test_ready_on_insert_is_captured_for_trusted_importers(tmp_path: Path) -> None:
     database, _service, generator = service_at(tmp_path)
     payload = b"Trusted import content"
@@ -2796,6 +2840,26 @@ def test_failed_spec_batch_recovers_only_invalid_node_and_reuses_receipt(
     assert first.specs[1].items[0].requirement == "REQUIRED"
     assert first.specs[1].items[0].evidence_ids == ["e2"]
 
+    # A later historical response must not replace the source already frozen
+    # in the split receipt, even if that other response is locally projectable.
+    alternative = rejected.model_copy(deep=True)
+    alternative.specs[1].items[0].evidence_ids = ["e2", "e1"]
+    alternative_json = canonical_json(alternative.model_dump())
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO auto_knowledge_model_attempts("
+            "operation_id,job_id,stage,shard_key,input_hash,status,output_text,"
+            "output_hash,rejection_code,rejection_detail_json) "
+            "VALUES(?,?,'TEACHING_SPEC','spec-00000',?,'BUSINESS_REJECTED',"
+            "?,?, 'AUTO_EVIDENCE_INVALID','{}')",
+            (
+                f"{operation_base}-r3",
+                job["id"],
+                "5" * 64,
+                alternative_json,
+                hashlib.sha256(alternative_json.encode()).hexdigest(),
+            ),
+        )
     second, repeated_dispatches = service.generator._recover_split_spec_batch(  # type: ignore[attr-defined]
         job_id=str(job["id"]),
         shard_key="spec-00000",
@@ -2826,6 +2890,43 @@ def test_failed_spec_batch_recovers_only_invalid_node_and_reuses_receipt(
     assert json.loads(receipt["invalid_node_keys_json"]) == ["core-b"]
     assert len(json.loads(receipt["split_operation_ids_json"])) == 1
     assert raw["status"] == "BUSINESS_REJECTED"
+
+    # V62 briefly selected that alternative before consulting the immutable
+    # split receipt. The exact no-send failure is safe to replay once.
+    conflict = {
+        "error_code": "AUTO_ARTIFACT_CONFLICT",
+        "error_message": "The split Spec recovery found no irreducibly invalid node.",
+    }
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='FAILED',error_code=?,error_message=?,"
+            "completed_at='2026-09-28T10:00:00.000Z' WHERE id=?",
+            (conflict["error_code"], conflict["error_message"], job["id"]),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_targets SET status='FAILED' WHERE active_job_id=?",
+            (job["id"],),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_job_receipts("
+            "job_id,target_key,corpus_fingerprint,status,source_snapshot_hash,"
+            "model_calls_made,detail_json) VALUES(?,?,?,'FAILED',?,1,?)",
+            (
+                job["id"],
+                job["target_key"],
+                job["corpus_fingerprint"],
+                digest(json.loads(job["source_snapshot_json"])),
+                canonical_json(conflict),
+            ),
+        )
+    assert service.reconcile(force=True)["RECOVERED_SAFE_FAILURE"] == 1
+    with database.connect() as connection:
+        replay = connection.execute(
+            "SELECT blocked_operation_ids_json FROM auto_knowledge_job_recovery_receipts "
+            "WHERE job_id=? AND reason='SPEC_SPLIT_SOURCE_REPLAY_V1'",
+            (job["id"],),
+        ).fetchone()
+    assert json.loads(replay["blocked_operation_ids_json"]) == [r1]
 
 
 def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_call(

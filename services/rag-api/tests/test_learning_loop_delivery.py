@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from test_question_persistence import NODE, OWNER, WORKSPACE, persist, pipeline
 
+from app.db import LATEST_V3_SCHEMA_VERSION
 from app.learning.learning_loop import LearningLoopError, LearningLoopService
 from app.learning.learning_loop_reporting import current_observation
 from app.learning.learning_loop_seeds import apply_seed, plan_seed
@@ -147,7 +148,7 @@ def test_learning_loop_schema_is_additive_and_reference_store_is_absent(tmp_path
             )
         }
         version = connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
-    assert version == 60
+    assert version == LATEST_V3_SCHEMA_VERSION
     assert {
         "learning_loop_cycles",
         "learning_loop_exposures",

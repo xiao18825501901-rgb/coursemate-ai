@@ -952,22 +952,48 @@ class OrchestratorDraftGenerator:
             f"{operation_base}-r3",
         ]
         with self.database.connect() as connection:
-            source = connection.execute(
+            frozen_scope = connection.execute(
+                "SELECT source_operation_id,source_output_hash "
+                "FROM auto_knowledge_spec_split_receipts "
+                "WHERE job_id=? AND shard_key=?",
+                (job_id, shard_key),
+            ).fetchone()
+            candidates = connection.execute(
                 "SELECT operation_id,status,rejection_code,output_text,output_hash "
                 "FROM auto_knowledge_model_attempts WHERE job_id=? "
                 "AND stage='TEACHING_SPEC' AND shard_key=? "
                 "AND status='BUSINESS_REJECTED' "
                 "AND rejection_code='AUTO_EVIDENCE_INVALID' "
-                "AND operation_id IN (?,?,?,?) "
-                "ORDER BY updated_at DESC,operation_id DESC LIMIT 1",
+                "AND operation_id IN (?,?,?,?)",
                 (job_id, shard_key, *eligible_operations),
-            ).fetchone()
+            ).fetchall()
             uncertain = connection.execute(
                 "SELECT 1 FROM auto_knowledge_model_attempts WHERE job_id=? "
                 "AND stage='TEACHING_SPEC' AND shard_key=? "
                 "AND status IN ('SEND_INTENT','RESPONSE_UNKNOWN') LIMIT 1",
                 (job_id, shard_key),
             ).fetchone()
+        candidate_by_operation = {str(item["operation_id"]): item for item in candidates}
+        if frozen_scope is not None:
+            source = candidate_by_operation.get(str(frozen_scope["source_operation_id"]))
+            if (
+                source is None
+                or source["output_hash"] != frozen_scope["source_output_hash"]
+            ):
+                raise ApiError(
+                    409,
+                    "AUTO_ARTIFACT_CONFLICT",
+                    "The frozen split Spec source response has changed.",
+                )
+        else:
+            source = next(
+                (
+                    candidate_by_operation[operation]
+                    for operation in reversed(eligible_operations)
+                    if operation in candidate_by_operation
+                ),
+                None,
+            )
         if (
             source is None
             or uncertain is not None
@@ -1173,7 +1199,8 @@ class OrchestratorDraftGenerator:
                     "'PER_SHARD_REPAIR_SCOPE_V1','REQUIRED_ITEM_REPAIR_V1',"
                     "'UNIQUE_KEY_REPAIR_V1','EVIDENCE_SCOPE_REPAIR_V1',"
                     "'EVIDENCE_SCOPE_NORMALIZATION_V1',"
-                    "'EVIDENCE_SCOPE_NORMALIZATION_RETRY_V1')",
+                    "'EVIDENCE_SCOPE_NORMALIZATION_RETRY_V1',"
+                    "'SPEC_SPLIT_RESUME_V1','SPEC_SPLIT_SOURCE_REPLAY_V1')",
                     (job_id,),
                 ).fetchall()
             }
@@ -3095,6 +3122,49 @@ class AutoKnowledgeMapService:
                 row["error_code"] == "AUTO_ARTIFACT_CONFLICT"
                 and row["builder_version"] == BUILDER_VERSION
                 and row["error_message"]
+                == "The split Spec recovery found no irreducibly invalid node."
+            ):
+                split_scope = connection.execute(
+                    "SELECT * FROM auto_knowledge_spec_split_receipts "
+                    "WHERE job_id=? ORDER BY created_at DESC LIMIT 1",
+                    (row["id"],),
+                ).fetchone()
+                if split_scope is None:
+                    continue
+                source_attempt = connection.execute(
+                    "SELECT operation_id,status,rejection_code,output_hash "
+                    "FROM auto_knowledge_model_attempts WHERE job_id=? "
+                    "AND operation_id=?",
+                    (row["id"], split_scope["source_operation_id"]),
+                ).fetchone()
+                split_operations = json.loads(str(split_scope["split_operation_ids_json"]))
+                split_artifacts = (
+                    connection.execute(
+                        "SELECT model_operation_id FROM auto_knowledge_job_artifacts "
+                        "WHERE job_id=? AND model_operation_id IN ("
+                        + ",".join("?" for _ in split_operations)
+                        + ") ORDER BY model_operation_id",
+                        (row["id"], *split_operations),
+                    ).fetchall()
+                    if split_operations
+                    else []
+                )
+                if (
+                    source_attempt is None
+                    or source_attempt["status"] != "BUSINESS_REJECTED"
+                    or source_attempt["rejection_code"] != "AUTO_EVIDENCE_INVALID"
+                    or source_attempt["output_hash"] != split_scope["source_output_hash"]
+                    or len(split_artifacts) != len(set(split_operations))
+                    or {str(item["model_operation_id"]) for item in split_artifacts}
+                    != set(split_operations)
+                ):
+                    continue
+                blocked = [source_attempt]
+                reason = "SPEC_SPLIT_SOURCE_REPLAY_V1"
+            elif (
+                row["error_code"] == "AUTO_ARTIFACT_CONFLICT"
+                and row["builder_version"] == BUILDER_VERSION
+                and row["error_message"]
                 == "The local evidence normalization lacks its exact r3 evidence."
             ):
                 # V54's global normalization lookup could stop a later shard
@@ -3405,6 +3475,7 @@ class AutoKnowledgeMapService:
                 "EVIDENCE_SCOPE_NORMALIZATION_RETRY_V1",
                 "EVIDENCE_SCOPE_RESUME_V1",
                 "SPEC_SPLIT_RESUME_V1",
+                "SPEC_SPLIT_SOURCE_REPLAY_V1",
             }
             existing_recovery = connection.execute(
                 "SELECT 1 FROM auto_knowledge_job_recovery_receipts "
@@ -3633,6 +3704,18 @@ class AutoKnowledgeMapService:
                 )
                 counts["EVENTS_CONSUMED"] = len(due)
         return dict(counts)
+
+    def reconcile_background(self) -> dict[str, int]:
+        """Run one periodic reconciliation under the configured backlog policy.
+
+        Source events remain event-driven when legacy inventory sweeping is
+        paused.  Explicit operator calls to ``reconcile(force=True, ...)`` are
+        deliberately unchanged so a handoff can resume one exact target.
+        """
+
+        return self.reconcile(
+            full=self.settings.auto_knowledge_map_legacy_backfill_enabled
+        )
 
     # --------------------------------------------------------------- job lease
 

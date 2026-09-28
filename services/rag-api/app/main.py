@@ -183,7 +183,7 @@ def create_app(
                         or now - last_reconcile
                         >= resolved_settings.auto_knowledge_map_reconcile_seconds
                     ):
-                        await asyncio.to_thread(service.reconcile, full=True)
+                        await asyncio.to_thread(service.reconcile_background)
                         first_pass = False
                         last_reconcile = now
                     while await asyncio.to_thread(service.run_once, worker_id) is not None:

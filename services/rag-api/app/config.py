@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     # Both switches must be explicit before a background worker can spend.
     auto_knowledge_map_enabled: bool = False
     auto_knowledge_map_allow_billable: bool = False
+    # Keep event-driven maps for new/changed material independent from the
+    # operator-controlled sweep of legacy inventory.  Production handoffs can
+    # pause the latter without disabling the former.
+    auto_knowledge_map_legacy_backfill_enabled: bool = True
     auto_knowledge_map_poll_seconds: float = Field(default=5.0, ge=1.0, le=300.0)
     auto_knowledge_map_reconcile_seconds: float = Field(default=300.0, ge=30.0, le=3600.0)
 
