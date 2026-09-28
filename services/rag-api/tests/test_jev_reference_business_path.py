@@ -11,8 +11,8 @@ Three properties are checked here and nowhere else:
 1. a labelled document really is produced by ingestion, so the locator has something
    correct to match;
 2. a message naming a question produces a recall whose sources report *how* that
-   label was verified — and with no credential present, that report says the
-   deterministic reference was used and nothing was claimed;
+   label was handled — deterministic reference parsing is retained while the retired
+   soft TypeSafe/Jev dependency is not called and nothing is claimed as verified;
 3. a message that merely contains the word "question" plus a number in prose is not
    pinned by an invented sub-part filter.
 """
@@ -173,12 +173,12 @@ def test_a_named_question_recalls_exactly_and_reports_how_it_was_verified(
         "question_part",
     }
     assert {field["value"] for field in report["fields"]} == {"1", "b"}
-    # With no TypeSafe credential configured, nothing may claim the label was
-    # verified: every field degrades typed, the deterministic reference is used
-    # unchanged, and both labels are on record as needing review.
+    # Soft reference parsing no longer calls TypeSafe/Jev. Nothing may claim the
+    # label was verified: the deterministic reference is used unchanged and both
+    # labels remain explicitly marked for review.
     assert report["dropped"] == []
     assert report["needs_review"] == ["question_number", "question_part"]
-    assert report["jev_calls"] == 2  # one bounded attempt per labelled field
+    assert report["jev_calls"] == 0
     for field in report["fields"]:
         assert field["used_jev"] is False
         assert field["verdict"] is None

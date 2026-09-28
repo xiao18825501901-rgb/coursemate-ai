@@ -189,6 +189,38 @@ def test_a_bare_topic_is_not_an_objective() -> None:
     assert refusal.value.errors()[0]["type"] == "value_error"
 
 
+@pytest.mark.parametrize(
+    "objective",
+    [
+        "List member names returned by a three-table join with DISTINCT selection",
+        "State the conditions under which a LEFT JOIN preserves a NULL row",
+        "Describe how duplicate rows arise across a many-to-many join",
+        "Define functional dependency using the supplied relation",
+        "Learners can write a parameterized SELECT query",
+        "Given the schema and rows, write the query and explain its output",
+        "For each execution plan, evaluate the join order",
+        "列出多表连接后需要去重的输出字段",
+        "描述 NULL 对外连接筛选条件的影响",
+        "根据给定表结构，写出查询并解释结果",
+    ],
+)
+def test_objective_accepts_real_course_action_phrasings(objective: str) -> None:
+    assert objective_is_observable(objective) is True
+
+
+@pytest.mark.parametrize(
+    "objective",
+    [
+        "Multi-table SQL Joins with DISTINCT Selection",
+        "Database specialist terminology",
+        "Classification taxonomy",
+        "聚类算法与数据库连接",
+    ],
+)
+def test_objective_rejects_topics_and_substring_false_positives(objective: str) -> None:
+    assert objective_is_observable(objective) is False
+
+
 def test_a_model_cannot_grant_itself_authority() -> None:
     """The keys that would let a model decide permissions, verification or grades do not exist."""
     for extra in (

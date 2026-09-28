@@ -16,6 +16,7 @@ __pycache__/
 # Node / frontend
 node_modules/
 dist/
+services/openjev-service/model/
 *.tsbuildinfo
 coverage/
 playwright-report/

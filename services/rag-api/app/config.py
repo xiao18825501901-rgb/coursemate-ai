@@ -175,6 +175,21 @@ class Settings(BaseSettings):
     jev_definition_modes: str = Field(
         default="", validation_alias=AliasChoices("JEV_DEFINITION_MODES")
     )
+    # TypeSafe/Jev is retained only for historical receipt readability. New
+    # traffic is disabled unless the operator explicitly selects the private,
+    # pinned OpenJev service and supplies every coordinate below.
+    jev_provider: Literal["disabled", "openjev"] = Field(
+        default="disabled", validation_alias=AliasChoices("JEV_PROVIDER")
+    )
+    openjev_endpoint: str = Field(
+        default="", validation_alias=AliasChoices("OPENJEV_ENDPOINT")
+    )
+    openjev_bearer_token: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("OPENJEV_BEARER_TOKEN")
+    )
+    openjev_model_revision: str = Field(
+        default="", validation_alias=AliasChoices("OPENJEV_MODEL_REVISION")
+    )
     # The task-level transient credential: a personal access token pasted for one import task,
     # held in the service process, destroyed before indexing starts.
     #
@@ -204,6 +219,18 @@ class Settings(BaseSettings):
             )
         if self.storage_backend == "aliyun_oss" and not self.v3_enabled:
             raise ValueError("aliyun_oss storage requires the V3 storage metadata schema")
+        if self.jev_provider == "openjev":
+            missing: list[str] = []
+            if not self.openjev_endpoint.strip():
+                missing.append("OPENJEV_ENDPOINT")
+            if not self.openjev_bearer_token:
+                missing.append("OPENJEV_BEARER_TOKEN")
+            if not self.openjev_model_revision.strip():
+                missing.append("OPENJEV_MODEL_REVISION")
+            if missing:
+                raise ValueError(
+                    "OpenJev configuration is incomplete: " + ", ".join(missing)
+                )
         self.rag_chat_api_key = self.rag_chat_api_key or self.openai_api_key
         self.rag_chat_base_url = self.rag_chat_base_url or self.openai_base_url
         self.rag_chat_model = self.rag_chat_model or self.openai_chat_model

@@ -1,0 +1,19 @@
+{
+  "name": "@coursejesus/openjev-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.14.0 <25"
+  },
+  "scripts": {
+    "start": "node src/main.mjs",
+    "fetch-model": "node scripts/fetch-frozen-model.mjs",
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "node --check src/server.mjs && node --check src/main.mjs && node --check src/snapshot.mjs && node --check scripts/fetch-frozen-model.mjs"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "4.3.0",
+    "open-jev": "file:vendor/open-jev-0.1.2.tgz"
+  }
+}

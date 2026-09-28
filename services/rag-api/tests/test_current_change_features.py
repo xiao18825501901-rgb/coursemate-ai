@@ -21,6 +21,7 @@ from app.jev.errors import JevNotConfiguredError
 from app.jev.gateway import FakeTransport, JevGateway
 from app.jev.models import JevAnswer, JevResult
 from app.main import create_app
+from app.cm_update.provider import ProviderError
 
 UI = "/ui-extension/api/ui/v1"
 
@@ -80,8 +81,8 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
             return JevNotConfiguredError("not configured in this focused fixture")
         return JevResult(answers={key: JevAnswer(choice=verdict)})
 
-    def fake_gateway(*, receipt_store, modes):
-        del modes
+    def fake_gateway(*, receipt_store, modes, transport=None, default_mode=None):
+        del modes, transport, default_mode
         return JevGateway(
             transport=FakeTransport(responder),
             catalog=load_catalog(),
@@ -382,6 +383,96 @@ def test_normal_mode_is_single_stage_and_thinking_runs_plan(client: TestClient) 
     assert "prompt_ready" in kinds_thinking, "thinking mode must run the plan stage"
     status_labels = [data.get("label") for kind, data in events_thinking if kind == "status"]
     assert "正在思考中" in status_labels and "正在输出中" in status_labels
+
+
+def test_private_course_teaching_does_not_require_a_node_or_seed_pack(
+    client: TestClient,
+) -> None:
+    created = client.post(
+        f"{UI}/courses",
+        headers=auth("token-a"),
+        json={"name": "Owner private notes", "description": "no knowledge graph yet"},
+    )
+    assert created.status_code == 201, created.text
+    course_id = created.json()["id"]
+    conversation = client.post(
+        f"{UI}/conversations",
+        headers=auth("token-a"),
+        json={"course": course_id, "lane": "teach"},
+    ).json()
+
+    for mode in ("normal", "thinking"):
+        started = client.post(
+            f"{UI}/conversations/{conversation['id']}/runs",
+            headers=auth("token-a"),
+            json={
+                "text": f"Explain my private course in {mode} mode",
+                "request_id": f"private-no-node-{mode}",
+                "teaching_mode": mode,
+            },
+        )
+        assert started.status_code == 202, started.text
+        run = wait_terminal(client, started.json()["id"])
+        assert run["status"] == "completed", run
+
+    history = client.get(
+        f"{UI}/conversations/{conversation['id']}", headers=auth("token-a")
+    ).json()["messages"]
+    assert [message["role"] for message in history] == [
+        "user", "assistant", "user", "assistant"
+    ]
+
+
+def test_incomplete_thinking_plan_persists_private_checkpoint_and_usage(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    make_course(client)
+    provider = client.app.state.ui_extension_app.state.provider
+    secret_plan = "internal planner prefix that must never become a public event"
+
+    async def incomplete(*_args, **_kwargs):
+        yield {"kind": "status", "status": "planning", "label": "正在思考中"}
+        yield {"kind": "prompt_checkpoint", "text": secret_plan}
+        yield {
+            "kind": "usage",
+            "stage": "prompt",
+            "value": {"input_tokens": 31, "output_tokens": 17},
+        }
+        raise ProviderError("INCOMPLETE_PROVIDER_RESPONSE_MAX_OUTPUT_TOKENS")
+
+    monkeypatch.setattr(provider, "generate", incomplete)
+    conversation = client.post(
+        f"{UI}/conversations", headers=auth("token-a"),
+        json={"course": "cs3481", "lane": "teach"},
+    ).json()
+    started = client.post(
+        f"{UI}/conversations/{conversation['id']}/runs",
+        headers=auth("token-a"),
+        json={
+            "text": "Use Thinking once",
+            "request_id": "incomplete-private-checkpoint-0001",
+            "teaching_mode": "thinking",
+        },
+    ).json()
+    run = wait_terminal(client, started["id"])
+    assert run["status"] == "failed"
+    assert run["error"] == "INCOMPLETE_PROVIDER_RESPONSE_MAX_OUTPUT_TOKENS"
+    assert run["usage"][-1]["value"] == {"input_tokens": 31, "output_tokens": 17}
+    assert "generated_prompt" not in run
+
+    database = client.app.state.ui_extension_app.state.db
+    internal = database.one(
+        "SELECT generated_prompt FROM cmui_runs WHERE id=?", (started["id"],)
+    )
+    assert internal["generated_prompt"] == secret_plan
+    frames = collect_events(client, started["id"])
+    serialized = json.dumps(frames, ensure_ascii=False)
+    assert secret_plan not in serialized
+    assert "prompt_checkpoint" not in {kind for kind, _payload in frames}
+    assert any(
+        kind == "error" and payload["code"] == "INCOMPLETE_PROVIDER_RESPONSE_MAX_OUTPUT_TOKENS"
+        for kind, payload in frames
+    )
 
 
 def test_run_response_never_exposes_plan_text(client: TestClient) -> None:

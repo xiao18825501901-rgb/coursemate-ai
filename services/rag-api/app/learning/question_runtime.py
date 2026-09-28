@@ -165,6 +165,11 @@ class GeneratedExercise(Contract):
     private: PrivateExerciseProjection
     references: list[ExerciseReference] = Field(min_length=1, max_length=20)
     usage: list[dict[str, Any]] = Field(min_length=3, max_length=3)
+    # The mounted dual-pane worker needs the canonical target selected by the
+    # owner-scoped domain adapter.  These fields are intentionally part of the
+    # server-only result; they do not expose the private solution projection.
+    target_node_id: Identifier | None = None
+    target_node_title: Text | None = None
 
 
 @dataclass(frozen=True)
@@ -1824,6 +1829,7 @@ class QuestionEngineRuntime:
         slots: tuple[AssessmentQuestionSlot, ...] | None = None,
         operation_id: str | None = None,
         should_cancel: Callable[[], bool] | None = None,
+        progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> list[dict[str, Any]]:
         """Prepare complementary READY revisions for one frozen configuration."""
 
@@ -1875,6 +1881,14 @@ class QuestionEngineRuntime:
             prepared: list[dict[str, Any]] = []
             for slot in (slots or default_assessment_question_slots()):
                 self._check_cancelled(should_cancel)
+                if progress is not None:
+                    progress(
+                        {
+                            "ordinal": slot.ordinal,
+                            "stage": "RESOLVING_EVIDENCE",
+                            "prepared_slots": len(prepared),
+                        }
+                    )
                 objective = objectives[(slot.ordinal - 1) % len(objectives)]
                 evidence = build_evidence_pack(
                     self.database,
@@ -1899,6 +1913,14 @@ class QuestionEngineRuntime:
                     evidence=evidence,
                 )
                 if existing is None:
+                    if progress is not None:
+                        progress(
+                            {
+                                "ordinal": slot.ordinal,
+                                "stage": "AUTHOR_AND_BLIND_SOLVE",
+                                "prepared_slots": len(prepared),
+                            }
+                        )
                     persisted, candidate, blind, report = self._execute_pipeline(
                         owner_user_id=owner_user_id,
                         workspace_id=workspace_id,
@@ -1945,6 +1967,14 @@ class QuestionEngineRuntime:
                         "usage": usage,
                     }
                 )
+                if progress is not None:
+                    progress(
+                        {
+                            "ordinal": slot.ordinal,
+                            "stage": "SLOT_READY",
+                            "prepared_slots": len(prepared),
+                        }
+                    )
             return prepared
         except QuestionEngineRuntimeError:
             raise

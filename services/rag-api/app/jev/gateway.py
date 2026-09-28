@@ -2,9 +2,9 @@
 
 Responsibilities (nothing else):
 
-* injectable transport — :class:`FakeTransport` for tests, :class:`SdkTransport`
-  for the live path (a real adapter over the verified ``typesafe-sdk`` signature
-  that raises :class:`JevNotConfiguredError` when no credential exists);
+* injectable transport — :class:`FakeTransport` for tests,
+  :class:`OpenJevTransport` for the pinned private production service, and
+  :class:`DisabledTransport` for fail-local operation;
 * ``off | shadow | on`` per definition key, with ``shadow`` the default;
 * request size / batch / timeout / concurrency / cancel bounds;
 * one call per decision, never an automatic paid retry;
@@ -12,24 +12,25 @@ Responsibilities (nothing else):
   latency, outcome) — the transport suggestion is recorded, never auto-applied;
 * typed errors only: the four required codes plus a request-bound error.
 
-The SDK is imported lazily inside :class:`SdkTransport` so the package has no
-third-party runtime import, and only the fields verified against
-``docs.typesafe.ai`` are used (``TypeSafeClient(model=...).system_one(state,
-questions)`` with ``Choice(instructions, criteria=dict)``,
-``Score(instructions, criteria=list)``, ``Noul(instructions)`` and the
-``.choices/.nouls/.scores`` accessors). No endpoint, model id, timeout or limit
-is invented.
+The legacy :class:`SdkTransport` remains solely so historical receipts and
+isolated compatibility tests retain their original provider identity.  App
+startup never constructs it and it is not an automatic fallback.  New live
+traffic can only use an explicitly configured :class:`OpenJevTransport`.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import os
+import re
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from time import perf_counter
-from typing import Any, Protocol, Sequence
+from typing import Any, Protocol
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from app.jev.catalog import Catalog, DecisionDefinition, Primitive, load_catalog
@@ -152,6 +153,215 @@ class FakeTransport:
         if isinstance(result, dict):
             return _result_from_dict(result, self.model_version)
         raise JevInvalidResponseError("FakeTransport responder returned an unknown type")
+
+
+class DisabledTransport:
+    """Fail locally without importing the retired TypeSafe SDK or using a network."""
+
+    model_version = "disabled"
+
+    def call(self, call: JevCall, *, timeout_seconds: float) -> JevResult:
+        del call, timeout_seconds
+        raise JevUnavailableError(
+            "External TypeSafe transport is disabled; no semantic provider is configured."
+        )
+
+
+class OpenJevTransport:
+    """One-shot authenticated adapter for the private self-hosted OpenJev service.
+
+    The transport does not decide whether an answer is qualified for a hard
+    gate.  It validates the authenticated model response and preserves the full
+    distribution; the gateway/receipt admission layer applies qualification.
+    No retry is installed here, so one reservation produces at most one HTTP
+    inference request.
+    """
+
+    provider = "open-jev-selfhost"
+
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        bearer_token: str,
+        expected_model_revision: str,
+        client: Any | None = None,
+    ) -> None:
+        parsed = urlparse(endpoint)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("OPENJEV_ENDPOINT must be an absolute http(s) URL")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("OPENJEV_ENDPOINT must not contain credentials, query, or fragment")
+        if parsed.scheme == "http" and parsed.hostname not in {"127.0.0.1", "::1", "localhost"}:
+            raise ValueError("Plain HTTP is allowed only for a loopback OpenJev endpoint")
+        if not bearer_token.strip():
+            raise ValueError("OPENJEV_BEARER_TOKEN is required")
+        if not expected_model_revision.strip():
+            raise ValueError("OPENJEV_MODEL_REVISION is required")
+        if client is None:
+            import httpx
+
+            client = httpx.Client(follow_redirects=False)
+        self.endpoint = endpoint.rstrip("/")
+        self.bearer_token = bearer_token
+        self.expected_model_revision = expected_model_revision
+        self.model_version = f"open-jev:{expected_model_revision}"
+        self.client = client
+
+    @staticmethod
+    def _language(state: dict[str, Any]) -> str:
+        def content(value: Any) -> list[str]:
+            if isinstance(value, str):
+                return [] if re.fullmatch(r"[A-Za-z0-9_.:-]+", value) else [value]
+            if isinstance(value, dict):
+                return [item for child in value.values() for item in content(child)]
+            if isinstance(value, (list, tuple)):
+                return [item for child in value for item in content(child)]
+            return []
+
+        text = " ".join(content(state))
+        has_zh = bool(re.search(r"[\u3400-\u9fff]", text))
+        has_latin = bool(re.search(r"[A-Za-z]", text))
+        if has_zh and has_latin:
+            return "mixed"
+        return "zh" if has_zh else "en"
+
+    @staticmethod
+    def _scope_digest(metadata: dict[str, Any]) -> str:
+        import hashlib
+
+        payload = json.dumps(metadata, ensure_ascii=False, sort_keys=True, default=str)
+        return hashlib.sha256(payload.encode()).hexdigest()
+
+    def call(self, call: JevCall, *, timeout_seconds: float) -> JevResult:
+        import httpx
+
+        request_id = f"openjev_{uuid4().hex}"
+        questions: dict[str, dict[str, Any]] = {}
+        for key, question in call.questions.items():
+            item: dict[str, Any] = {
+                "primitive": question.primitive,
+                "instructions": question.instructions,
+            }
+            if isinstance(question.criteria, dict):
+                item["options"] = list(question.criteria)
+                item["descriptions"] = dict(question.criteria)
+            elif isinstance(question.criteria, list):
+                item["options"] = list(question.criteria)
+            questions[key] = item
+        language = self._language(call.state)
+        body = {
+            "request_id": request_id,
+            "operation_id": str(call.metadata.get("operation_id") or request_id),
+            "scope_digest": self._scope_digest(call.metadata),
+            "case_id": str(call.metadata.get("case_id") or next(iter(call.questions))),
+            "case_version": str(call.metadata.get("case_version") or "unknown"),
+            "state": call.state,
+            "questions": questions,
+            "source_language": language,
+            "input_transform_version": "coursejesus-openjev-input.v1",
+            "truncation": "error",
+        }
+        try:
+            response = self.client.post(
+                f"{self.endpoint}/v1/decisions",
+                headers={
+                    "authorization": f"Bearer {self.bearer_token}",
+                    "content-type": "application/json",
+                },
+                json=body,
+                timeout=timeout_seconds,
+            )
+        except (httpx.TimeoutException, httpx.NetworkError) as error:
+            raise JevUnavailableError("Self-hosted OpenJev request failed") from error
+        if response.status_code != 200:
+            raise JevUnavailableError(
+                f"Self-hosted OpenJev returned HTTP {response.status_code}"
+            )
+        try:
+            payload = response.json()
+        except ValueError as error:
+            raise JevInvalidResponseError("Self-hosted OpenJev returned invalid JSON") from error
+        if not isinstance(payload, dict):
+            raise JevInvalidResponseError("Self-hosted OpenJev response must be an object")
+        model = payload.get("model")
+        input_info = payload.get("input")
+        answers_payload = payload.get("answers")
+        if (
+            payload.get("status") != "COMPLETED"
+            or payload.get("provider") != self.provider
+            or not isinstance(model, dict)
+            or model.get("revision") != self.expected_model_revision
+            or not isinstance(input_info, dict)
+            or input_info.get("truncated") is not False
+            or input_info.get("source_language") != language
+            or input_info.get("served_language") != ("en" if language == "en" else "mixed")
+            or not isinstance(answers_payload, dict)
+        ):
+            raise JevInvalidResponseError("Self-hosted OpenJev response identity is invalid")
+        answers: dict[str, JevAnswer] = {}
+        for key, question in call.questions.items():
+            value = answers_payload.get(key)
+            if not isinstance(value, dict):
+                raise JevInvalidResponseError(f"Self-hosted OpenJev omitted answer {key}")
+            if question.primitive == Primitive.CHOICE:
+                probabilities = value.get("probabilities")
+                options = list(question.criteria) if isinstance(question.criteria, dict) else []
+                if not _probability_distribution(probabilities, options):
+                    raise JevInvalidResponseError(f"{key}: invalid probability distribution")
+                selected = value.get("choice")
+                if (
+                    selected not in options
+                    or probabilities[selected] != max(probabilities.values())
+                ):
+                    raise JevInvalidResponseError(
+                        f"{key}: selected choice does not match distribution"
+                    )
+                answers[key] = JevAnswer(choice=str(selected), raw=dict(value))
+            elif question.primitive == Primitive.SCORE:
+                answers[key] = JevAnswer(
+                    score=_normalize_score(value.get("level")), raw=dict(value)
+                )
+            else:
+                probability = _coerce_probability(value.get("probability"))
+                confidence = _coerce_probability(value.get("confidence"))
+                if (
+                    probability is None
+                    or confidence is None
+                    or abs(confidence - max(probability, 1 - probability)) > 1e-6
+                ):
+                    raise JevInvalidResponseError(f"{key}: invalid Noul probability contract")
+                answers[key] = JevAnswer(
+                    noul=probability,
+                    probability=probability,
+                    raw=dict(value),
+                )
+        return JevResult(
+            answers=answers,
+            request_id=str(payload.get("request_id") or request_id),
+            model_version=self.model_version,
+            metadata={
+                "provider": self.provider,
+                "model": model,
+                "input": input_info,
+                "timing": payload.get("timing") or {},
+            },
+        )
+
+
+def _probability_distribution(value: Any, options: list[str]) -> bool:
+    if not isinstance(value, dict) or set(value) != set(options) or len(options) < 2:
+        return False
+    probabilities = list(value.values())
+    if any(
+        isinstance(item, bool)
+        or not isinstance(item, (int, float))
+        or not math.isfinite(float(item))
+        or not 0 <= float(item) <= 1
+        for item in probabilities
+    ):
+        return False
+    return abs(sum(float(item) for item in probabilities) - 1) <= 1e-6
 
 
 class SdkTransport:
@@ -346,7 +556,9 @@ class JevGateway:
         default_mode: str | None = None,
     ) -> None:
         self.catalog = catalog or load_catalog()
-        self.transport: Transport = transport or SdkTransport()
+        # TypeSafe is no longer an automatic live fallback.  Deployments must
+        # explicitly inject OpenJevTransport after pinning a local model.
+        self.transport: Transport = transport or DisabledTransport()
         self.modes = modes or {}
         self.bounds = bounds or GatewayBounds()
         self.receipt_store = receipt_store
@@ -411,17 +623,44 @@ class JevGateway:
                     input_hash=digest,
                 )
         started = perf_counter()
-        call = JevCall(state=request.state, questions={question.key: question})
+        call = JevCall(
+            state=request.state,
+            questions={question.key: question},
+            metadata={
+                "case_id": definition.key,
+                "case_version": self.catalog.version,
+                "owner_scope_hash": scope.owner_scope_hash,
+                "course_id": scope.course_id,
+                "workspace_id": scope.workspace_id,
+                "material_revision": scope.material_revision,
+                "node_id": scope.node_id,
+                "spec_version": scope.spec_version,
+                "question_hash": scope.question_hash,
+                "input_hash": digest,
+            },
+        )
         try:
             result = self._run_call(call, request.cancel_event)
         except JevTimeoutError:
-            return self._failed(definition, scope, request.caller_role, mode, "timeout", digest, perf_counter() - started)
+            return self._failed(
+                definition, scope, request.caller_role, mode, "timeout", digest,
+                perf_counter() - started,
+            )
         except JevNotConfiguredError:
-            return self._failed(definition, scope, request.caller_role, mode, "not_configured", digest, perf_counter() - started)
+            return self._failed(
+                definition, scope, request.caller_role, mode, "not_configured", digest,
+                perf_counter() - started,
+            )
         except JevError:
-            return self._failed(definition, scope, request.caller_role, mode, "unavailable", digest, perf_counter() - started)
+            return self._failed(
+                definition, scope, request.caller_role, mode, "unavailable", digest,
+                perf_counter() - started,
+            )
         except Exception:  # noqa: BLE001 - unknown transport failure fails closed
-            return self._failed(definition, scope, request.caller_role, mode, "unavailable", digest, perf_counter() - started)
+            return self._failed(
+                definition, scope, request.caller_role, mode, "unavailable", digest,
+                perf_counter() - started,
+            )
 
         latency_ms = (perf_counter() - started) * 1000
         answer = result.answers.get(question.key)
@@ -441,6 +680,8 @@ class JevGateway:
             outcome,
             latency_ms,
             result.model_version,
+            provider_request_id=result.request_id,
+            provider_metadata=result.metadata,
         )
         return Decision(
             definition_key=definition.key,
@@ -464,12 +705,16 @@ class JevGateway:
 
     # ------------------------------------------------------------------ internals
 
-    def _build_question(self, definition: DecisionDefinition, request: DecisionRequest) -> JevQuestion:
+    def _build_question(
+        self, definition: DecisionDefinition, request: DecisionRequest
+    ) -> JevQuestion:
         instructions = request.instructions or definition.instructions
         if definition.primitive == Primitive.CHOICE:
             criteria = request.criteria
             if not criteria or not isinstance(criteria, dict):
-                raise JevRequestError(f"{definition.key}: Choice requires an id->label criteria dict")
+                raise JevRequestError(
+                    f"{definition.key}: Choice requires an id->label criteria dict"
+                )
             return JevQuestion(
                 key=request.definition.key,
                 primitive=Primitive.CHOICE,
@@ -511,7 +756,9 @@ class JevGateway:
             raise JevRequestError(f"{definition.key}: call was cancelled")
 
     def _run_call(self, call: JevCall, cancel_event: Any) -> JevResult:
-        future = self._executor.submit(self.transport.call, call, timeout_seconds=self.bounds.timeout_seconds)
+        future = self._executor.submit(
+            self.transport.call, call, timeout_seconds=self.bounds.timeout_seconds
+        )
         try:
             return future.result(timeout=self.bounds.timeout_seconds)
         except FutureTimeout:
@@ -538,7 +785,8 @@ class JevGateway:
             authorized = set(criteria) if isinstance(criteria, dict) else set()
             if not answer.choice or answer.choice not in authorized:
                 raise JevInvalidResponseError(
-                    f"{definition.key}: selected {answer.choice!r} is not an authorized candidate id"
+                    f"{definition.key}: selected {answer.choice!r} is not an "
+                    "authorized candidate id"
                 )
             return JevAnswer(choice=answer.choice, raw=answer.raw)
         if definition.primitive == Primitive.SCORE:
@@ -580,10 +828,19 @@ class JevGateway:
         outcome: str,
         latency_ms: float,
         model_version: str | None,
+        *,
+        provider_request_id: str | None = None,
+        provider_metadata: dict[str, Any] | None = None,
     ) -> str | None:
         if self.receipt_store is None:
             return None
-        output = _suggestion_payload(suggestion, outcome=outcome, model_version=model_version)
+        output = _suggestion_payload(
+            suggestion,
+            outcome=outcome,
+            model_version=model_version,
+            provider_request_id=provider_request_id,
+            provider_metadata=provider_metadata,
+        )
         receipt = Receipt(
             id=f"jev_{uuid4().hex}",
             definition_key=definition.key,
@@ -628,7 +885,9 @@ class JevGateway:
             input_hash=digest,
         )
 
-    def _suggestion_from_cache(self, definition: DecisionDefinition, cached: dict[str, Any]) -> JevAnswer:
+    def _suggestion_from_cache(
+        self, definition: DecisionDefinition, cached: dict[str, Any]
+    ) -> JevAnswer:
         if definition.primitive == Primitive.CHOICE:
             return JevAnswer(choice=cached.get("choice"), raw=cached)
         if definition.primitive == Primitive.SCORE:
@@ -647,15 +906,26 @@ class JevGateway:
 
 
 def _suggestion_payload(
-    suggestion: JevAnswer | None, *, outcome: str, model_version: str | None
+    suggestion: JevAnswer | None,
+    *,
+    outcome: str,
+    model_version: str | None,
+    provider_request_id: str | None = None,
+    provider_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    identity = {
+        "outcome": outcome,
+        "model_version": model_version,
+        "provider_request_id": provider_request_id,
+        "provider_metadata": provider_metadata or {},
+    }
     if suggestion is None:
-        return {"outcome": outcome, "model_version": model_version}
-    return {
+        return identity
+    return identity | {
         "choice": suggestion.choice,
         "noul": suggestion.noul,
         "score": suggestion.score,
         "score_value": suggestion.score_value,
         "probability": suggestion.probability,
-        "model_version": model_version,
+        "raw": suggestion.raw,
     }

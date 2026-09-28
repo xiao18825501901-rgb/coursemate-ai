@@ -2,7 +2,7 @@ import { BRAND } from "../brand";
 import { RichText } from './richtext.jsx';
 import { DirectoryPicker } from './DirectoryPicker.jsx';
 import React from 'react';
-import { request, send, remove, download, key, streamEvents, listPairs, getPair, createPair, renamePair, deletePair, bindPair, createExercise, getExercise, revealExercise, requestExerciseHint, submitPracticeAttempt, scheduleLearningFollowup, configureLearningDiagnostic, skipLearningDiagnostic, markLearningDiagnosticUnsure, createExplanation, getExplanation, postExplanationMessage, cancelExplanation, searchPeople, listShares, getShare, createShare, joinShare, getAssessment, getAssessmentSetup, startAssessment, getAssessmentSession, submitAssessment, abandonAssessment, saveAssessmentDraft, loadAssessmentDraft, cancelPreparation, resumePreparation, createAssessmentExplanation, submitFeedback } from './api.js';
+import { request, send, remove, download, key, streamEvents, listPairs, getPair, createPair, renamePair, deletePair, bindPair, createExercise, getExercise, revealExercise, requestExerciseHint, submitPracticeAttempt, scheduleLearningFollowup, configureLearningDiagnostic, skipLearningDiagnostic, markLearningDiagnosticUnsure, createExplanation, getExplanation, postExplanationMessage, cancelExplanation, searchPeople, listShares, getShare, createShare, joinShare, getAssessment, getAssessmentSetup, getAssessmentPreparation, startAssessment, getAssessmentSession, submitAssessment, abandonAssessment, saveAssessmentDraft, loadAssessmentDraft, cancelPreparation, resumePreparation, createAssessmentExplanation, submitFeedback } from './api.js';
 import { dateKey, zonedParts, wallTimeToISO, formatBytes, formatTime, goto } from './utils.js';
 import { citationVerdict } from './citationSupport.js';
 import { referenceVerificationNote } from './referenceVerification.js';
@@ -758,23 +758,64 @@ export class Learn extends React.Component {
     }
     async stop(lane) { const rid = this.state.run[lane]; if (rid)
         await send('/runs/' + rid + '/cancel', {}); }
+    currentPairId() { return typeof this.state.pair === 'object' ? this.state.pair?.id : this.state.pair; }
+    isCurrentExerciseRun(rid, context) {
+        return !this.unmounted && this.props.course.id === context.courseId &&
+            this.currentPairId() === context.pairId && this.state.run.problem === rid;
+    }
     async doExercise(explicitNode = null, cycleId = null, purpose = null) { const lane = 'problem'; if (this.state.busy.problem)
         return; this.follow.problem = true; this.setLane('busy', lane, true); this.setLane('partial', lane, ''); this.setLane('status', lane, '正在出题…'); try {
-        const run = await createExercise(this.props.course.id, explicitNode, this.state.pair?.id || this.state.pair, cycleId, purpose);
+        const context = { courseId: this.props.course.id, pairId: this.currentPairId() };
+        const run = await createExercise(context.courseId, explicitNode, context.pairId, cycleId, purpose);
         this.setLane('run', lane, run.id);
-        await this.watchExercise(run.id);
+        await this.watchExercise(run.id, context);
     }
     catch (e) {
         this.setLane('status', lane, e.message);
         this.setLane('busy', lane, false);
         this.props.toast(e.message);
     } }
-    async watchExercise(rid) {
+    async reconcileExercise(rid, context, controller) {
+        const terminal = ['completed', 'cancelled', 'failed'];
+        // The exercise run is durable. Polling this GET endpoint only observes that same run;
+        // it never starts a replacement task or incurs another model call.
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+            if (controller.signal.aborted || !this.isCurrentExerciseRun(rid, context)) return false;
+            const run = await request('/runs/' + rid);
+            if (!this.isCurrentExerciseRun(rid, context)) return false;
+            if (!terminal.includes(run.status)) {
+                this.setLane('partial', 'problem', run.partial_text || this.state.partial.problem);
+                this.setLane('status', 'problem', run.status === 'running' ? '题目仍在生成，正在恢复连接…' : (run.status_label || '正在准备题目…'));
+                await new Promise(resolve => {
+                    const timer = window.setTimeout(resolve, 1800);
+                    controller.signal.addEventListener('abort', () => { window.clearTimeout(timer); resolve(); }, { once: true });
+                });
+                continue;
+            }
+            if (run.conversation) {
+                const saved = await request('/conversations/' + run.conversation);
+                if (!this.isCurrentExerciseRun(rid, context)) return false;
+                this.setLane('conv', 'problem', run.conversation, () => this.saveLayout());
+                this.setLane('messages', 'problem', Array.isArray(saved.messages) ? saved.messages : []);
+            }
+            this.setLane('partial', 'problem', run.status === 'completed' ? '' : (run.partial_text || ''));
+            this.setLane('status', 'problem', run.status === 'completed' ? '' : (run.error || (run.status === 'cancelled' ? '已停止生成' : '题目生成未完成')));
+            this.setLane('busy', 'problem', false);
+            this.setLane('run', 'problem', null);
+            return true;
+        }
+        if (this.isCurrentExerciseRun(rid, context)) {
+            this.setLane('status', 'problem', '题目仍在服务器生成，可稍后打开历史对话恢复；系统不会重复提交。');
+            this.setLane('busy', 'problem', false);
+        }
+        return false;
+    }
+    async watchExercise(rid, context = { courseId: this.props.course.id, pairId: this.currentPairId() }) {
         const controller = new AbortController();
         this.controllers['problem'] = controller;
         let seenDelta = false;
         try {
-            await streamEvents(rid, (type, data) => { if (type === 'delta') {
+            await streamEvents(rid, (type, data) => { if (!this.isCurrentExerciseRun(rid, context)) return; if (type === 'delta') {
                 seenDelta = true;
                 this.setState(s => ({ partial: { ...s.partial, problem: s.partial.problem + data.text } }));
                 this.setLane('status', 'problem', '正在输出中');
@@ -782,26 +823,18 @@ export class Learn extends React.Component {
             if (type === 'status')
                 this.setLane('status', 'problem', seenDelta ? '正在输出中' : (data.label || '正在思考中')); if (type === 'error')
                 this.setLane('status', 'problem', data.message || (data.code + ' · ' + data.message)); }, controller.signal);
-            if (!this.unmounted) {
-                const run = await request('/runs/' + rid);
-                if (run.conversation) {
-                    this.setLane('conv', 'problem', run.conversation, () => this.saveLayout());
-                    const saved = await request('/conversations/' + run.conversation);
-                    this.setLane('messages', 'problem', saved.messages);
-                }
-                this.setLane('partial', 'problem', run.status === 'completed' ? '' : run.partial_text);
-                if (run.status === 'completed')
-                    this.setLane('status', 'problem', '');
-                else if (!this.state.status.problem)
-                    this.setLane('status', 'problem', `${run.status} · ${run.error || ''}`);
-                this.setLane('busy', 'problem', false);
-                this.setLane('run', 'problem', null);
-            }
+            await this.reconcileExercise(rid, context, controller);
         }
         catch (e) {
             if (e.name !== 'AbortError') {
-                this.setLane('status', 'problem', '连接中断。题目可能仍在生成，可稍后刷新查看。');
-                this.setLane('busy', 'problem', false);
+                this.setLane('status', 'problem', '连接中断，正在读取同一题目任务（不会重复调用模型）…');
+                try { await this.reconcileExercise(rid, context, controller); }
+                catch {
+                    if (this.isCurrentExerciseRun(rid, context)) {
+                        this.setLane('status', 'problem', '暂时无法读取题目状态；原任务和诊断记录已保留，不会自动重发。');
+                        this.setLane('busy', 'problem', false);
+                    }
+                }
             }
         }
     }
@@ -1135,7 +1168,8 @@ export class AssessmentWorkspace extends React.Component {
     winCount = 0;
     componentDidMount() { this.loadSummary(); this.keyHandler = e => { if (e.key === 'Escape')
         this.props.onExit(); }; window.addEventListener('keydown', this.keyHandler); }
-    componentWillUnmount() { window.removeEventListener('keydown', this.keyHandler); }
+    componentWillUnmount() { window.removeEventListener('keydown', this.keyHandler); if (this.preparationTimer)
+        window.clearTimeout(this.preparationTimer); }
     async loadSummary() { try {
         const summary = await getAssessment(this.props.course.id, this.props.node.id);
         this.setState({ summary });
@@ -1149,8 +1183,12 @@ export class AssessmentWorkspace extends React.Component {
     } }
     async loadSetup() { try {
         const setup = await getAssessmentSetup(this.props.course.id, this.props.node.id);
-        const slots = (setup.default_slots || []).map(slot => ({ ...slot }));
-        this.setState({ setup, slots, configurationId: null, preparing: null, error: '' });
+        const active = setup.active_preparation;
+        const slots = ((active?.slots?.length ? active.slots : setup.default_slots) || []).map(slot => ({ ...slot }));
+        this.setState({ setup, slots, configurationId: active?.configuration_id || null, preparing: active || null, error: '' }, () => {
+            if (active)
+                this.handlePreparationState(active);
+        });
     }
     catch (e) {
         this.setState({ error: e.message });
@@ -1189,20 +1227,33 @@ export class AssessmentWorkspace extends React.Component {
     } }
     async handleStart(started) { if (started.preparation_job_id) {
         this.setState({ preparing: started, configurationId: started.configuration_id || this.state.configurationId });
-        if (started.status === 'READY' || (started.status === 'BLOCKED' && started.can_start_from_ready_pool)) {
-            const retry = await startAssessment(this.props.course.id, this.props.node.id, { ...this.configurationPayload(), configuration_id: started.configuration_id || this.state.configurationId });
-            if (retry.preparation_job_id)
-                return this.setState({ preparing: retry });
-            await this.open(retry.id);
-        }
+        await this.handlePreparationState(started);
         return;
     }
         await this.open(started.id); }
-    async retryPreparation() { const retry = this.state.configurationId ? await startAssessment(this.props.course.id, this.props.node.id, this.configurationPayload()) : await resumePreparation(this.props.course.id, this.props.node.id); this.setState({ preparing: retry, configurationId: retry.configuration_id || this.state.configurationId }); if (retry.status === 'READY') {
-        const started = await startAssessment(this.props.course.id, this.props.node.id, this.configurationPayload());
-        if (!started.preparation_job_id)
-            await this.open(started.id);
+    schedulePreparationPoll() { if (this.preparationTimer)
+        window.clearTimeout(this.preparationTimer); this.preparationTimer = window.setTimeout(() => this.pollPreparation(), 1800); }
+    async pollPreparation() { const configurationId = this.state.configurationId; if (!configurationId)
+        return; try {
+        const current = await getAssessmentPreparation(this.props.course.id, this.props.node.id, configurationId);
+        this.setState({ preparing: current });
+        await this.handlePreparationState(current);
+    }
+    catch (e) {
+        this.setState({ error: e.message });
     } }
+    async handlePreparationState(preparation) { if (preparation.status === 'PREPARING')
+        return this.schedulePreparationPoll(); if (preparation.status === 'READY' || (preparation.status === 'BLOCKED' && preparation.can_start_from_ready_pool)) {
+        if (this.preparationTimer)
+            window.clearTimeout(this.preparationTimer); const started = await startAssessment(this.props.course.id, this.props.node.id, { configuration_id: preparation.configuration_id, slots: [] }); if (started.preparation_job_id) {
+            this.setState({ preparing: started });
+            if (started.status === 'PREPARING')
+                this.schedulePreparationPoll();
+            return;
+        }
+        await this.open(started.id);
+    } }
+    async retryPreparation() { const retry = this.state.configurationId ? await startAssessment(this.props.course.id, this.props.node.id, this.configurationPayload()) : await resumePreparation(this.props.course.id, this.props.node.id); this.setState({ preparing: retry, configurationId: retry.configuration_id || this.state.configurationId }); await this.handlePreparationState(retry); }
     async cancelPreparation() { const job = this.state.preparing; if (!job?.preparation_job_id)
         return; await cancelPreparation(this.props.course.id, this.props.node.id, job.preparation_job_id); this.setState({ preparing: { ...job, status: 'CANCELLED' } }); }
     async attach(e) { const input = e.currentTarget; const file = input.files[0]; if (!file)
@@ -1281,7 +1332,7 @@ export class AssessmentWorkspace extends React.Component {
             return '测评进行中'; if (view.status === 'SUBMITTED')
             return '待复核'; if (view.status === 'GRADED')
             return '已评阅'; return view.status; }
-    renderPreparing() { const p = this.state.preparing; return <div className="assessment-preparing"><p>{p.error_message || `题池不足，正在准备 ${p.question_count || this.state.slots.length} 道测评题。`}（已找到 {p.eligible_families || 0} 个不同题族）</p>{p.status === 'BLOCKED' && <p className="error-text">准备受阻：{p.error_code || '模型或证据暂不可用'}。已完成的兼容槽位会保留，重试只补缺项。</p>}<div className="row" style={{ marginTop: 12 }}><button className="btn" disabled={this.state.busy} onClick={() => this.retryPreparation()}>继续准备</button>{p.status === 'PREPARING' && <button className="btn" onClick={() => this.cancelPreparation()}>取消准备</button>}</div></div>; }
+    renderPreparing() { const p = this.state.preparing; const prepared = p.prepared_questions ?? p.eligible_families ?? 0; const total = p.question_count || this.state.slots.length; const stage = p.current_stage === 'RESOLVING_EVIDENCE' ? `正在读取第 ${p.current_ordinal || prepared + 1} 题课程证据` : p.current_stage === 'AUTHOR_AND_BLIND_SOLVE' ? `正在检查第 ${p.current_ordinal || prepared + 1} 题参考解` : '正在准备本节测评'; return <div className="assessment-preparing"><p>{p.status === 'BLOCKED' ? (p.error_message || '测评准备暂时受阻。') : stage}</p><p>已准备 {prepared}/{total} 题</p>{p.status === 'BLOCKED' && <p className="error-text">已完成的兼容槽位会保留，重试只补缺项。{p.diagnostic_id ? ` 诊断编号：${p.diagnostic_id}` : ''}</p>}<div className="row" style={{ marginTop: 12 }}>{p.status === 'BLOCKED' && <button className="btn" disabled={this.state.busy || p.error_code === 'MODEL_REQUEST_UNCERTAIN'} onClick={() => this.retryPreparation()}>继续准备</button>}{p.status === 'PREPARING' && <button className="btn" onClick={() => this.cancelPreparation()}>取消准备</button>}</div></div>; }
     changeSlot(index, questionType) { this.setState(state => ({ slots: state.slots.map((slot, current) => current === index ? { ...slot, question_type: questionType, task_form: defaultTaskForm(questionType) } : slot), configurationId: null })); }
     changeTaskForm(index, taskForm) { this.setState(state => ({ slots: state.slots.map((slot, current) => current === index ? { ...slot, task_form: taskForm } : slot), configurationId: null })); }
     addSlot() { const setup = this.state.setup; if (!setup || this.state.slots.length >= setup.maximum_questions)

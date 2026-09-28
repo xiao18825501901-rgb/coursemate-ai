@@ -1,22 +1,13 @@
-"""Two subjects, one service: the semantic cache cannot be shared between them.
+"""Soft semantic routing must not call or cache the retired TypeSafe provider.
 
-The scope that keys the Jev cache is derived from the authenticated caller, and the
-property "one learner's verdict is never served to another" was pinned by a unit test
-(`test_cache_scope_is_owner_scoped_and_never_crosses_users`) that calls the module
-directly. That proves the scope *function*; it does not prove that the running service
-derives the scope from the request's authenticated subject rather than from something a
-client could influence. This suite drives the mounted product over HTTP with **two**
-identities and reads the receipt store, which is the artifact the cache is keyed on:
+The owner-approved OpenJev transition removed TypeSafe/Jev from optional routing,
+reranking and classification. Those soft paths now use deterministic routing and must
+not create a provider receipt or semantic cache entry at all. Hard Question Engine
+quality gates retain their separate fail-closed, owner-scoped receipt contract.
 
-* the same definition asked by two subjects must produce **two different**
-  ``owner_scope_hash`` values — if they matched, one subject's cached verdict would be
-  answerable to the other;
-* the two subjects' runs must reach the same definition key, or the comparison would be
-  vacuous;
-* what one subject sends must not appear in the other's answers.
-
-The transport is the deterministic fake, so no credential and no budget are involved:
-what is asserted is the scoping of the ledger, not the quality of a verdict.
+This suite drives the mounted product over HTTP with two identities and proves that
+ordinary teaching completes while the retired soft provider remains completely unused.
+The dedicated gateway tests continue to pin owner-scoped cache isolation for hard gates.
 """
 
 from __future__ import annotations
@@ -116,7 +107,7 @@ def _receipts(database: Database) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-def test_two_subjects_never_share_a_semantic_cache_scope(
+def test_two_subjects_soft_semantic_routing_creates_no_provider_cache_scope(
     client: TestClient, tmp_path: Path
 ) -> None:
     created = client.post(
@@ -138,27 +129,10 @@ def test_two_subjects_never_share_a_semantic_cache_scope(
         )
     )
     rows = _receipts(database)
-    assert rows, "no semantic decision was recorded, so this test proves nothing"
-
-    by_definition: dict[str, set[str]] = {}
-    for row in rows:
-        definition = str(row["definition_key"])
-        by_definition.setdefault(definition, set()).add(str(row["owner_scope_hash"]))
-
-    # A definition both subjects reached must have been scoped twice, not once.
-    shared = {key: scopes for key, scopes in by_definition.items() if len(scopes) > 1}
-    assert shared, (
-        "no definition was reached by both subjects with distinct scopes, so the "
-        f"isolation property was not exercised: {by_definition}"
+    assert rows == [], (
+        "ordinary teaching must use deterministic soft routing and must not call, "
+        f"receipt, or cache the retired TypeSafe provider: {rows}"
     )
-    # And nothing may carry a scope that both subjects share for the same definition.
-    offenders = {key: scopes for key, scopes in shared.items() if len(scopes) != 2}
-    assert not offenders, f"a definition was scoped to more than two subjects: {offenders}"
-    # Every decision is recorded with a typed outcome. In this deployment there is no
-    # credential, so the outcome is `not_configured` by design — asserting `ok` here was
-    # this test's own error, not the product's.
-    assert all(str(row["outcome"]).strip() for row in rows), rows
-    assert {str(row["outcome"]) for row in rows} <= {"ok", "not_configured"}, rows
 
 
 # What is deliberately *not* here: a second test asserting that one subject's uploaded

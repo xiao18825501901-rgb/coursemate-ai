@@ -32,6 +32,9 @@ class JevCall:
 
     state: dict[str, Any]
     questions: dict[str, JevQuestion]
+    # Server-derived transport context.  It is never accepted from a browser
+    # and is excluded from the semantic state passed to the model.
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -59,6 +62,7 @@ class JevResult:
     answers: dict[str, JevAnswer]
     request_id: str | None = None
     model_version: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

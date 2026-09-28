@@ -111,6 +111,7 @@ export const searchPeople = (q) => request('/people?q=' + encodeURIComponent(q))
 // Configurable assessment unified flow (fullscreen workspace).
 export const getAssessment = (courseId, nodeId) => request(`/courses/${courseId}/knowledge/${nodeId}/assessment`);
 export const getAssessmentSetup = (courseId, nodeId) => request(`/courses/${courseId}/knowledge/${nodeId}/assessment/setup`);
+export const getAssessmentPreparation = (courseId, nodeId, configurationId) => request(`/courses/${courseId}/knowledge/${nodeId}/assessment/prepare/status?configuration_id=${encodeURIComponent(configurationId)}`);
 export const startAssessment = (courseId, nodeId, configuration = {}) => send(`/courses/${courseId}/knowledge/${nodeId}/assessment/session`, { ...configuration, request_id: key() });
 export const getAssessmentSession = (courseId, sessionId) => request(`/courses/${courseId}/knowledge/assessment/${sessionId}`);
 export const submitAssessment = (courseId, sessionId, payload) => send(`/courses/${courseId}/knowledge/assessment/${sessionId}/submit`, { ...payload, request_id: key() });

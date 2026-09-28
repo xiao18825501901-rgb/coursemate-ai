@@ -1,14 +1,25 @@
 import hashlib
 import json
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
+from test_question_persistence import (
+    NODE as QUESTION_NODE,
+    OWNER as QUESTION_OWNER,
+    WORKSPACE as QUESTION_WORKSPACE,
+    database_with_objective,
+)
 from test_learning_journey import setup_workspace
 from test_learning_workspace import client_at
 
 from app.db import LATEST_V3_SCHEMA_VERSION
+from app.jev.gateway import FakeTransport
+from app.jev.models import JevAnswer, JevResult
+from app.main import create_app
 
 
 def seed_assessment_pool(
@@ -175,6 +186,167 @@ def start_assessment(
     )
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def test_empty_sql_pool_is_prepared_durably_then_starts_without_manual_question_seed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A qualified reviewer turns the production SQL cold start into a real exam."""
+
+    database, config = database_with_objective(tmp_path)
+    sql_item = {
+        "item_id": "multi_join_distinct",
+        "requirement": "REQUIRED",
+        "objective": (
+            "List member names returned by joining Member, Subscription, and "
+            "AccessRecord with DISTINCT selection"
+        ),
+        "acceptance": (
+            "The answer uses all three equi-joins, explains duplicates and NULLs, "
+            "selects the requested fields, and states a deterministic ordering."
+        ),
+        "evidence_ids": ["chunk-course"],
+    }
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE chunks SET content=?,section='SQL joins and DISTINCT' WHERE id='chunk-course'",
+            (
+                "Member(member_id, member_name), Subscription(subscription_id, member_id), "
+                "and AccessRecord(subscription_id, accessed_at) are joined with equality predicates. "
+                "Member 1 Alice has subscriptions 10 and 11; both have access rows, so selecting "
+                "member_name without DISTINCT returns Alice twice. Member 2 Bob has subscription 12 "
+                "with a NULL accessed_at. Return only member_name, remove duplicates with DISTINCT, "
+                "and ORDER BY member_name. A WHERE predicate on the nullable right-side column can "
+                "remove NULL-extended rows, while the equivalent ON condition preserves them in an "
+                "outer join.",
+            ),
+        )
+        connection.execute(
+            "UPDATE knowledge_nodes SET title=? WHERE id=?",
+            ("Multi-table SQL Joins with DISTINCT Selection", QUESTION_NODE),
+        )
+        connection.execute(
+            "INSERT INTO teaching_specs(node_id,version,content_json,content_hash) "
+            "VALUES(?,2,?,?)",
+            (QUESTION_NODE, json.dumps([sql_item]), "c" * 64),
+        )
+
+    verdicts = {
+        "question.ambiguity.v1": "CLEAR",
+        "question.answer_agreement.v1": "AGREE",
+        "question.mcq_distractor_quality.v1": "ACCEPTABLE",
+        "question.rule_violation_quality.v1": "SUPPORTED",
+    }
+
+    def qualified_reviewer(call: Any) -> JevResult:
+        key = next(iter(call.questions))
+        return JevResult(answers={key: JevAnswer(choice=verdicts[key])})
+
+    monkeypatch.setattr(
+        "app.main.jev_transport_from_settings",
+        lambda _settings: FakeTransport(qualified_reviewer),
+    )
+    modes = ",".join(f"{key}=on" for key in verdicts)
+    app = create_app(settings=config.model_copy(update={
+        "auth_test_user_id": QUESTION_OWNER,
+        "jev_definition_modes": modes,
+    }))
+    with TestClient(app, headers={"Authorization": "Bearer test-session-token"}) as client:
+        with client.app.state.database.connect() as connection:
+            connection.execute(
+                "UPDATE learning_workspaces SET revision=0 WHERE id=?",
+                (QUESTION_WORKSPACE,),
+            )
+
+        setup = client.get(
+            f"/api/learning/workspaces/{QUESTION_WORKSPACE}/assessments/setup/{QUESTION_NODE}"
+        ).json()
+        queued = client.post(
+            f"/api/learning/workspaces/{QUESTION_WORKSPACE}/assessments",
+            json={
+                "operation_id": "sql-empty-pool-configure",
+                "revision": current_revision(client, QUESTION_WORKSPACE),
+                "node_id": QUESTION_NODE,
+                "slots": setup["default_slots"],
+            },
+        )
+        assert queued.status_code == 200, queued.text
+        preparation = queued.json()
+        assert preparation["status"] == "PREPARING"
+        assert preparation["prepared_questions"] == 0
+        assert preparation["question_count"] == 5
+
+        status_url = (
+            f"/api/learning/workspaces/{QUESTION_WORKSPACE}/assessments/preparations/"
+            f"{preparation['configuration_id']}"
+        )
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            status = client.get(status_url)
+            assert status.status_code == 200, status.text
+            preparation = status.json()
+            if preparation["status"] != "PREPARING":
+                break
+            time.sleep(0.05)
+
+        assert preparation["status"] == "READY", preparation
+        assert preparation["prepared_questions"] == 5
+        started = client.post(
+            f"/api/learning/workspaces/{QUESTION_WORKSPACE}/assessments",
+            json={
+                "operation_id": "sql-ready-pool-start",
+                "revision": current_revision(client, QUESTION_WORKSPACE),
+                "node_id": QUESTION_NODE,
+                "configuration_id": preparation["configuration_id"],
+                "slots": [],
+            },
+        )
+        assert started.status_code == 200, started.text
+        session = started.json()
+        assert session["status"] == "IN_PROGRESS"
+        assert len(session["questions"]) == 5
+
+
+def test_empty_pool_without_qualified_semantic_reviewer_fails_closed(
+    tmp_path: Path,
+) -> None:
+    """Cold start is not permission to publish unreviewed model questions."""
+
+    _, config = database_with_objective(tmp_path)
+    app = create_app(
+        settings=config.model_copy(update={"auth_test_user_id": QUESTION_OWNER})
+    )
+    with TestClient(app, headers={"Authorization": "Bearer test-session-token"}) as client:
+        setup = client.get(
+            f"/api/learning/workspaces/{QUESTION_WORKSPACE}/assessments/setup/{QUESTION_NODE}"
+        ).json()
+        queued = client.post(
+            f"/api/learning/workspaces/{QUESTION_WORKSPACE}/assessments",
+            json={
+                "operation_id": "unqualified-empty-pool-configure",
+                "revision": current_revision(client, QUESTION_WORKSPACE),
+                "node_id": QUESTION_NODE,
+                "slots": setup["default_slots"],
+            },
+        )
+        assert queued.status_code == 200, queued.text
+        preparation = queued.json()
+        status_url = (
+            f"/api/learning/workspaces/{QUESTION_WORKSPACE}/assessments/preparations/"
+            f"{preparation['configuration_id']}"
+        )
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            preparation = client.get(status_url).json()
+            if preparation["status"] != "PREPARING":
+                break
+            time.sleep(0.05)
+
+        assert preparation["status"] == "BLOCKED"
+        assert preparation["prepared_questions"] == 0
+        assert preparation["error_code"] == "QUESTION_NOT_READY"
+        assert preparation["diagnostic_id"].startswith("assessment-diagnostic-")
 
 
 @pytest.mark.parametrize("question_count", [5, 6, 8, 10, 12])

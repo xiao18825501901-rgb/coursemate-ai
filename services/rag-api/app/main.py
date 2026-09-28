@@ -26,7 +26,7 @@ from app.canvas.transient_credential import TransientCanvasCredentialStore
 from app.config import Settings
 from app.db import Database
 from app.errors import ApiError
-from app.jev.gateway import JevGateway
+from app.jev.gateway import DisabledTransport, JevGateway, OpenJevTransport, Transport
 from app.jev.receipt_store import SqlReceiptStore
 from app.jev.service import SemanticDecisionService
 from app.learning.orchestrator import LearningOrchestrator
@@ -53,6 +53,25 @@ from app.services.qa import QaService
 from app.services.teaching_profiles import TeachingProfileService
 
 LOGGER = logging.getLogger(__name__)
+
+
+def jev_transport_from_settings(settings: Settings) -> Transport:
+    """Build the only live semantic transport allowed for new requests.
+
+    Historical TypeSafe receipts remain readable, but there is deliberately no
+    TypeSafe construction or fallback here. A deployment either names the
+    pinned loopback OpenJev service or receives a local typed-disabled result.
+    """
+    if settings.jev_provider != "openjev":
+        return DisabledTransport()
+    token = settings.openjev_bearer_token
+    if token is None:  # guarded by Settings; retain a fail-closed boundary here.
+        raise RuntimeError("OPENJEV_BEARER_TOKEN is required")
+    return OpenJevTransport(
+        endpoint=settings.openjev_endpoint,
+        bearer_token=token.get_secret_value(),
+        expected_model_revision=settings.openjev_model_revision,
+    )
 
 
 def create_app(
@@ -134,10 +153,10 @@ def create_app(
     database.storage_object_probe = ingestion_service.has_stored_object
     database.storage_range_resolver = ingestion_service.read_stored_range
     application.state.database = database
-    # One shared semantic-decision layer for the whole app (single gateway, single
-    # service). Shadow is the default runtime mode; with no TypeSafe credential the
-    # live transport fails typed (JevNotConfiguredError) and every module stays in
-    # shadow, so the deterministic result remains the user-visible one.
+    # One shared semantic-decision layer for the whole app. TypeSafe/Jev is not
+    # constructed here and is not an automatic fallback. Unconfigured deployments
+    # stay local/off; a configured deployment can call only the pinned private
+    # OpenJev endpoint.
     #
     # `jev_definition_mode_map` is empty unless the deployment says otherwise, and it is validated
     # against the catalogue when it is not (an unknown definition or mode refuses at startup). It is
@@ -146,8 +165,12 @@ def create_app(
     # `JEV_CALIBRATION_AND_ABLATION_REPORT.md`.
     application.state.jev_service = SemanticDecisionService(
         JevGateway(
+            transport=jev_transport_from_settings(resolved_settings),
             receipt_store=SqlReceiptStore(database),
             modes=resolved_settings.jev_definition_mode_map,
+            # Soft semantic helpers return to their deterministic implementation.
+            # Only explicitly qualified/configured definitions may make a model call.
+            default_mode="off",
         )
     )
     if resolved_settings.v3_enabled:
@@ -194,9 +217,31 @@ def create_app(
                     LOGGER.exception("Automatic knowledge-map worker iteration failed")
                 await asyncio.sleep(resolved_settings.auto_knowledge_map_poll_seconds)
 
+        async def configured_assessment_worker() -> None:
+            """Advance user-confirmed Assessment preparations outside HTTP requests."""
+
+            service: LearningOrchestrator = application.state.learning
+            worker_id = f"assessment-preparation-{id(application)}"
+            while True:
+                try:
+                    result = await asyncio.to_thread(
+                        service.run_configured_preparation_once, worker_id
+                    )
+                    if result is None:
+                        await asyncio.sleep(1.0)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    LOGGER.exception("Configured Assessment worker iteration failed")
+                    await asyncio.sleep(2.0)
+
         @asynccontextmanager
         async def application_lifespan(_application: FastAPI):
             task = None
+            assessment_task = asyncio.create_task(
+                configured_assessment_worker(), name="configured-assessment-worker"
+            )
+            application.state.configured_assessment_task = assessment_task
             if resolved_settings.auto_knowledge_map_enabled:
                 if resolved_settings.auto_knowledge_map_allow_billable:
                     task = asyncio.create_task(
@@ -215,6 +260,9 @@ def create_app(
                     task.cancel()
                     with suppress(asyncio.CancelledError):
                         await task
+                assessment_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await assessment_task
 
         application.router.lifespan_context = application_lifespan
     teaching_profile_service = TeachingProfileService(database)

@@ -647,6 +647,18 @@ def assessment_setup(
     )
 
 
+@router.get("/workspaces/{workspace_id}/assessments/preparations/{configuration_id}")
+def configured_assessment_preparation(
+    workspace_id: str,
+    configuration_id: str,
+    request: Request,
+    user: User,
+) -> dict[str, Any]:
+    return cast(
+        LearningOrchestrator, request.app.state.learning
+    ).configured_preparation_status(workspace_id, user.user_id, configuration_id)
+
+
 @router.get("/workspaces/{workspace_id}/assessments/{session_id}")
 def assessment(
     workspace_id: str,

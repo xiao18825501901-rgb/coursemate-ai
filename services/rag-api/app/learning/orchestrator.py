@@ -321,7 +321,19 @@ class LearningOrchestrator:
     ) -> dict[str, Any]:
         workspace = workspace_for(self.db, workspace_id, owner)
         with self.db.connect() as db:
-            return self.assessments.setup(db, workspace, node_id)
+            setup = self.assessments.setup(db, workspace, node_id)
+            active = db.execute(
+                "SELECT prep.* FROM assessment_configuration_preparations AS prep "
+                "JOIN assessment_configurations AS config ON config.id=prep.configuration_id "
+                "WHERE prep.workspace_id=? AND config.node_id=? "
+                "AND prep.status IN ('PREPARING','READY','BLOCKED') "
+                "ORDER BY prep.updated_at DESC,prep.id DESC LIMIT 1",
+                (workspace_id, node_id),
+            ).fetchone()
+            setup["active_preparation"] = (
+                self._configured_preparation_view(db, active) if active is not None else None
+            )
+            return setup
 
     def prepare_configured_pool(
         self,
@@ -331,91 +343,389 @@ class LearningOrchestrator:
         *,
         configuration_id: str,
     ) -> dict[str, Any]:
-        """Prepare only the slots missing from one immutable configuration."""
+        """Queue only missing slots for one immutable configuration.
+
+        Freezing a configuration stays synchronous.  Provider work is claimed by
+        the durable worker, so closing the page cannot strand an HTTP request or
+        cause a second click to author the same five questions again.
+        """
 
         workspace = workspace_for(self.db, workspace_id, owner)
         with self.db.connect() as db:
             node = self.assessments._atomic_node(db, workspace, request.node_id)
             slots = self.assessments.configuration_slots(db, configuration_id)
-            preparation_id = "assessment-config-prep-" + configuration_id[-32:]
-            db.execute(
-                "INSERT OR IGNORE INTO assessment_configuration_preparations("
-                "id,configuration_id,workspace_id,status) VALUES(?,?,?,'PREPARING')",
-                (preparation_id, configuration_id, workspace["id"]),
-            )
             row = db.execute(
                 "SELECT * FROM assessment_configuration_preparations WHERE configuration_id=?",
                 (configuration_id,),
             ).fetchone()
-            if row is not None and str(row["status"]) == "READY":
-                return {
-                    "status": "READY",
-                    "preparation_job_id": str(row["id"]),
-                    "configuration_id": configuration_id,
-                    "question_count": len(slots),
-                    "eligible_families": len(self.assessments.distinct_families(db, workspace, node)),
-                }
+            if row is not None:
+                complete = self._configured_prepared_count(db, configuration_id) == len(slots)
+                if complete and str(row["status"]) != "READY":
+                    self._recover_completed_configuration(db, row, len(slots))
+                    row = db.execute(
+                        "SELECT * FROM assessment_configuration_preparations WHERE id=?",
+                        (row["id"],),
+                    ).fetchone()
+                if str(row["status"]) in {"PREPARING", "READY"}:
+                    return self._configured_preparation_view(db, row)
 
-        def prepare(current_workspace: sqlite3.Row) -> tuple[str, str | None]:
-            try:
-                self.question_engine.generate_assessment_set(
-                    owner_user_id=str(current_workspace["owner_user_id"]),
-                    workspace_id=str(current_workspace["id"]),
-                    course_id=str(current_workspace["course_id"]),
-                    private_course_id=str(current_workspace["private_course_id"]),
-                    node_id=str(node["id"]),
-                    preparation_key=configuration_id,
-                    slots=slots,
-                    operation_id=request.operation_id,
-                )
-            except QuestionEngineRuntimeError as error:
-                return "BLOCKED", error.code
-            return "OK", None
+        preparation_id = "assessment-config-prep-" + configuration_id[-32:]
 
         def save(
             db: sqlite3.Connection,
             current_workspace: sqlite3.Row,
-            prepared: tuple[str, str | None],
+            _: Any,
         ) -> dict[str, Any]:
-            status, code = prepared
-            ready = False
-            try:
-                selected, _ = self.assessments.select_configuration(
-                    db, current_workspace, node, configuration_id
-                )
-                ready = len(selected) == len(slots)
-            except ApiError:
-                ready = False
-            final_status = "READY" if ready else "BLOCKED"
-            message = None if ready else (
-                "Compatible READY questions remain incomplete; saved slots will be reused on recovery."
-            )
+            existing = db.execute(
+                "SELECT * FROM assessment_configuration_preparations WHERE configuration_id=?",
+                (configuration_id,),
+            ).fetchone()
+            if existing is not None and existing["operation_id"]:
+                unsafe = db.execute(
+                    "SELECT status FROM learning_model_call_reservations "
+                    "WHERE workspace_id=? AND operation_id=? "
+                    "AND status IN ('RESERVED','UNKNOWN') LIMIT 1",
+                    (workspace_id, existing["operation_id"]),
+                ).fetchone()
+                if unsafe is not None:
+                    db.execute(
+                        "UPDATE assessment_configuration_preparations SET status='BLOCKED',"
+                        "error_code='MODEL_REQUEST_UNCERTAIN',"
+                        "error_message='上一次模型请求状态未知；为避免重复计费，系统不会自动重发。',"
+                        "diagnostic_id=COALESCE(diagnostic_id,?),"
+                        "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
+                        ("assessment-diagnostic-" + uuid4().hex, existing["id"]),
+                    )
+                    blocked = db.execute(
+                        "SELECT * FROM assessment_configuration_preparations WHERE id=?",
+                        (existing["id"],),
+                    ).fetchone()
+                    return self._configured_preparation_view(db, blocked)
+
+            attempt = int(existing["attempt"]) + 1 if existing is not None else 1
+            model_operation_id = f"assessment-prep-{configuration_id[-20:]}-{attempt}"
+            # Model-reservation triggers require a known operation.  The HTTP
+            # operation only queues work and completes immediately; this stable
+            # background identity owns every later reservation without keeping
+            # the workspace's one-interactive-operation lock occupied.
+            operation_hash = hashlib.sha256(
+                encode(
+                    {
+                        "kind": "assessment.configured_preparation.worker",
+                        "configuration_id": configuration_id,
+                        "attempt": attempt,
+                    }
+                ).encode()
+            ).hexdigest()
             db.execute(
-                "UPDATE assessment_configuration_preparations SET status=?,error_code=?,"
-                "error_message=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),"
-                "completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE configuration_id=?",
-                (final_status, None if ready else code, message, configuration_id),
+                "INSERT OR IGNORE INTO learning_operations("
+                "workspace_id,id,request_hash,kind,status,result_json) "
+                "VALUES(?,?,?,'assessment.configured_preparation.worker','COMPLETED','{}')",
+                (workspace_id, model_operation_id, operation_hash),
             )
-            return {
-                "status": final_status,
-                "preparation_job_id": preparation_id,
-                "configuration_id": configuration_id,
-                "question_count": len(slots),
-                "eligible_families": len(self.assessments.distinct_families(db, current_workspace, node)),
-                "error_code": None if ready else code,
-                "error_message": message,
-                "can_start_from_ready_pool": ready,
-            }
+            if existing is None:
+                db.execute(
+                    "INSERT INTO assessment_configuration_preparations("
+                    "id,configuration_id,workspace_id,status,operation_id,attempt,total_slots,"
+                    "prepared_slots,current_stage) VALUES(?,?,?,'PREPARING',?,?,?,0,'QUEUED')",
+                    (
+                        preparation_id,
+                        configuration_id,
+                        current_workspace["id"],
+                        model_operation_id,
+                        attempt,
+                        len(slots),
+                    ),
+                )
+            else:
+                db.execute(
+                    "UPDATE assessment_configuration_preparations SET status='PREPARING',"
+                    "operation_id=?,attempt=?,total_slots=?,prepared_slots=?,current_ordinal=NULL,"
+                    "current_stage='QUEUED',diagnostic_id=NULL,error_code=NULL,error_message=NULL,"
+                    "cancel_requested=0,lease_owner=NULL,lease_expires_at=NULL,completed_at=NULL,"
+                    "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
+                    (
+                        model_operation_id,
+                        attempt,
+                        len(slots),
+                        self._configured_prepared_count(db, configuration_id),
+                        existing["id"],
+                    ),
+                )
+            queued = db.execute(
+                "SELECT * FROM assessment_configuration_preparations WHERE configuration_id=?",
+                (configuration_id,),
+            ).fetchone()
+            return self._configured_preparation_view(db, queued)
 
         return self.operate(
             workspace_id,
             owner,
             request,
             "assessment.prepare_configured_pool",
-            prepare,
+            lambda current_workspace: None,
             save,
             resource_identity={"node_id": request.node_id, "configuration_id": configuration_id},
         )
+
+    @staticmethod
+    def _configured_prepared_count(db: sqlite3.Connection, configuration_id: str) -> int:
+        return int(
+            db.execute(
+                "SELECT COUNT(*) FROM assessment_configuration_questions WHERE configuration_id=?",
+                (configuration_id,),
+            ).fetchone()[0]
+        )
+
+    def _configured_preparation_view(
+        self, db: sqlite3.Connection, row: sqlite3.Row
+    ) -> dict[str, Any]:
+        configuration_id = str(row["configuration_id"])
+        prepared = self._configured_prepared_count(db, configuration_id)
+        total = int(row["total_slots"] or 0) or int(
+            db.execute(
+                "SELECT COUNT(*) FROM assessment_configuration_slots WHERE configuration_id=?",
+                (configuration_id,),
+            ).fetchone()[0]
+        )
+        selections = [
+            {
+                "slot_id": str(slot["slot_id"]),
+                "question_type": str(slot["question_type"]),
+                "task_form": str(slot["task_form"]),
+            }
+            for slot in db.execute(
+                "SELECT slot_id,question_type,task_form FROM assessment_configuration_slots "
+                "WHERE configuration_id=? ORDER BY ordinal",
+                (configuration_id,),
+            ).fetchall()
+        ]
+        return {
+            "status": str(row["status"]),
+            "preparation_job_id": str(row["id"]),
+            "configuration_id": configuration_id,
+            "question_count": total,
+            "slots": selections,
+            "prepared_questions": prepared,
+            "eligible_families": prepared,
+            "current_ordinal": row["current_ordinal"],
+            "current_stage": row["current_stage"],
+            "diagnostic_id": row["diagnostic_id"],
+            "error_code": row["error_code"],
+            "error_message": row["error_message"],
+            "can_start_from_ready_pool": str(row["status"]) == "READY" and prepared == total,
+            "updated_at": row["updated_at"],
+        }
+
+    def _recover_completed_configuration(
+        self, db: sqlite3.Connection, row: sqlite3.Row, prepared: int
+    ) -> None:
+        db.execute(
+            "INSERT OR IGNORE INTO assessment_configuration_recovery_receipts("
+            "id,preparation_id,configuration_id,prior_status,reason,prepared_slots) "
+            "VALUES(?,?,?,?, 'COMPATIBLE_POOL_COMPLETE', ?)",
+            (
+                "assessment-recovery-" + uuid4().hex,
+                row["id"],
+                row["configuration_id"],
+                row["status"],
+                prepared,
+            ),
+        )
+        db.execute(
+            "UPDATE assessment_configuration_preparations SET status='READY',prepared_slots=?,"
+            "current_stage='READY',error_code=NULL,error_message=NULL,diagnostic_id=NULL,"
+            "lease_owner=NULL,lease_expires_at=NULL,"
+            "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),"
+            "completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
+            (prepared, row["id"]),
+        )
+
+    def configured_preparation_status(
+        self, workspace_id: str, owner: str, configuration_id: str
+    ) -> dict[str, Any]:
+        workspace_for(self.db, workspace_id, owner)
+        with self.db.connect() as db:
+            row = db.execute(
+                "SELECT * FROM assessment_configuration_preparations "
+                "WHERE configuration_id=? AND workspace_id=?",
+                (configuration_id, workspace_id),
+            ).fetchone()
+            if row is None:
+                raise ApiError(404, "ASSESSMENT_PREPARATION_NOT_FOUND", "测评准备任务不存在。")
+            total = int(row["total_slots"] or 0)
+            prepared = self._configured_prepared_count(db, configuration_id)
+            if total and prepared == total and str(row["status"]) != "READY":
+                self._recover_completed_configuration(db, row, prepared)
+                row = db.execute(
+                    "SELECT * FROM assessment_configuration_preparations WHERE id=?",
+                    (row["id"],),
+                ).fetchone()
+            return self._configured_preparation_view(db, row)
+
+    def run_configured_preparation_once(self, worker_id: str) -> dict[str, Any] | None:
+        """Claim and advance one durable configured-assessment preparation."""
+
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT * FROM assessment_configuration_preparations "
+                "WHERE status='PREPARING' AND cancel_requested=0 "
+                "AND (lease_expires_at IS NULL OR lease_expires_at<strftime('%Y-%m-%dT%H:%M:%fZ','now')) "
+                "ORDER BY created_at,id LIMIT 1"
+            ).fetchone()
+            if row is None:
+                return None
+            if row["operation_id"]:
+                uncertain = db.execute(
+                    "SELECT 1 FROM learning_model_call_reservations WHERE workspace_id=? "
+                    "AND operation_id=? AND status IN ('RESERVED','UNKNOWN') LIMIT 1",
+                    (row["workspace_id"], row["operation_id"]),
+                ).fetchone()
+                if uncertain is not None:
+                    diagnostic = "assessment-diagnostic-" + uuid4().hex
+                    db.execute(
+                        "UPDATE assessment_configuration_preparations SET status='BLOCKED',"
+                        "error_code='MODEL_REQUEST_UNCERTAIN',"
+                        "error_message='模型请求状态未知；为避免重复计费，系统不会自动重发。',"
+                        "diagnostic_id=?,current_stage='BLOCKED',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                        "WHERE id=?",
+                        (diagnostic, row["id"]),
+                    )
+                    return {"id": str(row["id"]), "status": "BLOCKED"}
+            claimed = db.execute(
+                "UPDATE assessment_configuration_preparations SET lease_owner=?,"
+                "lease_expires_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','+30 minutes'),"
+                "current_stage='CLAIMED',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                "WHERE id=? AND status='PREPARING' AND cancel_requested=0 "
+                "AND (lease_expires_at IS NULL OR lease_expires_at<strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                (worker_id, row["id"]),
+            )
+            if claimed.rowcount != 1:
+                return None
+            row = db.execute(
+                "SELECT prep.*,config.node_id,workspace.owner_user_id,workspace.course_id,"
+                "workspace.private_course_id FROM assessment_configuration_preparations AS prep "
+                "JOIN assessment_configurations AS config ON config.id=prep.configuration_id "
+                "JOIN learning_workspaces AS workspace ON workspace.id=prep.workspace_id "
+                "WHERE prep.id=?",
+                (row["id"],),
+            ).fetchone()
+            slots = self.assessments.configuration_slots(db, str(row["configuration_id"]))
+
+        def cancelled() -> bool:
+            with self.db.connect() as check:
+                state = check.execute(
+                    "SELECT status,cancel_requested,lease_owner FROM assessment_configuration_preparations "
+                    "WHERE id=?",
+                    (row["id"],),
+                ).fetchone()
+            return (
+                state is None
+                or str(state["status"]) != "PREPARING"
+                or int(state["cancel_requested"]) == 1
+                or str(state["lease_owner"]) != worker_id
+            )
+
+        def progress(update: dict[str, Any]) -> None:
+            with self.db.connect() as db:
+                db.execute(
+                    "UPDATE assessment_configuration_preparations SET prepared_slots=?,"
+                    "current_ordinal=?,current_stage=?,"
+                    "lease_expires_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','+30 minutes'),"
+                    "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                    "WHERE id=? AND lease_owner=? AND status='PREPARING'",
+                    (
+                        int(update["prepared_slots"]),
+                        int(update["ordinal"]),
+                        str(update["stage"]),
+                        row["id"],
+                        worker_id,
+                    ),
+                )
+
+        error: QuestionEngineRuntimeError | None = None
+        try:
+            self.question_engine.generate_assessment_set(
+                owner_user_id=str(row["owner_user_id"]),
+                workspace_id=str(row["workspace_id"]),
+                course_id=str(row["course_id"]),
+                private_course_id=str(row["private_course_id"]),
+                node_id=str(row["node_id"]),
+                preparation_key=str(row["configuration_id"]),
+                slots=slots,
+                operation_id=str(row["operation_id"]),
+                should_cancel=cancelled,
+                progress=progress,
+            )
+        except QuestionEngineRuntimeError as caught:
+            error = caught
+        except Exception as caught:
+            error = QuestionEngineRuntimeError(
+                "ASSESSMENT_WORKER_FAILED",
+                "The durable assessment worker failed before the configuration was complete.",
+            )
+
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            current = db.execute(
+                "SELECT * FROM assessment_configuration_preparations WHERE id=?",
+                (row["id"],),
+            ).fetchone()
+            prepared = self._configured_prepared_count(db, str(row["configuration_id"]))
+            if current is None:
+                return None
+            if int(current["cancel_requested"]):
+                db.execute(
+                    "UPDATE assessment_configuration_preparations SET status='CANCELLED',"
+                    "current_stage='CANCELLED',prepared_slots=?,lease_owner=NULL,lease_expires_at=NULL,"
+                    "completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),"
+                    "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
+                    (prepared, row["id"]),
+                )
+                return {"id": str(row["id"]), "status": "CANCELLED"}
+            if prepared == len(slots):
+                if error is not None:
+                    self._recover_completed_configuration(db, current, prepared)
+                else:
+                    db.execute(
+                        "UPDATE assessment_configuration_preparations SET status='READY',"
+                        "prepared_slots=?,current_stage='READY',error_code=NULL,error_message=NULL,"
+                        "diagnostic_id=NULL,lease_owner=NULL,lease_expires_at=NULL,"
+                        "completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),"
+                        "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
+                        (prepared, row["id"]),
+                    )
+                return {"id": str(row["id"]), "status": "READY", "prepared": prepared}
+
+            diagnostic = "assessment-diagnostic-" + uuid4().hex
+            code = error.code if error is not None else "ASSESSMENT_PREPARATION_INCOMPLETE"
+            messages = {
+                "NO_TEACHING_SPEC": "该知识点还没有可用教学规格。",
+                "NO_REQUIRED_ITEM": "该知识点没有可用于组卷的必学目标。",
+                "SOURCE_NOT_FOUND": "课程资料版本与教学目标的来源绑定不完整。",
+                "MODEL_REQUEST_UNCERTAIN": "模型请求状态未知；为避免重复计费，系统不会自动重发。",
+                "ASSESSMENT_PREPARATION_CANCELLED": "测评准备已取消，已完成题目仍然保留。",
+            }
+            message = messages.get(
+                code,
+                f"测评准备在第 {prepared + 1} 题受阻；已保留 {prepared}/{len(slots)} 题。",
+            )
+            db.execute(
+                "UPDATE assessment_configuration_preparations SET status='BLOCKED',"
+                "prepared_slots=?,current_stage='BLOCKED',diagnostic_id=?,error_code=?,"
+                "error_message=?,lease_owner=NULL,lease_expires_at=NULL,"
+                "completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),"
+                "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
+                (prepared, diagnostic, code, message, row["id"]),
+            )
+            return {
+                "id": str(row["id"]),
+                "status": "BLOCKED",
+                "prepared": prepared,
+                "error_code": code,
+                "diagnostic_id": diagnostic,
+            }
 
     def prepare_pool(
         self,
@@ -606,6 +916,26 @@ class LearningOrchestrator:
             workspace: sqlite3.Row,
             _: Any,
         ) -> dict[str, Any]:
+            configured = db.execute(
+                "SELECT * FROM assessment_configuration_preparations "
+                "WHERE id=? AND workspace_id=?",
+                (job_id, workspace["id"]),
+            ).fetchone()
+            if configured is not None:
+                db.execute(
+                    "UPDATE assessment_configuration_preparations SET cancel_requested=1,"
+                    "status=CASE WHEN lease_owner IS NULL THEN 'CANCELLED' ELSE status END,"
+                    "current_stage=CASE WHEN lease_owner IS NULL THEN 'CANCELLED' ELSE current_stage END,"
+                    "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),"
+                    "completed_at=CASE WHEN lease_owner IS NULL THEN "
+                    "strftime('%Y-%m-%dT%H:%M:%fZ','now') ELSE completed_at END WHERE id=?",
+                    (job_id,),
+                )
+                updated = db.execute(
+                    "SELECT * FROM assessment_configuration_preparations WHERE id=?",
+                    (job_id,),
+                ).fetchone()
+                return self._configured_preparation_view(db, updated)
             return self.assessments.cancel_preparation_job(db, workspace, job_id)
 
         return self.operate(

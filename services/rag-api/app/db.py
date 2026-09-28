@@ -59,6 +59,7 @@ V3_MIGRATIONS = (
     "061_auto_knowledge_spec_split_recovery.sql",
     "062_auto_knowledge_spec_split_resume.sql",
     "063_auto_knowledge_spec_split_source_replay.sql",
+    "064_durable_assessment_preparation.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -114,9 +115,13 @@ V3_REPLAY_SUPERSEDED_BY = {
     # deliberately one-shot schema alteration; its own ledger row is the
     # restart-safe replay guard.
     "059_storage_document_versions.sql": 59,
+    # Migration 064 adds leased configured-assessment preparation columns.
+    # SQLite cannot express these ALTERs idempotently, so its own ledger row is
+    # the restart-safe replay guard.
+    "064_durable_assessment_preparation.sql": 64,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 63
+LATEST_V3_SCHEMA_VERSION = 64
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (

@@ -16,8 +16,16 @@ import pytest
 
 from app.config import Settings
 from app.jev.catalog import load_catalog
-from app.jev.gateway import MODES, DecisionRequest, JevGateway, JevRequestError
+from app.jev.gateway import (
+    MODES,
+    DecisionRequest,
+    DisabledTransport,
+    JevGateway,
+    JevRequestError,
+    OpenJevTransport,
+)
 from app.jev.models import CacheScope, JevAnswer, JevResult
+from app.main import jev_transport_from_settings
 
 
 def _settings(**overrides) -> Settings:
@@ -34,6 +42,40 @@ def _settings(**overrides) -> Settings:
 def test_the_default_is_empty_so_nothing_is_promoted() -> None:
     assert _settings().jev_definition_modes == ""
     assert _settings().jev_definition_mode_map == {}
+
+
+def test_type_safe_is_not_an_implicit_runtime_fallback() -> None:
+    settings = _settings()
+    assert settings.jev_provider == "disabled"
+    assert isinstance(jev_transport_from_settings(settings), DisabledTransport)
+
+
+def test_openjev_requires_all_private_runtime_coordinates() -> None:
+    with pytest.raises(ValueError, match="OPENJEV_ENDPOINT"):
+        _settings(jev_provider="openjev")
+
+
+def test_openjev_is_wired_only_when_explicitly_configured() -> None:
+    settings = _settings(
+        jev_provider="openjev",
+        openjev_endpoint="http://127.0.0.1:8711",
+        openjev_bearer_token="local-secret",
+        openjev_model_revision="hf-snapshot-123",
+    )
+    transport = jev_transport_from_settings(settings)
+    assert isinstance(transport, OpenJevTransport)
+    assert transport.endpoint == "http://127.0.0.1:8711"
+
+
+def test_openjev_rejects_plain_http_to_a_non_loopback_host() -> None:
+    settings = _settings(
+        jev_provider="openjev",
+        openjev_endpoint="http://10.0.0.8:8711",
+        openjev_bearer_token="local-secret",
+        openjev_model_revision="hf-snapshot-123",
+    )
+    with pytest.raises(ValueError, match="Plain HTTP"):
+        jev_transport_from_settings(settings)
 
 
 def test_a_definition_can_be_promoted_by_name() -> None:

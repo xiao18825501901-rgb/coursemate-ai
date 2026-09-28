@@ -1314,6 +1314,16 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         if not domain: raise HTTPException(501,'正式测评沿用 V3 评分引擎；本更新包不伪造 GPA。')
         return await remote('knowledge.assessment.setup',user,{'course':cid,'node':node_id},request)
 
+    @r.get('/courses/{cid}/knowledge/{node_id}/assessment/prepare/status')
+    async def assessment_prepare_status(
+        cid:str,node_id:str,configuration_id:str,user:User,request:Request
+    ):
+        await course(user,cid,request)
+        if not domain: raise HTTPException(501,'正式测评准备状态需要 V3 学习引擎。')
+        return await remote('knowledge.assessment.prepare.status',user,{
+            'course':cid,'node':node_id,'configuration_id':configuration_id,
+        },request)
+
     @r.get('/courses/{cid}/knowledge/assessment/{session_id}')
     async def assessment_view(cid:str,session_id:str,user:User,request:Request):
         await course(user,cid,request)
@@ -1439,6 +1449,16 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                     elif kind=='prompt':
                         db.execute('UPDATE cmui_runs SET generated_prompt=? WHERE id=?',(item['text'],run_id))
                         event(run_id,'prompt_ready',{'characters':len(item['text'])})
+                    elif kind=='prompt_checkpoint':
+                        # Internal only: get_run() deliberately excludes
+                        # generated_prompt and public_event() drops this event.
+                        # Persisting the latest received prefix preserves the
+                        # evidence of a billed incomplete planner response.
+                        db.execute(
+                            'UPDATE cmui_runs SET generated_prompt=?,updated_at=? WHERE id=?',
+                            (item['text'],now(),run_id),
+                        )
+                        event(run_id,'prompt_checkpoint',{'characters':len(item['text'])})
                     elif kind=='delta':
                         output+=item['text']
                         if len(output)>100000: raise ProviderError('ANSWER_TOO_LONG')
@@ -2355,6 +2375,11 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             node=next((n for n in nodes if n.get('id')==target),None)
             if node is None: raise HTTPException(404,'知识点不存在')
             return node
+        # The integrated domain owns active-Spec selection.  Returning None
+        # prevents this UI projection from binding an unbound Pair to the first
+        # visually atomic row when that row has no usable Spec.
+        if domain is not None:
+            return None
         for n in nodes:
             if n.get('kind')=='ATOMIC' and n.get('progress') in ('NOT_STARTED','LEARNING'):
                 return n
@@ -2393,6 +2418,10 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 if state and state['status'] in TERMINAL: raise asyncio.CancelledError()
                 usages.extend(generated.usage)
                 question_text=generated.public.question_text
+                selected_node_id=generated.target_node_id or (
+                    (node or {}).get('id') if isinstance(node,dict) else node
+                )
+                selected_node_title=generated.target_node_title or node_title
                 steps=[step.model_dump(mode='json') for step in generated.private.steps]
                 references=[reference.model_dump(mode='json') for reference in generated.references]
                 loop_cycle_id=None
@@ -2412,7 +2441,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                         cycle=await domain.call('knowledge.learning_loop.start',user['id'],{
                             'course':course_data['id'],
                             'pair_ref':pair['id'],
-                            'node_id':(node or {}).get('id') if isinstance(node,dict) else node,
+                            'node_id':selected_node_id,
                             'question_revision_id':generated.question_revision_id,
                             'operation_id':run_id+'-loop-start',
                         },'')
@@ -2440,8 +2469,8 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                         'run,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                         (
                             exercise_id,user['id'],course_data['id'],pair['id'],
-                            (node or {}).get('id') if isinstance(node,dict) else node,
-                            node_title,question_text,json.dumps(steps,ensure_ascii=False),
+                            selected_node_id,
+                            selected_node_title,question_text,json.dumps(steps,ensure_ascii=False),
                             json.dumps(references,ensure_ascii=False),
                             generated.verification_status,generated.generation_version,
                             generated.question_revision_id,loop_cycle_id,loop_assignment_id,
@@ -2481,6 +2510,16 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             except asyncio.CancelledError:
                 db.execute("UPDATE cmui_runs SET status='cancelled',error=CASE WHEN status IN ('queued','planning','generating') THEN 'CANCELLED' ELSE error END,updated_at=? WHERE id=? AND status NOT IN ('completed','failed')",(now(),run_id))
                 event(run_id,'error',{'code':'CANCELLED','message':'已停止'})
+            except ApiError as error:
+                # Keep the stable domain code.  Collapsing local preflight,
+                # provider, access and review failures into one string made the
+                # production UI impossible to recover or diagnose safely.
+                db.execute(
+                    "UPDATE cmui_runs SET status='failed',error=?,usage=?,updated_at=? "
+                    "WHERE id=? AND status NOT IN ('completed','cancelled')",
+                    (error.code,json.dumps(usages,ensure_ascii=False),now(),run_id),
+                )
+                event(run_id,'error',{'code':error.code,'message':error.message})
             except Exception:
                 db.execute("UPDATE cmui_runs SET status='failed',error='QUESTION_ENGINE_FAILED',usage=?,updated_at=? WHERE id=? AND status NOT IN ('completed','cancelled')",(json.dumps(usages,ensure_ascii=False),now(),run_id))
                 event(run_id,'error',{'code':'QUESTION_ENGINE_FAILED','message':'题目未通过当前证据与验证门槛；不会展示未验证题目。'})
@@ -2602,7 +2641,18 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         if data.node and not any(n.get('id')==data.node for n in flatten_nodes(knowledge)):
             raise HTTPException(404,'知识点不存在')
         node=pick_exercise_node(pair,knowledge,data.node)
-        node_title=('复习：' if node.get('review') else '')+node['title']
+        # An unbound integrated Pair deliberately lets the owner-scoped domain
+        # select an ATOMIC node that has an active Teaching Spec.  Do not
+        # dereference the absent UI projection before the domain returns that
+        # canonical target; the worker stores the returned node id/title.
+        if node is None:
+            node_title=(
+                course_data.get('name')
+                or course_data.get('title')
+                or '课程知识点'
+            )
+        else:
+            node_title=('复习：' if node.get('review') else '')+node['title']
         sources=(await remote('context.retrieve',user,{'course':cid,'query':node_title or '课程知识点','history':[]},request)) if domain else context_for(db,user['id'],cid,node_title or '课程知识点',[])
         strength=problem_strength(user,cid)
         if domain is not None:

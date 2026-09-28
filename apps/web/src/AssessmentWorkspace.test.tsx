@@ -4,11 +4,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // @ts-ignore delivered JSX component
 import { AssessmentWorkspace } from './ui/pages.jsx';
 // @ts-ignore delivered JS API
-import { getAssessment, getAssessmentSetup, getAssessmentSession, loadAssessmentDraft, startAssessment, submitAssessment } from './ui/api.js';
+import { getAssessment, getAssessmentSetup, getAssessmentPreparation, getAssessmentSession, loadAssessmentDraft, startAssessment, submitAssessment } from './ui/api.js';
 
 vi.mock('./ui/api.js', () => ({
   getAssessment: vi.fn(),
   getAssessmentSetup: vi.fn(),
+  getAssessmentPreparation: vi.fn(),
   startAssessment: vi.fn(),
   getAssessmentSession: vi.fn(),
   submitAssessment: vi.fn(),
@@ -219,6 +220,38 @@ describe('AssessmentWorkspace', () => {
 
     expect(await screen.findByLabelText('第 1 题答案')).toBeVisible();
     expect(startAssessment).toHaveBeenCalledTimes(2);
+  });
+
+  it('polls the same durable preparation and opens it automatically when READY', async () => {
+    vi.mocked(getAssessmentPreparation).mockResolvedValue({
+      preparation_job_id: 'prep-1',
+      configuration_id: 'config-1',
+      status: 'READY',
+      prepared_questions: 5,
+      question_count: 5,
+      slots: setup.default_slots,
+    });
+    const workspace: any = new AssessmentWorkspace({
+      course: { id: 'cs3481', code: 'CS3481' },
+      node: { id: 'n1', title: 'DBSCAN' },
+      toast: vi.fn(),
+      onExit: vi.fn(),
+    });
+    workspace.state = { ...workspace.state, configurationId: 'config-1' };
+    workspace.setState = (value: any, callback?: () => void) => {
+      const patch = typeof value === 'function' ? value(workspace.state) : value;
+      workspace.state = { ...workspace.state, ...patch };
+      callback?.();
+    };
+
+    await workspace.pollPreparation();
+
+    expect(getAssessmentPreparation).toHaveBeenCalledWith('cs3481', 'n1', 'config-1');
+    expect(startAssessment).toHaveBeenCalledWith('cs3481', 'n1', {
+      configuration_id: 'config-1',
+      slots: [],
+    });
+    expect(workspace.state.view.status).toBe('IN_PROGRESS');
   });
 
   it('adds a sixth stable slot and sends only the content-free configuration', async () => {

@@ -19,7 +19,7 @@ import httpx
 import pytest
 
 from app.cm_update.config import Settings as UiSettings
-from app.cm_update.provider import DeepSeekProvider
+from app.cm_update.provider import DeepSeekProvider, ProviderError
 from app.config import Settings
 from app.learning.coverage_review import deepseek_review_invoke, resolve_coverage_reviewer
 from app.learning.provider import LearningProvider
@@ -119,6 +119,91 @@ async def test_ui_responses_stream_has_deepseek_model_and_no_qwen_fields() -> No
     assert body["reasoning"] == {"effort": "none"}
     assert "input" in body and "max_output_tokens" in body
     assert not (_keys(body) & set(QWEN_ONLY_FIELDS))
+
+
+@pytest.mark.asyncio
+async def test_ui_incomplete_response_preserves_usage_before_typed_failure() -> None:
+    usage = {"input_tokens": 211, "output_tokens": 2500}
+
+    def transport(_request: httpx.Request) -> httpx.Response:
+        body = {
+            "type": "response.incomplete",
+            "response": {
+                "status": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"},
+                "usage": usage,
+            },
+        }
+        return httpx.Response(
+            200,
+            text="data: " + json.dumps(body) + "\n\n",
+            headers={"content-type": "text/event-stream"},
+        )
+
+    provider = DeepSeekProvider(ui_cfg(), httpx.MockTransport(transport))
+    recorded: list[dict] = []
+    with pytest.raises(
+        ProviderError,
+        match="INCOMPLETE_PROVIDER_RESPONSE_MAX_OUTPUT_TOKENS",
+    ):
+        async for item in provider.stream(
+            [{"role": "user", "content": "write the teaching prompt"}],
+            provider.cfg.prompt_tokens,
+        ):
+            recorded.append(item)
+
+    assert recorded == [{"usage": usage}]
+
+
+def test_default_planner_budget_can_hold_the_full_versioned_teaching_prompt() -> None:
+    config = ui_cfg()
+    assert config.prompt_tokens == 6000
+    assert config.prompt_tokens < config.answer_tokens
+
+
+@pytest.mark.asyncio
+async def test_thinking_planner_checkpoints_private_text_before_incomplete_terminal() -> None:
+    usage = {"input_tokens": 400, "output_tokens": 6000}
+
+    def transport(_request: httpx.Request) -> httpx.Response:
+        events = [
+            {"type": "response.output_text.delta", "delta": "private partial plan"},
+            {
+                "type": "response.incomplete",
+                "response": {
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                    "usage": usage,
+                },
+            },
+        ]
+        body = "\n\n".join("data: " + json.dumps(event) for event in events) + "\n\n"
+        return httpx.Response(
+            200,
+            text=body,
+            headers={"content-type": "text/event-stream"},
+        )
+
+    provider = DeepSeekProvider(ui_cfg(), httpx.MockTransport(transport))
+    recorded: list[dict] = []
+    with pytest.raises(ProviderError):
+        async for item in provider.generate(
+            {"name": "Private course", "code": "PRIVATE"},
+            "teach this",
+            {"language": "zh-CN"},
+            [{"id": "S1", "text": "authorized evidence"}],
+            [],
+            "teach",
+            teaching_mode="thinking",
+        ):
+            recorded.append(item)
+
+    assert {
+        "kind": "prompt_checkpoint",
+        "text": "private partial plan",
+    } in recorded
+    assert {"kind": "usage", "stage": "prompt", "value": usage} in recorded
+    assert not any(item.get("kind") == "delta" for item in recorded)
 
 
 @pytest.mark.asyncio

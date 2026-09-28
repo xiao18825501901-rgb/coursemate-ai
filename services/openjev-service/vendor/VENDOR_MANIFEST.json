@@ -1,0 +1,11 @@
+{
+  "package": "open-jev",
+  "package_version": "0.1.2",
+  "upstream_repository": "https://github.com/nico-martin/open-jev",
+  "upstream_commit": "52667199e8a55553e1865a41f43fcb7d4dd92779",
+  "build_node": "v24.19.0",
+  "tarball": "open-jev-0.1.2.tgz",
+  "tarball_sha256": "387d9acd4531356375f13d3a3c3a94b12f370a7e6e1017a1c110b7829ea1a8fd",
+  "npm_registry_0_1_2_git_head": "b330b9ae7c24ea9899ee605fb523c6ee28c7e181",
+  "note": "Built from the reviewed commit; deliberately not the different npm registry artifact."
+}

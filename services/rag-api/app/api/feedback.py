@@ -5,9 +5,10 @@ deterministic backend owns persistence and the human review, so this route only
 records and classifies.  A report body (free text + question/answer) is refused
 unless the caller sets ``attach_body``.
 
-There is no live Jev call here: the gateway uses the default ``SdkTransport``,
-which fails typed with ``JevNotConfiguredError`` while no TypeSafe credential
-exists, so the report degrades to ``OTHER`` + middle severity and is still queued.
+There is no live semantic-model call here: the gateway defaults to
+``DisabledTransport`` and fails locally with ``JevNotConfiguredError``.  The
+report therefore degrades to ``OTHER`` + middle severity and is still queued;
+the retired external TypeSafe transport is never used as a fallback.
 
 The queue is durable (`feedback_reports`, migration 030) and has exactly one
 reader: the admin-only listing below, which is what makes it a queue a reviewer can

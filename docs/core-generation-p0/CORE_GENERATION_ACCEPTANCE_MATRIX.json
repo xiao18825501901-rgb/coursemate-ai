@@ -1,0 +1,97 @@
+{
+  "task_id": "COURSE_GENERATION_CORE_RELIABILITY_20260928",
+  "priority": "P0",
+  "status": "IN_PROGRESS",
+  "application_candidate_sha": null,
+  "production_application_sha": "b63401e479829eac9c6e25884e5fc5f155396145",
+  "map50_remaining_over_limit_trees": 13,
+  "checks": [
+    {
+      "id": "A",
+      "requirement": "campus normal and Thinking teaching health control",
+      "source": "implemented",
+      "offline_contract": "passed",
+      "authenticated_live": "pending"
+    },
+    {
+      "id": "B",
+      "requirement": "owner private normal, Thinking and node teaching",
+      "source": "implemented",
+      "offline_contract": "passed",
+      "authenticated_live": "pending"
+    },
+    {
+      "id": "C",
+      "requirement": "new private course upload and teaching",
+      "source": "implemented",
+      "offline_contract": "passed",
+      "authenticated_live": "pending"
+    },
+    {
+      "id": "D",
+      "requirement": "campus/private do-one reveal explanation history",
+      "source": "implemented",
+      "offline_contract": "passed_with_qualified_fake_reviewer",
+      "authenticated_live": "blocked_openjev_unqualified"
+    },
+    {
+      "id": "E",
+      "requirement": "private text/image problem explanation",
+      "source": "preserved",
+      "offline_contract": "covered_by_existing_regression",
+      "authenticated_live": "pending"
+    },
+    {
+      "id": "F",
+      "requirement": "SQL cold pool to five-question submit and grade",
+      "source": "implemented",
+      "offline_contract": "passed_with_qualified_fake_reviewer_and_fail_closed_without_one",
+      "authenticated_live": "blocked_openjev_unqualified"
+    },
+    {
+      "id": "G",
+      "requirement": "another campus objective and N greater than five",
+      "source": "implemented",
+      "offline_contract": "passed",
+      "authenticated_live": "pending"
+    },
+    {
+      "id": "H",
+      "requirement": "two panes, course switch, refresh, disconnect and relogin",
+      "source": "implemented",
+      "offline_contract": "passed",
+      "authenticated_live": "pending"
+    },
+    {
+      "id": "I",
+      "requirement": "stored result recovery with zero new model calls",
+      "source": "implemented",
+      "offline_contract": "passed",
+      "authenticated_live": "pending"
+    },
+    {
+      "id": "J",
+      "requirement": "two-user isolation and immutable history/grades",
+      "source": "preserved",
+      "offline_contract": "passed",
+      "authenticated_live": "pending"
+    }
+  ],
+  "test_evidence": {
+    "web": "146 passed",
+    "agent": "100 passed",
+    "rag_targeted": "106 passed plus 5 updated TypeSafe-retirement contract tests",
+    "integration_additions": "3 passed",
+    "typecheck": "passed",
+    "production_build": "passed locally and with Netlify production context preflight",
+    "rag_full": "2006 passed, 3 platform/retired-SDK skips, 0 failed",
+    "openjev_service": "8 passed; npm production dependency audit found 0 vulnerabilities",
+    "schema_63_to_64_rehearsal": "integrity ok, 0 foreign-key violations, historical row hashes unchanged, restart idempotence passed"
+  },
+  "production_inventory": {
+    "schema": 63,
+    "configured_preparations": {"READY": 4, "BLOCKED": 7},
+    "question_revisions": {"VALIDATED_AI_REVIEWED": 49, "NEEDS_REVIEW_MODEL_ONLY": 5},
+    "sql_private_configurations": {"count": 2, "slots_each": 5, "bound_families_each": 0}
+  }
+}

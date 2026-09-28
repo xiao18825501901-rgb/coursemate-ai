@@ -67,18 +67,39 @@ Hex64 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 # labelled as one: it refuses a bare noun ("DBSCAN") while accepting either language. It is
 # deliberately not a model call — a rule answers this, so no Jev decision and no generation cost is
 # spent on it.
-OBSERVABLE_ACTION_MARKERS: Final[tuple[str, ...]] = (
-    "compute", "calculate", "classify", "distinguish", "compare", "explain", "derive", "prove",
-    "identify", "trace", "apply", "construct", "design", "find", "determine", "solve",
-    "计算", "判断", "区分", "比较", "解释", "推导", "证明", "识别", "追踪", "应用", "构造", "设计",
-    "给出", "求出", "说明", "分析",
+OBSERVABLE_ACTION_WORDS: Final[frozenset[str]] = frozenset(
+    {
+        "analyze", "apply", "assess", "build", "calculate", "choose", "classify",
+        "compare", "compute", "construct", "contrast", "convert", "create", "define",
+        "demonstrate", "derive", "describe", "design", "determine", "differentiate",
+        "distinguish", "enumerate", "evaluate", "explain", "express", "find", "identify",
+        "implement", "interpret", "justify", "list", "name", "predict", "prove", "recall",
+        "recognize", "reproduce", "select", "show", "solve", "state", "summarize", "trace",
+        "use", "verify", "write",
+    }
 )
+
+OBSERVABLE_ACTION_CJK_MARKERS: Final[tuple[str, ...]] = (
+    "计算", "判断", "区分", "比较", "解释", "推导", "证明", "识别", "追踪", "应用", "构造", "设计",
+    "给出", "求出", "说明", "分析", "列出", "描述", "定义", "写出", "评估", "验证", "选择", "展示",
+    "转换", "实现", "总结", "命名", "回忆", "复现", "预测",
+)
+
+_ENGLISH_WORD = re.compile(r"[a-z]+(?:'[a-z]+)?")
 
 
 def objective_is_observable(text: str) -> bool:
     """True when the objective names an action, rather than a topic or a noun phrase."""
     lowered = text.casefold()
-    return any(marker in lowered for marker in OBSERVABLE_ACTION_MARKERS)
+    # English verbs are matched as whole words.  The old substring check accepted
+    # topics such as ``classification`` merely because they contain ``classify``-like
+    # text, while rejecting ordinary Bloom objectives such as ``List ...`` and
+    # ``Given ..., write ...``.  A verb may occur after a condition or learner stem,
+    # so checking only the first token would reject legitimate stored curricula.
+    words = set(_ENGLISH_WORD.findall(lowered))
+    if words.intersection(OBSERVABLE_ACTION_WORDS):
+        return True
+    return any(marker in lowered for marker in OBSERVABLE_ACTION_CJK_MARKERS)
 
 
 class SourceScopeEntry(Contract):

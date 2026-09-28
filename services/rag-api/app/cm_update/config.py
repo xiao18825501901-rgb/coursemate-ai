@@ -35,7 +35,13 @@ class Settings:
     deepseek_model: str = field(default_factory=lambda: os.getenv('CMUI_DEEPSEEK_MODEL', 'deepseek-flash'))
     deepseek_protocol: str = field(default_factory=lambda: os.getenv('CMUI_DEEPSEEK_PROTOCOL', 'responses'))
     timeout: float = field(default_factory=lambda: float(os.getenv("CMUI_MODEL_TIMEOUT", "180")))
-    prompt_tokens: int = field(default_factory=lambda: int(os.getenv("CMUI_PROMPT_TOKENS", "2500")))
+    # The stage-one planner must reproduce the complete versioned teaching
+    # template as a natural-language prompt.  The former 2,500-token ceiling
+    # repeatedly ended otherwise valid production runs with
+    # response.incomplete/max_output_tokens before stage two could begin.
+    # 6,000 remains below the reviewed 12,000 hard bound and below the visible
+    # answer ceiling, while billing still follows actual provider usage.
+    prompt_tokens: int = field(default_factory=lambda: int(os.getenv("CMUI_PROMPT_TOKENS", "6000")))
     answer_tokens: int = field(default_factory=lambda: int(os.getenv("CMUI_ANSWER_TOKENS", "6500")))
     operation_usd_baseline: str = field(default_factory=lambda: os.getenv('CMUI_OPERATION_USD_BASELINE', ''))
     # Prices are explicitly configured by the deployment owner for the selected

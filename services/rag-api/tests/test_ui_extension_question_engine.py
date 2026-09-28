@@ -82,8 +82,14 @@ def client(
         }[key]
         return JevResult(answers={key: JevAnswer(choice=verdict)})
 
-    def fake_gateway(*, receipt_store: Any, modes: Any) -> JevGateway:
-        del modes
+    def fake_gateway(
+        *,
+        receipt_store: Any,
+        modes: Any,
+        transport: Any = None,
+        default_mode: Any = None,
+    ) -> JevGateway:
+        del modes, transport, default_mode
         return JevGateway(
             transport=FakeTransport(responder),
             catalog=load_catalog(),
@@ -408,6 +414,48 @@ def test_mounted_do_one_question_uses_ready_revision_and_keeps_answer_private(
             (provenance["workspace_id"],),
         ).fetchall()
     assert len({item["family_id"] for item in families}) == 2
+
+
+def test_unbound_pair_selects_an_owner_scoped_atomic_node_with_active_spec(
+    client: tuple[TestClient, ForbiddenLegacyExerciseProvider],
+) -> None:
+    test_client, legacy = client
+    created = test_client.post(
+        f"{UI}/courses",
+        headers=auth(),
+        json={"name": "Unbound private course", "description": "offline fixture"},
+    )
+    assert created.status_code == 201, created.text
+    course_id = created.json()["id"]
+    valid_node_id = seed_objective(test_client, course_id)
+    database = test_client.app.state.database
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO knowledge_nodes(id,course_id,owner_user_id,title,description,"
+            "major,kind,status) VALUES('node-without-active-spec',?,?,'No spec',"
+            "'Must be skipped','CS','ATOMIC','PRIVATE')",
+            (course_id, SUBJECT),
+        )
+    pair = test_client.post(
+        f"{UI}/pairs", headers=auth(), json={"course": course_id}
+    ).json()
+
+    started = test_client.post(
+        f"{UI}/courses/{course_id}/exercises",
+        headers=auth(),
+        json={"pair_id": pair["id"], "request_id": "unbound-valid-spec-0001"},
+    )
+    assert started.status_code == 202, started.text
+    run = wait_terminal(test_client, started.json()["id"])
+    assert run["status"] == "completed", run
+    assert legacy.exercise_calls == 0
+    ui_database = test_client.app.state.ui_extension_app.state.db
+    exercise = ui_database.one(
+        "SELECT node,target_node FROM cmui_exercises WHERE run=?",
+        (started.json()["id"],),
+    )
+    assert exercise["node"] == valid_node_id
+    assert exercise["target_node"] == "Density clustering"
 
 
 def test_mounted_do_one_question_fails_closed_when_semantic_review_is_unavailable(

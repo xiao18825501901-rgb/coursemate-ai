@@ -6,15 +6,12 @@ import pytest
 
 from app.jev.catalog import load_catalog
 from app.jev.errors import (
-    JevError,
-    JevInvalidResponseError,
     JevNotConfiguredError,
     JevRequestError,
     JevTimeoutError,
     JevUnavailableError,
 )
 from app.jev.gateway import (
-    Decision,
     DecisionRequest,
     FakeTransport,
     GatewayBounds,
@@ -104,6 +101,44 @@ def test_shadow_mode_calls_transport_and_records_suggestion() -> None:
     assert len(transport.calls) == 1
     assert len(store.receipts) == 1
     assert store.receipts[0].mode == "shadow"
+
+
+def test_receipt_preserves_openjev_identity_and_raw_distribution() -> None:
+    transport = FakeTransport(
+        lambda call: JevResult(
+            answers={
+                "intent.next_action.v1": JevAnswer(
+                    choice="CONTINUE",
+                    raw={
+                        "choice": "CONTINUE",
+                        "probabilities": {
+                            "CONTINUE": 0.8,
+                            "ANSWER_ONLY": 0.1,
+                            "OTHER": 0.1,
+                        },
+                    },
+                )
+            },
+            request_id="openjev_req_1",
+            model_version="open-jev:hf-commit-1",
+            metadata={
+                "provider": "open-jev-selfhost",
+                "model": {"revision": "hf-commit-1", "dtype": "q4"},
+                "input": {"source_language": "en", "truncated": False},
+            },
+        )
+    )
+    store = MemoryStore()
+    decision = _gateway(
+        transport, store=store, modes={"intent.next_action.v1": "shadow"}
+    ).evaluate(_choice_request())
+
+    assert decision.outcome == "ok"
+    payload = __import__("json").loads(store.receipts[0].output_json)
+    assert payload["provider_request_id"] == "openjev_req_1"
+    assert payload["provider_metadata"]["provider"] == "open-jev-selfhost"
+    assert payload["provider_metadata"]["model"]["revision"] == "hf-commit-1"
+    assert payload["raw"]["probabilities"]["CONTINUE"] == 0.8
 
 
 def test_on_mode_returns_suggestion() -> None:

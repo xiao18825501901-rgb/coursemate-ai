@@ -1657,7 +1657,7 @@ class V3DomainAdapter:
         if self.question_engine is None:
             raise ApiError(503, "QUESTION_ENGINE_DISABLED", "The Question Engine is disabled.")
         course_id = str(payload["course"])
-        node_id = str(payload["node"])
+        requested_node = str(payload.get("node") or "").strip()
         operation_id = str(payload.get("operation_id") or "").strip()
         cancel_check = payload.get("_cancel_check")
         if cancel_check is not None and not callable(cancel_check):
@@ -1666,11 +1666,56 @@ class V3DomainAdapter:
         workspace = self._workspace_for_node(course_id, subject)
         if self.learning is None:
             raise ApiError(503, "V3_DISABLED", "The V3 learning engine is disabled.")
-        # Reuse the learning engine's canonical node authorization and atomic-node
-        # validation before authoring can spend money.
-        self.learning.node(workspace, node_id)
+        # Reuse the learning engine's canonical authorization and active-Spec
+        # validation before authoring can spend money.  An unbound Pair must not
+        # blindly pick the first ATOMIC row: old trees can legitimately contain
+        # atomic nodes whose Spec is not active.  Resolve the first usable node
+        # from the caller's effective tree, without widening course visibility.
+        selected_node: dict[str, Any] | None = None
+        if requested_node:
+            selected_node = self.learning.node(workspace, requested_node)
+        else:
+            snapshot = self._knowledge(subject, course_id)
+            registry = {
+                str(node.get("id")): node
+                for node in snapshot.get("registry") or []
+                if isinstance(node, dict) and node.get("id")
+            }
+            ordered_ids = [
+                str(member.get("node_id"))
+                for member in sorted(
+                    (
+                        member
+                        for member in snapshot.get("members") or []
+                        if isinstance(member, dict) and member.get("node_id")
+                    ),
+                    key=lambda member: (
+                        str(member.get("parent_node_id") or ""),
+                        int(member.get("ordinal") or 0),
+                    ),
+                )
+            ]
+            ordered_ids.extend(node_id for node_id in registry if node_id not in ordered_ids)
+            for candidate_id in ordered_ids:
+                candidate = registry.get(candidate_id) or {}
+                if candidate.get("kind") != "ATOMIC":
+                    continue
+                try:
+                    selected_node = self.learning.node(workspace, candidate_id)
+                    break
+                except ApiError as error:
+                    if error.code == "SPEC_NOT_AVAILABLE":
+                        continue
+                    raise
+            if selected_node is None:
+                raise ApiError(
+                    409,
+                    "NO_EXERCISE_READY_NODE",
+                    "No accessible atomic knowledge node has an active Teaching Spec.",
+                )
+        node_id = str(selected_node["id"])
         try:
-            return self.question_engine.generate_one(
+            generated = self.question_engine.generate_one(
                 owner_user_id=subject,
                 workspace_id=str(workspace["id"]),
                 course_id=course_id,
@@ -1679,6 +1724,9 @@ class V3DomainAdapter:
                 operation_id=operation_id,
                 should_cancel=cancel_check,
             )
+            generated["target_node_id"] = node_id
+            generated["target_node_title"] = str(selected_node["title"])
+            return generated
         except QuestionEngineRuntimeError as error:
             if error.code == "QUESTION_CANCELLED":
                 raise asyncio.CancelledError() from error
@@ -2155,6 +2203,18 @@ class V3DomainAdapter:
         workspace = self._workspace_for_node(course_id, subject)
         return self.learning.assessment_setup(workspace["id"], subject, node_id)
 
+    def _assessment_prepare_status(
+        self, subject: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        if self.learning is None:
+            raise ApiError(503, "V3_DISABLED", "The V3 learning engine is disabled.")
+        course_id = str(payload["course"])
+        self._course_row(course_id, subject)
+        workspace = self._workspace_for_node(course_id, subject)
+        return self.learning.configured_preparation_status(
+            workspace["id"], subject, str(payload["configuration_id"])
+        )
+
     def _assessment_view(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
         if self.learning is None:
             raise ApiError(503, "V3_DISABLED", "The V3 learning engine is disabled.")
@@ -2441,6 +2501,7 @@ class V3DomainAdapter:
             "knowledge.begin_learning",
             "knowledge.assessment.start",
             "knowledge.assessment.setup",
+            "knowledge.assessment.prepare.status",
             "knowledge.assessment.view",
             "knowledge.assessment.submit",
             "knowledge.assessment.abandon",
@@ -2572,6 +2633,8 @@ class V3DomainAdapter:
             return self._assessment_start(subject, payload)
         if operation == "knowledge.assessment.setup":
             return self._assessment_setup(subject, payload)
+        if operation == "knowledge.assessment.prepare.status":
+            return self._assessment_prepare_status(subject, payload)
         if operation == "knowledge.assessment.view":
             return self._assessment_view(subject, payload)
         if operation == "knowledge.assessment.submit":

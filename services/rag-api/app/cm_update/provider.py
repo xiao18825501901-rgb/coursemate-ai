@@ -40,6 +40,22 @@ from app.brand import BRAND
 class ProviderError(Exception):
     pass
 
+
+def _responses_incomplete_code(response: object) -> str:
+    """Return a bounded public code without reflecting provider-controlled text."""
+
+    if not isinstance(response, dict):
+        return 'INCOMPLETE_PROVIDER_RESPONSE'
+    details = response.get('incomplete_details')
+    reason = details.get('reason') if isinstance(details, dict) else None
+    suffixes = {
+        'max_output_tokens': 'MAX_OUTPUT_TOKENS',
+        'content_filter': 'CONTENT_FILTER',
+        'server_error': 'SERVER_ERROR',
+    }
+    suffix = suffixes.get(str(reason))
+    return f'INCOMPLETE_PROVIDER_RESPONSE_{suffix}' if suffix else 'INCOMPLETE_PROVIDER_RESPONSE'
+
 TEACH_DIRECT_INSTRUCTION = (
     f'你是 {BRAND.name} 教师。直接、简洁地回答学生当前的问题，'
     '保留中文解释与英文术语，紧扣课程资料，引用材料时使用 [S1] 等标记。'
@@ -404,7 +420,13 @@ class QwenProvider:
         planner=self.planner_messages(course,text,profile,sources,history,lane,bridge,spec_items,template_id)
         self.attach_images(planner, attachments or [])
         async for item in self.stream(planner,self.cfg.prompt_tokens):
-            if 'text' in item: prompt+=item['text']
+            if 'text' in item:
+                prompt+=item['text']
+                # This is an internal audit checkpoint, not visible teaching
+                # output.  If the provider reports an explicit incomplete
+                # terminal event, the already received plan and usage remain
+                # attributable to this run without being replayed or exposed.
+                yield {'kind':'prompt_checkpoint','text':prompt}
             if 'usage' in item: yield {'kind':'usage','stage':'prompt','value':item['usage']}
             if len(prompt)>24000: raise ProviderError('PROMPT_TOO_LONG')
         if len(prompt.strip())<30: raise ProviderError('EMPTY_GENERATED_PROMPT')
@@ -604,14 +626,21 @@ class DeepSeekProvider(QwenProvider):
                                     raise ProviderError('INVALID_PROVIDER_STREAM')
                                 if value:
                                     yield {'text': value}
+                            response_body = data.get('response', {})
                             if kind == 'response.completed':
-                                status = data.get('response', {}).get('status', 'completed')
+                                status = response_body.get('status', 'completed')
                                 if status != 'completed':
-                                    raise ProviderError('INCOMPLETE_PROVIDER_RESPONSE')
+                                    usage = response_body.get('usage')
+                                    if isinstance(usage, dict) and usage:
+                                        yield {'usage': usage}
+                                    raise ProviderError(_responses_incomplete_code(response_body))
                                 finished = True
-                                yield {'usage': data.get('response', {}).get('usage', {})}
+                                yield {'usage': response_body.get('usage', {})}
                             if kind in {'response.failed', 'response.incomplete', 'error'}:
-                                raise ProviderError('INCOMPLETE_PROVIDER_RESPONSE')
+                                usage = response_body.get('usage')
+                                if isinstance(usage, dict) and usage:
+                                    yield {'usage': usage}
+                                raise ProviderError(_responses_incomplete_code(response_body))
                         else:
                             choices = data.get('choices', [])
                             if not isinstance(choices, list):
