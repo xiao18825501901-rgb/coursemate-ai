@@ -945,16 +945,32 @@ class OrchestratorDraftGenerator:
     ) -> tuple[AutoKnowledgeSpecSetDraft, int]:
         """Regenerate only Specs an exhausted grounded batch cannot retain."""
 
-        source_operation = f"{operation_base}-r3"
+        eligible_operations = [
+            operation_base,
+            f"{operation_base}-r1",
+            f"{operation_base}-r2",
+            f"{operation_base}-r3",
+        ]
         with self.database.connect() as connection:
             source = connection.execute(
-                "SELECT status,rejection_code,output_text,output_hash "
-                "FROM auto_knowledge_model_attempts WHERE operation_id=? "
-                "AND job_id=? AND stage='TEACHING_SPEC' AND shard_key=?",
-                (source_operation, job_id, shard_key),
+                "SELECT operation_id,status,rejection_code,output_text,output_hash "
+                "FROM auto_knowledge_model_attempts WHERE job_id=? "
+                "AND stage='TEACHING_SPEC' AND shard_key=? "
+                "AND status='BUSINESS_REJECTED' "
+                "AND rejection_code='AUTO_EVIDENCE_INVALID' "
+                "AND operation_id IN (?,?,?,?) "
+                "ORDER BY updated_at DESC,operation_id DESC LIMIT 1",
+                (job_id, shard_key, *eligible_operations),
+            ).fetchone()
+            uncertain = connection.execute(
+                "SELECT 1 FROM auto_knowledge_model_attempts WHERE job_id=? "
+                "AND stage='TEACHING_SPEC' AND shard_key=? "
+                "AND status IN ('SEND_INTENT','RESPONSE_UNKNOWN') LIMIT 1",
+                (job_id, shard_key),
             ).fetchone()
         if (
             source is None
+            or uncertain is not None
             or source["status"] != "BUSINESS_REJECTED"
             or source["rejection_code"] != "AUTO_EVIDENCE_INVALID"
             or not str(source["output_text"] or "").strip()
@@ -963,8 +979,9 @@ class OrchestratorDraftGenerator:
             raise ApiError(
                 409,
                 "AUTO_ARTIFACT_CONFLICT",
-                "The split Spec recovery lacks its exact rejected r3 response.",
+                "The split Spec recovery lacks a complete, safely rejected response.",
             )
+        source_operation = str(source["operation_id"])
 
         raw = AutoKnowledgeSpecSetDraft.model_validate_json(str(source["output_text"]))
         node_by_key = {str(node.key): node for node in nodes}
@@ -2120,7 +2137,10 @@ class OrchestratorDraftGenerator:
                 )
                 dispatched_count = int(dispatched)
             except ApiError as error:
-                if error.code != "AUTO_LOCAL_NORMALIZATION_REJECTED":
+                if error.code not in {
+                    "AUTO_LOCAL_NORMALIZATION_REJECTED",
+                    "AUTO_REPAIR_LIMIT",
+                }:
                     raise
                 output, dispatched_count = self._recover_split_spec_batch(
                     job_id=job_id,

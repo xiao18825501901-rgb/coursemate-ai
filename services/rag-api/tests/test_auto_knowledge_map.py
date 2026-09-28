@@ -2738,7 +2738,7 @@ def test_failed_spec_batch_recovers_only_invalid_node_and_reuses_receipt(
             (job["id"],),
         )
         operation_base = f"akm-{digest(str(job['id']))[:16]}-s-00000"
-        r3 = f"{operation_base}-r3"
+        r1 = f"{operation_base}-r1"
         connection.execute(
             "INSERT INTO auto_knowledge_model_attempts("
             "operation_id,job_id,stage,shard_key,input_hash,status,output_text,"
@@ -2746,11 +2746,27 @@ def test_failed_spec_batch_recovers_only_invalid_node_and_reuses_receipt(
             "VALUES(?,?,'TEACHING_SPEC','spec-00000',?,'BUSINESS_REJECTED',"
             "?,?, 'AUTO_EVIDENCE_INVALID','{}')",
             (
-                r3,
+                r1,
                 job["id"],
                 "3" * 64,
                 rejected_json,
                 hashlib.sha256(rejected_json.encode()).hexdigest(),
+            ),
+        )
+        truncated = '{"specs":['
+        connection.execute(
+            "INSERT INTO auto_knowledge_model_attempts("
+            "operation_id,job_id,stage,shard_key,input_hash,status,output_text,"
+            "output_hash,rejection_code,rejection_detail_json) "
+            "VALUES(?,?,'TEACHING_SPEC','spec-00000',?,'CONTRACT_REJECTED',"
+            "?,?, 'ValidationError',?)",
+            (
+                f"{operation_base}-r2",
+                job["id"],
+                "4" * 64,
+                truncated,
+                hashlib.sha256(truncated.encode()).hexdigest(),
+                canonical_json({"code": "SCHEMA_INVALID"}),
             ),
         )
 
@@ -2803,9 +2819,9 @@ def test_failed_spec_batch_recovers_only_invalid_node_and_reuses_receipt(
         raw = connection.execute(
             "SELECT status,output_hash FROM auto_knowledge_model_attempts "
             "WHERE operation_id=?",
-            (r3,),
+            (r1,),
         ).fetchone()
-    assert receipt["source_operation_id"] == r3
+    assert receipt["source_operation_id"] == r1
     assert receipt["source_output_hash"] == hashlib.sha256(rejected_json.encode()).hexdigest()
     assert json.loads(receipt["invalid_node_keys_json"]) == ["core-b"]
     assert len(json.loads(receipt["split_operation_ids_json"])) == 1
