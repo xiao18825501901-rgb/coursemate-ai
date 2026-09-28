@@ -39,7 +39,7 @@ from app.learning.models import (
 from app.learning.orchestrator import LearningOrchestrator
 from app.learning.workspaces import join_course
 
-BUILDER_VERSION = "AUTO_KNOWLEDGE_MAP_V10_REDUCIBLE_COMPACT_OUTLINE"
+BUILDER_VERSION = "AUTO_KNOWLEDGE_MAP_V11_REDUCIBLE_COMPACT_OUTLINE"
 # Whole-build safety limits are deliberately separate from the per-request
 # provider limit.  Every readable byte below these bounds is segmented; it is
 # never silently truncated to make a single model call fit.
@@ -1314,7 +1314,6 @@ class OrchestratorDraftGenerator:
                     if (
                         not cited <= allowed_keys
                         or not disposed <= allowed_keys
-                        or cited | disposed != allowed_keys
                     ):
                         raise ApiError(
                             422,
@@ -1367,7 +1366,10 @@ class OrchestratorDraftGenerator:
                 model_calls += int(dispatched)
                 outline = cast(AutoKnowledgeCompactOutlineDraft, output)
                 cited_handles = {handle for node in outline.nodes for handle in node.evidence_ids}
-                for handle in outline.unmapped_evidence_ids:
+                unresolved_handles = (allowed - cited_handles) | set(
+                    outline.unmapped_evidence_ids
+                )
+                for handle in sorted(unresolved_handles):
                     if handle in cited_handles:
                         continue
                     candidate = by_key[handle]
@@ -1375,8 +1377,8 @@ class OrchestratorDraftGenerator:
                         compacted_dispositions[str(source_id)] = {
                             "status": "REVIEW_REQUIRED",
                             "reason": (
-                                "The compact outline did not retain this provisional "
-                                "concept; review is required"
+                                "The compact outline did not map this provisional concept; "
+                                "review is required"
                             ),
                         }
 

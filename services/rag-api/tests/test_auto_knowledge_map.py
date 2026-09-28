@@ -258,8 +258,11 @@ class ManyConceptLearning(RecordingLearning):
                 }
             )
             concepts = context["provisional_concepts"]
+            outline_concepts = concepts[:-1] if len(concepts) > 60 else concepts
             group_count = 45 if len(concepts) > 60 else 30
-            groups = [concepts[index::group_count] for index in range(group_count)]
+            groups = [
+                outline_concepts[index::group_count] for index in range(group_count)
+            ]
             groups = [group for group in groups if group]
             return schema.model_validate(
                 {
@@ -1330,7 +1333,7 @@ def test_many_source_concepts_are_compacted_before_teaching_specs(
     assert service.reconcile(force=True)["QUEUED"] == 1
     completed = service.run_once("compact-course-worker")
 
-    assert completed is not None and completed["status"] == "READY"
+    assert completed is not None and completed["status"] == "READY_WITH_EXCEPTIONS"
     outline_calls = [
         item for item in learning.calls if "whole-course outline" in item["instructions"]
     ]
