@@ -3056,6 +3056,47 @@ def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_cal
         "EVIDENCE_SCOPE_RESUME_V1",
     }
 
+    # If that no-dispatch V55 resume was already consumed before the split-Spec
+    # recovery shipped, the same intact r3 gets one separately named resume.
+    # This is the production upgrade path; it still sends nothing by itself.
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='FAILED',"
+            "error_code='AUTO_LOCAL_NORMALIZATION_REJECTED',"
+            "error_message='The saved r3 response cannot retain authorized evidence "
+            "for every affected item.',completed_at=? WHERE id=?",
+            ("2026-09-27T12:45:45.000Z", job["id"]),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_targets SET status='FAILED' WHERE active_job_id=?",
+            (job["id"],),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_job_receipts("
+            "job_id,target_key,corpus_fingerprint,status,source_snapshot_hash,"
+            "model_calls_made,detail_json) VALUES(?,?,?,'FAILED',?,4,?)",
+            (
+                job["id"],
+                job["target_key"],
+                job["corpus_fingerprint"],
+                digest(json.loads(job["source_snapshot_json"])),
+                canonical_json(local_rejection_receipt),
+            ),
+        )
+    assert service.reconcile(force=True)["RECOVERED_SAFE_FAILURE"] == 1
+    with database.connect() as connection:
+        recovery = connection.execute(
+            "SELECT reason FROM auto_knowledge_job_recovery_receipts "
+            "WHERE job_id=? ORDER BY created_at,reason",
+            (job["id"],),
+        ).fetchall()
+    assert {row["reason"] for row in recovery} == {
+        "EVIDENCE_SCOPE_NORMALIZATION_V1",
+        "EVIDENCE_SCOPE_REPAIR_V1",
+        "EVIDENCE_SCOPE_RESUME_V1",
+        "SPEC_SPLIT_RESUME_V1",
+    }
+
     # V52 chose r3's rejection feedback when reconstructing the immutable r3
     # request.  Model work was never dispatched and no artifact was written,
     # so this exact terminal state gets one separately recorded retry.
@@ -3099,6 +3140,7 @@ def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_cal
         "EVIDENCE_SCOPE_NORMALIZATION_V1",
         "EVIDENCE_SCOPE_REPAIR_V1",
         "EVIDENCE_SCOPE_RESUME_V1",
+        "SPEC_SPLIT_RESUME_V1",
     }
 
     def validate_specs(value: Any) -> None:

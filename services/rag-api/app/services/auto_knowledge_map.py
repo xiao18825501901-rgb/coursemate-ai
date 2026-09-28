@@ -3054,7 +3054,23 @@ class AutoKnowledgeMapService:
                 if selected_attempts is None:
                     continue
                 blocked = selected_attempts
-                reason = "EVIDENCE_SCOPE_RESUME_V1"
+                blocked_json = canonical_json([str(item[0]) for item in blocked])
+                prior_resume = connection.execute(
+                    "SELECT 1 FROM auto_knowledge_job_recovery_receipts "
+                    "WHERE job_id=? AND reason='EVIDENCE_SCOPE_RESUME_V1' "
+                    "AND blocked_operation_ids_json=?",
+                    (row["id"], blocked_json),
+                ).fetchone()
+                split_scope = connection.execute(
+                    "SELECT 1 FROM auto_knowledge_spec_split_receipts "
+                    "WHERE job_id=? AND shard_key=?",
+                    (row["id"], blocked[0]["shard_key"]),
+                ).fetchone()
+                reason = (
+                    "SPEC_SPLIT_RESUME_V1"
+                    if prior_resume is not None and split_scope is None
+                    else "EVIDENCE_SCOPE_RESUME_V1"
+                )
             elif (
                 row["error_code"] == "AUTO_ARTIFACT_CONFLICT"
                 and row["builder_version"] == BUILDER_VERSION
@@ -3368,6 +3384,7 @@ class AutoKnowledgeMapService:
                 "EVIDENCE_SCOPE_NORMALIZATION_V1",
                 "EVIDENCE_SCOPE_NORMALIZATION_RETRY_V1",
                 "EVIDENCE_SCOPE_RESUME_V1",
+                "SPEC_SPLIT_RESUME_V1",
             }
             existing_recovery = connection.execute(
                 "SELECT 1 FROM auto_knowledge_job_recovery_receipts "
