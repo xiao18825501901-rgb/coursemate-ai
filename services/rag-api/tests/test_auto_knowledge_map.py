@@ -281,7 +281,13 @@ class ManyConceptLearning(RecordingLearning):
                             "parent_key": "course-outline",
                             "title": f"Learning unit {index}",
                             "description": (
-                                "x" * 793
+                                # Real PHY1201 compaction returned a complete
+                                # intermediate outline with a 1,451-character
+                                # unit summary.  The transport contract must
+                                # preserve that valid summary so it can be
+                                # reduced again instead of spending two repair
+                                # calls and failing the whole course.
+                                "x" * 1451
                                 if len(concepts) > 60 and index == 0
                                 else "A compact unit covering related source concepts"
                             ),

@@ -448,8 +448,11 @@ class AutoKnowledgeCompactAtomicDraft(Contract):
     key: Identifier
     parent_key: Identifier | None = None
     title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=150)]
+    # A retained real compact response reached 1,451 characters.  Keep a
+    # finite transport margin while leaving full instructional depth to the
+    # separately generated Teaching Spec.
     description: Annotated[
-        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)
     ]
     major: Major = "OTHER"
     prerequisite_keys: list[Identifier] = Field(default_factory=list, max_length=20)
