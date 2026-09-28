@@ -773,33 +773,46 @@ class OrchestratorDraftGenerator:
 
     @staticmethod
     def _normalize_atomic_evidence(value: Any, authorized: dict[str, set[str]]) -> bool:
-        """Remove only surplus foreign evidence when every item stays grounded.
+        """Project a saved Spec set onto each atomic node's authorized evidence.
 
-        This deliberately does not infer, replace or add evidence.  The caller
-        enables it only for the one audited local-recovery path after a complete
-        r3 response was retained.  A partial normalization is never allowed.
+        This deliberately does not infer, replace or add evidence. Items with
+        no authorized citation are removed, but only when their Spec still has
+        at least one grounded REQUIRED item. The caller enables this only for
+        the audited local-recovery path after a complete r3 response was saved.
         """
 
         draft = cast(AutoKnowledgeSpecSetDraft, value)
-        updates: list[tuple[Any, list[str]]] = []
+        evidence_updates: list[tuple[Any, list[str]]] = []
+        item_updates: list[tuple[Any, list[Any]]] = []
+        changed = False
         for spec in draft.specs:
             permitted = authorized.get(spec.node_key)
             if permitted is None:
                 return False
+            retained_items: list[Any] = []
             for item in spec.items:
-                foreign = set(item.evidence_ids) - permitted
-                if not foreign:
-                    continue
                 retained = [
                     evidence_id for evidence_id in item.evidence_ids if evidence_id in permitted
                 ]
                 if not retained:
-                    return False
-                updates.append((item, retained))
-        if not updates:
+                    changed = True
+                    continue
+                retained_items.append(item)
+                if retained != item.evidence_ids:
+                    changed = True
+                    evidence_updates.append((item, retained))
+            if not retained_items or not any(
+                item.requirement == "REQUIRED" for item in retained_items
+            ):
+                return False
+            if len(retained_items) != len(spec.items):
+                item_updates.append((spec, retained_items))
+        if not changed:
             return False
-        for item, retained in updates:
+        for item, retained in evidence_updates:
             item.evidence_ids = retained
+        for spec, retained_items in item_updates:
+            spec.items = retained_items
         return True
 
     def _persist_local_evidence_normalization(
@@ -2538,7 +2551,8 @@ class AutoKnowledgeMapService:
             "WHERE ((job.status='FAILED' "
             "AND job.error_code IN ("
             "'DAILY_MODEL_CALL_QUOTA','AUTO_REPAIR_LIMIT',"
-            "'AUTO_SOURCE_COVERAGE_INCOMPLETE','AUTO_ARTIFACT_CONFLICT') "
+            "'AUTO_SOURCE_COVERAGE_INCOMPLETE','AUTO_ARTIFACT_CONFLICT',"
+            "'AUTO_LOCAL_NORMALIZATION_REJECTED') "
             "AND receipt.status='FAILED') OR ("
             "job.status='BLOCKED' AND job.target_kind='AUTO_COURSE' "
             "AND job.error_code='COURSE_NOT_FOUND' AND receipt.status='BLOCKED')) "
@@ -2758,6 +2772,75 @@ class AutoKnowledgeMapService:
                         )
                     )
                 )
+            elif row["error_code"] == "AUTO_LOCAL_NORMALIZATION_REJECTED":
+                if (
+                    row["builder_version"] != BUILDER_VERSION
+                    or row["error_message"]
+                    != "The saved r3 response cannot retain authorized evidence "
+                    "for every affected item."
+                ):
+                    continue
+                normalization_receipts = connection.execute(
+                    "SELECT blocked_operation_ids_json FROM "
+                    "auto_knowledge_job_recovery_receipts "
+                    "WHERE job_id=? AND reason='EVIDENCE_SCOPE_NORMALIZATION_V1' "
+                    "ORDER BY created_at,id",
+                    (row["id"],),
+                ).fetchall()
+                selected_attempts: list[sqlite3.Row] | None = None
+                for normalization_receipt in normalization_receipts:
+                    operations = json.loads(
+                        str(normalization_receipt["blocked_operation_ids_json"])
+                    )
+                    if (
+                        not isinstance(operations, list)
+                        or len(operations) != 4
+                        or not all(isinstance(item, str) for item in operations)
+                    ):
+                        continue
+                    base_operation = operations[0]
+                    expected_operations = [
+                        base_operation,
+                        f"{base_operation}-r1",
+                        f"{base_operation}-r2",
+                        f"{base_operation}-r3",
+                    ]
+                    if operations != expected_operations:
+                        continue
+                    attempts = connection.execute(
+                        "SELECT operation_id,stage,shard_key,status,rejection_code,"
+                        "output_text,output_hash FROM auto_knowledge_model_attempts "
+                        "WHERE job_id=? AND operation_id IN (?,?,?,?) "
+                        "ORDER BY operation_id",
+                        (row["id"], *expected_operations),
+                    ).fetchall()
+                    artifact = connection.execute(
+                        "SELECT 1 FROM auto_knowledge_job_artifacts "
+                        "WHERE job_id=? AND stage='TEACHING_SPEC' AND shard_key=?",
+                        (row["id"], attempts[0]["shard_key"] if attempts else ""),
+                    ).fetchone()
+                    if (
+                        len(attempts) != 4
+                        or [str(item["operation_id"]) for item in attempts]
+                        != expected_operations
+                        or len({str(item["shard_key"]) for item in attempts}) != 1
+                        or any(
+                            str(item["stage"]) != "TEACHING_SPEC"
+                            or str(item["status"]) != "BUSINESS_REJECTED"
+                            or str(item["rejection_code"]) != "AUTO_EVIDENCE_INVALID"
+                            or not str(item["output_text"] or "").strip()
+                            or len(str(item["output_hash"] or "")) != 64
+                            for item in attempts
+                        )
+                        or artifact is not None
+                    ):
+                        continue
+                    selected_attempts = attempts
+                    break
+                if selected_attempts is None:
+                    continue
+                blocked = selected_attempts
+                reason = "EVIDENCE_SCOPE_RESUME_V1"
             elif (
                 row["error_code"] == "AUTO_ARTIFACT_CONFLICT"
                 and row["builder_version"] == BUILDER_VERSION

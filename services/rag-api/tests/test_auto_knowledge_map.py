@@ -2608,15 +2608,43 @@ def test_teaching_spec_evidence_scope_gets_one_exact_audited_third_repair(
     assert denied.value.code == "AUTO_REPAIR_LIMIT"
 
 
+def test_local_spec_projection_refuses_to_remove_the_only_required_item() -> None:
+    draft = AutoKnowledgeSpecSetDraft.model_validate(
+        {
+            "specs": [
+                {
+                    "node_key": "core-a",
+                    "change_reason": "Foreign-only required item",
+                    "items": [
+                        {
+                            "item_id": "required-foreign",
+                            "requirement": "REQUIRED",
+                            "objective": "Unsupported objective",
+                            "acceptance": "Must not become coverage",
+                            "evidence_ids": ["foreign"],
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert not OrchestratorDraftGenerator._normalize_atomic_evidence(
+        draft, {"core-a": {"authorized"}}
+    )
+    assert [item.item_id for item in draft.specs[0].items] == ["required-foreign"]
+
+
 def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_call(
     tmp_path: Path,
 ) -> None:
     """An exhausted exact r3 may remove only surplus foreign evidence locally.
 
     The original provider response stays BUSINESS_REJECTED.  This is a narrow
-    recovery for a complete, saved r3 response where every affected item still
-    has at least one citation from its own atomic node; it must never reserve
-    r4 or send another request.
+    recovery for a complete, saved r3 response. Mixed citations retain only
+    the node's own evidence; foreign-only items are discarded only while every
+    Spec keeps a grounded REQUIRED item. It must never reserve r4 or send
+    another request.
     """
 
     settings = settings_at(tmp_path).model_copy(
@@ -2671,7 +2699,14 @@ def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_cal
                         "objective": "Explain the first node",
                         "acceptance": "Use its primary source",
                         "evidence_ids": ["e1", "e2"],
-                    }
+                    },
+                    {
+                        "item_id": "a-foreign-only",
+                        "requirement": "RECOMMENDED",
+                        "objective": "Unsupported neighbouring detail",
+                        "acceptance": "Must not survive local projection",
+                        "evidence_ids": ["e2"],
+                    },
                 ],
             },
             {
@@ -2803,6 +2838,47 @@ def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_cal
     )
     assert json.loads(normalization["blocked_operation_ids_json"])[-1] == r3
 
+    # An older local projector could refuse a complete r3 when one optional
+    # item was foreign-only.  No request was sent and no artifact was written,
+    # so the exact saved scope is safe to retry after the projector is fixed.
+    local_rejection_receipt = {"error_code": "AUTO_LOCAL_NORMALIZATION_REJECTED"}
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='FAILED',"
+            "error_code='AUTO_LOCAL_NORMALIZATION_REJECTED',"
+            "error_message='The saved r3 response cannot retain authorized evidence "
+            "for every affected item.',completed_at=? WHERE id=?",
+            ("2026-09-27T12:45:30.000Z", job["id"]),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_targets SET status='FAILED' WHERE active_job_id=?",
+            (job["id"],),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_job_receipts("
+            "job_id,target_key,corpus_fingerprint,status,source_snapshot_hash,"
+            "model_calls_made,detail_json) VALUES(?,?,?,'FAILED',?,4,?)",
+            (
+                job["id"],
+                job["target_key"],
+                job["corpus_fingerprint"],
+                digest(json.loads(job["source_snapshot_json"])),
+                canonical_json(local_rejection_receipt),
+            ),
+        )
+    assert service.reconcile(force=True)["RECOVERED_SAFE_FAILURE"] == 1
+    with database.connect() as connection:
+        recovery = connection.execute(
+            "SELECT reason FROM auto_knowledge_job_recovery_receipts "
+            "WHERE job_id=? ORDER BY created_at,reason",
+            (job["id"],),
+        ).fetchall()
+    assert {row["reason"] for row in recovery} == {
+        "EVIDENCE_SCOPE_NORMALIZATION_V1",
+        "EVIDENCE_SCOPE_REPAIR_V1",
+        "EVIDENCE_SCOPE_RESUME_V1",
+    }
+
     # V52 chose r3's rejection feedback when reconstructing the immutable r3
     # request.  Model work was never dispatched and no artifact was written,
     # so this exact terminal state gets one separately recorded retry.
@@ -2845,6 +2921,7 @@ def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_cal
         "EVIDENCE_SCOPE_NORMALIZATION_RETRY_V1",
         "EVIDENCE_SCOPE_NORMALIZATION_V1",
         "EVIDENCE_SCOPE_REPAIR_V1",
+        "EVIDENCE_SCOPE_RESUME_V1",
     }
 
     def validate_specs(value: Any) -> None:
@@ -2871,6 +2948,7 @@ def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_cal
     assert dispatched is False
     assert learning.calls == []
     assert output.specs[0].items[0].evidence_ids == ["e1"]
+    assert [item.item_id for item in output.specs[0].items] == ["a-required"]
 
     with database.connect() as connection:
         raw_attempt = connection.execute(
@@ -2892,7 +2970,9 @@ def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_cal
         hashlib.sha256(rejected_json.encode()).hexdigest(),
     )
     assert artifact["model_operation_id"] == r3
-    assert json.loads(artifact["output_json"])["specs"][0]["items"][0]["evidence_ids"] == ["e1"]
+    normalized_items = json.loads(artifact["output_json"])["specs"][0]["items"]
+    assert [item["item_id"] for item in normalized_items] == ["a-required"]
+    assert normalized_items[0]["evidence_ids"] == ["e1"]
     assert [row["ordinal"] for row in repairs] == [1, 2, 3]
 
     # A second frozen Teaching-Spec shard in the same course must receive its
@@ -2989,14 +3069,17 @@ def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_cal
     with database.connect() as connection:
         resumed = connection.execute(
             "SELECT blocked_operation_ids_json FROM auto_knowledge_job_recovery_receipts "
-            "WHERE job_id=? AND reason='EVIDENCE_SCOPE_RESUME_V1'",
+            "WHERE job_id=? AND reason='EVIDENCE_SCOPE_RESUME_V1' "
+            "ORDER BY blocked_operation_ids_json",
             (job["id"],),
-        ).fetchone()
-    assert tuple(json.loads(resumed["blocked_operation_ids_json"])) == (
+        ).fetchall()
+    assert (
         second_base,
         f"{second_base}-r1",
         f"{second_base}-r2",
-    )
+    ) in {
+        tuple(json.loads(row["blocked_operation_ids_json"])) for row in resumed
+    }
     with database.connect() as connection:
         connection.execute(
             "UPDATE auto_knowledge_jobs SET status='RUNNING' WHERE id=?", (job["id"],)
