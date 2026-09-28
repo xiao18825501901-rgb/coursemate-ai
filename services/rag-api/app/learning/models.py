@@ -162,9 +162,7 @@ class SolutionStep(Contract):
     @model_validator(mode="after")
     def unique_validated_nodes(self) -> "SolutionStep":
         node_ids = [
-            link.node_id
-            for link in self.knowledge_links
-            if link.resolution_status == "VALIDATED"
+            link.node_id for link in self.knowledge_links if link.resolution_status == "VALIDATED"
         ]
         if len(node_ids) != len(set(node_ids)):
             raise ValueError("A solution step may ask only one question per bound node")
@@ -258,9 +256,7 @@ class PrerequisiteInput(Contract):
 
 
 class PersonalPlanInput(OperationInput):
-    title: Annotated[
-        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
-    ]
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
     change_reason: Text
     memberships: list[TreeMembershipInput] = Field(min_length=1, max_length=500)
     prerequisites: list[PrerequisiteInput] = Field(default_factory=list, max_length=1_000)
@@ -268,9 +264,7 @@ class PersonalPlanInput(OperationInput):
     @model_validator(mode="after")
     def unique_graph_entries(self) -> "PersonalPlanInput":
         nodes = [member.node_id for member in self.memberships]
-        edges = [
-            (edge.node_id, edge.prerequisite_node_id) for edge in self.prerequisites
-        ]
+        edges = [(edge.node_id, edge.prerequisite_node_id) for edge in self.prerequisites]
         if len(nodes) != len(set(nodes)):
             raise ValueError("Each knowledge node may appear only once in a tree version")
         if len(edges) != len(set(edges)):
@@ -314,9 +308,7 @@ class OfficialNodeDraftOutput(Contract):
     out of the first builder version.
     """
 
-    title: Annotated[
-        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=150)
-    ]
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=150)]
     description: Text
     major: Major
     kind: Literal["ATOMIC"]
@@ -363,9 +355,7 @@ class AutoKnowledgeModuleDraft(Contract):
     """One structural grouping in a machine-validated course map."""
 
     key: Identifier
-    title: Annotated[
-        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=150)
-    ]
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=150)]
     description: Text
     major: Major = "OTHER"
     parent_key: Identifier | None = None
@@ -376,9 +366,7 @@ class AutoKnowledgeAtomicDraft(Contract):
 
     key: Identifier
     parent_key: Identifier | None = None
-    title: Annotated[
-        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=150)
-    ]
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=150)]
     description: Text
     major: Major = "OTHER"
     prerequisite_keys: list[Identifier] = Field(default_factory=list, max_length=20)
@@ -400,9 +388,7 @@ class AutoKnowledgeSectionDisposition(Contract):
 class AutoKnowledgeMapDraft(Contract):
     """First model stage: hierarchy only, with source-bound atomic nodes."""
 
-    title: Annotated[
-        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
-    ]
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
     # A provider sees only one bounded shard.  The persisted aggregate may be
     # much larger, so these bounds protect memory without imposing a 20/30-node
     # product limit on a real course.
@@ -436,12 +422,75 @@ class AutoKnowledgeMapDraft(Contract):
             raise ValueError("Each source segment needs one final disposition")
         for item in self.dispositions:
             if any(
-                key not in {candidate.key for candidate in self.nodes}
-                for key in item.node_keys
+                key not in {candidate.key for candidate in self.nodes} for key in item.node_keys
             ):
                 raise ValueError("A source disposition may reference only atomic nodes")
             if item.status == "MAPPED" and not item.node_keys:
                 raise ValueError("A mapped source segment must name at least one atomic node")
+        return self
+
+
+class AutoKnowledgeCompactModuleDraft(Contract):
+    """A deliberately concise chapter returned by the compact-outline stage."""
+
+    key: Identifier
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=150)]
+    description: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=240)
+    ]
+    major: Major = "OTHER"
+    parent_key: Identifier | None = None
+
+
+class AutoKnowledgeCompactAtomicDraft(Contract):
+    """One compact curriculum unit with bounded outline-only prose."""
+
+    key: Identifier
+    parent_key: Identifier | None = None
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=150)]
+    description: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=420)
+    ]
+    major: Major = "OTHER"
+    prerequisite_keys: list[Identifier] = Field(default_factory=list, max_length=20)
+    evidence_ids: list[Identifier] = Field(min_length=1, max_length=120)
+
+
+class AutoKnowledgeCompactOutlineDraft(Contract):
+    """Output-bounded whole-course outline used before full Teaching Specs.
+
+    Disposition prose is intentionally not model-authored here. Large legacy
+    trees can have hundreds of provisional handles, and asking the provider to
+    repeat a reason object for every handle can exceed the upstream output
+    boundary before valid JSON is complete. The model returns each handle once
+    either through an atomic unit or this compact unmapped list; the service
+    expands deterministic review receipts locally.
+    """
+
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    modules: list[AutoKnowledgeCompactModuleDraft] = Field(default_factory=list, max_length=8)
+    nodes: list[AutoKnowledgeCompactAtomicDraft] = Field(default_factory=list, max_length=36)
+    unmapped_evidence_ids: list[Identifier] = Field(default_factory=list, max_length=120)
+
+    @model_validator(mode="after")
+    def valid_graph_keys(self) -> "AutoKnowledgeCompactOutlineDraft":
+        keys = [item.key for item in self.modules] + [item.key for item in self.nodes]
+        if len(keys) != len(set(keys)):
+            raise ValueError("Compact outline keys must be unique")
+        module_keys = {item.key for item in self.modules}
+        node_keys = {item.key for item in self.nodes}
+        for module in self.modules:
+            if module.parent_key is not None and module.parent_key not in module_keys:
+                raise ValueError("A compact module parent must be another module")
+        for node in self.nodes:
+            if node.parent_key is not None and node.parent_key not in module_keys:
+                raise ValueError("A compact atomic parent must be a module")
+            if any(key not in node_keys for key in node.prerequisite_keys):
+                raise ValueError("Every compact prerequisite must be another atomic node")
+            if node.key in node.prerequisite_keys:
+                raise ValueError("A compact atomic node cannot require itself")
+        if len(self.unmapped_evidence_ids) != len(set(self.unmapped_evidence_ids)):
+            raise ValueError("Each unmapped compact handle must be unique")
         return self
 
 
@@ -666,18 +715,14 @@ class AssessmentGradeProposal(Contract):
 
 
 class NumericGradeValue(Contract):
-    letter: Annotated[
-        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20)
-    ]
+    letter: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20)]
     numeric_value: float | None = None
 
 
 class RawScoreBand(Contract):
     minimum: int = Field(ge=0, le=100)
     maximum: int = Field(ge=0, le=100)
-    letter: Annotated[
-        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20)
-    ]
+    letter: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20)]
 
     @model_validator(mode="after")
     def ordered_band(self) -> "RawScoreBand":

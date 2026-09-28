@@ -31,6 +31,7 @@ from app.errors import ApiError
 from app.learning.knowledge import KnowledgeService
 from app.learning.knowledge_policy import MAX_EFFECTIVE_COURSE_NODES
 from app.learning.models import (
+    AutoKnowledgeCompactOutlineDraft,
     AutoKnowledgeMapDraft,
     AutoKnowledgeSpecSetDraft,
     TreeMembershipInput,
@@ -38,7 +39,7 @@ from app.learning.models import (
 from app.learning.orchestrator import LearningOrchestrator
 from app.learning.workspaces import join_course
 
-BUILDER_VERSION = "AUTO_KNOWLEDGE_MAP_V6_STRICT_COMPACT_OUTLINE"
+BUILDER_VERSION = "AUTO_KNOWLEDGE_MAP_V7_BOUNDED_COMPACT_OUTLINE"
 # Whole-build safety limits are deliberately separate from the per-request
 # provider limit.  Every readable byte below these bounds is segmented; it is
 # never silently truncated to make a single model call fit.
@@ -116,9 +117,7 @@ class OrchestratorDraftGenerator:
         self.database = database
         self.learning = learning
 
-    def _legacy_tree_id(
-        self, course_id: str, workspace_id: str, target_kind: str
-    ) -> str | None:
+    def _legacy_tree_id(self, course_id: str, workspace_id: str, target_kind: str) -> str | None:
         with self.database.connect() as connection:
             if target_kind != "AUTO_COURSE":
                 row = connection.execute(
@@ -237,9 +236,7 @@ class OrchestratorDraftGenerator:
             }
         )
 
-    def _legacy_reusable_spec(
-        self, legacy_tree_id: str | None, node: Any
-    ) -> dict[str, Any] | None:
+    def _legacy_reusable_spec(self, legacy_tree_id: str | None, node: Any) -> dict[str, Any] | None:
         """Return an exact one-to-one old spec; merged units must be recompiled."""
 
         if legacy_tree_id is None:
@@ -280,10 +277,7 @@ class OrchestratorDraftGenerator:
             return None
         old = matches[0]
         items = json.loads(str(old["content_json"]))
-        if any(
-            not set(item.get("evidence_ids") or []) <= authorized
-            for item in items
-        ):
+        if any(not set(item.get("evidence_ids") or []) <= authorized for item in items):
             return None
         return {
             "node_key": node.key,
@@ -292,9 +286,7 @@ class OrchestratorDraftGenerator:
             "items": items,
         }
 
-    def _effective_operation_id(
-        self, job_id: str, workspace_id: str, operation_id: str
-    ) -> str:
+    def _effective_operation_id(self, job_id: str, workspace_id: str, operation_id: str) -> str:
         """Use a fresh id only for a durably proven pre-dispatch quota stop.
 
         The original UNKNOWN learning operation remains as audit evidence.  A
@@ -311,8 +303,7 @@ class OrchestratorDraftGenerator:
                 (job_id,),
             ).fetchone()
             original = connection.execute(
-                "SELECT status,kind FROM learning_operations "
-                "WHERE workspace_id=? AND id=?",
+                "SELECT status,kind FROM learning_operations WHERE workspace_id=? AND id=?",
                 (workspace_id, operation_id),
             ).fetchone()
             if recovery is None or original is None:
@@ -332,8 +323,7 @@ class OrchestratorDraftGenerator:
                         (workspace_id, operation_id),
                     ).fetchone(),
                     connection.execute(
-                        "SELECT 1 FROM auto_knowledge_model_attempts "
-                        "WHERE operation_id=? LIMIT 1",
+                        "SELECT 1 FROM auto_knowledge_model_attempts WHERE operation_id=? LIMIT 1",
                         (operation_id,),
                     ).fetchone(),
                     connection.execute(
@@ -357,9 +347,7 @@ class OrchestratorDraftGenerator:
     ) -> tuple[str, str]:
         """Return the immutable operation id and request hash for one shard."""
 
-        effective_operation_id = self._effective_operation_id(
-            job_id, workspace_id, operation_id
-        )
+        effective_operation_id = self._effective_operation_id(job_id, workspace_id, operation_id)
         request_payload = {
             "builder": BUILDER_VERSION,
             "operation": effective_operation_id,
@@ -393,9 +381,7 @@ class OrchestratorDraftGenerator:
         return {"code": type(error).__name__[:100]}
 
     @classmethod
-    def _durable_rejection_feedback(
-        cls, row: sqlite3.Row, schema: type
-    ) -> dict[str, object]:
+    def _durable_rejection_feedback(cls, row: sqlite3.Row, schema: type) -> dict[str, object]:
         detail = cast(
             dict[str, object],
             json.loads(str(row["rejection_detail_json"]) or "{}"),
@@ -482,14 +468,22 @@ class OrchestratorDraftGenerator:
                         "UPDATE auto_knowledge_model_attempts SET status='CONTRACT_REJECTED',"
                         "rejection_code=?,updated_at=? WHERE operation_id=? "
                         "AND status IN ('RESPONSE_SAVED','CONTRACT_VALID')",
-                        (str(event.get("reason") or "CONTRACT_REJECTED"), now, operation_id),
+                        (
+                            str(event.get("reason") or "CONTRACT_REJECTED"),
+                            now,
+                            operation_id,
+                        ),
                     ).rowcount
                 elif phase == "RESPONSE_UNKNOWN":
                     changed = connection.execute(
                         "UPDATE auto_knowledge_model_attempts SET status='RESPONSE_UNKNOWN',"
                         "rejection_code=?,updated_at=? WHERE operation_id=? "
                         "AND status='SEND_INTENT'",
-                        (str(event.get("error_class") or "RESPONSE_UNKNOWN"), now, operation_id),
+                        (
+                            str(event.get("error_class") or "RESPONSE_UNKNOWN"),
+                            now,
+                            operation_id,
+                        ),
                     ).rowcount
                 else:
                     return
@@ -597,10 +591,7 @@ class OrchestratorDraftGenerator:
                 validate(output)
         except Exception as error:
             validation_detail = self._safe_validation_detail(error)
-            ledger_failed = (
-                isinstance(error, ApiError)
-                and error.code == "AUTO_LEDGER_WRITE_FAILED"
-            )
+            ledger_failed = isinstance(error, ApiError) and error.code == "AUTO_LEDGER_WRITE_FAILED"
             # A complete but business-invalid structured response is safe to
             # repair with a fresh operation id. Transport uncertainty is not.
             with self.database.connect() as connection:
@@ -729,8 +720,7 @@ class OrchestratorDraftGenerator:
             authorized_third_repairs: defaultdict[str, set[str]] = defaultdict(set)
             for row in third_recovery_rows:
                 authorized_third_repairs[str(row["reason"])].update(
-                    str(item)
-                    for item in json.loads(str(row["blocked_operation_ids_json"]))
+                    str(item) for item in json.loads(str(row["blocked_operation_ids_json"]))
                 )
             required_authorized = (
                 stage == "TEACHING_SPEC"
@@ -849,9 +839,7 @@ class OrchestratorDraftGenerator:
             f"{base_operation}-r2",
         ]
         expected_scope_json = canonical_json(expected_scope_operations)
-        expected_normalization_json = canonical_json(
-            [*expected_scope_operations, operation_id]
-        )
+        expected_normalization_json = canonical_json([*expected_scope_operations, operation_id])
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             running = connection.execute(
@@ -906,9 +894,9 @@ class OrchestratorDraftGenerator:
                 or attempt["status"] != "BUSINESS_REJECTED"
                 or attempt["rejection_code"] != "AUTO_EVIDENCE_INVALID"
                 or attempt["output_hash"] != raw_output_hash
-            or scope_receipt is None
-            or normalization_receipt is None
-        ):
+                or scope_receipt is None
+                or normalization_receipt is None
+            ):
                 raise ApiError(
                     409,
                     "AUTO_ARTIFACT_CONFLICT",
@@ -967,20 +955,29 @@ class OrchestratorDraftGenerator:
                 f"{operation_base}-r1",
                 f"{operation_base}-r2",
             ]
-            evidence_scope_recovery = connection.execute(
-                "SELECT 1 FROM auto_knowledge_job_recovery_receipts "
-                "WHERE job_id=? AND reason='EVIDENCE_SCOPE_REPAIR_V1' "
-                "AND blocked_operation_ids_json=?",
-                (job_id, canonical_json(evidence_scope_operations)),
-            ).fetchone() is not None
-            evidence_scope_normalization_recovery = connection.execute(
-                "SELECT 1 FROM auto_knowledge_job_recovery_receipts "
-                "WHERE job_id=? AND reason IN ("
-                "'EVIDENCE_SCOPE_NORMALIZATION_V1',"
-                "'EVIDENCE_SCOPE_NORMALIZATION_RETRY_V1') "
-                "AND blocked_operation_ids_json=?",
-                (job_id, canonical_json([*evidence_scope_operations, f"{operation_base}-r3"])),
-            ).fetchone() is not None
+            evidence_scope_recovery = (
+                connection.execute(
+                    "SELECT 1 FROM auto_knowledge_job_recovery_receipts "
+                    "WHERE job_id=? AND reason='EVIDENCE_SCOPE_REPAIR_V1' "
+                    "AND blocked_operation_ids_json=?",
+                    (job_id, canonical_json(evidence_scope_operations)),
+                ).fetchone()
+                is not None
+            )
+            evidence_scope_normalization_recovery = (
+                connection.execute(
+                    "SELECT 1 FROM auto_knowledge_job_recovery_receipts "
+                    "WHERE job_id=? AND reason IN ("
+                    "'EVIDENCE_SCOPE_NORMALIZATION_V1',"
+                    "'EVIDENCE_SCOPE_NORMALIZATION_RETRY_V1') "
+                    "AND blocked_operation_ids_json=?",
+                    (
+                        job_id,
+                        canonical_json([*evidence_scope_operations, f"{operation_base}-r3"]),
+                    ),
+                ).fetchone()
+                is not None
+            )
             artifact = connection.execute(
                 "SELECT model_operation_id,created_at FROM auto_knowledge_job_artifacts "
                 "WHERE job_id=? AND stage=? AND shard_key=?",
@@ -1074,9 +1071,7 @@ class OrchestratorDraftGenerator:
                                 "The local evidence normalization is missing its r2 "
                                 "request feedback.",
                             )
-                        r2_feedback = self._durable_rejection_feedback(
-                            predecessor, schema
-                        )
+                        r2_feedback = self._durable_rejection_feedback(predecessor, schema)
                         effective_instructions = (
                             instructions
                             + "\nThe previous complete response was rejected. Correct these exact "
@@ -1102,9 +1097,7 @@ class OrchestratorDraftGenerator:
                         )
                         return candidate, False
                     repair_feedback = self._durable_rejection_feedback(previous, schema)
-                    repair = self._reserve_repair(
-                        job_id, stage, shard_key, operation_base
-                    )
+                    repair = self._reserve_repair(job_id, stage, shard_key, operation_base)
         while True:
             operation_id = operation_base if repair == 0 else f"{operation_base}-r{repair}"
             effective_instructions = instructions
@@ -1112,8 +1105,7 @@ class OrchestratorDraftGenerator:
                 effective_instructions += (
                     "\nThe previous complete response was rejected. Correct these exact "
                     "issues and return a shorter valid response without repeating invalid "
-                    "content: "
-                    + canonical_json(repair_feedback)
+                    "content: " + canonical_json(repair_feedback)
                 )
             if required_item_recovery and repair == 3 and stage == "TEACHING_SPEC":
                 # Do not change the base prompt used by already-paid artifacts:
@@ -1122,7 +1114,7 @@ class OrchestratorDraftGenerator:
                 effective_instructions += (
                     "\nFinal REQUIRED-item repair: in every specs[i].items array, at "
                     "least one item must contain the exact field/value "
-                    "\"requirement\": \"REQUIRED\". Check every supplied node."
+                    '"requirement": "REQUIRED". Check every supplied node.'
                 )
             if unique_key_recovery and repair == 3 and stage == "SECTION_MAP":
                 effective_instructions += (
@@ -1154,12 +1146,8 @@ class OrchestratorDraftGenerator:
             except ApiError as error:
                 if error.code != "AUTO_STAGE_REJECTED":
                     raise
-                repair_feedback = cast(
-                    dict[str, object], error.details.get("validation") or {}
-                )
-                repair = self._reserve_repair(
-                    job_id, stage, shard_key, operation_base
-                )
+                repair_feedback = cast(dict[str, object], error.details.get("validation") or {})
+                repair = self._reserve_repair(job_id, stage, shard_key, operation_base)
 
     @staticmethod
     def _segments(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1192,8 +1180,7 @@ class OrchestratorDraftGenerator:
         for segment in segments:
             size = len(str(segment["content"]))
             if current and (
-                characters + size > MODEL_SHARD_CHARS
-                or len(current) >= MODEL_SHARD_SEGMENTS
+                characters + size > MODEL_SHARD_CHARS or len(current) >= MODEL_SHARD_SEGMENTS
             ):
                 shards.append(current)
                 current = []
@@ -1206,13 +1193,13 @@ class OrchestratorDraftGenerator:
 
     @staticmethod
     def _identity(prefix: str, *values: object) -> str:
-        normalized = [
-            re.sub(r"\s+", " ", str(value).strip().casefold()) for value in values
-        ]
+        normalized = [re.sub(r"\s+", " ", str(value).strip().casefold()) for value in values]
         return prefix + "_" + digest(normalized)[:28]
 
     @staticmethod
-    def _outline_batches(candidates: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    def _outline_batches(
+        candidates: list[dict[str, Any]],
+    ) -> list[list[dict[str, Any]]]:
         batches: list[list[dict[str, Any]]] = []
         current: list[dict[str, Any]] = []
         characters = 0
@@ -1239,9 +1226,7 @@ class OrchestratorDraftGenerator:
         return batches
 
     @classmethod
-    def _outline_candidates(
-        cls, draft: AutoKnowledgeMapDraft
-    ) -> list[dict[str, Any]]:
+    def _outline_candidates(cls, draft: AutoKnowledgeMapDraft) -> list[dict[str, Any]]:
         return [
             {
                 "key": node.key,
@@ -1270,7 +1255,7 @@ class OrchestratorDraftGenerator:
         }
         compacted_dispositions: dict[str, dict[str, str]] = {}
         model_calls = 0
-        final_outline: AutoKnowledgeMapDraft | None = None
+        final_outline: AutoKnowledgeCompactOutlineDraft | None = None
         final_inputs: dict[str, dict[str, Any]] = {}
 
         for level in range(OUTLINE_MAX_REDUCTION_PASSES):
@@ -1290,16 +1275,14 @@ class OrchestratorDraftGenerator:
                 }
                 allowed = set(by_key)
                 shard_key = f"outline-{level:02d}-{batch_index:05d}"
-                operation = (
-                    f"akm-{digest(job_id)[:16]}-o-{level:02d}-{batch_index:05d}"
-                )
+                operation = f"akm-{digest(job_id)[:16]}-o-{level:02d}-{batch_index:05d}"
 
                 def validate_outline(
                     value: Any,
                     *,
                     allowed_keys: set[str] = allowed,
                 ) -> None:
-                    draft = cast(AutoKnowledgeMapDraft, value)
+                    draft = cast(AutoKnowledgeCompactOutlineDraft, value)
                     if (
                         len(draft.modules) > OUTLINE_MAX_MODULES
                         or len(draft.nodes) > OUTLINE_MAX_ATOMIC_NODES
@@ -1323,21 +1306,18 @@ class OrchestratorDraftGenerator:
                             f"The generated outline exceeds its {node_budget}-node budget.",
                         )
                     cited = {item for node in draft.nodes for item in node.evidence_ids}
-                    disposed = {item.evidence_id for item in draft.dispositions}
+                    disposed = set(draft.unmapped_evidence_ids)
                     if (
                         not cited <= allowed_keys
                         or not disposed <= allowed_keys
+                        or bool(cited & disposed)
                         or cited | disposed != allowed_keys
                     ):
                         raise ApiError(
                             422,
                             "AUTO_OUTLINE_COVERAGE_INCOMPLETE",
                             "The whole-course outline did not account for every source concept.",
-                            details={
-                                "missingConceptKeys": sorted(
-                                    allowed_keys - cited - disposed
-                                )
-                            },
+                            details={"missingConceptKeys": sorted(allowed_keys - cited - disposed)},
                         )
 
                 output, dispatched = self._run_with_repairs(
@@ -1346,7 +1326,7 @@ class OrchestratorDraftGenerator:
                     shard_key=shard_key,
                     operation_base=operation,
                     workspace_id=workspace_id,
-                    schema=AutoKnowledgeMapDraft,
+                    schema=AutoKnowledgeCompactOutlineDraft,
                     instructions=(
                         "Build a compact whole-course outline from every supplied provisional "
                         "source concept. The entire output, including COMPOSITE chapters, "
@@ -1358,9 +1338,10 @@ class OrchestratorDraftGenerator:
                         "limits: count both arrays before returning. Keep titles, descriptions, "
                         "and disposition reasons concise enough to finish the complete JSON "
                         "within the output-token boundary. Use only supplied concept keys as "
-                        "evidence "
-                        "ids and account for every key by citing it from a final unit or by an "
-                        "explicit disposition. Put definitions, conditions, method steps, "
+                        "evidence ids and account for every key exactly once: cite it from one "
+                        "or more final units, or put it in unmapped_evidence_ids. Do not return "
+                        "per-key reason objects; the service expands review receipts locally. "
+                        "Put definitions, conditions, method steps, "
                         "examples, and misconceptions inside complete units. Do not merge "
                         "different algorithms, objects, or conflicting validity conditions. "
                         "This is curriculum planning, not truncation, pagination, or UI hiding."
@@ -1373,22 +1354,19 @@ class OrchestratorDraftGenerator:
                     validate=validate_outline,
                 )
                 model_calls += int(dispatched)
-                outline = cast(AutoKnowledgeMapDraft, output)
-                cited_handles = {
-                    handle for node in outline.nodes for handle in node.evidence_ids
-                }
-                for disposition in outline.dispositions:
-                    if disposition.evidence_id in cited_handles:
+                outline = cast(AutoKnowledgeCompactOutlineDraft, output)
+                cited_handles = {handle for node in outline.nodes for handle in node.evidence_ids}
+                for handle in outline.unmapped_evidence_ids:
+                    if handle in cited_handles:
                         continue
-                    candidate = by_key[disposition.evidence_id]
+                    candidate = by_key[handle]
                     for source_id in candidate["source_ids"]:
                         compacted_dispositions[str(source_id)] = {
-                            "status": (
-                                disposition.status
-                                if disposition.status != "MAPPED"
-                                else "REVIEW_REQUIRED"
+                            "status": "REVIEW_REQUIRED",
+                            "reason": (
+                                "The compact outline did not retain this provisional "
+                                "concept; review is required"
                             ),
-                            "reason": disposition.reason,
                         }
 
                 if final_level:
@@ -1506,12 +1484,10 @@ class OrchestratorDraftGenerator:
         dispositions: dict[str, dict[str, Any]] = {}
         for draft, segment_to_source in parts:
             local_modules = {
-                item.key: cls._identity("module", item.title, item.major)
-                for item in draft.modules
+                item.key: cls._identity("module", item.title, item.major) for item in draft.modules
             }
             local_nodes = {
-                item.key: cls._identity("node", item.title, item.major)
-                for item in draft.nodes
+                item.key: cls._identity("node", item.title, item.major) for item in draft.nodes
             }
             for item in draft.modules:
                 key = local_modules[item.key]
@@ -1562,9 +1538,7 @@ class OrchestratorDraftGenerator:
                         "node_keys": set(),
                     },
                 )
-                mapped = {
-                    local_nodes[value] for value in item.node_keys if value in local_nodes
-                }
+                mapped = {local_nodes[value] for value in item.node_keys if value in local_nodes}
                 current["node_keys"].update(mapped)
                 if mapped or item.status == "MAPPED":
                     current["status"] = "MAPPED"
@@ -1586,9 +1560,7 @@ class OrchestratorDraftGenerator:
                 current["status"] = "MAPPED"
                 current["node_keys"].add(node["key"])
         cited_sources = {
-            str(source_id)
-            for node in nodes.values()
-            for source_id in node["evidence_ids"]
+            str(source_id) for node in nodes.values() for source_id in node["evidence_ids"]
         }
         for source_id, disposition in dispositions.items():
             if disposition["status"] == "MAPPED" and source_id not in cited_sources:
@@ -1609,9 +1581,7 @@ class OrchestratorDraftGenerator:
         # only modules that contain a grounded atomic node, plus their ancestor
         # chain. No atomic node, evidence or Teaching Spec is discarded.
         retained_modules = {
-            str(node["parent_key"])
-            for node in nodes.values()
-            if node["parent_key"] is not None
+            str(node["parent_key"]) for node in nodes.values() if node["parent_key"] is not None
         }
         while True:
             parents = {
@@ -1625,9 +1595,7 @@ class OrchestratorDraftGenerator:
             retained_modules = expanded
         map_payload = {
             "title": f"{course['name']} · AI整理学习图",
-            "modules": [
-                item for key, item in modules.items() if key in retained_modules
-            ],
+            "modules": [item for key, item in modules.items() if key in retained_modules],
             "nodes": [
                 {
                     **item,
@@ -1637,8 +1605,7 @@ class OrchestratorDraftGenerator:
                 for item in nodes.values()
             ],
             "dispositions": [
-                {**item, "node_keys": sorted(item["node_keys"])}
-                for item in dispositions.values()
+                {**item, "node_keys": sorted(item["node_keys"])} for item in dispositions.values()
             ],
         }
         return AutoKnowledgeMapDraft.model_validate(map_payload)
@@ -1669,9 +1636,7 @@ class OrchestratorDraftGenerator:
         }
         map_parts: list[tuple[AutoKnowledgeMapDraft, dict[str, str]]] = []
         model_calls = 0
-        legacy_tree_id = self._legacy_tree_id(
-            str(course["id"]), workspace_id, target_kind
-        )
+        legacy_tree_id = self._legacy_tree_id(str(course["id"]), workspace_id, target_kind)
         node_budget = MAX_EFFECTIVE_COURSE_NODES
         if target_kind == "SUPPLEMENT" and base_tree_version_id is not None:
             with self.database.connect() as connection:
@@ -1698,10 +1663,7 @@ class OrchestratorDraftGenerator:
             shard_key = f"map-{index:05d}"
             operation = f"akm-{digest(job_id)[:16]}-m-{index:05d}"
             allowed = {str(item["id"]) for item in shard}
-            source_mapping = {
-                str(item["id"]): str(item["source_evidence_id"])
-                for item in shard
-            }
+            source_mapping = {str(item["id"]): str(item["source_evidence_id"]) for item in shard}
             model_shard = [
                 {key: value for key, value in item.items() if key != "source_evidence_id"}
                 for item in shard
@@ -1720,9 +1682,7 @@ class OrchestratorDraftGenerator:
                         422,
                         "AUTO_SOURCE_COVERAGE_INCOMPLETE",
                         "A section-analysis shard did not account for every frozen segment.",
-                        details={
-                            "missingEvidenceIds": sorted(allowed_ids - cited - disposed)
-                        },
+                        details={"missingEvidenceIds": sorted(allowed_ids - cited - disposed)},
                     )
 
             output, dispatched = self._run_with_repairs(
@@ -1777,8 +1737,7 @@ class OrchestratorDraftGenerator:
         specs = [
             reusable
             for node in map_draft.nodes
-            if (reusable := self._legacy_reusable_spec(legacy_tree_id, node))
-            is not None
+            if (reusable := self._legacy_reusable_spec(legacy_tree_id, node)) is not None
         ]
         reused_keys = {str(item["node_key"]) for item in specs}
         pending_nodes = [node for node in map_draft.nodes if node.key not in reused_keys]
@@ -1788,9 +1747,10 @@ class OrchestratorDraftGenerator:
             nodes = pending_nodes[index : index + SPEC_BATCH_NODES]
             batch_ids = {value for node in nodes for value in node.evidence_ids}
             bounded_evidence = [
-                {**evidence_by_id[value], "content": str(evidence_by_id[value]["content"])[
-                    :SPEC_EVIDENCE_CHARS
-                ]}
+                {
+                    **evidence_by_id[value],
+                    "content": str(evidence_by_id[value]["content"])[:SPEC_EVIDENCE_CHARS],
+                }
                 for value in sorted(batch_ids)
                 if value in evidence_by_id
             ][:24]
@@ -1848,7 +1808,11 @@ class OrchestratorDraftGenerator:
             specs.extend(cast(AutoKnowledgeSpecSetDraft, output).model_dump()["specs"])
         if heartbeat:
             heartbeat()
-        return map_draft, AutoKnowledgeSpecSetDraft.model_validate({"specs": specs}), model_calls
+        return (
+            map_draft,
+            AutoKnowledgeSpecSetDraft.model_validate({"specs": specs}),
+            model_calls,
+        )
 
 
 class AutoKnowledgeMapService:
@@ -1930,7 +1894,8 @@ class AutoKnowledgeMapService:
             )
             return dict(
                 connection.execute(
-                    "SELECT * FROM auto_knowledge_upload_batches WHERE id=?", (batch_id,)
+                    "SELECT * FROM auto_knowledge_upload_batches WHERE id=?",
+                    (batch_id,),
                 ).fetchone()
             )
 
@@ -2060,7 +2025,8 @@ class AutoKnowledgeMapService:
             )
             return dict(
                 connection.execute(
-                    "SELECT * FROM auto_knowledge_upload_batches WHERE id=?", (batch_id,)
+                    "SELECT * FROM auto_knowledge_upload_batches WHERE id=?",
+                    (batch_id,),
                 ).fetchone()
             )
 
@@ -2286,8 +2252,7 @@ class AutoKnowledgeMapService:
             else 0
         )
         requires_compaction = (
-            migration_tree is not None
-            and existing_member_count > MAX_EFFECTIVE_COURSE_NODES
+            migration_tree is not None and existing_member_count > MAX_EFFECTIVE_COURSE_NODES
         )
         # A pre-existing valid personalized tree is the safe migration baseline.
         # Historical trees above the new product ceiling are different: they
@@ -2363,13 +2328,12 @@ class AutoKnowledgeMapService:
             (target.key, source.fingerprint),
         )
         compaction_source = (
-            [str(migration_tree["id"]), existing_member_count]
-            if requires_compaction
-            else None
+            [str(migration_tree["id"]), existing_member_count] if requires_compaction else None
         )
-        job_id = "akm-job-" + digest(
-            [target.key, source.fingerprint, BUILDER_VERSION, compaction_source]
-        )[:32]
+        job_id = (
+            "akm-job-"
+            + digest([target.key, source.fingerprint, BUILDER_VERSION, compaction_source])[:32]
+        )
         snapshot = {
             "target": {
                 "key": target.key,
@@ -2517,8 +2481,7 @@ class AutoKnowledgeMapService:
                 )
                 if (
                     course is None
-                    or tuple(course)
-                    != ("official", "private", "private")
+                    or tuple(course) != ("official", "private", "private")
                     or sent_evidence
                 ):
                     continue
@@ -2567,9 +2530,7 @@ class AutoKnowledgeMapService:
                 ).fetchall()
                 if not blocked:
                     continue
-                required_message = (
-                    "Every atomic node needs at least one REQUIRED item"
-                )
+                required_message = "Every atomic node needs at least one REQUIRED item"
                 exact_required_item_failure = all(
                     str(item["stage"]) == "TEACHING_SPEC"
                     and str(item["status"]) == "CONTRACT_REJECTED"
@@ -2577,9 +2538,7 @@ class AutoKnowledgeMapService:
                     and bool(str(item["output_text"] or "").strip())
                     and len(str(item["output_hash"] or "")) == 64
                     and required_message
-                    in canonical_json(
-                        json.loads(str(item["rejection_detail_json"] or "{}"))
-                    )
+                    in canonical_json(json.loads(str(item["rejection_detail_json"] or "{}")))
                     for item in blocked
                 ) and any(str(item["operation_id"]).endswith("-r2") for item in blocked)
                 unique_key_message = "Automatic knowledge-map keys must be unique"
@@ -2590,17 +2549,11 @@ class AutoKnowledgeMapService:
                     and bool(str(item["output_text"] or "").strip())
                     and len(str(item["output_hash"] or "")) == 64
                     and unique_key_message
-                    in canonical_json(
-                        json.loads(str(item["rejection_detail_json"] or "{}"))
-                    )
+                    in canonical_json(json.loads(str(item["rejection_detail_json"] or "{}")))
                     for item in blocked
                 ) and any(str(item["operation_id"]).endswith("-r2") for item in blocked)
-                evidence_scope_message = (
-                    "A Teaching Spec cited evidence outside its atomic node."
-                )
-                evidence_scope_operations = {
-                    str(item["operation_id"]) for item in blocked
-                }
+                evidence_scope_message = "A Teaching Spec cited evidence outside its atomic node."
+                evidence_scope_operations = {str(item["operation_id"]) for item in blocked}
                 evidence_scope_r2 = [
                     operation
                     for operation in evidence_scope_operations
@@ -2626,9 +2579,7 @@ class AutoKnowledgeMapService:
                         and bool(str(item["output_text"] or "").strip())
                         and len(str(item["output_hash"] or "")) == 64
                         and evidence_scope_message
-                        in canonical_json(
-                            json.loads(str(item["rejection_detail_json"] or "{}"))
-                        )
+                        in canonical_json(json.loads(str(item["rejection_detail_json"] or "{}")))
                         for item in blocked
                     )
                 )
@@ -2685,9 +2636,7 @@ class AutoKnowledgeMapService:
                         and bool(str(item["output_text"] or "").strip())
                         and len(str(item["output_hash"] or "")) == 64
                         and evidence_scope_message
-                        in canonical_json(
-                            json.loads(str(item["rejection_detail_json"] or "{}"))
-                        )
+                        in canonical_json(json.loads(str(item["rejection_detail_json"] or "{}")))
                         for item in blocked
                     )
                 )
@@ -2749,14 +2698,12 @@ class AutoKnowledgeMapService:
                     ).fetchall()
                     if (
                         len(attempts) != 3
-                        or [str(item["operation_id"]) for item in attempts]
-                        != expected_operations
+                        or [str(item["operation_id"]) for item in attempts] != expected_operations
                         or len({str(item["shard_key"]) for item in attempts}) != 1
                         or any(
                             str(item["stage"]) != "TEACHING_SPEC"
                             or str(item["status"]) != "BUSINESS_REJECTED"
-                            or str(item["rejection_code"])
-                            != "AUTO_EVIDENCE_INVALID"
+                            or str(item["rejection_code"]) != "AUTO_EVIDENCE_INVALID"
                             or not str(item["output_text"] or "").strip()
                             or len(str(item["output_hash"] or "")) != 64
                             for item in attempts
@@ -2812,9 +2759,7 @@ class AutoKnowledgeMapService:
                     "ORDER BY created_at,id",
                     (row["id"],),
                 ).fetchall():
-                    candidate_scope = json.loads(
-                        str(scope_receipt["blocked_operation_ids_json"])
-                    )
+                    candidate_scope = json.loads(str(scope_receipt["blocked_operation_ids_json"]))
                     if (
                         not isinstance(candidate_scope, list)
                         or len(candidate_scope) != 3
@@ -2855,8 +2800,7 @@ class AutoKnowledgeMapService:
                     None,
                 )
                 operation_rows = connection.execute(
-                    "SELECT request_hash,status,kind FROM learning_operations "
-                    "WHERE id=?",
+                    "SELECT request_hash,status,kind FROM learning_operations WHERE id=?",
                     (r3_operation,),
                 ).fetchall()
                 artifact = (
@@ -2961,24 +2905,25 @@ class AutoKnowledgeMapService:
                     required_operation_ids = json.loads(
                         str(required_item_recovery["blocked_operation_ids_json"])
                     )
-                    required_attempts = connection.execute(
-                        "SELECT operation_id,status,output_text,output_hash,"
-                        "rejection_code,rejection_detail_json "
-                        "FROM auto_knowledge_model_attempts WHERE job_id=? "
-                        "AND operation_id IN ("
-                        + ",".join("?" for _ in required_operation_ids)
-                        + ") ORDER BY operation_id",
-                        (row["id"], *required_operation_ids),
-                    ).fetchall() if required_operation_ids else []
-                    required_message = (
-                        "Every atomic node needs at least one REQUIRED item"
+                    required_attempts = (
+                        connection.execute(
+                            "SELECT operation_id,status,output_text,output_hash,"
+                            "rejection_code,rejection_detail_json "
+                            "FROM auto_knowledge_model_attempts WHERE job_id=? "
+                            "AND operation_id IN ("
+                            + ",".join("?" for _ in required_operation_ids)
+                            + ") ORDER BY operation_id",
+                            (row["id"], *required_operation_ids),
+                        ).fetchall()
+                        if required_operation_ids
+                        else []
                     )
+                    required_message = "Every atomic node needs at least one REQUIRED item"
                     exact_required_attempts = (
                         bool(required_operation_ids)
                         and len(required_attempts) == len(set(required_operation_ids))
                         and any(
-                            str(item["operation_id"]).endswith("-r2")
-                            for item in required_attempts
+                            str(item["operation_id"]).endswith("-r2") for item in required_attempts
                         )
                         and all(
                             str(item["status"]) == "CONTRACT_REJECTED"
@@ -2987,9 +2932,7 @@ class AutoKnowledgeMapService:
                             and len(str(item["output_hash"] or "")) == 64
                             and required_message
                             in canonical_json(
-                                json.loads(
-                                    str(item["rejection_detail_json"] or "{}")
-                                )
+                                json.loads(str(item["rejection_detail_json"] or "{}"))
                             )
                             for item in required_attempts
                         )
@@ -3053,9 +2996,10 @@ class AutoKnowledgeMapService:
                 "created_at": row["receipt_created_at"],
             }
             receipt_json = canonical_json(receipt)
-            recovery_id = "akm-recovery-" + digest(
-                [row["id"], reason, blocked_operation_ids_json, receipt]
-            )[:32]
+            recovery_id = (
+                "akm-recovery-"
+                + digest([row["id"], reason, blocked_operation_ids_json, receipt])[:32]
+            )
             connection.execute(
                 "INSERT INTO auto_knowledge_job_recovery_receipts("
                 "id,job_id,reason,prior_receipt_json,prior_receipt_hash,"
@@ -3130,9 +3074,7 @@ class AutoKnowledgeMapService:
                 )
             )
             scope_clause = (
-                " AND source_course_id IN ("
-                + ",".join("?" for _ in scoped_course_ids)
-                + ")"
+                " AND source_course_id IN (" + ",".join("?" for _ in scoped_course_ids) + ")"
                 if target_key is not None
                 else ""
             )
@@ -3295,7 +3237,12 @@ class AutoKnowledgeMapService:
             connection.execute(
                 "UPDATE auto_knowledge_targets SET status='BUILDING',message=?,updated_at=? "
                 "WHERE target_key=? AND active_job_id=?",
-                ("Analyzing frozen course materials", stamp(), row["target_key"], row["id"]),
+                (
+                    "Analyzing frozen course materials",
+                    stamp(),
+                    row["target_key"],
+                    row["id"],
+                ),
             )
             return connection.execute(
                 "SELECT * FROM auto_knowledge_jobs WHERE id=?", (row["id"],)
@@ -3574,11 +3521,7 @@ class AutoKnowledgeMapService:
                 "SELECT status,lease_owner FROM auto_knowledge_jobs WHERE id=?",
                 (job["id"],),
             ).fetchone()
-            if (
-                lease is None
-                or lease["status"] != "RUNNING"
-                or lease["lease_owner"] != worker_id
-            ):
+            if lease is None or lease["status"] != "RUNNING" or lease["lease_owner"] != worker_id:
                 raise ApiError(
                     409,
                     "AUTO_LEASE_LOST",
@@ -3731,15 +3674,18 @@ class AutoKnowledgeMapService:
                 node_id = key_to_id[draft.key]
                 for chunk_id in sorted(set(draft.evidence_ids)):
                     source = evidence_by_id[chunk_id]
-                    evidence_id = "auto-evidence-" + digest(
-                        [
-                            node_id,
-                            source["document_version_id"],
-                            chunk_id,
-                            source["locator_type"],
-                            source["locator_value"],
-                        ]
-                    )[:28]
+                    evidence_id = (
+                        "auto-evidence-"
+                        + digest(
+                            [
+                                node_id,
+                                source["document_version_id"],
+                                chunk_id,
+                                source["locator_type"],
+                                source["locator_value"],
+                            ]
+                        )[:28]
+                    )
                     connection.execute(
                         "INSERT OR IGNORE INTO material_evidence("
                         "id,node_id,document_version_id,chunk_id,owner_user_id,source_scope,"
@@ -3785,9 +3731,7 @@ class AutoKnowledgeMapService:
                 current.base_tree_version_id if target.kind == "SUPPLEMENT" else None
             )
             lineage_base_tree_id = (
-                copy_base_tree_id
-                if target.kind == "SUPPLEMENT"
-                else legacy_tree_id
+                copy_base_tree_id if target.kind == "SUPPLEMENT" else legacy_tree_id
             )
             sibling_counts: dict[str | None, int] = defaultdict(int)
             membership_index: dict[str, int] = {}
@@ -3831,9 +3775,7 @@ class AutoKnowledgeMapService:
                         parent_node_id=existing_member.parent_node_id,
                         ordinal=existing_member.ordinal,
                         spec_version=(
-                            spec_versions.get(draft.key)
-                            if kinds[draft.key] == "ATOMIC"
-                            else None
+                            spec_versions.get(draft.key) if kinds[draft.key] == "ATOMIC" else None
                         ),
                     )
                     continue
@@ -3935,9 +3877,10 @@ class AutoKnowledgeMapService:
                 )
             if legacy_tree_id is not None:
                 for mapping in compact_mapping:
-                    mapping_id = "compact-map-" + digest(
-                        [tree_id, legacy_tree_id, mapping["legacy_node_id"]]
-                    )[:28]
+                    mapping_id = (
+                        "compact-map-"
+                        + digest([tree_id, legacy_tree_id, mapping["legacy_node_id"]])[:28]
+                    )
                     connection.execute(
                         "INSERT INTO compact_node_mappings("
                         "id,compact_tree_version_id,compact_node_id,legacy_tree_version_id,"
@@ -3953,9 +3896,7 @@ class AutoKnowledgeMapService:
                         ),
                     )
                 if len(legacy_members) > MAX_EFFECTIVE_COURSE_NODES:
-                    mapped = [
-                        item for item in compact_mapping if item["relation"] != "UNMAPPED"
-                    ]
+                    mapped = [item for item in compact_mapping if item["relation"] != "UNMAPPED"]
                     connection.execute(
                         "INSERT INTO compact_tree_receipts("
                         "compact_tree_version_id,legacy_tree_version_id,legacy_member_count,"
@@ -4252,7 +4193,15 @@ class AutoKnowledgeMapService:
                 "error_message=?,lease_owner=NULL,lease_expires_at=NULL,"
                 "completed_at=?,updated_at=? "
                 "WHERE id=? AND status='RUNNING'",
-                (status, model_calls, code, message[:2000], stamp(), stamp(), job["id"]),
+                (
+                    status,
+                    model_calls,
+                    code,
+                    message[:2000],
+                    stamp(),
+                    stamp(),
+                    job["id"],
+                ),
             ).rowcount
             if changed != 1:
                 return
@@ -4309,9 +4258,7 @@ class AutoKnowledgeMapService:
                 ),
             )
 
-    def run_once(
-        self, worker_id: str, target_key: str | None = None
-    ) -> dict[str, Any] | None:
+    def run_once(self, worker_id: str, target_key: str | None = None) -> dict[str, Any] | None:
         job = self.claim(worker_id, target_key)
         if job is None:
             return None
@@ -4360,7 +4307,8 @@ class AutoKnowledgeMapService:
                 # late provider result or a second terminal classification.
                 with self.database.connect() as connection:
                     current = connection.execute(
-                        "SELECT status FROM auto_knowledge_jobs WHERE id=?", (job["id"],)
+                        "SELECT status FROM auto_knowledge_jobs WHERE id=?",
+                        (job["id"],),
                     ).fetchone()
                 status = (
                     str(current["status"])
@@ -4404,7 +4352,11 @@ class AutoKnowledgeMapService:
                 message=str(error) or "Provider state is unknown",
                 model_calls=model_calls,
             )
-            return {"job_id": job["id"], "status": "UNKNOWN", "error": type(error).__name__}
+            return {
+                "job_id": job["id"],
+                "status": "UNKNOWN",
+                "error": type(error).__name__,
+            }
 
     def _model_call_count(self, job: sqlite3.Row, workspace_id: str | None) -> int:
         """Count durable reservations for this job, including UNKNOWN attempts."""

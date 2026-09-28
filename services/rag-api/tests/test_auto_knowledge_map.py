@@ -121,50 +121,54 @@ class RecordingLearning:
                 "max_output_tokens": kwargs.get("max_output_tokens"),
             }
         )
-        if schema.__name__ == "AutoKnowledgeMapDraft":
+        if schema.__name__ in {
+            "AutoKnowledgeMapDraft",
+            "AutoKnowledgeCompactOutlineDraft",
+        }:
             if "provisional_concepts" in context:
                 concepts = context["provisional_concepts"]
                 ids = [item["key"] for item in concepts]
             else:
                 assert len(context["frozen_source_segments"]) <= 6
                 assert all(
-                    "source_evidence_id" not in item
-                    for item in context["frozen_source_segments"]
+                    "source_evidence_id" not in item for item in context["frozen_source_segments"]
                 )
                 ids = [item["id"] for item in context["frozen_source_segments"]]
-            output = schema.model_validate(
-                {
-                    "title": "Bounded shard",
-                    "modules": [
-                        {
-                            "key": "module",
-                            "title": "Course foundations",
-                            "description": "Grounded grouping",
-                            "major": "OTHER",
-                        }
-                    ],
-                    "nodes": [
-                        {
-                            "key": "core",
-                            "parent_key": "module",
-                            "title": "Core knowledge",
-                            "description": "Grounded in every bounded source part",
-                            "major": "OTHER",
-                            "prerequisite_keys": [],
-                            "evidence_ids": ids,
-                        }
-                    ],
-                    "dispositions": [
-                        {
-                            "evidence_id": value,
-                            "status": "MAPPED",
-                            "reason": "Mapped to the core node",
-                            "node_keys": ["core"],
-                        }
-                        for value in ids
-                    ],
-                }
-            )
+            payload = {
+                "title": "Bounded shard",
+                "modules": [
+                    {
+                        "key": "module",
+                        "title": "Course foundations",
+                        "description": "Grounded grouping",
+                        "major": "OTHER",
+                    }
+                ],
+                "nodes": [
+                    {
+                        "key": "core",
+                        "parent_key": "module",
+                        "title": "Core knowledge",
+                        "description": "Grounded in every bounded source part",
+                        "major": "OTHER",
+                        "prerequisite_keys": [],
+                        "evidence_ids": ids,
+                    }
+                ],
+            }
+            if schema.__name__ == "AutoKnowledgeMapDraft":
+                payload["dispositions"] = [
+                    {
+                        "evidence_id": value,
+                        "status": "MAPPED",
+                        "reason": "Mapped to the core node",
+                        "node_keys": ["core"],
+                    }
+                    for value in ids
+                ]
+            else:
+                payload["unmapped_evidence_ids"] = []
+            output = schema.model_validate(payload)
         else:
             output = schema.model_validate(
                 {
@@ -199,9 +203,7 @@ class ManyConceptLearning(RecordingLearning):
                 {
                     "operation": operation,
                     "schema": schema.__name__,
-                    "context_size": len(
-                        json.dumps(context, ensure_ascii=False, sort_keys=True)
-                    ),
+                    "context_size": len(json.dumps(context, ensure_ascii=False, sort_keys=True)),
                     "instructions": kwargs["instructions"],
                     "max_output_tokens": kwargs.get("max_output_tokens"),
                 }
@@ -242,14 +244,15 @@ class ManyConceptLearning(RecordingLearning):
                     ],
                 }
             ), {"status": "COMPLETED"}
-        if schema.__name__ == "AutoKnowledgeMapDraft" and "provisional_concepts" in context:
+        if (
+            schema.__name__ == "AutoKnowledgeCompactOutlineDraft"
+            and "provisional_concepts" in context
+        ):
             self.calls.append(
                 {
                     "operation": operation,
                     "schema": schema.__name__,
-                    "context_size": len(
-                        json.dumps(context, ensure_ascii=False, sort_keys=True)
-                    ),
+                    "context_size": len(json.dumps(context, ensure_ascii=False, sort_keys=True)),
                     "instructions": kwargs["instructions"],
                     "max_output_tokens": kwargs.get("max_output_tokens"),
                 }
@@ -280,16 +283,7 @@ class ManyConceptLearning(RecordingLearning):
                         }
                         for index, group in enumerate(groups)
                     ],
-                    "dispositions": [
-                        {
-                            "evidence_id": item["key"],
-                            "status": "MAPPED",
-                            "reason": "Mapped into the compact whole-course outline",
-                            "node_keys": [f"unit-{index}"],
-                        }
-                        for index, group in enumerate(groups)
-                        for item in group
-                    ],
+                    "unmapped_evidence_ids": [],
                 }
             ), {"status": "COMPLETED"}
         if schema.__name__ == "AutoKnowledgeSpecSetDraft":
@@ -494,11 +488,14 @@ def ready_document(
             (chunk_id, document_id, course_id, content),
         )
         connection.execute(
-            "UPDATE documents SET status='ready',chunk_count=1 WHERE id=?", (document_id,)
+            "UPDATE documents SET status='ready',chunk_count=1 WHERE id=?",
+            (document_id,),
         )
 
 
-def service_at(tmp_path: Path) -> tuple[Database, AutoKnowledgeMapService, FakeGenerator]:
+def service_at(
+    tmp_path: Path,
+) -> tuple[Database, AutoKnowledgeMapService, FakeGenerator]:
     settings = settings_at(tmp_path)
     database = Database(settings)
     database.initialize()
@@ -542,7 +539,8 @@ def test_private_upload_batch_builds_one_active_tree_and_spec(tmp_path: Path) ->
             "SELECT * FROM auto_knowledge_targets WHERE target_key='PRIVATE:workspace-a'"
         ).fetchone()
         tree = connection.execute(
-            "SELECT * FROM knowledge_tree_versions WHERE id=?", (target["active_tree_version_id"],)
+            "SELECT * FROM knowledge_tree_versions WHERE id=?",
+            (target["active_tree_version_id"],),
         ).fetchone()
         atomic = connection.execute(
             "SELECT node.* FROM knowledge_tree_memberships AS member "
@@ -550,7 +548,6 @@ def test_private_upload_batch_builds_one_active_tree_and_spec(tmp_path: Path) ->
             "WHERE member.tree_version_id=? AND node.kind='ATOMIC'",
             (tree["id"],),
         ).fetchone()
-
 
         spec = connection.execute(
             "SELECT metadata.status,item.requirement,item.evidence_ids_json "
@@ -731,7 +728,9 @@ def test_pre_dispatch_staged_course_access_failure_has_one_audited_recovery(
     assert tuple(current) == ("READY", None)
 
 
-def test_explicit_multi_file_batch_waits_for_seal_then_builds_once(tmp_path: Path) -> None:
+def test_explicit_multi_file_batch_waits_for_seal_then_builds_once(
+    tmp_path: Path,
+) -> None:
     database, service, generator = service_at(tmp_path)
     opened = service.begin_upload_batch(
         course_id="private-course",
@@ -843,7 +842,9 @@ def test_canvas_local_import_waits_for_terminal_session_then_builds_once(
         assert connection.execute("SELECT COUNT(*) FROM auto_knowledge_jobs").fetchone()[0] == 1
 
 
-def test_same_frozen_versions_are_idempotent_and_do_not_regenerate(tmp_path: Path) -> None:
+def test_same_frozen_versions_are_idempotent_and_do_not_regenerate(
+    tmp_path: Path,
+) -> None:
     database, service, generator = service_at(tmp_path)
     ready_document(
         database,
@@ -915,9 +916,7 @@ def test_reviewed_official_tree_is_authoritative_and_never_regenerated(
             "id,course_id,tree_kind,version,status,title,change_reason,content_hash,"
             "reviewed_by_user_id,reviewed_at) "
             "VALUES('reviewed-tree','reviewed-course','OFFICIAL',1,'PUBLISHED',"
-            "'Reviewed tree','Human review','"
-            + "a" * 64
-            + "','reviewer','2026-09-27T00:00:00Z')"
+            "'Reviewed tree','Human review','" + "a" * 64 + "','reviewer','2026-09-27T00:00:00Z')"
         )
     generator = FakeGenerator()
     service = AutoKnowledgeMapService(
@@ -990,8 +989,7 @@ def test_existing_private_tree_stays_active_until_incremental_replacement_is_rea
             "VALUES('legacy-private-tree','legacy-private-node',NULL,0,1)"
         )
         connection.execute(
-            "UPDATE knowledge_tree_versions SET status='ACTIVE' "
-            "WHERE id='legacy-private-tree'"
+            "UPDATE knowledge_tree_versions SET status='ACTIVE' WHERE id='legacy-private-tree'"
         )
 
     # Installing the feature records the existing tree as a baseline; it does
@@ -1013,8 +1011,7 @@ def test_existing_private_tree_stays_active_until_incremental_replacement_is_rea
     def assert_old_version_available(**kwargs):
         with database.connect() as connection:
             old = connection.execute(
-                "SELECT status FROM knowledge_tree_versions "
-                "WHERE id='legacy-private-tree'"
+                "SELECT status FROM knowledge_tree_versions WHERE id='legacy-private-tree'"
             ).fetchone()
         assert old["status"] == "ACTIVE"
         return original_generate(**kwargs)
@@ -1054,7 +1051,9 @@ def test_existing_private_tree_stays_active_until_incremental_replacement_is_rea
     assert lineage["relation"] == "UNMAPPED"
 
 
-def test_upload_event_respects_quiet_window_and_status_get_only_reads(tmp_path: Path) -> None:
+def test_upload_event_respects_quiet_window_and_status_get_only_reads(
+    tmp_path: Path,
+) -> None:
     database, service, generator = service_at(tmp_path)
     ready_document(
         database,
@@ -1148,7 +1147,9 @@ def test_source_version_change_during_generation_fails_revision_fence(
     assert target["status"] == "FAILED"
 
 
-def test_stale_queued_snapshot_is_superseded_before_any_model_call(tmp_path: Path) -> None:
+def test_stale_queued_snapshot_is_superseded_before_any_model_call(
+    tmp_path: Path,
+) -> None:
     database, service, generator = service_at(tmp_path)
     ready_document(
         database,
@@ -1175,7 +1176,9 @@ def test_stale_queued_snapshot_is_superseded_before_any_model_call(tmp_path: Pat
     assert receipt["status"] == "SUPERSEDED"
 
 
-def test_late_provider_result_cannot_overwrite_an_unknown_lease_receipt(tmp_path: Path) -> None:
+def test_late_provider_result_cannot_overwrite_an_unknown_lease_receipt(
+    tmp_path: Path,
+) -> None:
     database, service, generator = service_at(tmp_path)
     ready_document(
         database,
@@ -1300,7 +1303,9 @@ def test_complete_source_is_segmented_without_truncation_or_oversize_single_call
     assert len(learning.calls) == calls_before_restart
 
 
-def test_many_source_concepts_are_compacted_before_teaching_specs(tmp_path: Path) -> None:
+def test_many_source_concepts_are_compacted_before_teaching_specs(
+    tmp_path: Path,
+) -> None:
     settings = settings_at(tmp_path)
     database = Database(settings)
     database.initialize()
@@ -1323,6 +1328,7 @@ def test_many_source_concepts_are_compacted_before_teaching_specs(tmp_path: Path
         item for item in learning.calls if "whole-course outline" in item["instructions"]
     ]
     assert outline_calls
+    assert all(item["schema"] == "AutoKnowledgeCompactOutlineDraft" for item in outline_calls)
     with database.connect() as connection:
         job = connection.execute("SELECT * FROM auto_knowledge_jobs").fetchone()
         member_count = connection.execute(
@@ -1348,9 +1354,9 @@ def test_many_source_concepts_are_compacted_before_teaching_specs(tmp_path: Path
         "learning units" in item["instructions"]
         for item in outline_calls
     )
-    assert len(
-        [item for item in learning.calls if item["schema"] == "AutoKnowledgeSpecSetDraft"]
-    ) == 5
+    assert (
+        len([item for item in learning.calls if item["schema"] == "AutoKnowledgeSpecSetDraft"]) == 5
+    )
 
 
 def _install_over_limit_private_tree(
@@ -1413,7 +1419,11 @@ def _install_over_limit_private_tree(
             connection.execute(
                 "INSERT INTO teaching_specs(node_id,version,content_json,content_hash) "
                 "VALUES(?,1,?,?)",
-                (node_id, spec_content, hashlib.sha256(spec_content.encode()).hexdigest()),
+                (
+                    node_id,
+                    spec_content,
+                    hashlib.sha256(spec_content.encode()).hexdigest(),
+                ),
             )
             connection.execute(
                 "UPDATE teaching_spec_metadata SET status='PRIVATE_ACTIVE' "
@@ -1611,9 +1621,7 @@ def test_targeted_reconcile_freezes_only_the_requested_target(tmp_path: Path) ->
         ).fetchall()
     assert [tuple(row) for row in jobs] == [("PRIVATE:workspace-a", "QUEUED")]
     assert [tuple(row) for row in targets] == [("PRIVATE:workspace-a", "QUEUED")]
-    assert [row["source_course_id"] for row in pending_source_courses] == [
-        "private-corpus-b"
-    ]
+    assert [row["source_course_id"] for row in pending_source_courses] == ["private-corpus-b"]
 
 
 def test_real_orchestrator_and_provider_complete_over_fake_http_upstream(
@@ -1654,10 +1662,13 @@ def test_real_orchestrator_and_provider_complete_over_fake_http_upstream(
         assert len(serialized) < 60_000
         context = json.loads(serialized)["authorized_context"]
         schema_name = str(body["text"]["format"]["name"])
-        if schema_name == "AutoKnowledgeMapDraft":
+        if schema_name in {
+            "AutoKnowledgeMapDraft",
+            "AutoKnowledgeCompactOutlineDraft",
+        }:
             ids = (
                 [item["id"] for item in context["frozen_source_segments"]]
-                if "frozen_source_segments" in context
+                if schema_name == "AutoKnowledgeMapDraft"
                 else [item["key"] for item in context["provisional_concepts"]]
             )
             output = {
@@ -1681,7 +1692,9 @@ def test_real_orchestrator_and_provider_complete_over_fake_http_upstream(
                         "evidence_ids": ids,
                     }
                 ],
-                "dispositions": [
+            }
+            if schema_name == "AutoKnowledgeMapDraft":
+                output["dispositions"] = [
                     {
                         "evidence_id": value,
                         "status": "MAPPED",
@@ -1689,8 +1702,9 @@ def test_real_orchestrator_and_provider_complete_over_fake_http_upstream(
                         "node_keys": ["core"],
                     }
                     for value in ids
-                ],
-            }
+                ]
+            else:
+                output["unmapped_evidence_ids"] = []
         else:
             output = {
                 "specs": [
@@ -1737,9 +1751,7 @@ def test_real_orchestrator_and_provider_complete_over_fake_http_upstream(
     assert result is not None and result["status"] == "READY"
     assert len(requests) >= 4  # inventories, whole-course outline, then final Specs
     assert [item["phase"] for item in transport_events] == [
-        phase
-        for _ in requests
-        for phase in ("SEND_INTENT", "RESPONSE_COMPLETE", "CONTRACT_VALID")
+        phase for _ in requests for phase in ("SEND_INTENT", "RESPONSE_COMPLETE", "CONTRACT_VALID")
     ]
     with database.connect() as connection:
         reservations = connection.execute(
@@ -1832,9 +1844,7 @@ def test_pre_dispatch_quota_failure_resumes_from_frozen_artifacts_with_audit(
         operations = connection.execute(
             "SELECT id,status FROM learning_operations ORDER BY id"
         ).fetchall()
-        receipt = connection.execute(
-            "SELECT status FROM auto_knowledge_job_receipts"
-        ).fetchone()
+        receipt = connection.execute("SELECT status FROM auto_knowledge_job_receipts").fetchone()
     assert recovery["reason"] == "BACKGROUND_QUOTA_SCOPE_V1"
     assert json.loads(recovery["prior_receipt_json"])["status"] == "FAILED"
     assert json.loads(recovery["blocked_operation_ids_json"]) == [operation]
@@ -1927,18 +1937,14 @@ def test_legacy_job_level_repair_limit_resumes_only_known_rejected_shard(
 
     with database.connect() as connection:
         recovery = connection.execute(
-            "SELECT reason,blocked_operation_ids_json "
-            "FROM auto_knowledge_job_recovery_receipts"
+            "SELECT reason,blocked_operation_ids_json FROM auto_knowledge_job_recovery_receipts"
         ).fetchone()
         repairs = connection.execute(
-            "SELECT stage,shard_key,ordinal,operation_id "
-            "FROM auto_knowledge_repair_reservations"
+            "SELECT stage,shard_key,ordinal,operation_id FROM auto_knowledge_repair_reservations"
         ).fetchall()
     assert recovery["reason"] == "PER_SHARD_REPAIR_SCOPE_V1"
     assert json.loads(recovery["blocked_operation_ids_json"]) == [operation]
-    assert [tuple(row) for row in repairs] == [
-        ("SECTION_MAP", "map-00000", 1, f"{operation}-r1")
-    ]
+    assert [tuple(row) for row in repairs] == [("SECTION_MAP", "map-00000", 1, f"{operation}-r1")]
 
 
 def test_required_item_rejection_gets_one_audited_third_repair(
@@ -1969,7 +1975,9 @@ def test_required_item_rejection_gets_one_audited_third_repair(
     )
     learning = RecordingLearning()
     service = AutoKnowledgeMapService(
-        database, settings, learning  # type: ignore[arg-type]
+        database,
+        settings,
+        learning,  # type: ignore[arg-type]
     )
     assert service.reconcile(force=True)["QUEUED"] == 1
 
@@ -2232,7 +2240,9 @@ def test_duplicate_map_keys_get_one_exact_audited_third_repair(tmp_path: Path) -
     )
     learning = RecordingLearning()
     service = AutoKnowledgeMapService(
-        database, settings, learning  # type: ignore[arg-type]
+        database,
+        settings,
+        learning,  # type: ignore[arg-type]
     )
     assert service.reconcile(force=True)["QUEUED"] == 1
 
@@ -2394,7 +2404,9 @@ def test_teaching_spec_evidence_scope_gets_one_exact_audited_third_repair(
     )
     learning = RecordingLearning()
     service = AutoKnowledgeMapService(
-        database, settings, learning  # type: ignore[arg-type]
+        database,
+        settings,
+        learning,  # type: ignore[arg-type]
     )
     assert service.reconcile(force=True)["QUEUED"] == 1
 
@@ -2862,9 +2874,7 @@ def test_evidence_scope_r3_normalizes_only_foreign_citations_without_a_model_cal
             "ORDER BY blocked_operation_ids_json",
             (job["id"],),
         ).fetchall()
-    assert {
-        tuple(json.loads(row["blocked_operation_ids_json"])) for row in scope_receipts
-    } == {
+    assert {tuple(json.loads(row["blocked_operation_ids_json"])) for row in scope_receipts} == {
         (base, f"{base}-r1", f"{base}-r2"),
         (second_base, f"{second_base}-r1", f"{second_base}-r2"),
     }
@@ -2960,9 +2970,7 @@ def test_safe_validation_failure_uses_one_targeted_repair_and_reuses_stage_contr
     assert result is not None and result["status"] == "READY"
     assert len(learning.calls) == 4
     with database.connect() as connection:
-        job = connection.execute(
-            "SELECT * FROM auto_knowledge_jobs"
-        ).fetchone()
+        job = connection.execute("SELECT * FROM auto_knowledge_jobs").fetchone()
         course = connection.execute(
             "SELECT * FROM courses WHERE id=?", (job["course_id"],)
         ).fetchone()
@@ -3115,8 +3123,7 @@ def test_legacy_rejection_feedback_allows_one_second_exact_recovery(
             (job["id"],),
         )
         connection.execute(
-            "UPDATE auto_knowledge_job_receipts SET status='FAILED',detail_json=? "
-            "WHERE job_id=?",
+            "UPDATE auto_knowledge_job_receipts SET status='FAILED',detail_json=? WHERE job_id=?",
             (json.dumps({"error_code": "AUTO_ARTIFACT_CONFLICT"}), job["id"]),
         )
 
@@ -3226,10 +3233,13 @@ def test_live_incomplete_response_is_saved_then_repaired_with_larger_bound(
         requests.append(body)
         context = json.loads(str(body["input"]))["authorized_context"]
         schema_name = str(body["text"]["format"]["name"])
-        if schema_name == "AutoKnowledgeMapDraft":
+        if schema_name in {
+            "AutoKnowledgeMapDraft",
+            "AutoKnowledgeCompactOutlineDraft",
+        }:
             ids = (
                 [item["id"] for item in context["frozen_source_segments"]]
-                if "frozen_source_segments" in context
+                if schema_name == "AutoKnowledgeMapDraft"
                 else [item["key"] for item in context["provisional_concepts"]]
             )
             output = {
@@ -3253,7 +3263,9 @@ def test_live_incomplete_response_is_saved_then_repaired_with_larger_bound(
                         "evidence_ids": ids,
                     }
                 ],
-                "dispositions": [
+            }
+            if schema_name == "AutoKnowledgeMapDraft":
+                output["dispositions"] = [
                     {
                         "evidence_id": value,
                         "status": "MAPPED",
@@ -3261,8 +3273,9 @@ def test_live_incomplete_response_is_saved_then_repaired_with_larger_bound(
                         "node_keys": ["node"],
                     }
                     for value in ids
-                ],
-            }
+                ]
+            else:
+                output["unmapped_evidence_ids"] = []
         else:
             output = {
                 "specs": [
@@ -3275,9 +3288,7 @@ def test_live_incomplete_response_is_saved_then_repaired_with_larger_bound(
                                 "requirement": "REQUIRED",
                                 "objective": "Explain the recovered concept",
                                 "acceptance": "Explain it correctly",
-                                "evidence_ids": context["knowledge_nodes"][0][
-                                    "evidence_ids"
-                                ][:1],
+                                "evidence_ids": context["knowledge_nodes"][0]["evidence_ids"][:1],
                             }
                         ],
                     }
@@ -3482,7 +3493,9 @@ def test_final_mapped_disposition_failure_gets_one_audited_local_recovery(
     assert len(learning.calls) == calls_before_recovery
 
 
-def test_provider_output_cannot_silently_drop_a_frozen_source_segment(tmp_path: Path) -> None:
+def test_provider_output_cannot_silently_drop_a_frozen_source_segment(
+    tmp_path: Path,
+) -> None:
     database, service, generator = service_at(tmp_path)
     ready_document(
         database,
@@ -3521,9 +3534,7 @@ def test_provider_output_cannot_silently_drop_a_frozen_source_segment(tmp_path: 
         ).fetchone()
     assert receipt["status"] == "FAILED"
     assert receipt["model_calls_made"] == 2
-    assert json.loads(receipt["detail_json"])["error_code"] == (
-        "AUTO_SOURCE_COVERAGE_INCOMPLETE"
-    )
+    assert json.loads(receipt["detail_json"])["error_code"] == ("AUTO_SOURCE_COVERAGE_INCOMPLETE")
 
 
 def test_machine_validated_campus_tree_is_resolved_without_becoming_official(
