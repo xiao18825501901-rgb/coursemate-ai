@@ -3549,6 +3549,7 @@ class AutoKnowledgeMapService:
         force: bool = False,
         full: bool = False,
         target_key: str | None = None,
+        recover_safe_failures: bool = True,
     ) -> dict[str, int]:
         """Queue missing/stale targets and consume due source events.
 
@@ -3556,6 +3557,8 @@ class AutoKnowledgeMapService:
         it does not bypass any source, permission, validation or revision fence.
         ``target_key`` scopes every reconciliation mutation to one exact durable
         target so a canary cannot enqueue or recover unrelated courses.
+        ``recover_safe_failures`` is disabled only by the background handoff
+        freeze; explicit operator recovery keeps the historical default.
         """
 
         counts: defaultdict[str, int] = defaultdict(int)
@@ -3635,6 +3638,7 @@ class AutoKnowledgeMapService:
             if (
                 self.settings.auto_knowledge_map_enabled
                 and self.settings.auto_knowledge_map_allow_billable
+                and recover_safe_failures
             ):
                 counts["RECOVERED_SAFE_FAILURE"] += self._recover_safe_blocked_jobs(
                     connection, target_key
@@ -3714,7 +3718,8 @@ class AutoKnowledgeMapService:
         """
 
         return self.reconcile(
-            full=self.settings.auto_knowledge_map_legacy_backfill_enabled
+            full=self.settings.auto_knowledge_map_legacy_backfill_enabled,
+            recover_safe_failures=self.settings.auto_knowledge_map_legacy_backfill_enabled,
         )
 
     # --------------------------------------------------------------- job lease

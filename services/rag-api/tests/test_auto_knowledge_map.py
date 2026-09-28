@@ -1122,6 +1122,7 @@ def test_upload_event_respects_quiet_window_and_status_get_only_reads(
 
 def test_background_reconcile_can_pause_legacy_backfill_without_scanning_inventory(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     database, service, _generator = service_at(tmp_path)
     ready_document(
@@ -1133,11 +1134,21 @@ def test_background_reconcile_can_pause_legacy_backfill_without_scanning_invento
     with database.connect() as connection:
         connection.execute("DELETE FROM auto_knowledge_source_events")
 
+    service.settings.auto_knowledge_map_enabled = True
+    service.settings.auto_knowledge_map_allow_billable = True
     service.settings.auto_knowledge_map_legacy_backfill_enabled = False
+    monkeypatch.setattr(
+        service,
+        "_recover_safe_blocked_jobs",
+        lambda *_args, **_kwargs: pytest.fail(
+            "background freeze must not recover legacy failed jobs"
+        ),
+    )
     assert service.reconcile_background() == {}
     with database.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM auto_knowledge_jobs").fetchone()[0] == 0
 
+    monkeypatch.undo()
     service.settings.auto_knowledge_map_legacy_backfill_enabled = True
     assert service.reconcile_background()["QUEUED"] == 1
 
