@@ -13,7 +13,11 @@ from app.db import Database
 from app.errors import ApiError
 from app.learning.assessments import AssessmentService
 from app.learning.knowledge import KnowledgeService
-from app.learning.models import AutoKnowledgeMapDraft, AutoKnowledgeSpecSetDraft
+from app.learning.models import (
+    AutoKnowledgeCompactOutlineDraft,
+    AutoKnowledgeMapDraft,
+    AutoKnowledgeSpecSetDraft,
+)
 from app.learning.orchestrator import LearningOrchestrator
 from app.learning.provider import LearningProvider
 from app.rag.retrieval import HybridRetriever
@@ -293,10 +297,30 @@ class ManyConceptLearning(RecordingLearning):
                             ),
                             "major": "OTHER",
                             "prerequisite_keys": [],
-                            "evidence_ids": [item["key"] for item in group],
+                            "evidence_ids": [item["key"] for item in group]
+                            + (
+                                ["foreign-outline-handle"]
+                                if len(concepts) > 60 and index == 0
+                                else []
+                            ),
                         }
                         for index, group in enumerate(groups)
-                    ],
+                    ]
+                    + (
+                        [
+                            {
+                                "key": "foreign-only-unit",
+                                "parent_key": "course-outline",
+                                "title": "Foreign-only unit",
+                                "description": "Must not survive the authorization boundary",
+                                "major": "OTHER",
+                                "prerequisite_keys": [],
+                                "evidence_ids": ["foreign-outline-handle"],
+                            }
+                        ]
+                        if len(concepts) > 60
+                        else []
+                    ),
                     "unmapped_evidence_ids": (
                         [concepts[0]["key"]] if len(concepts) > 60 else []
                     ),
@@ -1362,9 +1386,19 @@ def test_many_source_concepts_are_compacted_before_teaching_specs(
             "WHERE member.tree_version_id=? AND member.teaching_spec_version IS NOT NULL",
             (job["result_tree_version_id"],),
         ).fetchone()[0]
+        artifact_payloads = [
+            str(row["output_json"])
+            for row in connection.execute(
+                "SELECT output_json FROM auto_knowledge_job_artifacts "
+                "WHERE stage='SECTION_MAP' AND shard_key LIKE 'outline-%'"
+            )
+        ]
     assert member_count <= 50
     assert atomic_count == spec_count == 30
     assert atomic_count <= 36
+    assert artifact_payloads
+    assert all("foreign-outline-handle" not in payload for payload in artifact_payloads)
+    assert all("foreign-only-unit" not in payload for payload in artifact_payloads)
     assert any(
         "final reduction pass: return no more than 8 COMPOSITE chapters and no more "
         "than 36 ATOMIC learning units" in item["instructions"]
@@ -1378,6 +1412,31 @@ def test_many_source_concepts_are_compacted_before_teaching_specs(
     assert (
         len([item for item in learning.calls if item["schema"] == "AutoKnowledgeSpecSetDraft"]) == 5
     )
+
+
+def test_compact_outline_rejects_an_all_foreign_projection() -> None:
+    outline = AutoKnowledgeCompactOutlineDraft.model_validate(
+        {
+            "title": "Foreign outline",
+            "modules": [],
+            "nodes": [
+                {
+                    "key": "foreign-unit",
+                    "title": "Foreign unit",
+                    "description": "No authorized source handle remains",
+                    "major": "OTHER",
+                    "prerequisite_keys": [],
+                    "evidence_ids": ["foreign-outline-handle"],
+                }
+            ],
+            "unmapped_evidence_ids": [],
+        }
+    )
+
+    with pytest.raises(ApiError) as raised:
+        OrchestratorDraftGenerator._normalize_outline_handles(outline, {"authorized-handle"})
+
+    assert raised.value.code == "AUTO_OUTLINE_FOREIGN_ONLY"
 
 
 def _install_over_limit_private_tree(

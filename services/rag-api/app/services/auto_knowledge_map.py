@@ -39,7 +39,7 @@ from app.learning.models import (
 from app.learning.orchestrator import LearningOrchestrator
 from app.learning.workspaces import join_course
 
-BUILDER_VERSION = "AUTO_KNOWLEDGE_MAP_V13_COMPLETE_COMPACT_DESCRIPTIONS"
+BUILDER_VERSION = "AUTO_KNOWLEDGE_MAP_V14_AUTHORIZED_COMPACT_HANDLES"
 # Whole-build safety limits are deliberately separate from the per-request
 # provider limit.  Every readable byte below these bounds is segmented; it is
 # never silently truncated to make a single model call fit.
@@ -1239,6 +1239,89 @@ class OrchestratorDraftGenerator:
             for node in draft.nodes
         ]
 
+    @staticmethod
+    def _normalize_outline_handles(
+        draft: AutoKnowledgeCompactOutlineDraft,
+        allowed: set[str],
+    ) -> None:
+        """Remove provider handles that are outside this frozen outline shard.
+
+        The immutable model-attempt row retains the raw response.  Only the
+        authorized projection is persisted as the reusable shard artifact.
+        This never invents or replaces grounding: an atomic unit with no
+        permitted handle is removed, and an all-foreign response is rejected.
+        """
+
+        cited = {handle for node in draft.nodes for handle in node.evidence_ids}
+        disposed = set(draft.unmapped_evidence_ids)
+        if cited <= allowed and disposed <= allowed:
+            return
+
+        node_payloads: list[dict[str, Any]] = []
+        for node in draft.nodes:
+            retained = list(
+                dict.fromkeys(handle for handle in node.evidence_ids if handle in allowed)
+            )
+            if not retained:
+                continue
+            payload = node.model_dump()
+            payload["evidence_ids"] = retained
+            node_payloads.append(payload)
+        if not node_payloads:
+            raise ApiError(
+                422,
+                "AUTO_OUTLINE_FOREIGN_ONLY",
+                "The compact outline did not return any unit grounded in this frozen shard.",
+            )
+
+        retained_node_keys = {str(node["key"]) for node in node_payloads}
+        for node in node_payloads:
+            node["prerequisite_keys"] = [
+                key
+                for key in node["prerequisite_keys"]
+                if key in retained_node_keys and key != node["key"]
+            ]
+
+        modules_by_key = {module.key: module for module in draft.modules}
+        retained_module_keys = {
+            str(node["parent_key"])
+            for node in node_payloads
+            if node["parent_key"] is not None
+        }
+        while True:
+            parents = {
+                str(modules_by_key[key].parent_key)
+                for key in retained_module_keys
+                if key in modules_by_key and modules_by_key[key].parent_key is not None
+            }
+            expanded = retained_module_keys | parents
+            if expanded == retained_module_keys:
+                break
+            retained_module_keys = expanded
+
+        cited_after = {
+            handle for node in node_payloads for handle in node["evidence_ids"]
+        }
+        normalized = AutoKnowledgeCompactOutlineDraft.model_validate(
+            {
+                "title": draft.title,
+                "modules": [
+                    module.model_dump()
+                    for module in draft.modules
+                    if module.key in retained_module_keys
+                ],
+                "nodes": node_payloads,
+                "unmapped_evidence_ids": [
+                    handle
+                    for handle in dict.fromkeys(draft.unmapped_evidence_ids)
+                    if handle in allowed and handle not in cited_after
+                ],
+            }
+        )
+        draft.modules = normalized.modules
+        draft.nodes = normalized.nodes
+        draft.unmapped_evidence_ids = normalized.unmapped_evidence_ids
+
     def _compact_outline(
         self,
         *,
@@ -1288,6 +1371,7 @@ class OrchestratorDraftGenerator:
                     is_final_level: bool = final_level,
                 ) -> None:
                     draft = cast(AutoKnowledgeCompactOutlineDraft, value)
+                    self._normalize_outline_handles(draft, allowed_keys)
                     if is_final_level and (
                         len(draft.modules) > OUTLINE_MAX_MODULES
                         or len(draft.nodes) > OUTLINE_MAX_ATOMIC_NODES
