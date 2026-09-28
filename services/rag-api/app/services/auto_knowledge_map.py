@@ -39,7 +39,7 @@ from app.learning.models import (
 from app.learning.orchestrator import LearningOrchestrator
 from app.learning.workspaces import join_course
 
-BUILDER_VERSION = "AUTO_KNOWLEDGE_MAP_V9_REDUCIBLE_COMPACT_OUTLINE"
+BUILDER_VERSION = "AUTO_KNOWLEDGE_MAP_V10_REDUCIBLE_COMPACT_OUTLINE"
 # Whole-build safety limits are deliberately separate from the per-request
 # provider limit.  Every readable byte below these bounds is segmented; it is
 # never silently truncated to make a single model call fit.
@@ -1308,10 +1308,12 @@ class OrchestratorDraftGenerator:
                         )
                     cited = {item for node in draft.nodes for item in node.evidence_ids}
                     disposed = set(draft.unmapped_evidence_ids)
+                    # A provider may redundantly list a cited handle as unmapped.
+                    # The cited binding is the stronger fact and the expansion
+                    # below deterministically ignores that redundant disposition.
                     if (
                         not cited <= allowed_keys
                         or not disposed <= allowed_keys
-                        or bool(cited & disposed)
                         or cited | disposed != allowed_keys
                     ):
                         raise ApiError(

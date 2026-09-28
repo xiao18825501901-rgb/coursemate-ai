@@ -278,7 +278,7 @@ class ManyConceptLearning(RecordingLearning):
                             "parent_key": "course-outline",
                             "title": f"Learning unit {index}",
                             "description": (
-                                "x" * 632
+                                "x" * 793
                                 if len(concepts) > 60 and index == 0
                                 else "A compact unit covering related source concepts"
                             ),
@@ -288,7 +288,9 @@ class ManyConceptLearning(RecordingLearning):
                         }
                         for index, group in enumerate(groups)
                     ],
-                    "unmapped_evidence_ids": [],
+                    "unmapped_evidence_ids": (
+                        [concepts[0]["key"]] if len(concepts) > 60 else []
+                    ),
                 }
             ), {"status": "COMPLETED"}
         if schema.__name__ == "AutoKnowledgeSpecSetDraft":
