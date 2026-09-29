@@ -86,7 +86,7 @@ def _blueprint(
         criteria = [objective.acceptance, "the selected option is the only correct one"]
     elif kind == "RULE_EXPLANATION":
         question_type = "EXPLANATION"
-        answer_form = "FREE_TEXT"
+        answer_form = "WORKED_STEPS"
         policy = RULE_VIOLATION_POLICY_VERSION
         misconceptions = []
         criteria = [objective.acceptance, "the cited rule is applied correctly"]
@@ -178,7 +178,17 @@ def main() -> int:
     args = parser.parse_args()
 
     settings = Settings()
-    database = Database(settings)
+    # The database and upload root are taken from the explicit arguments so a
+    # qualification run can measure against a restored copy without ever
+    # pointing the process at the live file.
+    database = Database(
+        settings.model_copy(
+            update={
+                "database_path": Path(args.database),
+                "upload_dir": Path(args.database).parent / "uploads",
+            }
+        )
+    )
     with database.connect() as connection:
         workspace = connection.execute(
             "SELECT * FROM learning_workspaces WHERE id=?", (args.workspace,)
@@ -195,7 +205,9 @@ def main() -> int:
         objective = resolve_objective(connection, node_id=args.node)
     evidence = build_evidence_pack(database, objective=objective, access=access)
 
-    provider = LearningProvider(settings)
+    provider = LearningProvider(
+        settings.model_copy(update={"database_path": Path(args.database)})
+    )
     base: list[tuple[str, ReviewerInputs]] = []
     author_failures: list[dict[str, str]] = []
     for kind in ITEM_KINDS:

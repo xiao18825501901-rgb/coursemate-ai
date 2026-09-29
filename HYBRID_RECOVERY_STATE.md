@@ -96,10 +96,42 @@ explicit billable decision — the two reviewer calls per candidate are real
 provider requests.  The four `question.*` OpenJev definition modes stay as the
 deployment sets them and are *not* a publication condition under this policy.
 
-## 6. Explicitly paused / not done
+## 6. Round status labels
+
+| Label | Status |
+|---|---|
+| `LOCAL_RUNTIME_REUSED` | **ACHIEVED** — one pinned q4 process, loopback bearer auth, caps unchanged, not restarted |
+| `OPENJEV_DIAGNOSTICS_COMPLETE` | **ACHIEVED** — artifact recomputed and the input-contract defect reproduced live |
+| `OPENJEV_ADVISORY_SCOPE` | **ACHIEVED** — advisory-only observer, no field that grants or vetoes |
+| `DETERMINISTIC_CHECKS` | **ACHIEVED** — six hard gates unchanged, never overridable |
+| `DEEPSEEK_REVIEW_A_B` | **ACHIEVED (live)** — two isolated roles, distinct response ids, references verified |
+| `HYBRID_SCOPED_QUALIFICATION` | **NOT ESTABLISHED** — the run recorded `DRAFT`, no qualification row |
+| `CAMPUS_EXERCISE_RESTORED` | **NOT ACHIEVED** — nothing publishable |
+| `PRIVATE_EXERCISE_RESTORED` | **NOT ACHIEVED** — nothing publishable |
+| `SQL_COLD_POOL_GRADED` | **NOT ACHIEVED** — both configurations remain `BLOCKED` at 0/5 |
+| `N8_ASSESSMENT_GRADED` | **NOT ACHIEVED** |
+| `NORMAL_TEACHING_PRESERVED` | **PRESERVED** — source untouched, regression suite green |
+| `AUTHENTICATED_BROWSER_ACCEPTANCE` | **NOT ACHIEVED** — see the acceptance document |
+| `PRODUCTION_DEPLOYED` | **unchanged** — `916b76c` remains in service; the candidate is verified but not cut over |
+| `QUALITY_NONINFERIORITY_EVIDENCE` | **UNKNOWN** — no paired same-sample gold exists |
+| `MAP50_13_PAUSED` | **PAUSED** — unchanged |
+
+## 7. Explicitly paused / not done
 
 * The 13 Map50 over-limit trees remain paused.  No Map50 unit was started.
 * No student-facing data was rewritten: no grade, exposure, draft, submission or
   in-progress Assessment version was modified.
 * TypeSafe is not restored; Laya/Qwen teaching providers and the GPU host are not
   touched.
+* The candidate release was **not** cut over.  The reasons are in
+  `HYBRID_PRODUCTION_RELEASE_AND_ROLLBACK.md` §4: the qualification failed, the
+  release plan's own stop condition applies, and disk headroom was at the
+  documented limit.
+* The Clerk management API was deliberately not re-probed.
+
+## 8. Commit
+
+`8b84f94` — *feat(question-engine): hybrid-strict-v1 semantic gate with two
+isolated DeepSeek reviewers*, on `feature/learning-loop-20260928`, directly on
+top of `51e2f3f` / `916b76c`.  The pre-existing untracked `artifacts/` and
+`apps/web/public/downloads/` from earlier rounds are left untouched.

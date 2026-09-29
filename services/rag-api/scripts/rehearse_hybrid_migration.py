@@ -144,9 +144,28 @@ def main() -> int:
     replay_jev = _fingerprint(reopened, "jev_decision_receipts")
     reopened.close()
     report["replay_idempotent"] = versions_again == versions and replay_jev == after_jev
-    report["backup_compat"] = (
-        "A pre-065 release reads only versions <= 64 and touches none of the new "
-        "tables, so a code-only symlink rollback stays data-preserving."
+
+    # A pre-065 release must still be able to open this database.  `is_ready`
+    # reads `version <= required_version`, so reproduce that predicate exactly
+    # for the previous release's required version instead of asserting it.
+    previous_required = 64
+    reopened = sqlite3.connect(copy)
+    visible = {
+        int(row[0])
+        for row in reopened.execute(
+            "SELECT version FROM schema_migrations WHERE version <= ?",
+            (previous_required,),
+        )
+    }
+    reopened.close()
+    report["rollback_readiness_for_pre_065_release"] = visible == set(
+        range(1, previous_required + 1)
+    )
+    report["rollback_compat"] = (
+        "Verified by reproducing the previous release's own readiness predicate "
+        "(schema_migrations filtered to version <= 64 equals 1..64).  The new "
+        "tables are additive and untouched by that release, so a code-only "
+        "symlink rollback preserves post-release data."
     )
 
     passed = (
@@ -154,6 +173,7 @@ def main() -> int:
         and foreign_keys == 0
         and report["historical_rows_unchanged"] is True
         and report["replay_idempotent"] is True
+        and report["rollback_readiness_for_pre_065_release"] is True
         and not report["after"]["removed_tables"]  # type: ignore[index]
         and all(report["after"]["new_tables_present"].values())  # type: ignore[index]
         and report["after"]["contiguous"] is True  # type: ignore[index]
