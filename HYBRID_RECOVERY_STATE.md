@@ -105,7 +105,7 @@ deployment sets them and are *not* a publication condition under this policy.
 | `OPENJEV_ADVISORY_SCOPE` | **ACHIEVED** — advisory-only observer, no field that grants or vetoes |
 | `DETERMINISTIC_CHECKS` | **ACHIEVED** — six hard gates unchanged, never overridable |
 | `DEEPSEEK_REVIEW_A_B` | **ACHIEVED (live)** — two isolated roles, distinct response ids, references verified |
-| `HYBRID_SCOPED_QUALIFICATION` | **NOT ESTABLISHED** — the run recorded `DRAFT`, no qualification row |
+| `HYBRID_SCOPED_QUALIFICATION` | **NOT ESTABLISHED** — five measured runs; run 4 recorded a qualification on a thin sample, run 5 refuted it on 67 rows, and the raised floors now make run 4 non-qualifying.  Production holds no qualification row. |
 | `CAMPUS_EXERCISE_RESTORED` | **NOT ACHIEVED** — nothing publishable |
 | `PRIVATE_EXERCISE_RESTORED` | **NOT ACHIEVED** — nothing publishable |
 | `SQL_COLD_POOL_GRADED` | **NOT ACHIEVED** — both configurations remain `BLOCKED` at 0/5 |
@@ -115,6 +115,12 @@ deployment sets them and are *not* a publication condition under this policy.
 | `PRODUCTION_DEPLOYED` | **unchanged** — `916b76c` remains in service; the candidate is verified but not cut over |
 | `QUALITY_NONINFERIORITY_EVIDENCE` | **UNKNOWN** — no paired same-sample gold exists |
 | `MAP50_13_PAUSED` | **PAUSED** — unchanged |
+
+The binding blocker is one case: `question.ambiguity.v1` is required by every
+question, only three applicable negatives could be built for it, and against
+those the reviewers produced one false accept and six false rejects.  The
+detailed measurements, and the run-4/run-5 demonstration that a thin clean
+sample cannot be trusted, are in `HYBRID_QUALIFICATION_AND_REGRESSION.md`.
 
 ## 7. Explicitly paused / not done
 
