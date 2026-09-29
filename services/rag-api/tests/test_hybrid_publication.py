@@ -24,9 +24,11 @@ from app.learning.hybrid_quality import (
     review_language,
 )
 from app.learning.hybrid_review import (
+    ALL_REVIEW_ROLES,
     CASE_AGREEMENT,
     CASE_AMBIGUITY,
     POLICY_REVISION,
+    SPECIFICATION_AUDIT_ROLE,
     STRONG_REVIEW_ROLES,
 )
 from app.learning.provider import LearningProvider
@@ -55,9 +57,12 @@ REQUIRED = (CASE_AMBIGUITY, CASE_AGREEMENT)
 class StubJudgeProvider:
     """A deterministic stand-in for the DeepSeek reviewer transport."""
 
-    def __init__(self, *, verdict: str = "PASS", fabricate: bool = False) -> None:
+    def __init__(
+        self, *, verdict: str = "PASS", fabricate: bool = False, block_specification: bool = False
+    ) -> None:
         self.verdict = verdict
         self.fabricate = fabricate
+        self.block_specification = block_specification
         self.calls: list[dict[str, Any]] = []
 
     def generate(
@@ -79,6 +84,38 @@ class StubJudgeProvider:
                 "template_version": template_version,
             }
         )
+        run = {
+            "model": "FAKE_TEST_ONLY",
+            "provider": "deterministic",
+            "protocol": "fixture",
+            "region": "LOCAL_TEST",
+            "role": role,
+            "template_version": template_version,
+            "schema_version": schema_version or "coursejesus-judge-findings.v3",
+            "input_hash": "0" * 63 + str(len(self.calls)),
+            "started_at": "2026-01-01T00:00:00Z",
+            "finished_at": "2026-01-01T00:00:01Z",
+            "latency_ms": 1,
+            "input_tokens": 10,
+            "output_tokens": 10,
+            "provider_response_id": f"stub-{role}-{len(self.calls)}",
+            "status": "COMPLETED",
+            "error_class": None,
+        }
+        if role == SPECIFICATION_AUDIT_ROLE:
+            entry: dict[str, Any] = {
+                "datum": "the two integers the task asks about",
+                "stated_in_stem": True,
+            }
+            if self.block_specification:
+                entry = {
+                    "datum": "the value the answer is computed from",
+                    "stated_in_stem": False,
+                    "answer_changes_if_absent": True,
+                    "consequence": "the stub states that a different value results",
+                }
+            return schema.model_validate({"dependencies": [entry]}), run
+
         spans = [item["source_span_id"] for item in context["source_spans"]]
         findings = []
         for case in context["required_cases"]:
@@ -125,26 +162,7 @@ class StubJudgeProvider:
                     ),
                 }
             )
-        output = schema.model_validate({"findings": findings})
-        run = {
-            "model": "FAKE_TEST_ONLY",
-            "provider": "deterministic",
-            "protocol": "fixture",
-            "region": "LOCAL_TEST",
-            "role": role,
-            "template_version": template_version,
-            "schema_version": schema_version or "coursejesus-judge-findings.v1",
-            "input_hash": "0" * 63 + str(len(self.calls)),
-            "started_at": "2026-01-01T00:00:00Z",
-            "finished_at": "2026-01-01T00:00:01Z",
-            "latency_ms": 1,
-            "input_tokens": 10,
-            "output_tokens": 10,
-            "provider_response_id": f"stub-{role}-{len(self.calls)}",
-            "status": "COMPLETED",
-            "error_class": None,
-        }
-        return output, run
+        return schema.model_validate({"findings": findings}), run
 
 
 def _pipeline(tmp_path: Path) -> dict[str, Any]:
@@ -290,20 +308,24 @@ def _persist(context: dict[str, Any], result) -> Any:
     )
 
 
-def test_two_isolated_calls_are_made_and_neither_sees_the_other(tmp_path: Path) -> None:
+def test_three_isolated_calls_are_made_and_none_sees_another(tmp_path: Path) -> None:
     context = _pipeline(tmp_path)
     service, provider = _service(context)
     _qualify(context, service)
     result = _review(context, service)
     assert result is not None
     roles = [call["role"] for call in provider.calls]
-    assert sorted(roles) == sorted(STRONG_REVIEW_ROLES)
-    first, second = provider.calls
+    # Two case-deciding roles plus the dedicated specification pass.
+    assert sorted(roles) == sorted(ALL_REVIEW_ROLES)
+    first, second = provider.calls[0], provider.calls[1]
     assert first["context"]["anonymized_solutions"][0]["content"] == (
         second["context"]["anonymized_solutions"][1]["content"]
     )
     assert "findings" not in json.dumps(first["context"])
     assert "openjev" not in json.dumps(first["context"]).lower()
+    specification = provider.calls[2]["context"]
+    assert "anonymized_solutions" in specification
+    assert specification["review_role"] == SPECIFICATION_AUDIT_ROLE
 
 
 def test_without_a_qualification_the_hybrid_receipt_cannot_accept(tmp_path: Path) -> None:
@@ -356,7 +378,7 @@ def test_a_qualified_hybrid_review_publishes_ready(tmp_path: Path) -> None:
             "WHERE question_revision_hash=?",
             (context["candidate"].question_revision,),
         ).fetchall()
-        assert {str(call["role"]) for call in calls} == set(STRONG_REVIEW_ROLES)
+        assert {str(call["role"]) for call in calls} == set(ALL_REVIEW_ROLES)
         assert all(int(call["references_verified"]) == 1 for call in calls)
         status = connection.execute(
             "SELECT publication_status FROM question_engine_provenance "
@@ -397,11 +419,16 @@ def test_an_unverifiable_review_reference_blocks_publication(tmp_path: Path) -> 
     )
     with context["database"].connect() as connection:
         verified = connection.execute(
-            "SELECT references_verified FROM hybrid_review_calls "
+            "SELECT role,references_verified FROM hybrid_review_calls "
             "WHERE question_revision_hash=?",
             (context["candidate"].question_revision,),
         ).fetchall()
-    assert verified and all(int(row["references_verified"]) == 0 for row in verified)
+    # The two case-deciding calls carry the fabricated references; the
+    # specification pass cites nothing, so it has no reference to verify.
+    deciding = [
+        row for row in verified if str(row["role"]) in set(STRONG_REVIEW_ROLES)
+    ]
+    assert deciding and all(int(row["references_verified"]) == 0 for row in deciding)
     persisted = _persist(context, result)
     assert persisted.status == "NEEDS_REVIEW"
 

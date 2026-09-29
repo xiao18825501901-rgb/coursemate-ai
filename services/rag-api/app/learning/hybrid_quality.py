@@ -46,8 +46,10 @@ from app.learning.deepseek_reviewer import (
 )
 from app.learning.hybrid_review import (
     CASE_ACCEPT_LABEL,
+    CASE_AMBIGUITY,
     CASE_DIMENSION,
     POLICY_REVISION,
+    SPECIFICATION_AUDIT_ROLE,
     STRONG_REVIEW_ROLES,
     combine_case_verdicts,
     project_case_verdicts,
@@ -362,11 +364,13 @@ class HybridQualityService:
         # checking, and it must never be able to block the strong path.
         observations = self._observe(inputs)
         first, second = self.reviewer.review(inputs)
+        specification = getattr(self.reviewer, "last_specification", None)
         review_call_ids = self._record_calls(
             candidate=candidate,
             blueprint=blueprint,
             evidence=evidence,
             outcomes=(first, second),
+            specification=specification,
         )
         observation_ids = self._record_observations(
             question_revision=candidate.question_revision, observations=observations
@@ -376,8 +380,12 @@ class HybridQualityService:
             second.role: second.case_verdicts(),
         }
         combined, reasons = combine_case_verdicts(
-            required_cases=required_cases, by_role=by_role
+            required_cases=required_cases,
+            by_role=by_role,
+            specification=(specification.enumeration if specification is not None else None),
         )
+        if specification is None:
+            reasons.append("HYBRID_SPECIFICATION_PASS_MISSING")
         for outcome in (first, second):
             if not outcome.verification.complete:
                 reasons.append(f"HYBRID_REVIEW_REFERENCES_UNVERIFIED:{outcome.role}")
@@ -526,13 +534,39 @@ class HybridQualityService:
         blueprint: QuestionBlueprint,
         evidence: QuestionEvidencePack,
         outcomes: tuple[StrongReviewOutcome, StrongReviewOutcome],
-    ) -> tuple[str, str]:
+        specification: Any | None = None,
+    ) -> tuple[str, ...]:
         call_ids: list[str] = []
+        rows: list[tuple[str, str, str, str, Any]] = [
+            (outcome.role, outcome.call_id, outcome.input_hash, outcome.response_digest, outcome)
+            for outcome in outcomes
+        ]
+        if specification is not None:
+            rows.append(
+                (
+                    SPECIFICATION_AUDIT_ROLE,
+                    specification.call_id,
+                    specification.input_hash,
+                    specification.response_digest,
+                    specification,
+                )
+            )
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            for outcome in outcomes:
+            for role, call_id_value, input_hash, response_digest, outcome in rows:
                 call_id = f"hybridcall-{uuid4().hex}"
                 call_ids.append(call_id)
+                is_specification = role == SPECIFICATION_AUDIT_ROLE
+                verification_payload = (
+                    {"enumeration_only": True, "blocking": outcome.blocks}
+                    if is_specification
+                    else outcome.verification.model_dump(mode="json")
+                )
+                findings_payload = (
+                    {"dependencies": [i.model_dump(mode="json") for i in outcome.enumeration.dependencies]}
+                    if is_specification
+                    else outcome.findings.model_dump(mode="json")
+                )
                 connection.execute(
                     "INSERT OR REPLACE INTO hybrid_review_calls("
                     "id,question_revision_hash,blueprint_hash,evidence_pack_hash,policy_revision,"
@@ -547,20 +581,22 @@ class HybridQualityService:
                         blueprint.identity(),
                         evidence.identity(),
                         POLICY_REVISION,
-                        outcome.role,
-                        outcome.call_id,
+                        role,
+                        call_id_value,
                         outcome.run.model,
                         outcome.run.provider,
                         outcome.run.protocol,
                         outcome.run.region,
                         outcome.run.template_version,
                         outcome.run.schema_version,
-                        outcome.input_hash,
-                        outcome.response_digest,
+                        input_hash,
+                        response_digest,
                         outcome.response_text,
-                        _canonical(outcome.findings.model_dump(mode="json")),
-                        _canonical(outcome.verification.model_dump(mode="json")),
-                        1 if outcome.verification.complete else 0,
+                        _canonical(findings_payload),
+                        _canonical(verification_payload),
+                        # The specification pass has no references to verify; a
+                        # blocking entry is verified by the required consequence.
+                        1 if (is_specification or outcome.verification.complete) else 0,
                         outcome.terminal,
                         outcome.run.input_tokens,
                         outcome.run.output_tokens,
@@ -568,7 +604,7 @@ class HybridQualityService:
                         outcome.run.provider_response_id,
                     ),
                 )
-        return (call_ids[0], call_ids[1])
+        return tuple(call_ids)
 
     def _record_observations(
         self, *, question_revision: str, observations: list[LocalObservation]

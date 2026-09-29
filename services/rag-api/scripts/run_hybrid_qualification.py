@@ -348,12 +348,15 @@ def main() -> int:
     for position, row in enumerate(rows, start=1):
         try:
             first, second = reviewer.review(row.inputs)
+            specification = reviewer.last_specification
         except StrongReviewError as error:
             row_failures.append(
                 {"row_id": row.row_id, "code": error.code, "step": str(position)}
             )
             continue
-        outcome = evaluate_row(row, first=first, second=second)
+        outcome = evaluate_row(
+            row, first=first, second=second, specification=specification
+        )
         outcomes.append(outcome)
         print(
             json.dumps(
@@ -395,7 +398,9 @@ def main() -> int:
             "protocol": reviewer.protocol,
             "evidence_prompt_version": reviewer.evidence_prompt_version,
             "adversarial_prompt_version": reviewer.adversarial_prompt_version,
+            "specification_prompt_version": reviewer.specification_prompt_version,
             "schema_version": reviewer.schema_version,
+            "specification_schema_version": reviewer.specification_schema_version,
             "method_identity": reviewer.method_identity,
         },
     )

@@ -45,9 +45,11 @@ from app.learning.hybrid_review import (
     CASE_ACCEPT_LABEL,
     EVIDENCE_AUDIT_ROLE,
     POLICY_REVISION,
+    SPECIFICATION_AUDIT_ROLE,
     STRONG_REVIEW_ROLES,
     JudgeFindings,
     ReferenceVerification,
+    SpecificationEnumeration,
     balanced_solution_order,
     review_input_hash,
     verify_references,
@@ -60,10 +62,13 @@ from app.learning.provider import ProviderCallFailure
 # be readable as a qualification of a later revision.
 EVIDENCE_AUDIT_PROMPT_VERSION: Final = "judge-evidence-audit.v4"
 ADVERSARIAL_AUDIT_PROMPT_VERSION: Final = "judge-adversarial-audit.v4"
+SPECIFICATION_AUDIT_PROMPT_VERSION: Final = "judge-specification-audit.v1"
 STRONG_REVIEW_SCHEMA_VERSION: Final = "coursejesus-judge-findings.v3"
+SPECIFICATION_SCHEMA_VERSION: Final = "coursejesus-specification-audit.v1"
 PROMPT_DIR: Final = Path(__file__).with_name("prompts")
 EVIDENCE_AUDIT_PROMPT_PATH: Final = PROMPT_DIR / "judge_evidence_audit_v1.md"
 ADVERSARIAL_AUDIT_PROMPT_PATH: Final = PROMPT_DIR / "judge_adversarial_audit_v1.md"
+SPECIFICATION_AUDIT_PROMPT_PATH: Final = PROMPT_DIR / "judge_specification_audit_v1.md"
 
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 Hex64 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
@@ -145,6 +150,35 @@ class ReviewerInputs:
     evidence: tuple[dict[str, str], ...]
     deterministic: dict[str, str]
     output_language: str = "en"
+
+
+@dataclass(frozen=True)
+class SpecificationOutcome:
+    """The dedicated under-specification pass's recorded result."""
+
+    call_id: str
+    input_hash: str
+    response_digest: str
+    response_text: str
+    enumeration: SpecificationEnumeration
+    run: StrongReviewRun
+    terminal: str = "completed"
+
+    def as_receipt(self) -> dict[str, Any]:
+        return {
+            "role": SPECIFICATION_AUDIT_ROLE,
+            "call_id": self.call_id,
+            "input_hash": self.input_hash,
+            "response_digest": self.response_digest,
+            "terminal": self.terminal,
+            "dependencies": [
+                item.model_dump(mode="json") for item in self.enumeration.dependencies
+            ],
+        }
+
+    @property
+    def blocks(self) -> bool:
+        return bool(self.enumeration.blocking_entries)
 
 
 @dataclass(frozen=True)
@@ -286,7 +320,9 @@ class DeepSeekStrongReviewer:
         protocol: str = "responses",
         evidence_prompt_version: str = EVIDENCE_AUDIT_PROMPT_VERSION,
         adversarial_prompt_version: str = ADVERSARIAL_AUDIT_PROMPT_VERSION,
+        specification_prompt_version: str = SPECIFICATION_AUDIT_PROMPT_VERSION,
         schema_version: str = STRONG_REVIEW_SCHEMA_VERSION,
+        specification_schema_version: str = SPECIFICATION_SCHEMA_VERSION,
         max_output_tokens: int | None = 4000,
     ) -> None:
         self.provider = provider
@@ -295,9 +331,14 @@ class DeepSeekStrongReviewer:
         self.protocol = protocol
         self.evidence_prompt_version = evidence_prompt_version
         self.adversarial_prompt_version = adversarial_prompt_version
+        self.specification_prompt_version = specification_prompt_version
         self.schema_version = schema_version
+        self.specification_schema_version = specification_schema_version
         self.max_output_tokens = max_output_tokens
         self._prompts: dict[str, str] = {}
+        # The most recent specification pass, recorded by `review` so the caller
+        # can persist it alongside the two case-deciding calls.
+        self.last_specification: SpecificationOutcome | None = None
 
     @property
     def method_identity(self) -> str:
@@ -309,28 +350,37 @@ class DeepSeekStrongReviewer:
             protocol=self.protocol,
             evidence_prompt_version=self.evidence_prompt_version,
             adversarial_prompt_version=self.adversarial_prompt_version,
+            specification_prompt_version=self.specification_prompt_version,
             schema_version=self.schema_version,
+            specification_schema_version=self.specification_schema_version,
         )
 
     def prompt_for(self, role: str) -> str:
         if role not in self._prompts:
-            path = (
-                EVIDENCE_AUDIT_PROMPT_PATH
-                if role == EVIDENCE_AUDIT_ROLE
-                else ADVERSARIAL_AUDIT_PROMPT_PATH
-            )
+            path = {
+                EVIDENCE_AUDIT_ROLE: EVIDENCE_AUDIT_PROMPT_PATH,
+                ADVERSARIAL_AUDIT_ROLE: ADVERSARIAL_AUDIT_PROMPT_PATH,
+                SPECIFICATION_AUDIT_ROLE: SPECIFICATION_AUDIT_PROMPT_PATH,
+            }[role]
             self._prompts[role] = _read_prompt(path)
         return self._prompts[role]
 
     def prompt_version_for(self, role: str) -> str:
-        return (
-            self.evidence_prompt_version
-            if role == EVIDENCE_AUDIT_ROLE
-            else self.adversarial_prompt_version
-        )
+        return {
+            EVIDENCE_AUDIT_ROLE: self.evidence_prompt_version,
+            ADVERSARIAL_AUDIT_ROLE: self.adversarial_prompt_version,
+            SPECIFICATION_AUDIT_ROLE: self.specification_prompt_version,
+        }[role]
 
-    def review(self, inputs: ReviewerInputs) -> tuple[StrongReviewOutcome, StrongReviewOutcome]:
-        """Run both roles, then verify both.  No early return on the first role."""
+    def review(
+        self, inputs: ReviewerInputs
+    ) -> tuple[StrongReviewOutcome, StrongReviewOutcome]:
+        """Run both roles and the dedicated specification pass, then verify all.
+
+        No early return on the first role.  The specification pass is a third
+        call with a different schema and no verdict field; it is recorded like
+        the others and governs only the ambiguity case.
+        """
         span_text = {fragment["evidence_id"]: fragment["content"] for fragment in inputs.evidence}
         span_ids = set(span_text)
         step_ids = _solution_step_ids(inputs)
@@ -338,15 +388,17 @@ class DeepSeekStrongReviewer:
         for role in STRONG_REVIEW_ROLES:
             context = reviewer_context(inputs, role=role)
             outcomes.append(self._one(role, context=context))
+        specification = self._specification(inputs)
         if len(outcomes) != 2 or len({o.role for o in outcomes}) != 2:
             raise StrongReviewError(
                 "HYBRID_REVIEW_ROLE_COLLISION",
                 "The two strong reviews must be distinct roles.",
             )
-        if outcomes[0].call_id == outcomes[1].call_id:
+        seen_calls = {outcomes[0].call_id, outcomes[1].call_id}
+        if len(seen_calls) != 2 or specification.call_id in seen_calls:
             raise StrongReviewError(
                 "HYBRID_REVIEW_CALL_COLLISION",
-                "The two strong reviews must be separate provider calls.",
+                "Every review must be a separate provider call.",
             )
         verified: list[StrongReviewOutcome] = []
         for outcome in outcomes:
@@ -369,7 +421,45 @@ class DeepSeekStrongReviewer:
                     run=outcome.run,
                 )
             )
+        self.last_specification = specification
         return verified[0], verified[1]
+
+    def _specification(self, inputs: ReviewerInputs) -> SpecificationOutcome:
+        """The dedicated under-specification pass: one call, no verdict field."""
+        role = SPECIFICATION_AUDIT_ROLE
+        context = reviewer_context(inputs, role=role)
+        instructions = self.prompt_for(role)
+        template_version = self.prompt_version_for(role)
+        try:
+            output, run = self.provider.generate(
+                SpecificationEnumeration,
+                instructions=instructions,
+                context=context,
+                role=role,
+                template_version=template_version,
+                schema_version=self.specification_schema_version,
+                max_output_tokens=self.max_output_tokens,
+            )
+        except ProviderCallFailure as failure:
+            raise StrongReviewError(
+                "HYBRID_SPECIFICATION_PROVIDER_FAILED",
+                "The specification pass did not reach a complete terminal.",
+                provider_run=failure.run,
+            ) from failure
+        enumeration = SpecificationEnumeration.model_validate(output)
+        record = StrongReviewRun.model_validate(run)
+        response_text = json.dumps(
+            enumeration.model_dump(mode="json"), ensure_ascii=False, sort_keys=True
+        )
+        call_id = record.provider_response_id or f"{role}:{record.input_hash[:32]}"
+        return SpecificationOutcome(
+            call_id=str(call_id),
+            input_hash=record.input_hash,
+            response_digest=_digest(response_text),
+            response_text=response_text,
+            enumeration=enumeration,
+            run=record,
+        )
 
     def _one(self, role: str, *, context: dict[str, Any]) -> StrongReviewOutcome:
         instructions = self.prompt_for(role)

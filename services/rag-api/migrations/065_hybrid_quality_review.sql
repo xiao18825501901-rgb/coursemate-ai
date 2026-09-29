@@ -1,4 +1,4 @@
-﻿-- Hybrid strict quality review (policy hybrid-strict-v1).
+-- Hybrid strict quality review (policy hybrid-strict-v1).
 --
 -- Additive only.  The pre-existing jev_decision_receipts table, its rows and
 -- its historical decoding are untouched: an old TypeSafe/OpenJev receipt keeps
@@ -22,7 +22,9 @@ CREATE TABLE IF NOT EXISTS hybrid_review_calls (
     blueprint_hash TEXT NOT NULL CHECK(length(blueprint_hash) = 64),
     evidence_pack_hash TEXT NOT NULL CHECK(length(evidence_pack_hash) = 64),
     policy_revision TEXT NOT NULL,
-    role TEXT NOT NULL CHECK(role IN ('evidence_audit','adversarial_audit')),
+    role TEXT NOT NULL CHECK(role IN (
+        'evidence_audit','adversarial_audit','specification_audit'
+    )),
     call_id TEXT NOT NULL,
     model TEXT NOT NULL,
     provider TEXT NOT NULL,

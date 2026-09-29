@@ -338,14 +338,14 @@ the remaining problem, and it is in every required case set.
 
 | Original requirement | Status |
 |---|---|
-| `question.answer_agreement.v1 → AGREE` | **reliable** — 21/21 injected disagreements caught in each of the last two runs; 0 agreement false accepts in run 8 |
-| `question.mcq_distractor_quality.v1 → ACCEPTABLE` | **reliable** — 7–8/8 caught; 0 MCQ false accepts in runs 7 and 8 |
-| `question.rule_violation_quality.v1 → SUPPORTED` | **reliable** — 7/7 and 7/8 caught; 1 escape in run 8 |
-| `question.ambiguity.v1 → CLEAR` | **UNSTABLE** — never settles; between "detects nothing" and "refuses everything" across four prompt revisions |
+| `question.answer_agreement.v1 → AGREE` | **reliable** — 20–21/21 injected disagreements caught in each of the last three runs |
+| `question.mcq_distractor_quality.v1 → ACCEPTABLE` | **reliable** — 7–8/8 caught; 0 MCQ false accepts in the last three runs |
+| `question.rule_violation_quality.v1 → SUPPORTED` | **reliable** — 5/5 and 7/8 caught |
+| `question.ambiguity.v1 → CLEAR` | **frontier mapped, no qualifying setting** — 5/5 at recall 0.375, 4/5 at 0.238, 2/5 at 0.632 |
 
 The semantics of all four are unchanged and no gate was relaxed.  Three are
-measurably met; because ambiguity is in every required case set, none of them may
-currently be satisfied by the hybrid chain.
+measurably met; ambiguity gates every question and no measured configuration makes
+it both safe and usable, so the hybrid chain still may not satisfy any of them.
 
 ### 3.3 The remaining blockers, precisely
 
@@ -364,7 +364,69 @@ currently be satisfied by the hybrid chain.
    either an exact character window for the reviewers to copy, or a comparison
    that still refuses paraphrase while tolerating re-wrapping.
 
-### 3.4 The substantiation rule added in this round
+### 3.05 Run 9: the dedicated pass, and the third point on the curve
+
+The dedicated specification pass (§3.06) is a third call with its own prompt,
+its own schema and **no verdict field at all** — it can only return the
+enumeration, and the server turns it into the ambiguity verdict.  Its blocking
+entries are decisive over both general roles, and a missing pass abstains the
+case rather than approving it.
+
+| | run 7 | run 8 | run 9 |
+|---|---|---|---|
+| who decides under-specification | roles A/B | roles A/B | **dedicated pass** |
+| rule | unstated | unstated **and** answer-changing | unstated **and** answer-changing, from the dedicated pass |
+| release false accept | **0 / 41** | 4 / 41 | 2 / 39 |
+| release precision | **1.00** | 0.75 | 0.714 |
+| release recall | 0.375 | **0.632** | **0.238** |
+| false rejects | 13 / 24 | 7 / 19 | 15 / 21 |
+| `MISSING_CONDITION` caught | **5 / 5** | 2 / 5 | 4 / 5 |
+| `DISAGREEING_SOLUTION` caught | 21 / 21 | 21 / 21 | 20 / 21 |
+| `DUPLICATE_CORRECT_OPTION` caught | 8 / 8 | 7 / 7 | 8 / 8 |
+| `UNSUPPORTED_RULE` caught | 7 / 7 | 7 / 8 | 5 / 5 |
+| verdict | DRAFT (recall) | DRAFT (false accepts) | DRAFT (recall) |
+
+The dedicated pass **improved detection** over run 8 (2/5 → 4/5) but **crashed
+recall** to 0.238: 15 of 21 sound controls were refused, essentially all of them
+because the specification pass reported a blocking entry on a good item.
+
+### 3.06 What the three points together establish
+
+Three rule designs, three measurements, no acceptable setting:
+
+| | detection of under-specification | coverage |
+|---|---|---|
+| strict (unstated) | 5/5 | 0.375 |
+| moderate (answer-changing, A/B) | 2/5 | 0.632 |
+| dedicated (answer-changing, separate pass) | 4/5 | 0.238 |
+
+The pattern is consistent and it is not a wording problem: **the reviewer
+systematically over-reports "a different answer would result" on sound items.**
+Every attempt to raise detection raises that over-reporting with it.  Five rule
+iterations across three designs have now mapped the frontier, and the frontier
+does not contain a qualifying point.
+
+That is a calibration property of the model on this task, not a prompt defect,
+and it is the honest end state of this line of work: the hybrid chain is built,
+its receipts are real, three of the four cases are reliable, and the fourth
+cannot be made both safe and useful by instruction alone.  Closing it needs
+either a different instrument for this one case (an executable check, a human
+review step, or a model with calibrated under-specification judgement) or an
+explicitly accepted, *measured* risk level — which is a product decision, not an
+engineering one, and is not taken here.
+
+### 3.07 The dedicated specification pass is kept
+
+Even though run 9 does not qualify, the dedicated pass stays in the
+implementation, because it is the right decomposition and it produced the best
+under-specification detection of any non-degenerate configuration (4/5 at 0.238
+recall, against 5/5 at 0.375 for the strict rule applied to the general roles).
+It is additive and safe: it can only ever *refuse* an item or abstain, never
+approve one, and a missing pass abstains the ambiguity case instead of passing
+it.  Its over-triggering is now a measured, attributable quantity rather than an
+unknown.
+
+### 3.08 The substantiation rule added in this round
 
 A bare verdict is not evidence, so two internal contradictions are now resolved
 server-side before the two roles are combined, using only what the reviewer
@@ -466,27 +528,34 @@ the hybrid reviewers are as good as anything.  What can be said honestly is:
 
 ## 6. What has to change before this can qualify
 
-1. **Split the under-specification judgement out of the two general passes.**
-   Four prompt revisions moved it between the two extremes without landing
-   between them, because the same call is being asked to judge the item *and* to
-   model the reader.  A dedicated pass whose only output is the enumeration, with
-   the two existing roles unchanged, is the next measurement.
-2. **Diagnose the provider-failure rate.**  Seven of 67 rows failed in run 8 and
-   nine of 64 in run 6 on the same procedure.  Separate schema rejection from
-   output-token ceiling from transient upstream error.
-3. **Make citations survive the strict check** (5–10 rows blocked per run).
+1. **Change the instrument, not the instruction, for under-specification.**
+   Five rule iterations across three designs (`strict`, `moderate`, `dedicated`)
+   have mapped the frontier — detection 5/5 at recall 0.375, 4/5 at 0.238, 2/5
+   at 0.632 — and no point on it qualifies.  The reviewers systematically
+   over-report "a different answer would result" on sound items, so raising
+   detection raises refusals with it.  Closing this needs an executable check
+   (for the arithmetic and query items where one exists), a human review step
+   for this single case, or a model whose under-specification judgement is
+   calibrated — not a sixth wording.
+2. **Diagnose the provider-failure rate.**  6 of 66 rows failed in run 9 (one of
+   them in the specification pass).  Those failures are recorded and never
+   retried, so they cost coverage rather than corrupting a result, but the cause
+   still needs separating (schema rejection, output-token ceiling, transient
+   upstream error) before the chain carries an unattended publication path.
+3. **Make citations survive the strict check** (9 rows blocked in run 9).  It is
+   correct — a paraphrase is not evidence — but it costs real false rejects.
 4. **Keep the sample large** — floors are 8 negatives per case, 16 independent
    families globally, and a release-recall floor of 0.5.
-5. Only then re-run the qualification.  Re-running is only necessary for
-   reviewer-side changes: a gate-side change can be applied to stored evidence
-   with `scripts/re_evaluate_qualification.py`.
+5. If the residual risk is to be accepted instead of eliminated, that is a
+   product decision and it must be taken explicitly and with the measured number
+   attached; it is not taken here, and no question was published.
 
 ## 7. Cost
 
-Across the eight iterations the qualification made 120 authoring + 120
-blind-solve + roughly 520 reviewer requests, plus 23 authoring calls for the
-corpus diagnosis.  The reviewer pair cost roughly 5 200 input / 740 output tokens
-per row on the observed sample.  These are real billable DeepSeek requests; the
+Across the nine iterations the qualification made 132 authoring + 132
+blind-solve + roughly 680 reviewer requests, plus 23 authoring calls for the
+corpus diagnosis.  Run 9 added a third call per row, so its per-row cost is 50 %
+higher than the earlier runs.  These are real billable DeepSeek requests; the
 chain is **not** free, and the limit is not an application-level USD cap.
 
 Artifacts (private course material, therefore root-only mode 0600 on the
@@ -499,4 +568,5 @@ application host):
 /srv/coursemate/validation/hybrid-strict-v1/qualification-run6-20260929.json              (run 6)
 /srv/coursemate/validation/hybrid-strict-v1/qualification-run7-enumeration-20260929.json  (run 7)
 /srv/coursemate/validation/hybrid-strict-v1/qualification-run8-answer-changing-20260929.json (run 8)
+/srv/coursemate/validation/hybrid-strict-v1/qualification-run9-specification-pass-20260929.json (run 9)
 ```

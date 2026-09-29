@@ -136,12 +136,18 @@ def evaluate_row(
     *,
     first: StrongReviewOutcome,
     second: StrongReviewOutcome,
+    specification: Any | None = None,
 ) -> RowOutcome:
     """Apply the publication rule to one row and record the outcome."""
     by_role = {first.role: first.case_verdicts(), second.role: second.case_verdicts()}
+    enumeration = getattr(specification, "enumeration", None) if specification else None
     combined, reasons = combine_case_verdicts(
-        required_cases=row.inputs.required_cases, by_role=by_role
+        required_cases=row.inputs.required_cases,
+        by_role=by_role,
+        specification=enumeration,
     )
+    if specification is None:
+        reasons.append("HYBRID_SPECIFICATION_PASS_MISSING")
     for outcome in (first, second):
         if not outcome.verification.complete:
             reasons.append(f"HYBRID_REVIEW_REFERENCES_UNVERIFIED:{outcome.role}")

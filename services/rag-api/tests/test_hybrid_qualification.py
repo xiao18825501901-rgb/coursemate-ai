@@ -36,6 +36,8 @@ from app.learning.hybrid_review import (
     CASE_DISTRACTORS,
     CASE_RULE,
     EVIDENCE_AUDIT_ROLE,
+    JudgeDependency,
+    SpecificationEnumeration,
 )
 
 from test_hybrid_review_policy import _inputs  # noqa: E402 - shared fixture builder
@@ -674,9 +676,20 @@ def test_evaluate_row_requires_the_conjunction_of_both_roles() -> None:
                 case_set_exact=True, quotes_traceable=True, steps_exist=True
             )
 
+    class _Specification:
+        enumeration = SpecificationEnumeration(
+            dependencies=[
+                JudgeDependency(
+                    datum="the values stated in the stem", stated_in_stem=True
+                )
+            ]
+        )
+
     first = _Outcome(EVIDENCE_AUDIT_ROLE, "PASS")
     second = _Outcome(ADVERSARIAL_AUDIT_ROLE, "FAIL")
-    outcome = evaluate_row(row, first=first, second=second)  # type: ignore[arg-type]
+    outcome = evaluate_row(  # type: ignore[arg-type]
+        row, first=first, second=second, specification=_Specification()
+    )
     assert outcome.released is False
     assert outcome.case_outcomes[CASE_AMBIGUITY] == "FAIL"
 
@@ -684,6 +697,7 @@ def test_evaluate_row_requires_the_conjunction_of_both_roles() -> None:
         row,
         first=_Outcome(EVIDENCE_AUDIT_ROLE, "PASS"),
         second=_Outcome(ADVERSARIAL_AUDIT_ROLE, "PASS"),
+        specification=_Specification(),
     )
     assert both_pass.released is True
 

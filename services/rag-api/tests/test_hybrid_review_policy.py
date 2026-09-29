@@ -37,6 +37,7 @@ from app.learning.hybrid_review import (
     JudgeFinding,
     JudgeFindings,
     JudgeSourceRef,
+    SpecificationEnumeration,
     balanced_solution_order,
     case_set_for_blueprint,
     combine_case_verdicts,
@@ -137,6 +138,16 @@ def test_projection_keeps_the_original_four_quality_vocabulary() -> None:
 # ------------------------------------------------------------- combination
 
 
+def _clean_specification() -> SpecificationEnumeration:
+    """A specification pass that found nothing the answer turns on missing."""
+    return SpecificationEnumeration(
+        dependencies=[
+            JudgeDependency(datum="the values stated in the stem", stated_in_stem=True),
+            JudgeDependency(datum="the comparison the task asks for", stated_in_stem=True),
+        ]
+    )
+
+
 def test_both_roles_must_pass_for_a_case_to_pass() -> None:
     combined, reasons = combine_case_verdicts(
         required_cases=(CASE_AMBIGUITY, CASE_AGREEMENT),
@@ -144,9 +155,47 @@ def test_both_roles_must_pass_for_a_case_to_pass() -> None:
             EVIDENCE_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"},
             ADVERSARIAL_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"},
         },
+        specification=_clean_specification(),
     )
     assert combined == {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"}
     assert reasons == []
+
+
+def test_the_ambiguity_case_abstains_without_the_specification_pass() -> None:
+    """No specification pass means no approval of the case it governs."""
+    combined, reasons = combine_case_verdicts(
+        required_cases=(CASE_AMBIGUITY, CASE_AGREEMENT),
+        by_role={
+            EVIDENCE_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"},
+            ADVERSARIAL_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"},
+        },
+    )
+    assert combined[CASE_AMBIGUITY] == "UNCERTAIN"
+    assert combined[CASE_AGREEMENT] == "PASS"
+    assert "HYBRID_SPECIFICATION_PASS_MISSING" in reasons
+
+
+def test_the_specification_pass_can_only_refuse_never_approve() -> None:
+    blocking = SpecificationEnumeration(
+        dependencies=[
+            JudgeDependency(
+                datum="the value the answer is computed from",
+                stated_in_stem=False,
+                answer_changes_if_absent=True,
+                consequence="a different value gives a different answer",
+            )
+        ]
+    )
+    combined, reasons = combine_case_verdicts(
+        required_cases=(CASE_AMBIGUITY, CASE_AGREEMENT),
+        by_role={
+            EVIDENCE_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"},
+            ADVERSARIAL_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"},
+        },
+        specification=blocking,
+    )
+    assert combined[CASE_AMBIGUITY] == "FAIL"
+    assert any(r.startswith("HYBRID_UNSTATED_DEPENDENCY") for r in reasons)
 
 
 def test_one_concrete_failure_is_not_outvoted_by_the_other_role() -> None:
@@ -156,6 +205,7 @@ def test_one_concrete_failure_is_not_outvoted_by_the_other_role() -> None:
             EVIDENCE_AUDIT_ROLE: {CASE_AMBIGUITY: "FAIL", CASE_AGREEMENT: "PASS"},
             ADVERSARIAL_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"},
         },
+        specification=_clean_specification(),
     )
     assert combined[CASE_AMBIGUITY] == "FAIL"
     assert combined[CASE_AGREEMENT] == "PASS"

@@ -78,9 +78,22 @@ CASE_DIMENSION: Final[dict[str, str]] = {
 
 EVIDENCE_AUDIT_ROLE: Final = "evidence_audit"
 ADVERSARIAL_AUDIT_ROLE: Final = "adversarial_audit"
+# The under-specification judgement is the one case that moves the whole gate and
+# the one case that never settled while it was asked of the two general passes.
+# It is asked separately because it is the only case whose answer depends on a
+# judgement about *the reader* rather than about the item: "would someone holding
+# only this stem and these sources be able to produce a unique answer?"  A pass
+# whose only output is the enumeration, with no verdict of its own to defend,
+# removes the incentive to rationalise a conclusion already reached.
+SPECIFICATION_AUDIT_ROLE: Final = "specification_audit"
 STRONG_REVIEW_ROLES: Final[tuple[str, ...]] = (
     EVIDENCE_AUDIT_ROLE,
     ADVERSARIAL_AUDIT_ROLE,
+)
+ALL_REVIEW_ROLES: Final[tuple[str, ...]] = (
+    EVIDENCE_AUDIT_ROLE,
+    ADVERSARIAL_AUDIT_ROLE,
+    SPECIFICATION_AUDIT_ROLE,
 )
 
 ReviewRole = Literal["evidence_audit", "adversarial_audit"]
@@ -300,10 +313,47 @@ def substantiated_case_verdicts(findings: JudgeFindings) -> tuple[dict[str, str]
     return verdicts, reasons
 
 
+class SpecificationEnumeration(Contract):
+    """The dedicated under-specification pass's entire output.
+
+    It deliberately has **no verdict field**.  The pass cannot report "clear" or
+    "ambiguous"; it can only list what the answer depends on and, for each entry,
+    say whether the stem provides it and whether its absence changes the answer.
+    The server turns that list into the case verdict.  Removing the verdict is
+    the point: the two general passes were being asked to judge the item and to
+    model the reader in one step, and that is what never converged.
+    """
+
+    dependencies: list[JudgeDependency] = Field(min_length=1, max_length=24)
+
+    @property
+    def blocking_entries(self) -> list[JudgeDependency]:
+        return [item for item in self.dependencies if item.blocks_the_item]
+
+
+def ambiguity_verdict_from_enumeration(
+    enumeration: SpecificationEnumeration | None,
+) -> tuple[str, str]:
+    """Derive the ambiguity case verdict from the enumeration alone.
+
+    * a blocking entry (unstated *and* answer-changing, with its consequence
+      stated) -> ``FAIL``.  This is a concrete defect whoever found it.
+    * otherwise -> ``PASS`` only when the pass produced an enumeration at all,
+      because the pass is required to output one (``min_length=1``); a missing
+      pass is an abstention, never an approval.
+    """
+    if enumeration is None:
+        return "UNCERTAIN", "HYBRID_SPECIFICATION_PASS_MISSING"
+    if enumeration.blocking_entries:
+        return "FAIL", "HYBRID_UNSTATED_DEPENDENCY:" + CASE_AMBIGUITY
+    return "PASS", ""
+
+
 def combine_case_verdicts(
     *,
     required_cases: tuple[str, ...],
     by_role: dict[str, dict[str, str]],
+    specification: SpecificationEnumeration | None = None,
 ) -> tuple[dict[str, str], list[str]]:
     """Combine both reviewer roles into one verdict per required case.
 
@@ -312,6 +362,11 @@ def combine_case_verdicts(
     * both roles PASS -> PASS;
     * either role FAIL -> FAIL (a concrete defect is not outvoted);
     * otherwise -> UNCERTAIN.
+
+    The ambiguity case additionally consults the dedicated specification pass:
+    its blocking entries are decisive, and a missing pass leaves the case
+    abstained rather than approved.  The pass can only ever *refuse* an item, so
+    it cannot weaken the two-role rule.
 
     Returns the combined verdicts plus a list of stable refusal reasons.  A
     missing role, a missing case, or an unknown verdict is itself a refusal.
@@ -350,6 +405,18 @@ def combine_case_verdicts(
     }
     for case in sorted(extra):
         reasons.append(f"HYBRID_CASE_NOT_REQUIRED:{case}")
+    # The dedicated specification pass governs the ambiguity case.  It is
+    # consulted after the two-role rule so it can only add a refusal: when it
+    # reports a blocking entry the case becomes FAIL even if both roles passed,
+    # and when it is missing the case abstains even if both roles passed.
+    if CASE_AMBIGUITY in required_cases:
+        derived, reason = ambiguity_verdict_from_enumeration(specification)
+        if derived == "FAIL":
+            combined[CASE_AMBIGUITY] = "FAIL"
+            reasons.append(reason or ("HYBRID_UNSTATED_DEPENDENCY:" + CASE_AMBIGUITY))
+        elif derived == "UNCERTAIN":
+            combined[CASE_AMBIGUITY] = "UNCERTAIN"
+            reasons.append(reason or "HYBRID_SPECIFICATION_PASS_MISSING")
     return combined, list(dict.fromkeys(reasons))
 
 
@@ -427,6 +494,8 @@ def method_identity(
     evidence_prompt_version: str,
     adversarial_prompt_version: str,
     schema_version: str,
+    specification_prompt_version: str = "",
+    specification_schema_version: str = "",
 ) -> str:
     """The exact reviewed method a qualification is bound to.
 
@@ -447,7 +516,9 @@ def method_identity(
         "protocol": protocol,
         "evidence_prompt_version": evidence_prompt_version,
         "adversarial_prompt_version": adversarial_prompt_version,
+        "specification_prompt_version": specification_prompt_version,
         "schema_version": schema_version,
+        "specification_schema_version": specification_schema_version,
     }
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()

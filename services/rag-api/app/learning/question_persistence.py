@@ -377,7 +377,18 @@ def durable_hybrid_receipt_for_dimension(
         return False
     if not isinstance(projected, dict) or projected.get(dimension) != verdict:
         return False
-    if not isinstance(call_ids, list) or len(call_ids) != 2 or len(set(call_ids)) != 2:
+    try:
+        required_cases = json.loads(str(row["required_cases_json"]))
+    except (TypeError, ValueError):
+        return False
+    minimum_calls = 3 if isinstance(required_cases, list) and (
+        "question.ambiguity.v1" in required_cases
+    ) else 2
+    if (
+        not isinstance(call_ids, list)
+        or len(call_ids) != minimum_calls
+        or len(set(call_ids)) != len(call_ids)
+    ):
         return False
     # The qualification is re-checked here, not trusted from review time: a
     # scope withdrawn between the review and the publication transaction must
@@ -420,7 +431,16 @@ def durable_hybrid_receipt_for_dimension(
         ):
             return False
         roles.add(str(call["role"]))
-    return roles == {"evidence_audit", "adversarial_audit"}
+    # The two case-deciding roles are always required.  The dedicated
+    # specification pass is required whenever the ambiguity case is in scope,
+    # because that is the case it governs.
+    if not {"evidence_audit", "adversarial_audit"}.issubset(roles):
+        return False
+    if minimum_calls == 3 and "specification_audit" not in roles:
+        return False
+    if not roles.issubset({"evidence_audit", "adversarial_audit", "specification_audit"}):
+        return False
+    return True
 
 
 def _readiness(
