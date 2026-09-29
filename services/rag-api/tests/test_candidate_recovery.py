@@ -158,6 +158,89 @@ def test_provenance_immutability_blocks_a_tamper_without_bypassing_it(
             )
 
 
+def _blueprint(marks: float = 15, objective_text: str = "compute the total"):
+    from app.learning.question_blueprint import QuestionBlueprint, SourceScopeEntry
+
+    return QuestionBlueprint(
+        blueprint_id="bp-1",
+        course_id="c1",
+        node_id="n1",
+        spec_version=1,
+        spec_content_hash="a" * 64,
+        objective_id="o1",
+        objective_text=objective_text,
+        source_scope=[
+            SourceScopeEntry(
+                document_id="d1",
+                version=1,
+                locator="page:1",
+                content_hash="b" * 64,
+            )
+        ],
+        bloom_target="APPLY",
+        target_difficulty=3,
+        difficulty_features=["STEPS"],
+        question_type="NUMERIC",
+        expected_answer_form="NUMERIC_VALUE",
+        marks=marks,
+        scoring_criteria=["one"],
+        question_family_id="f1",
+        prompt_versions={"question_author": "question-author.v3"},
+        generation_policy_version="question-generation-policy-v1",
+    )
+
+
+def test_the_strict_rendering_is_used_when_it_reproduces_the_hash() -> None:
+    """A modern row is byte-identical, and the record says which rendering won."""
+    from app.learning.candidate_recovery import blueprint_identity_match
+
+    blueprint = _blueprint()
+    matched, rendering = blueprint_identity_match(blueprint, blueprint.identity())
+    assert matched is True
+    assert rendering == "CANONICAL"
+
+
+def test_the_historical_integral_float_rendering_is_accepted_and_named() -> None:
+    """The measured drift, reproduced as a test.
+
+    `marks` was serialised as an integer in the rows written on 2026-09-25 and as
+    a float from 2026-09-27 onward.  Because the identity hashes canonical JSON,
+    `100` and `100.0` hash differently although the values are numerically equal
+    and every other byte of the row matches.  Nineteen of the fifty-eight stored
+    blueprints are in the earlier form.
+    """
+    import hashlib
+
+    from app.learning.candidate_recovery import (
+        _canonical,
+        _integral_floats_as_ints,
+        blueprint_identity_match,
+    )
+
+    blueprint = _blueprint(marks=100)
+    legacy_payload = _integral_floats_as_ints(blueprint.model_dump(mode="json"))
+    legacy_hash = hashlib.sha256(_canonical(legacy_payload).encode()).hexdigest()
+    assert legacy_hash != blueprint.identity()
+
+    matched, rendering = blueprint_identity_match(blueprint, legacy_hash)
+    assert matched is True
+    assert rendering == "INTEGRAL_FLOAT_AS_INT"
+
+
+def test_a_genuine_mismatch_fails_both_renderings() -> None:
+    from app.learning.candidate_recovery import blueprint_identity_match
+
+    blueprint = _blueprint()
+    matched, rendering = blueprint_identity_match(blueprint, "0" * 64)
+    assert matched is False
+    assert rendering == "MISMATCH"
+    # Changing one character of the canonical payload is still a mismatch, so the
+    # tolerance did not become a blanket acceptance.
+    tampered = blueprint.model_copy(update={"objective_text": "compute the other total"})
+    matched, _ = blueprint_identity_match(tampered, blueprint.identity())
+    assert matched is False
+
+
 def test_an_unknown_revision_is_refused(tmp_path: Path) -> None:
     database, _, _ = _persist_needs_review(tmp_path)
     with pytest.raises(CandidateRecoveryError) as raised:

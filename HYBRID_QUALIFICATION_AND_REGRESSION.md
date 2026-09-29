@@ -180,20 +180,48 @@ authored.
 
 | outcome | count |
 |---|---|
-| rebuilt, every hash verified, all six hard gates PASS | **8** |
-| refused — `CANDIDATE_HASH_MISMATCH`, "the stored blueprint does not match its hash" | **1** |
+| rebuilt, every hash verified, all six hard gates PASS | **9** |
+| review cards generated, zero provider calls | **9** |
 
-Eight review cards were generated for those eight candidates **without a single
-provider call**, so every candidate can be put in front of the owner before any
-money is spent on reviewing it.
+**The one refusal, diagnosed rather than left open.**  On the first run eight
+candidates recovered and one (`qe_22cfcc081c3e4fa2899d53fd400671e2`, course
+`cs3481`) was refused with `CANDIDATE_HASH_MISMATCH`.  Investigating it produced a
+finding that is **not** data corruption but is worth recording exactly:
 
-**The refusal is a finding, not a nuisance.**  One stored provenance row's
-`blueprint_json` does not reproduce its recorded `blueprint_hash`
-(`qe_22cfcc081c3e4fa2899d53fd400671e2`, course `cs3481`).  Either the row was
-written differently from how the others were, or something changed it.  It is not
-repaired, it is not reviewed, and it is reported: a candidate whose provenance
-cannot be reproduced is exactly the case the verification exists to catch.
-Diagnosing it is left as an explicit open item rather than guessed at.
+* **19 of the 58 stored provenance rows do not reproduce their blueprint hash**,
+  and they are all the rows written on **2026-09-25**; the 39 written from
+  **2026-09-27** onward all do.
+* For those 19 rows **every field value compares equal** — no field missing, none
+  extra, none changed.
+* The whole difference is one rendering: `marks` is stored as an **integer**
+  (`100`) in the older rows and as a **float** (`100.0`) in the newer ones.  The
+  hash is taken over canonical JSON, so `100` and `100.0` hash differently even
+  though the numbers are equal.  A per-field type scan across all 58 rows reports
+  exactly one drift: `marks: int -> float`.
+
+So the model's declared type for `marks` changed between 2026-09-25 and
+2026-09-27, and blueprints stored before that cannot be re-hashed by the current
+code.  No row lost a value, and nothing needs restoring.
+
+**How the recovery path handles it.**  It does not lower the check.  It tries the
+canonical rendering first, and if that fails it tries one further rendering that
+changes **exactly one thing** — an integral float is written as an integer — and
+accepts it only when it reproduces the recorded hash exactly.  The record names
+which rendering won, so a reader can tell a byte-identical rebuild
+(`CANONICAL`) from a numerically-identical one (`INTEGRAL_FLOAT_AS_INT`), and a
+genuine mismatch still fails both.  A test reproduces the drift and another
+asserts that changing one character of the objective still fails.
+
+**A second bug the fix exposed.**  With the tolerance in place the oldest row got
+past the blueprint check and failed the next one:
+`CANDIDATE_REVISION_MISMATCH`.  The cause was mine — the rebuild passed the
+*recomputed* blueprint hash into the candidate, while the revision identity had
+been computed at authoring time against the *stored* hash.  Passing the stored
+value fixed it, which is also the honest reading: the revision identity belongs
+to what was actually written, not to how today's code would render it.
+
+With both corrections, **all nine** real `NEEDS_REVIEW` candidates rebuild and
+produce a card.
 
 **The rebuilt gates start unreviewed on purpose.**  `deterministic_report_for`
 recomputes the six hard gates from the recovered inputs but deliberately passes
@@ -201,10 +229,12 @@ recomputes the six hard gates from the recovered inputs but deliberately passes
 from scratch.  Reusing the stored semantic decision would be reusing the very
 thing this path exists to replace.
 
-**Tests.**  `test_candidate_recovery.py` (8) covers a verified rebuild, the
-authored content surviving the round trip, the unreviewed starting state, tampered
-hashes being refused rather than repaired, provenance immutability still blocking
-a tamper without being bypassed, and an unknown revision being refused.
+**Tests.**  `test_candidate_recovery.py` (11) covers a verified rebuild, the
+authored content surviving the round trip, the unreviewed starting state,
+tampered hashes being refused rather than repaired, provenance immutability still
+blocking a tamper without being bypassed, the canonical rendering being preferred
+when it applies, the historical rendering being accepted and named, a genuine
+mismatch failing both renderings, and an unknown revision being refused.
 
 ## 3. The qualification runs (three measured iterations)
 

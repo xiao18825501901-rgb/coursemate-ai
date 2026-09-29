@@ -25,6 +25,7 @@ receipt for an item nobody authored.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -67,6 +68,10 @@ class RecoveredCandidate:
     candidate: AuthoredQuestionCandidate
     blind_receipt: BlindSolveReceipt
     validation_report: dict[str, Any]
+    # "CANONICAL" means the rebuild is byte-identical to what was stored;
+    # "INTEGRAL_FLOAT_AS_INT" means it is numerically identical under the
+    # historical rendering.  A reader can tell the two apart.
+    identity_rendering: str = "CANONICAL"
 
     @property
     def question_revision(self) -> str:
@@ -82,6 +87,54 @@ def _loads(value: Any, *, field: str) -> Any:
         raise CandidateRecoveryError(
             "CANDIDATE_FIELD_INVALID", f"{field} is not valid JSON"
         ) from error
+
+
+def _canonical(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _integral_floats_as_ints(value: Any) -> Any:
+    """Render integral floats the way an earlier version of the model did."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {key: _integral_floats_as_ints(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_integral_floats_as_ints(item) for item in value]
+    return value
+
+
+def blueprint_identity_match(
+    blueprint: QuestionBlueprint, recorded_hash: str
+) -> tuple[bool, str]:
+    """Does this blueprint reproduce the stored identity, and in which rendering?
+
+    The strict answer is the canonical JSON hash the model computes today.  A
+    second, deliberately narrow rendering is also accepted, and the reason is a
+    measured fact about this database rather than a convenience:
+
+    ``marks`` was serialised as an **integer** (``100``) in the rows written on
+    2026-09-25 and as a **float** (``100.0``) in the rows written from
+    2026-09-27 onward.  Nineteen of the fifty-eight stored blueprints are in the
+    earlier form, and because the identity is a hash of the canonical JSON,
+    ``100`` and ``100.0`` hash differently even though the values are numerically
+    equal and every other byte of the row is identical.
+
+    So this second rendering changes exactly one thing -- an integral float is
+    written as an integer -- and it is accepted only when it reproduces the
+    recorded hash exactly.  A genuine mismatch still fails both renderings, and
+    the caller records which rendering was used, so a reader can tell a
+    byte-identical rebuild from a numerically-identical one.
+    """
+    dumped = blueprint.model_dump(mode="json")
+    if hashlib.sha256(_canonical(dumped).encode()).hexdigest() == recorded_hash:
+        return True, "CANONICAL"
+    legacy = _integral_floats_as_ints(dumped)
+    if hashlib.sha256(_canonical(legacy).encode()).hexdigest() == recorded_hash:
+        return True, "INTEGRAL_FLOAT_AS_INT"
+    return False, "MISMATCH"
 
 
 def list_recoverable(
@@ -147,7 +200,10 @@ def recover_candidate(
 
     blueprint_payload = _loads(row["blueprint_json"], field="blueprint_json")
     blueprint = QuestionBlueprint.model_validate(blueprint_payload)
-    if blueprint.identity() != str(row["blueprint_hash"]):
+    identity_matches, identity_rendering = blueprint_identity_match(
+        blueprint, str(row["blueprint_hash"])
+    )
+    if not identity_matches:
         raise CandidateRecoveryError(
             "CANDIDATE_HASH_MISMATCH", "The stored blueprint does not match its hash."
         )
@@ -195,7 +251,11 @@ def recover_candidate(
     )
     candidate = AuthoredQuestionCandidate(
         blueprint_id=blueprint.blueprint_id,
-        blueprint_hash=blueprint.identity(),
+        # The *stored* hash, not a recomputed one.  The revision identity was
+        # computed against this exact value when the candidate was authored, and
+        # for a row written under the historical integral-float rendering the
+        # recomputed identity differs from it while the values are identical.
+        blueprint_hash=str(row["blueprint_hash"]),
         evidence_pack_hash=evidence.identity(),
         question_revision=str(row["question_revision_hash"]),
         course_id=course_id,
@@ -251,6 +311,7 @@ def recover_candidate(
         candidate=candidate,
         blind_receipt=blind_receipt,
         validation_report=_loads(row["validation_report_json"], field="validation_report_json"),
+        identity_rendering=identity_rendering,
     )
 
 
