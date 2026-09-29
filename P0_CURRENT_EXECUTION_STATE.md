@@ -325,6 +325,78 @@ the model had never been told what each profile requires).
 
 Still true: **a diagnosis-only probe authors items; it publishes nothing.**
 
+## The frozen evaluation, measured twice (2026-09-30)
+
+25 authored items per run, expanded into positive controls and injected-defect
+negatives.  Both runs are stored under `/srv/coursemate/validation/p0-diag/`.
+
+| | run A | run B (after one policy change) |
+|---|---|---|
+| rows | 81 (43 pos, 38 neg) | 90 (49 pos, 41 neg) |
+| **false accepts** | **0 / 38** | **0 / 41** |
+| release precision | 1.0 | 1.0 |
+| release recall (release mode) | 0.353 | **0.526** |
+| release recall (overall) | 0.698 | 0.878 |
+| independent negative families | 19 | 21 |
+| negative abstain | 9 | 9 |
+| positive abstain | 11 | 6 |
+| harness decision | `DRAFT` | `SCOPED_QUALITY_ACCEPTED` |
+
+Per case in run B, every case has **zero false accepts**:
+
+```
+question.ambiguity.v1                pos=19 neg= 9  false_accept=0
+question.answer_agreement.v1         pos=19 neg=19  false_accept=0
+question.mcq_distractor_quality.v1   pos= 6 neg= 7  false_accept=0
+question.rule_violation_quality.v1   pos= 5 neg= 6  false_accept=0
+```
+
+Certificates per row in run B: 13 `COMPLETE_FOR_REGISTERED_PROFILE`, 5 `INCOMPLETE`,
+1 `NOT_SUPPORTED`, 41 none (the mutated negative rows, as designed).
+
+### What run A changed, and why
+
+Run A released about a third of the sound items that reached a release decision and
+the harness refused to qualify it.  The reason census named the cause: the blocking
+enumeration entry fired on 38 of 81 rows including sound controls -- the same
+over-triggering the dedicated pass showed on its measured frontier (detection 4/5,
+recall 0.238, the worst of the three designs).  On an item whose profile certificate
+is complete the certificate now answers the entry, because it positively establishes
+that every convention the shape requires is stated in the learner-visible text,
+which is what the entry claims is missing.  A negative carries no certificate and is
+still held, and a verified witness is still the only thing that fails this case.
+
+### Why this is not a qualification, despite run B passing
+
+Three reasons, all of which would have to be settled before a qualification record
+is created:
+
+1. **The set is no longer blind for that decision.**  Run A was used to change the
+   policy, and run B re-measured the same set.  That is tuning on the evaluation
+   data, and the plan explicitly warns that an adaptively used holdout cannot be
+   called an independent test.  Run B is evidence that the change helped; it is not
+   an independent confirmation of it.
+2. **The margin is thin.**  Release recall 0.526 against a pre-registered floor of
+   0.5, on one run.  A single run does not establish a rate.
+3. **The size is below the pre-registered floor.**  21 independent negative families
+   against a stated starting point of 64 scenarios.  The per-scope floors are met;
+   the overall representativeness is not claimed.
+
+So **no qualification has been installed and nothing has been published.**  The
+correct next step is a fresh, larger, frozen set that this policy decision has not
+seen, and only then a qualification record created through the normal management
+entry point.
+
+### Provider failures in run B, now attributable
+
+3 author failures and 5 review failures, **all** `SCHEMA_INVALID` at the
+`RESPONSE_SCHEMA` layer -- a complete response that did not match the schema, which
+is not an upstream outage.  The review failures quote their failing field:
+`findings.0.dependencies.2: value_error` and similar.  That is the model violating a
+self-consistency rule in its own dependency entries (a consequence present on an
+entry that does not change the answer, or the reverse), and it is the next concrete
+prompt fix -- not a network problem, and now provably not one.
+
 ## What the next round has to do first
 
 1. Take the trusted backup and prove a restore, and only then let anything write.
