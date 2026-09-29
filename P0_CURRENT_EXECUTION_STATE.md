@@ -74,6 +74,36 @@ and `apps/web/public/downloads/` directories from earlier rounds are untouched.
    removes transcription; it does not remove verification.  A supplied quotation
    still has to match the frozen text exactly.
 
+## Copy-guard verification on the production host (measured, not simulated)
+
+Run on the real host against the real production path
+(`/srv/coursemate/data/releases/20260919T202006Z/rag.sqlite3`, mode 0640, uid 998,
+`st_nlink` 1, writable by the process running the check), with no deployment
+environment file sourced.  Every hostile case is refused with its own code:
+
+| case | result |
+|---|---|
+| the argument alone names production | `DATABASE_TARGET_IS_PRODUCTION` |
+| environment and argument **both** name production | `DATABASE_TARGET_IS_PRODUCTION` |
+| environment names production while the argument names a copy | `DATABASE_TARGET_ENVIRONMENT_MISMATCH` |
+| environment names a different, non-production file | `DATABASE_TARGET_ENVIRONMENT_MISMATCH` |
+| a traversal path reaches production | `DATABASE_TARGET_NOT_EXPLICIT` |
+| a **symbolic link** to production | `DATABASE_TARGET_IS_PRODUCTION` |
+| a **hard link** to production | `DATABASE_TARGET_IS_PRODUCTION` |
+| a copy outside the authorised root | `DATABASE_TARGET_OUTSIDE_ALLOWED_ROOT` |
+| a path that does not exist | `DATABASE_TARGET_MISSING` |
+| a writable purpose that declares no production path | `DATABASE_TARGET_PRODUCTION_PATHS_REQUIRED` |
+| the wrong expected schema | `DATABASE_TARGET_SCHEMA_MISMATCH` |
+| the copy declared as its own source | `DATABASE_TARGET_IS_SOURCE` |
+| a distinct copy inside the root, from a declared source | **ACCEPTED** |
+| the read-only probe calling `initialize()` | `DATABASE_TARGET_READ_ONLY` |
+| the read-only probe issuing a write | `OperationalError` |
+
+The live database was read-only throughout and is unchanged afterwards
+(`integrity_check` ok, zero `hybrid_quality_receipts`).  Artifact:
+`/srv/coursemate/validation/p0-diag/guard-check-20260929T205901Z.txt`.  This is the
+case the previous rule could not catch: two paths that agree on production.
+
 ## What the next round has to do first
 
 1. Take the trusted backup and prove a restore, and only then let anything write.
