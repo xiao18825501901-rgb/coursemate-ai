@@ -50,6 +50,12 @@ class EvaluationRow:
     target_case: str | None  # the case the defect must break, or None for a control
     defect: str | None
     family_id: str
+    # The server's completeness certificate for this row's item, when the author
+    # produced a contract the registered profile certifies.  Only a control row
+    # receives one: an injected mutation changes the item, so the certificate that
+    # described the untampered item no longer describes this one, and a row without
+    # positive evidence must not be released.
+    certificate: Any | None = None
 
     def manifest_entry(self) -> dict[str, Any]:
         return {
@@ -348,6 +354,7 @@ def build_rows(
     base_rows: list[tuple[str, ReviewerInputs]],
     *,
     include_positives: bool = True,
+    certificates: dict[str, Any] | None = None,
 ) -> list[EvaluationRow]:
     """Expand base items into positive controls and injected-defect negatives.
 
@@ -356,6 +363,7 @@ def build_rows(
     mutation that does not change anything.
     """
     rows: list[EvaluationRow] = []
+    supplied = certificates or {}
     for family_id, inputs in base_rows:
         if include_positives:
             rows.append(
@@ -370,6 +378,7 @@ def build_rows(
                     target_case=None,
                     defect=None,
                     family_id=family_id,
+                    certificate=supplied.get(family_id),
                 )
             )
         for case in inputs.required_cases:

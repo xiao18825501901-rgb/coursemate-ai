@@ -213,6 +213,31 @@ def diagnose_item(  # noqa: PLR0913 - one record per item, reported verbatim
     return record
 
 
+def _certificate_for(candidate, blueprint, evidence, inputs: ReviewerInputs):
+    """The completeness certificate for an authored item, or None.
+
+    None means "no positive evidence that this item is answerable", which the
+    ambiguity case treats as an abstention -- never as an approval.
+    """
+    from app.learning.task_spec import certify_completeness, render_public_projection
+
+    if not getattr(candidate, "task_contract", None):
+        return None
+    spec = candidate.task_spec(blueprint)
+    if spec is None:
+        return None
+    try:
+        projection = render_public_projection(spec)
+    except Exception:  # noqa: BLE001 - an unrenderable contract is no evidence
+        return None
+    return certify_completeness(
+        spec,
+        projection=projection,
+        available_span_ids=evidence.evidence_ids,
+        reviewable_language=inputs.language,
+    )
+
+
 def _contract_diagnosis(candidate, blueprint, inputs: ReviewerInputs) -> dict[str, object]:
     """Whether the item carries a usable student-visible task contract.
 
@@ -381,6 +406,10 @@ def main() -> int:
         settings.model_copy(update={"database_path": target.path})
     )
     base: list[tuple[str, ReviewerInputs]] = []
+    # The server-issued completeness certificate per family.  Only a control row
+    # receives one: an injected mutation changes the item, so a certificate that
+    # described the untampered item no longer describes the mutated one.
+    certificates: dict[str, object] = {}
     diagnostics: list[dict[str, object]] = []
     author_failures: list[dict[str, object]] = []
     # Complete provider responses whose parsing failed, kept so they can be
@@ -457,7 +486,11 @@ def main() -> int:
                     )
                 )
                 continue
-            base.append((f"{kind.lower()}-{index}", inputs))
+            family = f"{kind.lower()}-{index}"
+            base.append((family, inputs))
+            certificate = _certificate_for(candidate, blueprint, evidence, inputs)
+            if certificate is not None:
+                certificates[family] = certificate
             diagnostics.append(
                 diagnose_item(
                     family=f"{kind.lower()}-{index}",
@@ -502,22 +535,46 @@ def main() -> int:
         )
         return 0
 
-    rows = build_rows(base)
+    rows = build_rows(base, certificates=certificates)
     reviewer = DeepSeekStrongReviewer(
         provider,
         model_alias=settings.v3_model,
         max_output_tokens=args.max_output_tokens,
     )
     outcomes = []
-    row_failures: list[dict[str, str]] = []
+    row_failures: list[dict[str, object]] = []
     for position, row in enumerate(rows, start=1):
         try:
             first, second = reviewer.review(row.inputs)
             specification = reviewer.last_specification
         except StrongReviewError as error:
-            row_failures.append(
-                {"row_id": row.row_id, "code": error.code, "step": str(position)}
-            )
+            # The layer and the field list are recorded, not just the code: a bare
+            # HYBRID_SPECIFICATION_PROVIDER_FAILED says nothing about whether this
+            # was an outage, our schema, or a complete response that did not parse.
+            failure: dict[str, object] = {
+                "row_id": row.row_id,
+                "code": error.code,
+                "step": str(position),
+            }
+            provider_run = getattr(error, "provider_run", None)
+            if isinstance(provider_run, dict):
+                failure.update(
+                    {
+                        "role": provider_run.get("role"),
+                        "provider_status": provider_run.get("status"),
+                        "error_class": provider_run.get("error_class"),
+                        "failure_layer": provider_run.get("failure_layer"),
+                        "http_status": provider_run.get("http_status"),
+                        "provider_response_id": provider_run.get("provider_response_id"),
+                        "schema_error_summary": provider_run.get("schema_error_summary"),
+                        "response_chars": (
+                            len(provider_run["response_text"])
+                            if isinstance(provider_run.get("response_text"), str)
+                            else None
+                        ),
+                    }
+                )
+            row_failures.append(failure)
             continue
         outcome = evaluate_row(
             row, first=first, second=second, specification=specification

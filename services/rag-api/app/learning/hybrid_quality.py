@@ -437,7 +437,10 @@ class HybridQualityService:
         for outcome in (first, second):
             if not outcome.verification.complete:
                 reasons.append(f"HYBRID_REVIEW_REFERENCES_UNVERIFIED:{outcome.role}")
-            for reason in outcome.substantiation_reasons():
+            # Only the cases the roles decide: the ambiguity case is decided by the
+            # certificate, and an explanatory downgrade of a role verdict there
+            # must not block a certified item.
+            for reason in outcome.blocking_substantiation_reasons():
                 reasons.append(f"{reason}:{outcome.role}")
         projected = project_case_verdicts(combined)
         if qualification_reason:
@@ -708,7 +711,12 @@ class HybridQualityService:
                     else outcome.verification.model_dump(mode="json")
                 )
                 findings_payload = (
-                    {"dependencies": [i.model_dump(mode="json") for i in outcome.enumeration.dependencies]}
+                    {
+                        "dependencies": [
+                            item.model_dump(mode="json")
+                            for item in outcome.enumeration.dependencies
+                        ]
+                    }
                     if is_specification
                     else outcome.findings.model_dump(mode="json")
                 )

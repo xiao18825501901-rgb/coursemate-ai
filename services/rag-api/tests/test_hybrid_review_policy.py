@@ -242,7 +242,12 @@ def test_the_ambiguity_case_abstains_without_the_specification_pass() -> None:
     assert "HYBRID_COMPLETENESS_CERTIFICATE_MISSING" in reasons
 
 
-def test_the_specification_pass_can_only_refuse_never_approve() -> None:
+def test_the_specification_pass_can_only_hold_never_approve() -> None:
+    """Its blocking entry is a doubt, not a witness, so it holds rather than fails.
+
+    It still cannot approve: two favourable role verdicts plus a clean enumeration
+    are not enough, because a pass needs the server completeness certificate.
+    """
     blocking = SpecificationEnumeration(
         dependencies=[
             JudgeDependency(
@@ -261,8 +266,21 @@ def test_the_specification_pass_can_only_refuse_never_approve() -> None:
         },
         specification=blocking,
     )
-    assert combined[CASE_AMBIGUITY] == "FAIL"
+    assert combined[CASE_AMBIGUITY] == "UNCERTAIN"
     assert any(r.startswith("HYBRID_UNSTATED_DEPENDENCY") for r in reasons)
+    # Even with every piece of positive evidence the enumeration still withholds
+    # the approval, because the doubt is unresolved rather than answered.
+    certified, _ = combine_case_verdicts(
+        required_cases=(CASE_AMBIGUITY, CASE_AGREEMENT),
+        by_role={
+            EVIDENCE_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"},
+            ADVERSARIAL_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"},
+        },
+        specification=blocking,
+        completeness=_certificate(),
+        qualification_active=True,
+    )
+    assert certified[CASE_AMBIGUITY] == "UNCERTAIN"
 
 
 def test_one_concrete_failure_is_not_outvoted_by_the_other_role() -> None:

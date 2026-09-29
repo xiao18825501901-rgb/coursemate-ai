@@ -8,6 +8,7 @@ is reported with its sample size instead of being called zero risk.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 from test_hybrid_review_policy import _inputs  # noqa: E402 - shared fixture builder
@@ -665,6 +666,9 @@ def test_evaluate_row_requires_the_conjunction_of_both_roles() -> None:
         def substantiation_reasons(self) -> list[str]:
             return []
 
+        def blocking_substantiation_reasons(self) -> list[str]:
+            return []
+
         @property
         def verification(self) -> ReferenceVerification:
             return ReferenceVerification(
@@ -692,10 +696,11 @@ def test_evaluate_row_requires_the_conjunction_of_both_roles() -> None:
     assert outcome.case_outcomes[CASE_AMBIGUITY] == "UNCERTAIN"
 
     # Two favourable verdicts are no longer sufficient to release an item: the
-    # ambiguity case additionally needs the server's completeness certificate for
-    # a registered profile and an active qualification.  This is the change the
-    # measured frontier forced, and the harness now reports it instead of
-    # attributing a release to the reviewer chain alone.
+    # ambiguity case additionally needs the server completeness certificate for a
+    # registered profile.  The qualification is assumed present here, because it is
+    # a deployment control rather than part of the rule being measured -- with it
+    # false every row would be unreleased for the same reason and every metric a
+    # constant.
     both_pass = evaluate_row(  # type: ignore[arg-type]
         row,
         first=_Outcome(EVIDENCE_AUDIT_ROLE, "PASS"),
@@ -703,11 +708,34 @@ def test_evaluate_row_requires_the_conjunction_of_both_roles() -> None:
         specification=_Specification(),
     )
     assert both_pass.released is False
-    assert both_pass.reasons == [
-        "HYBRID_COMPLETENESS_CERTIFICATE_MISSING",
-        "HYBRID_QUALIFICATION_MISSING",
-    ]
+    assert both_pass.reasons == ["HYBRID_COMPLETENESS_CERTIFICATE_MISSING"]
     assert both_pass.case_outcomes[CASE_AMBIGUITY] == "UNCERTAIN"
+    assert both_pass.certificate_status == "NO_CERTIFICATE"
+
+    # With the certificate the same row is released, and the outcome says which
+    # evidence decided it.
+    from app.learning.task_spec import CompletenessEvidence
+
+    certified_row = replace(
+        row,
+        certificate=CompletenessEvidence(
+            status="COMPLETE_FOR_REGISTERED_PROFILE",
+            profile_id="P-DISCRETE",
+            profile_version=1,
+            renderer_version="public-projection.v1",
+            checker="bounded_discrete.v1",
+            projection_digest="a" * 64,
+            question_revision_hash="b" * 64,
+        ),
+    )
+    certified = evaluate_row(  # type: ignore[arg-type]
+        certified_row,
+        first=_Outcome(EVIDENCE_AUDIT_ROLE, "PASS"),
+        second=_Outcome(ADVERSARIAL_AUDIT_ROLE, "PASS"),
+        specification=_Specification(),
+    )
+    assert certified.released is True, certified.reasons
+    assert certified.certificate_status == "COMPLETE_FOR_REGISTERED_PROFILE"
 
 
 def test_an_unverifiable_reference_makes_a_row_unreleasable() -> None:
@@ -731,6 +759,9 @@ def test_an_unverifiable_reference_makes_a_row_unreleasable() -> None:
             return {CASE_AMBIGUITY: "PASS"}
 
         def substantiation_reasons(self) -> list[str]:
+            return []
+
+        def blocking_substantiation_reasons(self) -> list[str]:
             return []
 
         @property

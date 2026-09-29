@@ -527,12 +527,31 @@ def test_an_unverified_objection_holds_the_item_rather_than_failing_it() -> None
     assert reasons == ["HYBRID_WITNESS_UNVERIFIED"]
 
 
-def test_an_enumerated_missing_dependency_is_a_failure() -> None:
+def test_an_enumerated_missing_dependency_holds_the_item_rather_than_failing_it() -> None:
+    """A specific doubt is not a witness.
+
+    An enumeration entry says "this datum is unstated and its absence changes the
+    answer" and gives one consequence.  The published rule for a material objection
+    is two admissible readings with their answers and the graded difference between
+    them, which an entry does not supply -- so it holds the item instead of failing
+    it.  The safety is unchanged: a held item is not released, and an item can only
+    pass with a completeness certificate the server issued.
+    """
     verdict, reasons = ambiguity_gate_verdict(
         witness_verdicts=[],
         blocking_enumeration_entries=1,
         completeness=_certificate(_spec()),
         qualification_active=True,
     )
-    assert verdict == "FAIL"
+    assert verdict == "UNCERTAIN"
     assert reasons == ["HYBRID_UNSTATED_DEPENDENCY:question.ambiguity.v1"]
+
+    # Without a certificate the same doubt also holds, for the same reason.
+    held, held_reasons = ambiguity_gate_verdict(
+        witness_verdicts=[],
+        blocking_enumeration_entries=1,
+        completeness=None,
+        qualification_active=True,
+    )
+    assert held == "UNCERTAIN"
+    assert held_reasons == ["HYBRID_UNSTATED_DEPENDENCY:question.ambiguity.v1"]

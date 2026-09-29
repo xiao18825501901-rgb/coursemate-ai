@@ -218,6 +218,22 @@ class StrongReviewOutcome:
         _, reasons = substantiated_case_verdicts(self.findings)
         return reasons
 
+    def blocking_substantiation_reasons(self) -> list[str]:
+        """Substantiation reasons for the cases the roles actually decide.
+
+        The ambiguity case is decided by the server completeness certificate, so
+        a downgrade of a role ambiguity verdict explains the record without
+        blocking the item.  Every other case still blocks on an unsubstantiated
+        verdict, and the full list is still recorded on the receipt.
+        """
+        from app.learning.hybrid_review import CASE_AMBIGUITY
+
+        return [
+            reason
+            for reason in self.substantiation_reasons()
+            if not reason.endswith(":" + CASE_AMBIGUITY)
+        ]
+
     def as_receipt(self) -> dict[str, Any]:
         return {
             "role": self.role,

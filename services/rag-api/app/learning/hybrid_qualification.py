@@ -29,7 +29,7 @@ import json
 import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any, Final
+from typing import Any
 
 from app.learning.deepseek_reviewer import StrongReviewOutcome
 from app.learning.hybrid_evaluation_set import (
@@ -113,6 +113,15 @@ class RowOutcome:
     defect: str | None
     provenance: str
     reasons: list[str] = field(default_factory=list)
+    # Which completeness evidence the ambiguity case was decided under, and the
+    # checks that refused it: an INCOMPLETE certificate is only actionable if the
+    # failing check is named.
+    certificate_status: str = "NO_CERTIFICATE"
+    certificate_failing_checks: list[str] = field(default_factory=list)
+    # What the citation check could not resolve, so an unverified reference is
+    # diagnosable rather than a bare reason string.
+    unknown_span_ids: list[str] = field(default_factory=list)
+    untraceable_quotes: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -128,6 +137,10 @@ class RowOutcome:
             "defect": self.defect,
             "provenance": self.provenance,
             "reasons": list(self.reasons),
+            "certificate_status": self.certificate_status,
+            "certificate_failing_checks": list(self.certificate_failing_checks),
+            "unknown_span_ids": list(self.unknown_span_ids),
+            "untraceable_quotes": list(self.untraceable_quotes),
         }
 
 
@@ -138,20 +151,40 @@ def evaluate_row(
     second: StrongReviewOutcome,
     specification: Any | None = None,
 ) -> RowOutcome:
-    """Apply the publication rule to one row and record the outcome."""
+    """Apply the publication rule to one row and record the outcome.
+
+    Two measurement decisions are explicit here rather than implicit in the
+    numbers the run reports.
+
+    **The row certificate is used.**  A control row carries the completeness
+    certificate the server issued for its item, because the ambiguity case is no
+    longer decided by the reviewers and would otherwise abstain on every row --
+    which would measure a policy nobody ships.
+
+    **A qualification is assumed to exist.**  qualification_active is a
+    deployment control, not part of the release rule being measured: with it false
+    every row is unreleased for the same reason and every metric becomes a
+    constant.  The artifact therefore states this assumption by name, and the
+    installation of the real qualification is verified separately.
+    """
     by_role = {first.role: first.case_verdicts(), second.role: second.case_verdicts()}
     enumeration = getattr(specification, "enumeration", None) if specification else None
     combined, reasons = combine_case_verdicts(
         required_cases=row.inputs.required_cases,
         by_role=by_role,
         specification=enumeration,
+        completeness=row.certificate,
+        qualification_active=True,
     )
     if specification is None:
         reasons.append("HYBRID_SPECIFICATION_PASS_MISSING")
     for outcome in (first, second):
         if not outcome.verification.complete:
             reasons.append(f"HYBRID_REVIEW_REFERENCES_UNVERIFIED:{outcome.role}")
-        for reason in outcome.substantiation_reasons():
+        # Only the cases the roles decide: the ambiguity case is decided by the
+        # row certificate, and an explanatory downgrade of a role verdict there
+        # must not block a certified item.
+        for reason in outcome.blocking_substantiation_reasons():
             reasons.append(f"{reason}:{outcome.role}")
     released = not reasons and all(v == "PASS" for v in combined.values())
     return RowOutcome(
@@ -167,6 +200,26 @@ def evaluate_row(
         defect=row.defect,
         provenance=row.provenance,
         reasons=list(dict.fromkeys(reasons)),
+        certificate_status=(
+            getattr(row.certificate, "status", None)
+            if row.certificate is not None
+            else "NO_CERTIFICATE"
+        ),
+        certificate_failing_checks=[
+            check.name
+            for check in getattr(row.certificate, "checks", []) or []
+            if getattr(check, "status", None) == "FAIL"
+        ],
+        unknown_span_ids=sorted(
+            {span for outcome in (first, second) for span in outcome.verification.unknown_span_ids}
+        ),
+        untraceable_quotes=sorted(
+            {
+                quote
+                for outcome in (first, second)
+                for quote in outcome.verification.untraceable_quotes
+            }
+        ),
     )
 
 
@@ -405,6 +458,15 @@ def qualify(
             "The release-recall floor is what distinguishes safe from merely closed.",
             "No paired same-sample comparison against a healthy historical reviewer "
             "exists, so quality non-inferiority is NOT established by this record.",
+            "The ambiguity case is decided by the server completeness certificate a "
+            "control row carries, not by the reviewers. A mutated row carries no "
+            "certificate, so its ambiguity case abstains and the row is not released: "
+            "that is a safe refusal, and it is NOT evidence that the reviewers detect "
+            "an injected missing condition.",
+            "This run assumes a scoped qualification exists, because that is a "
+            "deployment control rather than part of the release rule being measured. "
+            "The installation of the real qualification is verified separately and is "
+            "not established by this record.",
         ],
     }
 

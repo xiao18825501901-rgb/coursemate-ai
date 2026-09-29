@@ -268,14 +268,27 @@ def ambiguity_gate_verdict(
 
     The order matters and is deliberately conservative:
 
-    1. a confirmed material witness is a defect, whatever else is true;
-    2. an unresolved witness is an open objection -- it cannot pass, but it also
-       is not converted into a failure the server cannot substantiate;
-    3. a blocking enumeration entry is a concrete missing dependency;
+    1. a **confirmed** material witness is a defect, whatever else is true.  It is
+       the only thing here that fails an item;
+    2. an unresolved witness is an open objection -- it cannot pass, and it is not
+       converted into a failure the server cannot substantiate;
+    3. a blocking enumeration entry -- a datum the reviewer says is unstated and
+       whose absence it says changes the answer -- is a *specific doubt*, not a
+       witness.  It names one consequence rather than two admissible readings with
+       their answers, so under the published rule it is not a valid counterexample
+       and it cannot fail an item.  It holds the item, which is the same safety
+       outcome on an uncertified item and stops the measured over-triggering from
+       refusing sound ones;
     4. a pass requires positive completeness evidence for a registered profile
-       **and** an active qualification for this scope.  Without both, the answer
-       is UNCERTAIN, which is the honest reading of "nobody has shown this is
+       **and** an active qualification for this scope.  Without both, the answer is
+       UNCERTAIN, which is the honest reading of "nobody has shown this is
        answerable" and never a silent approval.
+
+    The safety of step 3 rests on step 4: an item with a doubt and no certificate
+    is never released, and a certificate only exists for a registered profile whose
+    required conventions the contract states.  What is given up is failing an item
+    on an objection nobody substantiated -- which is exactly the trade the nine
+    measured runs forced.
     """
     reasons: list[str] = []
     if any(verdict.status == "CONFIRMED_MATERIAL" for verdict in witness_verdicts):
@@ -283,7 +296,7 @@ def ambiguity_gate_verdict(
     if any(verdict.unresolved for verdict in witness_verdicts):
         return "UNCERTAIN", ["HYBRID_WITNESS_UNVERIFIED"]
     if blocking_enumeration_entries:
-        return "FAIL", ["HYBRID_UNSTATED_DEPENDENCY:question.ambiguity.v1"]
+        return "UNCERTAIN", ["HYBRID_UNSTATED_DEPENDENCY:question.ambiguity.v1"]
     if completeness is None or not completeness.certifies:
         reasons.append("HYBRID_COMPLETENESS_CERTIFICATE_MISSING")
     if not qualification_active:
