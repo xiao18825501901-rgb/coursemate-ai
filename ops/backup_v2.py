@@ -11,7 +11,12 @@ import shutil
 import sqlite3
 import sys
 import tarfile
-from datetime import UTC, datetime
+
+# timezone.utc rather than datetime.UTC: the documented wrapper runs this with the
+# host python3, which is 3.10 on the production box, and datetime.UTC does not
+# exist before 3.11.  A backup tool that cannot start on the machine it protects
+# is the defect this avoids.
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -191,7 +196,7 @@ def create_backup() -> Path:
         raise ValueError("BACKUP_ROOT must be outside the private upload tree.")
     backup_root.mkdir(mode=0o700, parents=True, exist_ok=True)
 
-    created_at = datetime.now(UTC)
+    created_at = datetime.now(timezone.utc)
     stamp = created_at.strftime("%Y%m%dT%H%M%S.%fZ")
     final_destination = backup_root / f"coursemate-v2-{stamp}"
     partial_destination = backup_root / f".coursemate-v2-{stamp}.{uuid4().hex}.partial"

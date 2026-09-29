@@ -8,7 +8,7 @@ import os
 import shutil
 import time
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -124,11 +124,11 @@ def check_backup(backup_root: Path, max_age: timedelta, now: datetime) -> Check:
             continue
         if created_at.tzinfo is None:
             continue
-        candidates.append((created_at.astimezone(UTC), candidate))
+        candidates.append((created_at.astimezone(timezone.utc), candidate))
     if not candidates:
         return Check("backup", False, "no completed backup was found")
     created_at, _ = max(candidates, key=lambda item: item[0])
-    age = now.astimezone(UTC) - created_at
+    age = now.astimezone(timezone.utc) - created_at
     if age < -timedelta(minutes=5):
         return Check("backup", False, "latest backup timestamp is in the future")
     age_seconds = max(0, round(age.total_seconds()))
@@ -183,7 +183,7 @@ def main() -> int:
         (
             Check("backup", False, "backup root is not configured")
             if not backup_root
-            else check_backup(Path(backup_root), max_backup_age, datetime.now(UTC)),
+            else check_backup(Path(backup_root), max_backup_age, datetime.now(timezone.utc)),
             Check("disk", False, "upload storage is not configured")
             if not upload_root
             else check_disk(Path(upload_root), minimum_free_bytes),
@@ -194,7 +194,7 @@ def main() -> int:
         json.dumps(
             {
                 "status": status,
-                "checkedAt": datetime.now(UTC).isoformat(),
+                "checkedAt": datetime.now(timezone.utc).isoformat(),
                 "checks": [asdict(check) for check in checks],
             }
         )
