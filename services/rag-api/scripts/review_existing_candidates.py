@@ -33,33 +33,39 @@ from app.learning.candidate_recovery import (  # noqa: E402
 from app.learning.human_review_card import CARD_QUESTIONS, build_card_prompt  # noqa: E402
 
 
-def _database(path: str, *, allow_live: bool) -> Database:
-    """Open the target database, refusing the live one unless asked.
+def _database(path: str, *, allow_mismatch: bool = False) -> Database:
+    """Open the target database, refusing when the environment disagrees with it.
 
-    This guard exists because the mistake it prevents was made: a helper sourced
-    the deployment environment, which points ``RAG_DATABASE_PATH`` at the live
-    file, and a migration was applied to production by accident.  The migration
-    was purely additive, but a tool that reviews and records receipts must not be
-    able to reach production just because an environment happened to say so.
+    The incident this guards against was precise: a helper sourced the
+    deployment environment and a component then read ``RAG_DATABASE_PATH``
+    **implicitly**, so a migration intended for a restored copy ran against the
+    live file.  The dangerous condition is therefore *the environment and the
+    requested target disagreeing*, not one particular path.
+
+    So the check is: if ``RAG_DATABASE_PATH`` is set and resolves to a different
+    file than the one asked for, refuse.  Pointing both at a copy is fine;
+    pointing the argument at a copy while the environment still names live is
+    exactly the mistake, and it stops here rather than at the data.
     """
     resolved = Path(path).resolve()
-    if not allow_live:
-        import os
+    import os
 
-        live = os.environ.get("RAG_DATABASE_PATH")
-        if live and Path(live).resolve() == resolved:
-            raise SystemExit(
-                json.dumps(
-                    {
-                        "status": "REFUSED",
-                        "code": "REFUSES_LIVE_DATABASE",
-                        "message": (
-                            "this path is the live RAG_DATABASE_PATH; pass "
-                            "--allow-live-database only when that is genuinely intended"
-                        ),
-                    }
-                )
+    declared = os.environ.get("RAG_DATABASE_PATH")
+    if declared and Path(declared).resolve() != resolved and not allow_mismatch:
+        raise SystemExit(
+            json.dumps(
+                {
+                    "status": "REFUSED",
+                    "code": "DATABASE_TARGET_MISMATCH",
+                    "message": (
+                        "RAG_DATABASE_PATH and --database name different files; "
+                        "a component could read the implicit path.  Point both at "
+                        "the intended database, or pass --allow-database-mismatch "
+                        "if that really is intended."
+                    ),
+                }
             )
+        )
     settings = Settings()
     return Database(
         settings.model_copy(
@@ -118,13 +124,13 @@ def main() -> int:
     parser.add_argument("--out", default="")
     parser.add_argument("--max-output-tokens", type=int, default=4000)
     parser.add_argument(
-        "--allow-live-database",
+        "--allow-database-mismatch",
         action="store_true",
-        help="permit the path that RAG_DATABASE_PATH points at (default: refuse)",
+        help="permit RAG_DATABASE_PATH and --database to name different files",
     )
     args = parser.parse_args()
 
-    database = _database(args.database, allow_live=args.allow_live_database)
+    database = _database(args.database, allow_mismatch=args.allow_database_mismatch)
 
     if args.list:
         rows = list_recoverable(database, limit=args.limit)

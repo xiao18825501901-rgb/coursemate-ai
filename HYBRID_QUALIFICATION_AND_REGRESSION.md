@@ -236,6 +236,50 @@ blocking a tamper without being bypassed, the canonical rendering being preferre
 when it applies, the historical rendering being accepted and named, a genuine
 mismatch failing both renderings, and an unknown revision being refused.
 
+## 2.3 What the automatic reviewers actually said on the nine real candidates
+
+The review-only path was then run over the nine real candidates on a restored
+copy, three billable calls each.  This is the first measurement of the chain on
+**genuinely stored course items** rather than on items authored for a
+qualification run, and it is markedly more critical.
+
+| case | outcomes across the seven that produced a receipt |
+|---|---|
+| `question.ambiguity.v1` | **FAIL 7 / 7** |
+| `question.answer_agreement.v1` | PASS 4, **FAIL 3** |
+| `question.mcq_distractor_quality.v1` | PASS 1, **FAIL 1** |
+
+| outcome | count |
+|---|---|
+| reviewed, receipt recorded, not accepted | 7 |
+| provider failure (recorded, not retried) | 1 |
+| **not eligible** — a deterministic hard gate fails on the rebuilt candidate | 1 |
+
+Three findings worth separating:
+
+1. **Every real item failed the ambiguity case.**  That is consistent with the
+   measured over-triggering of the specification pass, and it is also consistent
+   with the items genuinely relying on unstated conventions — and the two cannot
+   be told apart without reading them, which is exactly what the review card is
+   for.  It is not evidence either way, and it is not reported as either.
+2. **Three of seven real items have a substantive author/blind disagreement.**
+   A card cannot fix that: the card covers only the ambiguity case.  Those items
+   need a revised revision, not a signature.
+3. **One candidate is not eligible at all** (`qe_22cfcc08…`, course `cs3481`):
+   rebuilt from its own provenance, a deterministic hard gate fails, so the
+   service refuses before any reviewer runs.  This is the same oldest row whose
+   blueprint needed the historical rendering, and it is the only one of the nine
+   that the deterministic side rejects.  It is reported as an open item rather
+   than diagnosed here.
+
+`HYBRID_QUALIFICATION_MISSING` appears on all seven receipts, which is correct:
+production holds no qualification row, so nothing could have been accepted even
+if every case had passed.
+
+**Nothing was published and nothing was written to production**: the live
+database still shows 0 hybrid receipts, 0 human cards, and the same
+49 `READY` / 9 `NEEDS_REVIEW` provenance split.
+
 ## 3. The qualification runs (three measured iterations)
 
 * Runner: `scripts/run_hybrid_qualification.py`
