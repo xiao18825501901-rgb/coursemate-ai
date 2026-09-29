@@ -8,9 +8,9 @@ is reported with its sample size instead of being called zero risk.
 from __future__ import annotations
 
 import json
-import math
 
 import pytest
+from test_hybrid_review_policy import _inputs  # noqa: E402 - shared fixture builder
 
 from app.learning.hybrid_evaluation_set import (
     NEGATIVE_LABEL,
@@ -18,8 +18,8 @@ from app.learning.hybrid_evaluation_set import (
     EvaluationRow,
     build_rows,
     dataset_digest,
-    duplicate_correct_option,
     disagreeing_solution,
+    duplicate_correct_option,
     missing_condition,
 )
 from app.learning.hybrid_qualification import (
@@ -33,14 +33,10 @@ from app.learning.hybrid_review import (
     ADVERSARIAL_AUDIT_ROLE,
     CASE_AGREEMENT,
     CASE_AMBIGUITY,
-    CASE_DISTRACTORS,
-    CASE_RULE,
     EVIDENCE_AUDIT_ROLE,
     JudgeDependency,
     SpecificationEnumeration,
 )
-
-from test_hybrid_review_policy import _inputs  # noqa: E402 - shared fixture builder
 
 
 def test_zero_false_accept_bound_is_the_exact_binomial_expression() -> None:
@@ -647,7 +643,6 @@ def test_a_clean_run_still_reports_its_bound_and_sample_size() -> None:
 
 def test_evaluate_row_requires_the_conjunction_of_both_roles() -> None:
     from app.learning.deepseek_reviewer import ReferenceVerification
-    from app.learning.hybrid_review import JudgeFinding, JudgeFindings
 
     row = EvaluationRow(
         row_id="r1",
@@ -685,21 +680,34 @@ def test_evaluate_row_requires_the_conjunction_of_both_roles() -> None:
             ]
         )
 
+    # The ambiguity case is evidence-decided now: a bare FAIL without a witness is
+    # not a defect and not an approval either, so it withholds release rather than
+    # failing on an impression the measured frontier could not substantiate.
     first = _Outcome(EVIDENCE_AUDIT_ROLE, "PASS")
     second = _Outcome(ADVERSARIAL_AUDIT_ROLE, "FAIL")
     outcome = evaluate_row(  # type: ignore[arg-type]
         row, first=first, second=second, specification=_Specification()
     )
     assert outcome.released is False
-    assert outcome.case_outcomes[CASE_AMBIGUITY] == "FAIL"
+    assert outcome.case_outcomes[CASE_AMBIGUITY] == "UNCERTAIN"
 
+    # Two favourable verdicts are no longer sufficient to release an item: the
+    # ambiguity case additionally needs the server's completeness certificate for
+    # a registered profile and an active qualification.  This is the change the
+    # measured frontier forced, and the harness now reports it instead of
+    # attributing a release to the reviewer chain alone.
     both_pass = evaluate_row(  # type: ignore[arg-type]
         row,
         first=_Outcome(EVIDENCE_AUDIT_ROLE, "PASS"),
         second=_Outcome(ADVERSARIAL_AUDIT_ROLE, "PASS"),
         specification=_Specification(),
     )
-    assert both_pass.released is True
+    assert both_pass.released is False
+    assert both_pass.reasons == [
+        "HYBRID_COMPLETENESS_CERTIFICATE_MISSING",
+        "HYBRID_QUALIFICATION_MISSING",
+    ]
+    assert both_pass.case_outcomes[CASE_AMBIGUITY] == "UNCERTAIN"
 
 
 def test_an_unverifiable_reference_makes_a_row_unreleasable() -> None:

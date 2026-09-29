@@ -22,6 +22,7 @@ produce or veto one of these case verdicts.
 
 from __future__ import annotations
 
+from hashlib import sha256
 from typing import Annotated, Any, Final, Literal
 
 from pydantic import Field, StringConstraints, model_validator
@@ -102,6 +103,7 @@ CaseVerdict = Literal["PASS", "FAIL", "UNCERTAIN"]
 CaseKey = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
 ShortQuote = Annotated[str, StringConstraints(min_length=1, max_length=800)]
 Assertion = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+Hex64 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 StepId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 MissingCondition = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=600)
@@ -109,11 +111,64 @@ MissingCondition = Annotated[
 Counterexample = Annotated[str, StringConstraints(strip_whitespace=True, max_length=3000)]
 
 
+EvidenceKind = Literal[
+    "DIRECT_QUOTE",
+    "SOURCE_RULE",
+    "PROBLEM_DATA",
+    "EXERCISE_ASSUMPTION",
+    "CLAIM_TO_CRITIQUE",
+    "CHECKER_RESULT",
+]
+Claim = Annotated[str, StringConstraints(strip_whitespace=True, min_length=4, max_length=400)]
+
+
 class JudgeSourceRef(Contract):
-    """One short verbatim quotation tied to a server-supplied evidence span id."""
+    """A reference to a server-supplied evidence span id, and what it is cited for.
+
+    The quotation used to be mandatory, and that made the protocol fail for a
+    reason that had nothing to do with whether the source supported the claim: a
+    reviewer that had correctly selected a span still failed when it did not
+    re-transcribe a long sentence character for character.  The reviewer now
+    selects the id and states the claim; the **server** restores the frozen text,
+    its digest and its locator, so the final citation is server-owned rather than
+    model-transcribed.
+
+    This removes transcription, not verification.  An unknown id is still
+    refused, and a quotation that *is* supplied must still match the frozen text
+    exactly -- no folding of case, negation or mathematical symbols.  A derived
+    numeric result is declared as CHECKER_RESULT and carries rule, data and
+    checker references instead of a literal quotation.
+    """
 
     source_span_id: CaseKey
-    quote: ShortQuote
+    claim: Claim | None = None
+    evidence_kind: EvidenceKind = "DIRECT_QUOTE"
+    quote: ShortQuote | None = None
+    checker_ref: (
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+        | None
+    ) = None
+
+    @model_validator(mode="after")
+    def a_derived_result_names_its_checker(self) -> JudgeSourceRef:
+        if self.evidence_kind == "CHECKER_RESULT" and not self.checker_ref:
+            raise ValueError("a derived result must name the checker that produced it")
+        return self
+
+
+class ResolvedSpan(Contract):
+    """The server's own citation: the frozen text a reviewer pointed at.
+
+    A reader of the receipt can recompute the digest from the frozen source and
+    see exactly which characters were cited, without trusting anything the model
+    transcribed.
+    """
+
+    source_span_id: CaseKey
+    truncated: bool = False
+    text_digest: Hex64
+    char_count: int = Field(ge=0)
+    locator: str = Field(min_length=1, max_length=200)
 
 
 class JudgeDependency(Contract):
@@ -172,6 +227,12 @@ class JudgeFinding(Contract):
     verdict: CaseVerdict
     assertion: Assertion
     evidence_refs: list[JudgeSourceRef] = Field(default_factory=list, max_length=16)
+    # A claimed material ambiguity must arrive as a checkable witness.  The
+    # server verifies it: it refuses a reading that breaks the stated conditions
+    # and one whose two answers are equal under the declared equivalence, and it
+    # never treats the absence of a witness as an approval.  Imported lazily to
+    # keep this module free of a task-contract dependency at import time.
+    ambiguity_witness: Any | None = None
     solution_step_ids: list[StepId] = Field(default_factory=list, max_length=32)
     counterexample: Counterexample | None = None
     missing_conditions: list[MissingCondition] = Field(default_factory=list, max_length=20)
@@ -208,6 +269,10 @@ class ReferenceVerification(Contract):
     unknown_span_ids: list[CaseKey] = Field(default_factory=list, max_length=32)
     unknown_step_ids: list[StepId] = Field(default_factory=list, max_length=32)
     untraceable_quotes: list[CaseKey] = Field(default_factory=list, max_length=32)
+    # The server's own record of every span a reviewer cited: the frozen digest,
+    # the character count and the locator.  This is the citation of record; a
+    # model-transcribed quotation is at most a cross-check against it.
+    resolved_spans: list[ResolvedSpan] = Field(default_factory=list, max_length=64)
 
     @property
     def complete(self) -> bool:
@@ -355,6 +420,9 @@ def combine_case_verdicts(
     by_role: dict[str, dict[str, str]],
     specification: SpecificationEnumeration | None = None,
     human_card: Any | None = None,
+    witness_verdicts: list[Any] | None = None,
+    completeness: Any | None = None,
+    qualification_active: bool = False,
 ) -> tuple[dict[str, str], list[str]]:
     """Combine both reviewer roles into one verdict per required case.
 
@@ -439,22 +507,30 @@ def combine_case_verdicts(
             if derived != "PASS":
                 reasons.append(reason or "HYBRID_HUMAN_CARD_FAILED")
         else:
-            if specification is None:
-                _drop_ambiguity_reasons()
-                combined[CASE_AMBIGUITY] = "UNCERTAIN"
-                reasons.append("HYBRID_SPECIFICATION_PASS_MISSING")
-            else:
-                derived, reason = ambiguity_verdict_from_enumeration(specification)
-                if derived == "FAIL":
-                    _drop_ambiguity_reasons()
-                    combined[CASE_AMBIGUITY] = "FAIL"
-                    reasons.append(reason or ("HYBRID_UNSTATED_DEPENDENCY:" + CASE_AMBIGUITY))
-                elif derived == "UNCERTAIN" and combined.get(CASE_AMBIGUITY) == "PASS":
-                    # The pass abstained: it cannot approve, so it withholds the
-                    # approval the roles gave rather than converting it to a FAIL.
-                    _drop_ambiguity_reasons()
-                    combined[CASE_AMBIGUITY] = "UNCERTAIN"
-                    reasons.append(reason or "HYBRID_SPECIFICATION_PASS_MISSING")
+            # The evidence path.  The two general roles' own ambiguity verdicts do
+            # not decide this case: nine measured runs established that they
+            # over-report an absent condition on sound items, so what counts is
+            # what they can substantiate.  A substantiated objection is a witness
+            # the server checked; an approved item needs a positive completeness
+            # certificate for a registered profile plus an active qualification.
+            from app.learning.ambiguity_witness import ambiguity_gate_verdict
+
+            blocking = (
+                len(specification.blocking_entries)
+                if specification is not None
+                else 0
+            )
+            derived, extra = ambiguity_gate_verdict(
+                witness_verdicts=list(witness_verdicts or []),
+                blocking_enumeration_entries=blocking,
+                completeness=completeness,
+                qualification_active=qualification_active,
+            )
+            if specification is None and derived == "UNCERTAIN" and not extra:
+                extra = ["HYBRID_SPECIFICATION_PASS_MISSING"]
+            _drop_ambiguity_reasons()
+            combined[CASE_AMBIGUITY] = derived
+            reasons.extend(extra)
     return combined, list(dict.fromkeys(reasons))
 
 
@@ -465,34 +541,53 @@ def verify_references(
     span_ids: set[str],
     span_text_by_id: dict[str, str],
     solution_step_ids: set[str],
+    span_locator_by_id: dict[str, str] | None = None,
 ) -> ReferenceVerification:
-    """Check a reviewer's references against the frozen server material.
+    """Resolve a reviewer's references against the frozen server material.
 
-    An exact quotation only proves the reference is traceable; it never proves
-    the inference is sound.  That judgement stays with the reviewers and with
-    the deterministic gate.
+    The server owns the citation:
 
-    Quotation matching is whitespace-insensitive (reviewers legitimately
-    re-wrap lines) but otherwise exact and case-sensitive, so a fabricated or
-    paraphrased "quote" is not accepted as traceable.
+    * an unknown span id is refused, whether or not a quotation happens to match
+      something -- the reviewer is citing material it was not given;
+    * a known id is resolved to the frozen text, its digest and its locator, and
+      that resolution is what the receipt records;
+    * a quotation, when the reviewer supplies one, must still match the frozen
+      text exactly apart from line wrapping.  Matching stays case-sensitive and
+      symbol-sensitive: folding case, negation or a mathematical sign would let a
+      paraphrase authorize a claim the source does not make.
+
+    An exact resolution only proves the reference is traceable; it never proves
+    the inference is sound.  That judgement stays with the reviewers and with the
+    deterministic gate.
     """
     cases = [finding.case for finding in findings.findings]
     case_set_exact = len(cases) == len(set(cases)) and set(cases) == set(required_cases)
+    locators = span_locator_by_id or {}
     unknown_spans: list[str] = []
     unknown_steps: list[str] = []
     untraceable: list[str] = []
+    resolved: dict[str, ResolvedSpan] = {}
     for finding in findings.findings:
         for reference in finding.evidence_refs:
             if reference.source_span_id not in span_ids:
-                # A span id the server never supplied is not a traceable
-                # reference, whether or not the quotation happens to match
-                # something: the reviewer is citing material it was not given.
                 unknown_spans.append(reference.source_span_id)
                 continue
-            haystack = _collapse(span_text_by_id.get(reference.source_span_id, ""))
-            needle = _collapse(reference.quote)
-            if not needle or needle not in haystack:
-                untraceable.append(reference.source_span_id)
+            text = span_text_by_id.get(reference.source_span_id, "")
+            if reference.quote is not None:
+                if _collapse(reference.quote) not in _collapse(text):
+                    untraceable.append(reference.source_span_id)
+                    continue
+            resolved.setdefault(
+                reference.source_span_id,
+                ResolvedSpan(
+                    source_span_id=reference.source_span_id,
+                    truncated=False,
+                    text_digest=sha256(text.encode()).hexdigest(),
+                    char_count=len(text),
+                    locator=locators.get(reference.source_span_id)
+                    or f"span:{reference.source_span_id}",
+                ),
+            )
         for step_id in finding.solution_step_ids:
             if step_id not in solution_step_ids:
                 unknown_steps.append(step_id)
@@ -503,6 +598,7 @@ def verify_references(
         unknown_span_ids=sorted(set(unknown_spans))[:32],
         unknown_step_ids=sorted(set(unknown_steps))[:32],
         untraceable_quotes=sorted(set(untraceable))[:32],
+        resolved_spans=[resolved[key] for key in sorted(resolved)],
     )
 
 

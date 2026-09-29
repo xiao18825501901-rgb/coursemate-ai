@@ -27,6 +27,7 @@ from app.learning.candidate_recovery import (
     list_recoverable,
     recover_candidate,
 )
+from app.learning.question_author import QUESTION_AUTHOR_PROMPT_VERSION
 
 
 def _persist_needs_review(tmp_path: Path) -> tuple[object, str, str]:
@@ -183,7 +184,7 @@ def _blueprint(marks: float = 15, objective_text: str = "compute the total"):
         marks=marks,
         scoring_criteria=["one"],
         question_family_id="f1",
-        prompt_versions={"question_author": "question-author.v3"},
+        prompt_versions={"question_author": QUESTION_AUTHOR_PROMPT_VERSION},
         generation_policy_version="question-generation-policy-v1",
     )
 

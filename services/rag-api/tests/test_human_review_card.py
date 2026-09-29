@@ -14,22 +14,22 @@ import pytest
 
 from app.config import Settings
 from app.db import Database
-from app.learning.hybrid_review import (
-    CASE_AGREEMENT,
-    CASE_AMBIGUITY,
-    CASE_DISTRACTORS,
-    EVIDENCE_AUDIT_ROLE,
-    ADVERSARIAL_AUDIT_ROLE,
-    JudgeDependency,
-    SpecificationEnumeration,
-    combine_case_verdicts,
-)
 from app.learning.human_review_card import (
     CARD_QUESTIONS,
     MAX_CARD_AGE_DAYS,
     HumanReviewCard,
     HumanReviewStore,
     build_card_prompt,
+)
+from app.learning.hybrid_review import (
+    ADVERSARIAL_AUDIT_ROLE,
+    CASE_AGREEMENT,
+    CASE_AMBIGUITY,
+    CASE_DISTRACTORS,
+    EVIDENCE_AUDIT_ROLE,
+    JudgeDependency,
+    SpecificationEnumeration,
+    combine_case_verdicts,
 )
 
 REVISION = "a" * 64
@@ -109,25 +109,81 @@ def test_a_card_cannot_touch_any_other_case() -> None:
     assert combined[CASE_DISTRACTORS] == "FAIL"
 
 
-def test_without_a_card_the_specification_pass_still_gates_the_case() -> None:
+def test_without_a_card_the_case_needs_evidence_rather_than_two_votes() -> None:
+    """The card is no longer the only alternative to the reviewer verdicts.
+
+    With no card, the case is decided by evidence: a verified witness fails it, an
+    unverified objection holds it, and approval needs the server's completeness
+    certificate plus an active qualification.  Two favourable verdicts and a clean
+    specification pass are not enough on their own, and a bare refusal without a
+    witness no longer decides it either.
+    """
+    from app.learning.task_spec import CompletenessEvidence
+
     clean = SpecificationEnumeration(
         dependencies=[JudgeDependency(datum="the stated values", stated_in_stem=True)]
     )
-    passed, _ = combine_case_verdicts(
+    certificate = CompletenessEvidence(
+        status="COMPLETE_FOR_REGISTERED_PROFILE",
+        profile_id="P-SQL",
+        profile_version=1,
+        renderer_version="public-projection.v1",
+        checker="sql_oracle.v1",
+        projection_digest="a" * 64,
+        question_revision_hash="b" * 64,
+    )
+    passed, reasons = combine_case_verdicts(
         required_cases=(CASE_AMBIGUITY,),
         by_role=_both_roles("PASS"),
         specification=clean,
     )
-    assert passed[CASE_AMBIGUITY] == "PASS"
+    assert passed[CASE_AMBIGUITY] == "UNCERTAIN"
+    assert "HYBRID_COMPLETENESS_CERTIFICATE_MISSING" in reasons
+    assert "HYBRID_QUALIFICATION_MISSING" in reasons
 
-    # The automatic pass may refuse, and may withhold an approval, but it can
-    # never upgrade a case the roles refused.
+    certified, certified_reasons = combine_case_verdicts(
+        required_cases=(CASE_AMBIGUITY,),
+        by_role=_both_roles("PASS"),
+        specification=clean,
+        completeness=certificate,
+        qualification_active=True,
+    )
+    assert certified[CASE_AMBIGUITY] == "PASS"
+    assert not any(
+        reason.startswith("HYBRID_COMPLETENESS_CERTIFICATE_MISSING")
+        or reason == "HYBRID_QUALIFICATION_MISSING"
+        for reason in certified_reasons
+    )
+
+    # The automatic pass still cannot upgrade a case it refuses.
+    blocking = SpecificationEnumeration(
+        dependencies=[
+            JudgeDependency(
+                datum="the value the answer is computed from",
+                stated_in_stem=False,
+                answer_changes_if_absent=True,
+                consequence="a different value gives a different answer",
+            )
+        ]
+    )
+    refused_by_pass, _ = combine_case_verdicts(
+        required_cases=(CASE_AMBIGUITY,),
+        by_role=_both_roles("PASS"),
+        specification=blocking,
+        completeness=certificate,
+        qualification_active=True,
+    )
+    assert refused_by_pass[CASE_AMBIGUITY] == "FAIL"
+
+    # And a bare refusal without a witness no longer decides it.
     refused_by_roles, _ = combine_case_verdicts(
         required_cases=(CASE_AMBIGUITY,),
         by_role=_both_roles("FAIL"),
         specification=clean,
+        completeness=certificate,
+        qualification_active=True,
     )
-    assert refused_by_roles[CASE_AMBIGUITY] == "FAIL"
+    assert refused_by_roles[CASE_AMBIGUITY] == "PASS"
 
 
 # ------------------------------------------------------------ substantiation

@@ -51,7 +51,6 @@ from app.learning.hybrid_review import (
     ReferenceVerification,
     SpecificationEnumeration,
     balanced_solution_order,
-    review_input_hash,
     verify_references,
 )
 from app.learning.models import Contract
@@ -382,6 +381,10 @@ class DeepSeekStrongReviewer:
         the others and governs only the ambiguity case.
         """
         span_text = {fragment["evidence_id"]: fragment["content"] for fragment in inputs.evidence}
+        span_locator = {
+            fragment["evidence_id"]: fragment.get("locator") or ""
+            for fragment in inputs.evidence
+        }
         span_ids = set(span_text)
         step_ids = _solution_step_ids(inputs)
         outcomes: list[StrongReviewOutcome] = []
@@ -408,6 +411,7 @@ class DeepSeekStrongReviewer:
                 span_ids=span_ids,
                 span_text_by_id=span_text,
                 solution_step_ids=step_ids,
+                span_locator_by_id=span_locator,
             )
             verified.append(
                 StrongReviewOutcome(

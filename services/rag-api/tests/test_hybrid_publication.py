@@ -13,13 +13,22 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from test_question_persistence import (  # noqa: E402 - shared fixture builder
+    COURSE,
+    NODE,
+    OWNER,
+    PRIVATE_COURSE,
+    SPEC_HASH,
+    WORKSPACE,
+    database_with_objective,
+)
 
 from app.learning.blind_solve import run_blind_solve
 from app.learning.deepseek_reviewer import DeepSeekStrongReviewer
 from app.learning.hybrid_quality import (
+    QUALIFICATION_TTL_DAYS,
     HybridQualificationStore,
     HybridQualityService,
-    QUALIFICATION_TTL_DAYS,
     review_domain,
     review_language,
 )
@@ -32,7 +41,10 @@ from app.learning.hybrid_review import (
     STRONG_REVIEW_ROLES,
 )
 from app.learning.provider import LearningProvider
-from app.learning.question_author import author_question
+from app.learning.question_author import (  # noqa: E402
+    QUESTION_AUTHOR_PROMPT_VERSION,
+    author_question,
+)
 from app.learning.question_blueprint import QuestionBlueprint, resolve_objective
 from app.learning.question_evidence import EvidencePackAccess, build_evidence_pack
 from app.learning.question_persistence import persist_question_candidate
@@ -41,16 +53,6 @@ from app.learning.question_validator import (
     validate_question_candidate,
 )
 from app.learning.sql_oracle import OracleCheck, check_equivalence, check_expected_rows
-
-from test_question_persistence import (  # noqa: E402 - shared fixture builder
-    COURSE,
-    NODE,
-    OWNER,
-    PRIVATE_COURSE,
-    SPEC_HASH,
-    WORKSPACE,
-    database_with_objective,
-)
 
 REQUIRED = (CASE_AMBIGUITY, CASE_AGREEMENT)
 
@@ -194,7 +196,7 @@ def _pipeline(tmp_path: Path) -> dict[str, Any]:
         marks=15,
         scoring_criteria=["criterion one", "criterion two"],
         question_family_id="family-hybrid",
-        prompt_versions={"question_author": "question-author.v3"},
+        prompt_versions={"question_author": QUESTION_AUTHOR_PROMPT_VERSION},
         generation_policy_version="question-generation-policy-v1",
     )
     provider = LearningProvider(config)
@@ -650,13 +652,22 @@ def test_an_unverifiable_review_reference_blocks_publication(tmp_path: Path) -> 
 
 
 def test_a_fail_verdict_from_reviewers_cannot_publish(tmp_path: Path) -> None:
+    """Every case the roles refuse fails; none of them can be voted up.
+
+    The ambiguity case is now decided by evidence rather than by the roles' own
+    verdicts, so a bare FAIL there is answered by the certificate.  The cases with
+    a concrete defect -- agreement and the module-specific one -- keep the
+    conjunctive rule exactly as it was, and the item still cannot publish.
+    """
     context = _pipeline(tmp_path)
     service, _ = _service(context, verdict="FAIL")
     _qualify(context, service)
     result = _review(context, service)
     assert result is not None
     assert result.accepted is False
-    assert all(verdict == "FAIL" for verdict in result.case_outcomes.values())
+    assert result.case_outcomes["question.answer_agreement.v1"] == "FAIL"
+    assert result.case_outcomes[CASE_AMBIGUITY] == "PASS"
+    assert any("HYBRID_CASE_FAIL:" in reason for reason in result.reasons)
     persisted = _persist(context, result)
     assert persisted.status == "NEEDS_REVIEW"
 
@@ -721,9 +732,8 @@ def test_hybrid_receipts_are_immutable(tmp_path: Path) -> None:
     assert result is not None
     import sqlite3
 
-    with context["database"].connect() as connection:
-        with pytest.raises(sqlite3.IntegrityError):
-            connection.execute(
-                "UPDATE hybrid_quality_receipts SET status='QUALITY_ACCEPTED' WHERE id=?",
-                (result.receipt_id,),
-            )
+    with context["database"].connect() as connection, pytest.raises(sqlite3.IntegrityError):
+        connection.execute(
+            "UPDATE hybrid_quality_receipts SET status='QUALITY_ACCEPTED' WHERE id=?",
+            (result.receipt_id,),
+        )

@@ -406,11 +406,31 @@ class HybridQualityService:
             )
             if found is not None:
                 card_id, card = found
+        # The qualification state is resolved before the cases are combined: the
+        # ambiguity case now needs it as positive evidence, so it cannot be looked
+        # up afterwards.
+        language = inputs.language
+        domain = inputs.domain
+        qualification_id, qualification_reason = self._resolve_qualification(
+            language=language, domain=domain, cases=required_cases
+        )
+        witness_verdicts = self._verify_witnesses(
+            outcomes=(first, second),
+            candidate=candidate,
+            blueprint=blueprint,
+            evidence=evidence,
+        )
+        completeness = self._completeness_certificate(
+            candidate=candidate, blueprint=blueprint, evidence=evidence, inputs=inputs
+        )
         combined, reasons = combine_case_verdicts(
             required_cases=required_cases,
             by_role=by_role,
             specification=(specification.enumeration if specification is not None else None),
             human_card=card,
+            witness_verdicts=witness_verdicts,
+            completeness=completeness,
+            qualification_active=qualification_id is not None,
         )
         if specification is None:
             reasons.append("HYBRID_SPECIFICATION_PASS_MISSING")
@@ -420,12 +440,6 @@ class HybridQualityService:
             for reason in outcome.substantiation_reasons():
                 reasons.append(f"{reason}:{outcome.role}")
         projected = project_case_verdicts(combined)
-
-        language = inputs.language
-        domain = inputs.domain
-        qualification_id, qualification_reason = self._resolve_qualification(
-            language=language, domain=domain, cases=required_cases
-        )
         if qualification_reason:
             reasons.append(qualification_reason)
         reasons = list(dict.fromkeys(reasons))
@@ -529,7 +543,13 @@ class HybridQualityService:
             solution_b=_blind_solution_payload(blind_receipt),
             rubric=tuple(blueprint.scoring_criteria),
             evidence=tuple(
-                {"evidence_id": fragment.evidence_id, "content": fragment.content}
+                {
+                    "evidence_id": fragment.evidence_id,
+                    "content": fragment.content,
+                    # The locator travels with the span so the server can resolve a
+                    # cited id back to a frozen, addressable place in the source.
+                    "locator": fragment.locator,
+                }
                 for fragment in evidence.fragments
             ),
             deterministic={
@@ -554,6 +574,78 @@ class HybridQualityService:
                 )
                 for case in inputs.required_cases
             ]
+
+    # ------------------------------------------------------- ambiguity evidence
+
+    def _verify_witnesses(
+        self,
+        *,
+        outcomes: tuple[StrongReviewOutcome, StrongReviewOutcome],
+        candidate: AuthoredQuestionCandidate,
+        blueprint: QuestionBlueprint,
+        evidence: QuestionEvidencePack,
+    ) -> list[Any]:
+        """Check every witness the reviewers produced against the frozen material.
+
+        Only the structural rules run here.  Executing a witness needs a declared,
+        bounded instance to run it against, and an item that does not carry one
+        cannot have its readings executed -- so such a witness stays an open
+        objection rather than being confirmed or dismissed on the model's word.
+        """
+        from app.learning.ambiguity_witness import structural_check
+
+        spec = candidate.task_spec(blueprint) if candidate.task_contract else None
+        equivalence = spec.answer_equivalence if spec is not None else "EXACT"
+        span_ids = set(evidence.evidence_ids)
+        verdicts: list[Any] = []
+        for outcome in outcomes:
+            for finding in outcome.findings.findings:
+                if finding.case != CASE_AMBIGUITY:
+                    continue
+                claim = finding.ambiguity_witness
+                if claim is None:
+                    continue
+                verdicts.append(
+                    structural_check(
+                        claim,
+                        declared_equivalence=equivalence,
+                        span_ids=span_ids,
+                    )
+                )
+        return verdicts
+
+    def _completeness_certificate(
+        self,
+        *,
+        candidate: AuthoredQuestionCandidate,
+        blueprint: QuestionBlueprint,
+        evidence: QuestionEvidencePack,
+        inputs: ReviewerInputs,
+    ) -> Any | None:
+        """The server's own completeness evidence, or None when there is none.
+
+        None is not a soft pass: the ambiguity case treats it as UNCERTAIN.  An
+        item whose author produced no contract, or whose contract names no
+        registered profile, has no positive evidence that it is answerable, and
+        saying so is the honest outcome.
+        """
+        from app.learning.task_spec import certify_completeness, render_public_projection
+
+        if not candidate.task_contract:
+            return None
+        spec = candidate.task_spec(blueprint)
+        if spec is None:
+            return None
+        try:
+            projection = render_public_projection(spec)
+        except Exception:  # noqa: BLE001 - an unrenderable contract is no evidence
+            return None
+        return certify_completeness(
+            spec,
+            projection=projection,
+            available_span_ids=evidence.evidence_ids,
+            reviewable_language=inputs.language,
+        )
 
     # ------------------------------------------------------------ persistence
 

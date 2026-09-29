@@ -148,7 +148,42 @@ def _clean_specification() -> SpecificationEnumeration:
     )
 
 
-def test_both_roles_must_pass_for_a_case_to_pass() -> None:
+def _certificate(*, certifies: bool = True):
+    """The server-issued completeness evidence a bounded profile produces."""
+    from app.learning.task_spec import CompletenessEvidence
+
+    return CompletenessEvidence(
+        status=(
+            "COMPLETE_FOR_REGISTERED_PROFILE" if certifies else "NOT_SUPPORTED"
+        ),
+        profile_id="P-SQL" if certifies else None,
+        profile_version=1 if certifies else None,
+        renderer_version="public-projection.v1",
+        checker="sql_oracle.v1" if certifies else None,
+        projection_digest="a" * 64,
+        question_revision_hash="b" * 64,
+    )
+
+
+def _witness_verdict(status: str):
+    from app.learning.ambiguity_witness import WitnessVerdict
+
+    return WitnessVerdict(
+        status=status,
+        checked_by="PROFILE_CHECKER" if status.startswith("CONFIRMED") else "STRUCTURAL_RULES",
+        executed=status.startswith(("CONFIRMED", "REFUSED")),
+        reason="recorded by the test",
+    )
+
+
+def test_the_ambiguity_case_needs_positive_evidence_not_two_favourable_votes() -> None:
+    """Two PASS verdicts are not approval of this case any more.
+
+    Nine measured runs showed the general roles over-report an absent condition
+    on sound items, so their ambiguity verdict stopped deciding. A pass now needs
+    the server's own completeness certificate for a registered profile *and* an
+    active qualification; without both, the case is UNCERTAIN.
+    """
     combined, reasons = combine_case_verdicts(
         required_cases=(CASE_AMBIGUITY, CASE_AGREEMENT),
         by_role={
@@ -157,8 +192,40 @@ def test_both_roles_must_pass_for_a_case_to_pass() -> None:
         },
         specification=_clean_specification(),
     )
-    assert combined == {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"}
-    assert reasons == []
+    assert combined[CASE_AMBIGUITY] == "UNCERTAIN"
+    assert combined[CASE_AGREEMENT] == "PASS"
+    assert reasons == [
+        "HYBRID_COMPLETENESS_CERTIFICATE_MISSING",
+        "HYBRID_QUALIFICATION_MISSING",
+    ]
+
+    certified, certified_reasons = combine_case_verdicts(
+        required_cases=(CASE_AMBIGUITY, CASE_AGREEMENT),
+        by_role={
+            EVIDENCE_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"},
+            ADVERSARIAL_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"},
+        },
+        specification=_clean_specification(),
+        completeness=_certificate(),
+        qualification_active=True,
+    )
+    assert certified == {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"}
+    assert certified_reasons == []
+
+
+def test_a_certificate_for_an_unregistered_shape_cannot_approve_the_case() -> None:
+    combined, reasons = combine_case_verdicts(
+        required_cases=(CASE_AMBIGUITY, CASE_AGREEMENT),
+        by_role={
+            EVIDENCE_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"},
+            ADVERSARIAL_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"},
+        },
+        specification=_clean_specification(),
+        completeness=_certificate(certifies=False),
+        qualification_active=True,
+    )
+    assert combined[CASE_AMBIGUITY] == "UNCERTAIN"
+    assert reasons == ["HYBRID_COMPLETENESS_CERTIFICATE_MISSING"]
 
 
 def test_the_ambiguity_case_abstains_without_the_specification_pass() -> None:
@@ -172,7 +239,7 @@ def test_the_ambiguity_case_abstains_without_the_specification_pass() -> None:
     )
     assert combined[CASE_AMBIGUITY] == "UNCERTAIN"
     assert combined[CASE_AGREEMENT] == "PASS"
-    assert "HYBRID_SPECIFICATION_PASS_MISSING" in reasons
+    assert "HYBRID_COMPLETENESS_CERTIFICATE_MISSING" in reasons
 
 
 def test_the_specification_pass_can_only_refuse_never_approve() -> None:
@@ -199,6 +266,31 @@ def test_the_specification_pass_can_only_refuse_never_approve() -> None:
 
 
 def test_one_concrete_failure_is_not_outvoted_by_the_other_role() -> None:
+    """The conjunctive rule is unchanged for every case with a concrete defect."""
+    combined, reasons = combine_case_verdicts(
+        required_cases=(CASE_AGREEMENT,),
+        by_role={
+            EVIDENCE_AUDIT_ROLE: {CASE_AGREEMENT: "FAIL"},
+            ADVERSARIAL_AUDIT_ROLE: {CASE_AGREEMENT: "PASS"},
+        },
+    )
+    assert combined[CASE_AGREEMENT] == "FAIL"
+    assert "HYBRID_CASE_FAIL:" + CASE_AGREEMENT in reasons
+
+
+def test_a_bare_ambiguity_fail_without_a_witness_is_answered_by_the_certificate() -> None:
+    """The stated policy, with its risk written down rather than hidden.
+
+    A role that writes FAIL on this case without a witness has produced exactly
+    the impression the measured frontier could not separate from a real defect:
+    on sound controls it fired more often than not.  Such an objection is
+    therefore answered by the server's own positive completeness evidence rather
+    than deciding the item -- and only when that evidence exists.  The risk this
+    accepts is a real defect the reviewer failed to substantiate on an item that a
+    registered profile nonetheless certifies; it is bounded by the certificate's
+    own checks, by the six hard gates and by the oracle, and it is the reason the
+    profile registry is deliberately narrow.
+    """
     combined, reasons = combine_case_verdicts(
         required_cases=(CASE_AMBIGUITY, CASE_AGREEMENT),
         by_role={
@@ -206,10 +298,57 @@ def test_one_concrete_failure_is_not_outvoted_by_the_other_role() -> None:
             ADVERSARIAL_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"},
         },
         specification=_clean_specification(),
+        completeness=_certificate(),
+        qualification_active=True,
+    )
+    assert combined[CASE_AMBIGUITY] == "PASS"
+    assert combined[CASE_AGREEMENT] == "PASS"
+    assert reasons == []
+
+    # Without the certificate the same bare objection holds the item.
+    held, held_reasons = combine_case_verdicts(
+        required_cases=(CASE_AMBIGUITY, CASE_AGREEMENT),
+        by_role={
+            EVIDENCE_AUDIT_ROLE: {CASE_AMBIGUITY: "FAIL", CASE_AGREEMENT: "PASS"},
+            ADVERSARIAL_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"},
+        },
+        specification=_clean_specification(),
+        qualification_active=True,
+    )
+    assert held[CASE_AMBIGUITY] == "UNCERTAIN"
+    assert held_reasons == ["HYBRID_COMPLETENESS_CERTIFICATE_MISSING"]
+
+
+def test_a_verified_witness_fails_the_case_even_when_everything_else_passes() -> None:
+    combined, reasons = combine_case_verdicts(
+        required_cases=(CASE_AMBIGUITY, CASE_AGREEMENT),
+        by_role={
+            EVIDENCE_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"},
+            ADVERSARIAL_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"},
+        },
+        specification=_clean_specification(),
+        witness_verdicts=[_witness_verdict("CONFIRMED_MATERIAL")],
+        completeness=_certificate(),
+        qualification_active=True,
     )
     assert combined[CASE_AMBIGUITY] == "FAIL"
-    assert combined[CASE_AGREEMENT] == "PASS"
-    assert "HYBRID_CASE_FAIL:" + CASE_AMBIGUITY in reasons
+    assert "HYBRID_WITNESS_CONFIRMED_MATERIAL" in reasons
+
+
+def test_an_unverified_witness_holds_the_item_rather_than_failing_it() -> None:
+    combined, reasons = combine_case_verdicts(
+        required_cases=(CASE_AMBIGUITY,),
+        by_role={
+            EVIDENCE_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS"},
+            ADVERSARIAL_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS"},
+        },
+        specification=_clean_specification(),
+        witness_verdicts=[_witness_verdict("UNVERIFIABLE")],
+        completeness=_certificate(),
+        qualification_active=True,
+    )
+    assert combined[CASE_AMBIGUITY] == "UNCERTAIN"
+    assert "HYBRID_WITNESS_UNVERIFIED" in reasons
 
 
 def test_uncertain_never_becomes_pass() -> None:

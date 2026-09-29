@@ -3,6 +3,32 @@
 from typing import Any
 
 
+def _fixture_profile(question_type: str) -> str | None:
+    """The one registered profile this synthetic fixture can honestly satisfy."""
+    return "P-DISCRETE" if question_type in {"NUMERIC", "SHORT_TEXT", "EXPLANATION"} else None
+
+
+def _fixture_conventions(question_type: str) -> list[dict[str, str]]:
+    if _fixture_profile(question_type) != "P-DISCRETE":
+        return []
+    return [
+        {
+            "key": "DATA_COMPLETENESS",
+            "statement": (
+                "[FAKE TEST FIXTURE] The synthetic example states all the data the "
+                "answer is computed from."
+            ),
+        },
+        {
+            "key": "BOUNDARY_INCLUSION",
+            "statement": (
+                "[FAKE TEST FIXTURE] The synthetic example states which boundary "
+                "points count."
+            ),
+        },
+    ]
+
+
 def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
     if schema == "PracticeHintOutput":
         return {
@@ -64,8 +90,30 @@ def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
         proposed_statement = (
             "[FAKE TEST FIXTURE] The proposed solution ignores the governing course rule."
         )
+        conditions = list(blueprint.get("conditions") or [])
+        task_facts = [
+            {
+                "fact_id": f"fixture-condition-{index}",
+                "role": "GIVEN",
+                "origin": "PROBLEM_DATA",
+                "statement": condition,
+                "source_span_id": None,
+            }
+            for index, condition in enumerate(conditions, start=1)
+        ] or [
+            {
+                "fact_id": "fixture-given-1",
+                "role": "GIVEN",
+                "origin": "PROBLEM_DATA",
+                "statement": (
+                    "[FAKE TEST FIXTURE] The supplied synthetic example is the whole "
+                    "problem data."
+                ),
+                "source_span_id": None,
+            }
+        ]
         return {
-            "schema_version": "question-author-output.v3",
+            "schema_version": "question-author-output.v4",
             "question_text": (
                 proposed_statement
                 + " Identify the violated rule, explain the error, and correct the statement."
@@ -120,6 +168,24 @@ def fixture_output(schema: str, context: dict[str, Any]) -> dict[str, Any]:
                 }
             ],
             "source_refs": [source_id],
+            # A contract, so the fixture exercises the new author path.  It claims
+            # a profile only where the fixture's own shape actually satisfies that
+            # profile's requirements; a synthetic fixture that claimed a profile
+            # it does not satisfy is exactly what the server refuses, and the
+            # integration tests need one certifiable shape to follow the pass
+            # path end to end.
+            "task_contract": {
+                "task_boundary": (
+                    "[FAKE TEST FIXTURE] Answer the synthetic exercise using only the "
+                    "supplied material."
+                ),
+                "facts": task_facts,
+                "conventions": _fixture_conventions(blueprint["question_type"]),
+                "answer_equivalence": "EXACT",
+                "equivalence_note": None,
+                "profile_id": _fixture_profile(blueprint["question_type"]),
+                "profile_version": 1 if _fixture_profile(blueprint["question_type"]) else None,
+            },
         }
     if schema == "AssessmentGradeProposal":
         return {

@@ -20,11 +20,17 @@ from app.learning.models import Contract, Identifier, Text
 from app.learning.provider import ProviderCallFailure
 from app.learning.question_blueprint import Hex64, QuestionBlueprint
 from app.learning.question_evidence import QuestionEvidencePack
+from app.learning.task_spec import (
+    StudentVisibleTaskSpec,
+    TaskContractDraft,
+    TaskSpecError,
+    build_task_spec,
+)
 
-QUESTION_AUTHOR_PROMPT_VERSION: Final = "question-author.v3"
-QUESTION_AUTHOR_SCHEMA_VERSION: Final = "question-author-output.v3"
+QUESTION_AUTHOR_PROMPT_VERSION: Final = "question-author.v4"
+QUESTION_AUTHOR_SCHEMA_VERSION: Final = "question-author-output.v4"
 RULE_VIOLATION_POLICY_VERSION: Final = "question-rule-violation-policy-v1"
-PROMPT_PATH: Final = Path(__file__).with_name("prompts") / "question_author_v3.md"
+PROMPT_PATH: Final = Path(__file__).with_name("prompts") / "question_author_v4.md"
 
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 
@@ -76,7 +82,7 @@ class RuleViolationAnalysis(Contract):
 class QuestionAuthorOutput(Contract):
     """The model-authored fields; everything authoritative remains in the blueprint."""
 
-    schema_version: Literal["question-author-output.v3"] = QUESTION_AUTHOR_SCHEMA_VERSION
+    schema_version: Literal["question-author-output.v4"] = QUESTION_AUTHOR_SCHEMA_VERSION
     question_text: Text
     options: list[ShortText] = Field(default_factory=list, max_length=10)
     candidate_answer: Text = Field(repr=False)
@@ -85,6 +91,11 @@ class QuestionAuthorOutput(Contract):
     rule_violation_analysis: RuleViolationAnalysis | None = None
     solution_steps: list[AuthorSolutionStep] = Field(min_length=1, max_length=12, repr=False)
     source_refs: list[Identifier] = Field(min_length=1, max_length=20)
+    # The author's statement of what the learner can see.  Optional so a stored
+    # row written before this field existed still validates and still reproduces
+    # its own revision identity; the identity function drops the key when it is
+    # absent rather than hashing a null the old payload never had.
+    task_contract: TaskContractDraft | None = None
 
     @model_validator(mode="after")
     def consecutive_steps_and_unique_sources(self) -> QuestionAuthorOutput:
@@ -97,6 +108,29 @@ class QuestionAuthorOutput(Contract):
         return self
 
 
+def _revision_payload(output: QuestionAuthorOutput) -> dict[str, Any]:
+    """The exact author output that the revision identity covers.
+
+    `task_contract` is excluded, and the boundary is deliberate rather than
+    convenient.  The revision identity is what a stored blind solve, receipt and
+    provenance row are keyed on; adding a key to it would change the identity of
+    every future item and could not be reproduced for the rows already stored,
+    which carry no contract at all.
+
+    The contract is instead bound to the item by its own digest: the completeness
+    certificate and every hybrid receipt record the public projection digest
+    together with the revision hash, so a contract changed under a fixed revision
+    invalidates the evidence that cited it instead of quietly continuing to
+    describe a different question.  What this does not claim is that a contract
+    change alone forces a new revision -- a changed stem or condition does, because
+    those are in the identity, and an unchanged stem with a changed contract loses
+    the certificate that named it.
+    """
+    payload = output.model_dump(mode="json")
+    payload.pop("task_contract", None)
+    return payload
+
+
 def _question_revision_identity(
     *,
     blueprint_hash: str,
@@ -106,7 +140,7 @@ def _question_revision_identity(
     revision_payload = {
         "blueprint_hash": blueprint_hash,
         "evidence_pack_hash": evidence_pack_hash,
-        "author_output": output.model_dump(mode="json"),
+        "author_output": _revision_payload(output),
     }
     return hashlib.sha256(
         json.dumps(
@@ -142,9 +176,14 @@ class AuthorProviderRun(Contract):
     protocol: ShortText
     region: ShortText
     role: Literal["QUESTION_AUTHOR"]
-    template_version: Literal["question-author.v1", "question-author.v2", "question-author.v3"]
+    template_version: Literal[
+        "question-author.v1", "question-author.v2", "question-author.v3", "question-author.v4"
+    ]
     schema_version: Literal[
-        "question-author-output.v1", "question-author-output.v2", "question-author-output.v3"
+        "question-author-output.v1",
+        "question-author-output.v2",
+        "question-author-output.v3",
+        "question-author-output.v4",
     ]
     input_hash: Hex64
     started_at: ShortText
@@ -189,6 +228,21 @@ class AuthoredQuestionCandidate(Contract):
     public_question: PublicAuthoredQuestion
     private_solution: PrivateCandidateSolution = Field(repr=False)
     provider_run: AuthorProviderRun
+    # The author's student-visible task contract, when it produced one.  It is not
+    # part of the revision identity (see _revision_payload); it is what lets the
+    # completeness gate make a positive decision instead of asking a reviewer to
+    # guess what the learner can see.
+    task_contract: TaskContractDraft | None = None
+
+    def task_spec(self, blueprint: QuestionBlueprint) -> StudentVisibleTaskSpec | None:
+        """The server-owned contract for this candidate, or None when it has none."""
+        if self.task_contract is None:
+            return None
+        return build_task_spec(
+            self.task_contract,
+            blueprint=blueprint,
+            question_revision_hash=self.question_revision,
+        )
 
     def revision_identity(self) -> str:
         """Recompute the immutable revision from the split public/private candidate."""
@@ -346,6 +400,30 @@ def _failure_from_provider(failure: ProviderCallFailure) -> AuthorGenerationErro
     )
 
 
+def _assert_contract_scope(
+    spec: StudentVisibleTaskSpec, *, evidence: QuestionEvidencePack
+) -> None:
+    """Every span the contract cites must be a span the author was given.
+
+    A contract is the record of what the learner can see, so a fact bound to a
+    span that is not in the evidence pack would be a condition the learner cannot
+    reach -- exactly the defect the contract exists to make impossible.
+    """
+    allowed = set(evidence.evidence_ids)
+    offending = sorted(
+        {
+            fact.source_span_id
+            for fact in spec.facts
+            if fact.source_span_id and fact.source_span_id not in allowed
+        }
+    )
+    if offending:
+        raise AuthorGenerationError(
+            "AUTHOR_CONTRACT_SCOPE",
+            f"The task contract cites spans outside the evidence pack: {offending}",
+        )
+
+
 def author_question(
     provider: AuthorProvider,
     *,
@@ -394,15 +472,28 @@ def author_question(
     _assert_output_scope(output, blueprint=blueprint, evidence=evidence)
     blueprint_hash = blueprint.identity()
     evidence_hash = evidence.identity()
+    revision = _question_revision_identity(
+        blueprint_hash=blueprint_hash,
+        evidence_pack_hash=evidence_hash,
+        output=output,
+    )
+    if output.task_contract is not None:
+        try:
+            _assert_contract_scope(
+                build_task_spec(
+                    output.task_contract,
+                    blueprint=blueprint,
+                    question_revision_hash=revision,
+                ),
+                evidence=evidence,
+            )
+        except TaskSpecError as error:
+            raise AuthorGenerationError(error.code, str(error)) from error
     return AuthoredQuestionCandidate(
         blueprint_id=blueprint.blueprint_id,
         blueprint_hash=blueprint_hash,
         evidence_pack_hash=evidence_hash,
-        question_revision=_question_revision_identity(
-            blueprint_hash=blueprint_hash,
-            evidence_pack_hash=evidence_hash,
-            output=output,
-        ),
+        question_revision=revision,
         course_id=blueprint.course_id,
         node_id=blueprint.node_id,
         objective_id=blueprint.objective_id,
@@ -423,4 +514,5 @@ def author_question(
             source_refs=output.source_refs,
         ),
         provider_run=run,
+        task_contract=output.task_contract,
     )
