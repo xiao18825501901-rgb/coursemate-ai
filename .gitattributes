@@ -1,0 +1,13 @@
+# Line endings are part of correctness for anything the Linux host executes.
+#
+# Measured defect: the release tarball shipped every ops shell script with CRLF
+# endings.  On the host bash then reads `set -euo pipefail` as an option named
+# `pipefail\r` and refuses with "invalid option name", so
+# production_backup_window.sh, backup_v2.sh, restore_v2.sh, monitor_v2.sh and
+# production_switch_four_changes.sh were all non-functional as deployed -- a
+# wrapper that silently cannot run is worse than a missing one, because the
+# operator believes the backup happened.  The index was already LF; the working
+# tree, which the release was packaged from, was not.  These rules make the
+# checked-out form LF regardless of core.autocrlf.
+*.sh text eol=lf
+*.py text eol=lf
