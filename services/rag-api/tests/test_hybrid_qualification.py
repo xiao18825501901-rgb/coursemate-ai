@@ -71,7 +71,7 @@ def test_mutations_change_the_revision_and_the_declared_field() -> None:
 def test_a_mutation_that_cannot_apply_yields_no_row_rather_than_a_fake_defect() -> None:
     # No correct_option_index in the solution: the mutation must not produce a
     # "defect" that is not there, because that would count a control as a negative.
-    base = _inputs()
+    base = _inputs(question_text="Explain what makes a schedule recoverable.")
     assert duplicate_correct_option(base) is None
     rows = build_rows([("family-noop", base)])
     assert {row.target_case for row in rows if row.label == NEGATIVE_LABEL} == {
@@ -127,6 +127,26 @@ def test_the_missing_condition_mutation_removes_the_operative_givens() -> None:
     # The numeric givens are gone, so a unique answer is no longer determined.
     assert "1.0" not in mutated.question_text
     assert "MinPts = 3" not in mutated.question_text
+
+
+def test_an_inline_numeric_given_is_replaced_rather_than_left_alone() -> None:
+    """A one-clause stem cannot be trimmed, so the given is removed in place.
+
+    Without this, an item like "Compute 2 + 3." produced no ambiguity negative at
+    all, which is why the ambiguity case came out unmeasured rather than
+    measured-and-clean.
+    """
+    base = _inputs(question_text="Compute 2 + 3 as base-ten integers.")
+    mutated = missing_condition(base)
+    assert mutated is not None
+    assert "2" not in mutated.question_text.replace("unspecified", "")
+    assert "unspecified" in mutated.question_text
+    assert mutated.question_revision != base.question_revision
+
+
+def test_a_stem_with_no_given_at_all_still_yields_no_negative() -> None:
+    base = _inputs(question_text="Explain what makes a schedule recoverable.")
+    assert missing_condition(base) is None
 
 
 def test_a_prose_stem_with_no_removable_given_yields_no_ambiguity_negative() -> None:
@@ -249,10 +269,59 @@ def test_a_case_without_negatives_is_not_qualified() -> None:
         observed_model_facts={},
         min_positives_per_case=3,
         min_negatives_per_case=3,
+        min_independent_negatives=0,
     )
     assert decision["status"] == "DRAFT"
     assert decision["cases"] == []
     assert CASE_AMBIGUITY in decision["unmeasured_cases"]
+
+
+def test_a_thin_but_clean_sample_cannot_qualify_a_method() -> None:
+    """A small clean run is not evidence of a clean procedure.
+
+    This round is the evidence: 18 negatives recorded a pass, and the same
+    runner with 40 negatives recorded three false accepts.  The global floor is
+    what stops a thin sample from granting a durable permission.
+    """
+    outcomes = [
+        _outcome(
+            label=NEGATIVE_LABEL,
+            family=f"n{index}",
+            target_case=CASE_AMBIGUITY,
+            verdicts={CASE_AMBIGUITY: "FAIL"},
+        )
+        for index in range(4)
+    ]
+    outcomes.extend(
+        _outcome(
+            label=POSITIVE_LABEL,
+            family=f"p{index}",
+            verdicts={CASE_AMBIGUITY: "PASS"},
+        )
+        for index in range(4)
+    )
+    strict = qualify(
+        outcomes,
+        method_identity="a" * 64,
+        observed_model_facts={},
+        min_positives_per_case=3,
+        min_negatives_per_case=3,
+        min_independent_negatives=16,
+    )
+    assert strict["sample_sufficient"] is False
+    assert strict["status"] == "DRAFT"
+    assert strict["cases"] == []
+    # The same measurements would have qualified without the global floor, which
+    # is exactly the failure this guard exists to prevent.
+    lax = qualify(
+        outcomes,
+        method_identity="a" * 64,
+        observed_model_facts={},
+        min_positives_per_case=3,
+        min_negatives_per_case=3,
+        min_independent_negatives=0,
+    )
+    assert lax["status"] == "SCOPED_QUALITY_ACCEPTED"
 
 
 def test_release_metrics_separate_false_accept_from_false_reject() -> None:

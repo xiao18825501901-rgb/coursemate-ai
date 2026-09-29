@@ -116,7 +116,16 @@ def _strip_condition(text: str) -> str:
     if kept_clauses and len(kept_clauses) < len(clauses):
         return ", ".join(kept_clauses)
 
-    # Nothing the answer depends on can be removed by deletion.
+    # The givens are inline in a clause that cannot be dropped -- e.g. "Compute
+    # 2 + 3 as base-ten integers."  Replacing them with an explicitly
+    # unspecified quantity still removes the datum the answer depends on, which
+    # is what makes the item under-specified.
+    if _NUMBER.search(text):
+        replaced = _NUMBER.sub("an unspecified value", text)
+        if replaced != text:
+            return replaced
+
+    # Nothing the answer depends on can be removed by deletion or substitution.
     return text
 
 

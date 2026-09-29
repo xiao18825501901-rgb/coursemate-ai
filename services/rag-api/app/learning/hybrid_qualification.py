@@ -297,14 +297,22 @@ def qualify(
     observed_model_facts: dict[str, Any],
     min_positives_per_case: int,
     min_negatives_per_case: int,
+    min_independent_negatives: int,
 ) -> dict[str, Any]:
     """Turn measurements into a scoped qualification decision.
 
     A case is only admitted to the qualification when it has at least
     ``min_positives_per_case`` positives and ``min_negatives_per_case``
-    negatives from at least as many *independent families* as negatives.  Cases
-    below the floor are reported as unmeasured and are therefore not in the
-    qualification's case set, which leaves them fail-closed at publication.
+    negatives, and when *no* item anywhere was wrongly released.
+
+    The floors matter, and this round is the evidence for why.  A run with 30
+    rows and 18 negatives recorded a passing qualification; the same procedure
+    on 67 rows and 40 negatives recorded three false accepts and refused.  A
+    clean small sample is not evidence of a clean procedure, so the floors are
+    deliberately high and the independent-negative count is checked globally,
+    not only per case.  Cases below the floor are reported as unmeasured and are
+    therefore absent from the qualification's case set, which leaves them
+    fail-closed at publication.
     """
     summary = summarise(outcomes)
     scopes = summary["scopes"]
@@ -321,12 +329,15 @@ def qualify(
         entry["negatives"] += tally["negatives"]
         entry["false_accept"] += tally["false_accept"]
         entry["scopes"].append({"language": language, "domain": domain, **tally})
+    independent_negatives = summary["independent_negative_families"]
+    sample_sufficient = independent_negatives >= min_independent_negatives
     for case, entry in per_case_evidence.items():
         if (
             entry["positives"] >= min_positives_per_case
             and entry["negatives"] >= min_negatives_per_case
             and entry["false_accept"] == 0
             and summary["release"]["false_accept"] == 0
+            and sample_sufficient
         ):
             admitted_cases.add(case)
             for scope in entry["scopes"]:
@@ -343,6 +354,8 @@ def qualify(
         "languages": sorted(admitted_languages),
         "domains": sorted(admitted_domains),
         "unmeasured_cases": sorted(set(per_case_evidence) - admitted_cases),
+        "sample_sufficient": sample_sufficient,
+        "min_independent_negatives": min_independent_negatives,
         "per_case_evidence": per_case_evidence,
         "summary": summary,
         "observed_model_facts": observed_model_facts,
@@ -351,10 +364,15 @@ def qualify(
             "hard gates PASS and no injected defect; they are controls, not human gold.",
             "INJECTED_DEFECT rows carry a recorded byte-level mutation that must break "
             "a named case, so their label is decidable by construction.",
+            "A mutation that cannot actually be applied produces no row; the gap is "
+            "recorded in mutation_coverage rather than filled with a fake defect.",
             "The release decision is the conjunction of both reviewers PASSing every "
             "required case; false-accept is measured on that conjunction.",
             "A hosted model alias cannot be pinned; the served revision is recorded as "
             "an observation and must be re-sampled periodically.",
+            "A clean small sample is not evidence of a clean procedure: the same "
+            "runner recorded a pass at 18 negatives and three false accepts at 40. "
+            "The floors therefore apply to the independent-negative count as well.",
             "No paired same-sample comparison against a healthy historical reviewer "
             "exists, so quality non-inferiority is NOT established by this record.",
         ],

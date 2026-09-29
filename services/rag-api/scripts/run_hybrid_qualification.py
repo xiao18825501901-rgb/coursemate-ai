@@ -169,12 +169,16 @@ def main() -> int:
     parser.add_argument("--node", required=True)
     parser.add_argument("--private-course", required=True)
     parser.add_argument("--out", required=True)
-    parser.add_argument("--per-type", type=int, default=4)
+    parser.add_argument("--per-type", type=int, default=8)
     parser.add_argument("--max-output-tokens", type=int, default=4000)
     parser.add_argument("--record", action="store_true")
     parser.add_argument("--qualification-id", default="hybrid-qual-live-v1")
     parser.add_argument("--min-positives", type=int, default=3)
-    parser.add_argument("--min-negatives", type=int, default=3)
+    # The floors are high on purpose.  A run with 18 negatives recorded a passing
+    # qualification and the same procedure with 40 negatives recorded three false
+    # accepts, so a thin clean sample must not be able to qualify a method.
+    parser.add_argument("--min-negatives", type=int, default=8)
+    parser.add_argument("--min-independent-negatives", type=int, default=16)
     args = parser.parse_args()
 
     settings = Settings()
@@ -281,6 +285,7 @@ def main() -> int:
         },
         min_positives_per_case=args.min_positives,
         min_negatives_per_case=args.min_negatives,
+        min_independent_negatives=args.min_independent_negatives,
     )
     artifact = qualification_artifact(
         rows=rows,
