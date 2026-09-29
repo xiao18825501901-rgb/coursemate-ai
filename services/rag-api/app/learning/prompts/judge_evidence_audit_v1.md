@@ -33,24 +33,75 @@ Answer **every** required case with its original meaning, using
   boundary conditions make the task adequately specified. Concise wording is not
   ambiguity, and you must not assume a convention that is not stated. `PASS`
   means "clear and fully specified under the supplied rules".
+
+  Before you answer `PASS`, actively confirm that the stem itself states every
+  datum the answer depends on. Ask each of these explicitly and mark `FAIL` when
+  one is missing, `UNCERTAIN` only when the supplied material genuinely cannot
+  settle it:
+
+  1. Does the stem give the concrete values the answer needs, or does it ask for
+     a result from values the reader is never told?
+  2. Are the units, the scale, and the rounding convention stated where a
+     numeric answer is required?
+  3. Are the boundary and edge conventions stated -- whether an interval or
+     neighbourhood includes its own point, whether a relation is directed or
+     undirected, whether a set or a bag is meant?
+  4. For data or query tasks, are the schema, the dialect, the ordering, and the
+     treatment of NULL and duplicate rows stated?
+  5. Does the task stay inside what the supplied sources actually support?
+
+  A stem that names a quantity the reader cannot determine is `FAIL` for this
+  case even when the rest of the wording is precise.
+
 * **question.answer_agreement.v1** -- the two anonymised solutions reach the
   same substantive result **and** are justified for this item. Two matching
   wrong answers are not agreement. An executable result proves only its stated
   dataset and scope, never universal equivalence.
+
+  Compare the **results**, not the prose: read the final step of each solution
+  and the answer each one actually arrives at. If the two solutions state
+  materially different concrete results, this case is `FAIL` -- including when
+  one solution announces the difference politely, or when one restates the other
+  while its own steps compute something else. Surface similarity of the opening
+  sentences is never sufficient. Also mark `FAIL` when the two agree on an
+  answer that the cited sources do not support, and `UNCERTAIN` when a solution
+  is too incomplete to yield a comparable result.
+
 * **question.mcq_distractor_quality.v1** (when required) -- exactly one option
   is correct under the stated task and every other option is meaningfully wrong,
   not merely a different string. Look for paraphrased duplicates of the correct
-  answer and for wording that reveals the key without the target knowledge.
+  answer and for wording that reveals the key without the target knowledge. If
+  any distractor states the same thing as the correct option in other words, or
+  is itself defensibly correct, this case is `FAIL`.
 * **question.rule_violation_quality.v1** (when required) -- the controlling rule
   actually applies, the identified step really violates it, and the supplied
   correction is supported. Quoting a rule without its prerequisites is not
-  enough.
+  enough. If the cited rule has been stripped of the condition that makes it
+  applicable, or the correction is not derivable from the rule as quoted, this
+  case is `FAIL`.
 
 Use `FAIL` only for a defect you can state concretely; use `UNCERTAIN` when the
 supplied material genuinely does not settle the question. Never use `PASS`
 because publication is urgent, because both solutions agree, or because a
 provider seems confident. Do not report a numeric confidence as evidence of
 correctness and do not reveal hidden chain-of-thought.
+
+Do not default to `PASS`. If you checked everything you were asked to check and
+found nothing wrong, `PASS` is correct -- but a `PASS` that did not run the
+checks above is worse than an honest `UNCERTAIN`.
+
+## How to cite
+
+`quote` is checked **character by character** against the cited span (only runs
+of whitespace are normalised). Copy the characters; do not paraphrase, do not
+tidy the wording, do not merge two separate places into one quote.
+
+* Cite only spans you were actually given; an id you invent is not a reference.
+* Prefer one short, exactly copied fragment over several approximate ones.
+* If you cannot copy an exact fragment for a point, cite the span id without a
+  quotation rather than writing an approximate one. A quotation that does not
+  match is treated as a failed reference and refuses the whole item, so an
+  approximate quote is worse than no quote.
 
 ## Output
 

@@ -145,6 +145,8 @@ def evaluate_row(
     for outcome in (first, second):
         if not outcome.verification.complete:
             reasons.append(f"HYBRID_REVIEW_REFERENCES_UNVERIFIED:{outcome.role}")
+        for reason in outcome.substantiation_reasons():
+            reasons.append(f"{reason}:{outcome.role}")
     released = not reasons and all(v == "PASS" for v in combined.values())
     return RowOutcome(
         row_id=row.row_id,
@@ -172,8 +174,11 @@ def summarise(outcomes: list[RowOutcome]) -> dict[str, Any]:
         required case, which is the actual publication rule.  This is the number
         that a false-accept / false-reject claim must be based on.
     ``scopes``
-        Per-case.  Useful for finding *which* case a reviewer is weak on, and
-        never on its own a statement about release risk.
+        Per-case, attributed correctly.  A negative row only contributes to the
+        tally of the case its injected defect targets: when a row's defect is an
+        under-specified stem, a `PASS` on `answer_agreement` is not a false
+        accept, it is the correct answer to a case that was not broken.  Counting
+        it as one would inflate every case's error rate with other cases' rows.
     """
     overall = CaseTally()
     scopes: dict[tuple[str, str, str], CaseTally] = {}
@@ -200,6 +205,10 @@ def summarise(outcomes: list[RowOutcome]) -> dict[str, Any]:
         else:
             release_false_reject += 1
         for case, verdict in outcome.case_outcomes.items():
+            # A negative row is evidence about exactly one case: the one its
+            # defect targets.
+            if is_negative and outcome.target_case != case:
+                continue
             key = (case, outcome.language, outcome.domain)
             tally = scopes.setdefault(key, CaseTally())
             for target in (overall, tally):
@@ -267,7 +276,16 @@ def summarise(outcomes: list[RowOutcome]) -> dict[str, Any]:
         "negative_rows": negative_rows,
         "positive_rows": positive_rows,
         "zero_false_accept_upper_bound_95": (
-            zero_false_accept_upper_bound(independent) if independent else None
+            zero_false_accept_upper_bound(independent)
+            if independent and release_false_accept == 0
+            else None
+        ),
+        "zero_false_accept_bound_applicable": release_false_accept == 0,
+        "zero_false_accept_bound_note": (
+            "The one-sided bound is only defined for a zero-false-accept "
+            "observation; it is reported as null when any item was wrongly "
+            "released, because a bound on an event that did occur is not a "
+            "risk statement."
         ),
     }
 
@@ -297,15 +315,17 @@ def qualify(
     for key, tally in scopes.items():
         case, language, domain = key.split("|", 2)
         entry = per_case_evidence.setdefault(
-            case, {"positives": 0, "negatives": 0, "scopes": []}
+            case, {"positives": 0, "negatives": 0, "false_accept": 0, "scopes": []}
         )
         entry["positives"] += tally["positives"]
         entry["negatives"] += tally["negatives"]
+        entry["false_accept"] += tally["false_accept"]
         entry["scopes"].append({"language": language, "domain": domain, **tally})
     for case, entry in per_case_evidence.items():
         if (
             entry["positives"] >= min_positives_per_case
             and entry["negatives"] >= min_negatives_per_case
+            and entry["false_accept"] == 0
             and summary["release"]["false_accept"] == 0
         ):
             admitted_cases.add(case)

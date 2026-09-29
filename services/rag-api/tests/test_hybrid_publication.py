@@ -102,7 +102,14 @@ class StubJudgeProvider:
                     "assertion": f"stub checked {case}",
                     "evidence_refs": refs,
                     "solution_step_ids": [],
-                    "counterexample": None,
+                    # A real refusal has to say what is wrong with the item; an
+                    # unsubstantiated FAIL is downgraded to UNCERTAIN by the
+                    # substantiation pass, so the stub supplies one.
+                    "counterexample": (
+                        "the stub found a concrete counterexample for " + case
+                        if self.verdict == "FAIL"
+                        else None
+                    ),
                     "missing_conditions": [],
                 }
             )

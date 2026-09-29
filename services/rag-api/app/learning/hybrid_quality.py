@@ -381,6 +381,8 @@ class HybridQualityService:
         for outcome in (first, second):
             if not outcome.verification.complete:
                 reasons.append(f"HYBRID_REVIEW_REFERENCES_UNVERIFIED:{outcome.role}")
+            for reason in outcome.substantiation_reasons():
+                reasons.append(f"{reason}:{outcome.role}")
         projected = project_case_verdicts(combined)
 
         language = inputs.language

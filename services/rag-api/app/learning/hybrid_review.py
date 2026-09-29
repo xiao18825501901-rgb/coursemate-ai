@@ -191,6 +191,50 @@ def project_case_verdicts(case_outcomes: dict[str, str]) -> dict[str, str]:
     return projected
 
 
+def substantiated_case_verdicts(findings: JudgeFindings) -> tuple[dict[str, str], list[str]]:
+    """Enforce that a verdict is supported by what the reviewer itself reported.
+
+    A bare verdict is not evidence.  Two internal contradictions are therefore
+    resolved deterministically, in the reviewer's own terms, before the two roles
+    are combined:
+
+    * a **``FAIL`` with nothing behind it** -- no counterexample and no missing
+      condition -- is not a defect finding.  Treating it as one would let a
+      reviewer block a sound question arbitrarily, which is indistinguishable
+      from a reviewer that is simply guessing.  It is downgraded to
+      ``UNCERTAIN``.
+    * an **``ambiguity`` ``PASS`` while the same finding lists missing
+      conditions** contradicts itself: the reviewer named a datum the answer
+      needs and still certified the item as fully specified.  It is downgraded to
+      ``UNCERTAIN``.
+
+    Everything else is passed through unchanged.  This never turns anything into
+    a ``PASS``; it can only remove an unsupported decision and leave the item
+    under review.
+    """
+    verdicts: dict[str, str] = {}
+    reasons: list[str] = []
+    for finding in findings.findings:
+        verdict = finding.verdict
+        if verdict == "FAIL":
+            has_counterexample = bool(
+                finding.counterexample and finding.counterexample.strip()
+            )
+            has_missing = bool(finding.missing_conditions)
+            if not (has_counterexample or has_missing):
+                verdict = "UNCERTAIN"
+                reasons.append("HYBRID_UNSUBSTANTIATED_FAIL:" + finding.case)
+        elif (
+            verdict == "PASS"
+            and finding.case == CASE_AMBIGUITY
+            and finding.missing_conditions
+        ):
+            verdict = "UNCERTAIN"
+            reasons.append("HYBRID_SELF_CONTRADICTED_PASS:" + finding.case)
+        verdicts[finding.case] = verdict
+    return verdicts, reasons
+
+
 def combine_case_verdicts(
     *,
     required_cases: tuple[str, ...],

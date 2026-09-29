@@ -44,84 +44,123 @@ two billable requests; no retry.
 So the pipeline is real: the model returns traceable, quoted, schema-valid
 findings, and the server verifies the references rather than trusting them.
 
-## 3. The qualification run
+## 3. The qualification runs (three measured iterations)
 
 * Runner: `scripts/run_hybrid_qualification.py`
 * Data: a restored **copy** of the live database (the live file was only read).
 * Target: workspace `0f364c85-3010-4b91-811c-2e6333111a18` (the blocked private
   SQL course's own workspace), node `auto-node-9e012c6325c909bff3a56780b804`,
   evidence `WORKSPACE_PRIVATE`, detected language `en`.
-* 12 server-authored items (4 NUMERIC, 4 MCQ_SINGLE, 4 rule-policy EXPLANATION),
-  authored by the same production author + blind-solver pair; 0 authoring
-  failures.
-* 43 evaluation rows: 11 `POSITIVE_CONTROL`, 29 `INJECTED_DEFECT`.
-* 3 rows failed with `HYBRID_REVIEW_PROVIDER_FAILED` and were **not retried** —
-  the recorded-run contract working as designed.
-* Dataset digest `28847c47d17867189545c6628aaf1626da66796ea5100c9f20fb3e77d8e5501b`.
+* Items: server-authored NUMERIC / MCQ_SINGLE / rule-policy EXPLANATION items
+  produced by the same production author + blind-solver pair.
 
-### 3.1 The release decision (what actually gates publication)
+Each iteration changed only the *measurement* or the *reviewer instructions*, and
+each was re-measured end to end against real DeepSeek calls.
 
-An item is released only when **both** reviewers `PASS` **every** required case.
+| | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| reviewer prompt revision | v1 | v2 | v2 |
+| evaluation rows | 43 | 43 | 27 |
+| positives / negatives | 11 / 29 | 12 / 30 | 10 / 16 |
+| **release false accept** | 9 (31.0 %) | 3 (10.0 %) | **1 (6.25 %)** |
+| release precision | 0.50 | 0.667 | **0.875** |
+| release recall | 0.818 | 0.50 | 0.70 |
+| false rejects | 2 | 6 | 3 |
+| provider row failures (no retry) | 3 | 1 | 1 |
+| authoring failures | 0 | 0 | 2 |
+| caught `DISAGREEING_SOLUTION` | 5 / 12 | 11 / 11 | 9 / 10 |
+| caught `DUPLICATE_CORRECT_OPTION` | 4 / 4 | 4 / 4 | 4 / 4 |
+| caught `UNSUPPORTED_RULE` | 3 / 3 | 4 / 4 | 2 / 2 |
+| caught `MISSING_CONDITION` | 8 / 10 | 8 / 11 | *no rows* |
+| decision | `DRAFT` | `DRAFT` | `DRAFT` |
 
-| Metric | Value |
+All three runs ended with **no qualification row written**.
+
+### 3.1 What each iteration actually fixed
+
+**Run 1 → run 2 — a measurement defect, not a reviewer weakness.**
+The `DISAGREEING_SOLUTION` mutation wrote its sentinel into an unused payload key
+while the blind solution's steps still showed the original result, so a reviewer
+reading those steps could legitimately report agreement.  The mutation now
+derives a concrete contradicting result from the author's answer and rewrites
+the final step as well.  The effect was decisive: `5/12 → 11/11` caught.  The
+earlier 58 % "false accept" on that defect was **the mutation's fault, and it is
+withdrawn as a statement about the reviewers**.  The prompt was also strengthened
+with explicit under-specification and disagreement checklists and an exact-quote
+discipline.
+
+**Run 2 → run 3 — two corrections.**
+
+1. *Metric attribution.* A negative row was being counted as a negative for
+   **every** case it reported, so an under-specified stem that correctly passed
+   `answer_agreement` still counted as an agreement false accept.  Per-case
+   tallies are now attributed only to the case a row's defect targets.  The
+   run-1/run-2 per-case rates quoted in the previous revision of this document
+   were inflated by that error.
+2. *Mutation substantiation.* `MISSING_CONDITION` was firing on prose stems by
+   deleting a trailing sentence, which does not make an item under-specified.  It
+   now fires only when it removes something the answer depends on -- an explicit
+   condition clause or a numeric given -- and otherwise produces **no row**.
+
+### 3.2 Run 3 in full (the most recent measurement)
+
+* 27 rows: 10 `POSITIVE_CONTROL`, 16 `INJECTED_DEFECT`; 2 authoring failures and
+  1 provider row failure, none retried.
+* Dataset digest `5816518a6269102a025a08ecade587a1b87cfd534c3cab6581eab40ddcfd6dd8`.
+* Reviewer method identity `bec75861e73e597d9cb5a02c4d98c0c99db6165567cc422af895e5ed707ebaef`
+  (prompt revisions `judge-evidence-audit.v2` / `judge-adversarial-audit.v2`).
+
+| metric | value |
 |---|---|
-| positive rows released (`true_accept`) | 9 / 11 |
-| positive rows refused (`false_reject`) | 2 |
-| negative rows released (**`false_accept`**) | **9 / 29** |
-| negative rows refused (`true_reject`) | 18 |
-| abstain | 2 |
-| coverage | 0.95 |
-| release precision | **0.50** |
-| release recall | 0.818 |
-| false-release rate | **0.310** |
+| true accept (positive rows released) | 7 / 10 |
+| false reject | 3 / 10 |
+| **false accept (negative rows released)** | **1 / 16** |
+| true reject | 15 |
+| abstain | 0 |
+| release precision | 0.875 |
+| release recall | 0.70 |
+| false-release rate | 0.0625 |
 
-### 3.2 Per-case false-accept (diagnostic only, not the release rule)
+Per case, correctly attributed:
 
-| case | positives | negatives | false accepts | abstain |
+| case | positives | negatives | false accepts | false rejects |
 |---|---|---|---|---|
-| `question.ambiguity.v1` | 11 | 29 | 19 (65.5 %) | 1 |
-| `question.answer_agreement.v1` | 11 | 29 | 21 (72.4 %) | 0 |
-| `question.mcq_distractor_quality.v1` | 4 | 10 | 6 (60.0 %) | 1 |
-| `question.rule_violation_quality.v1` | 3 | 11 | 7 (63.6 %) | 1 |
+| `question.ambiguity.v1` | 10 | **0** | 0 | 0 |
+| `question.answer_agreement.v1` | 10 | 10 | 2 | 1 |
+| `question.mcq_distractor_quality.v1` | 4 | 4 | 1 | 0 |
+| `question.rule_violation_quality.v1` | 3 | 2 | 0 | 0 |
 
-### 3.3 By injected defect
+The single escaped row was `rule_explanation-0:DISAGREEING_SOLUTION`.
 
-| defect | rows | wrongly released |
-|---|---|---|
-| `DUPLICATE_CORRECT_OPTION` (a distractor restates the correct option) | 4 | **0** |
-| `UNSUPPORTED_RULE` (cited rule loses its prerequisite) | 3 | **0** |
-| `MISSING_CONDITION` (an operative condition is removed from the stem) | 10 | 2 |
-| `DISAGREEING_SOLUTION` (the two solutions no longer agree) | 12 | **7** |
+### 3.3 The two remaining blockers, precisely
 
-Two honest readings of that table:
+1. **`question.ambiguity.v1` now has zero negatives.** Once the mutation stopped
+   manufacturing under-specification from prose, none of the authored SQL items
+   had a removable given: their stems carry no numeric parameters and no explicit
+   condition marker.  The ambiguity case is therefore **unmeasured**, not clean,
+   and a case with no negatives is deliberately excluded from the qualification.
+   Fixing this needs items whose stems actually state parameters -- a numeric or
+   parameterised item population, not a different prompt.
+2. **One false accept remains**, from the disagreement mutation on a rule item,
+   plus 3 false rejects -- 2 of which are the strict unverified-reference check.
+   5 rows were blocked by that check in run 3; it is doing what it was designed
+   to do (a paraphrase is not evidence), but the reviewers still re-word
+   quotations often enough to cost real false rejects.
 
-* **The reviewers do catch some real defects every time.**  A duplicated correct
-  option and a rule cited without its prerequisite were rejected 7 times out of
-  7.  That is genuine, useful behaviour.
-* **The `DISAGREEING_SOLUTION` number is partly a measurement artifact.**  The
-  mutation writes a sentinel into an `answer` key of the blind payload, while the
-  blind-solve contract's substantive fields are `conclusion` and `steps`; a
-  reviewer that reads the conclusion sees it unchanged and can reasonably report
-  agreement.  This mutation therefore does **not** cleanly separate "the reviewer
-  is weak" from "the mutation is not the defect it claims to be", and the 7/12
-  figure must not be reported as a pure reviewer error rate.
-* The `MISSING_CONDITION` result (8/10 caught) and the MCQ/rule results are the
-  least ambiguous signals available, and they are still far too weak:
-  6/10 and 7/11 false accepts are not a basis for publishing.
+### 3.4 The substantiation rule added in this round
 
-### 3.4 Two independent weak points found
+A bare verdict is not evidence, so two internal contradictions are now resolved
+server-side before the two roles are combined, using only what the reviewer
+itself reported:
 
-1. **Verbatim-quote strictness causes false rejects.**  8 rows were blocked by
-   `HYBRID_REVIEW_REFERENCES_UNVERIFIED`.  Both positive controls that were
-   "refused" show **all case verdicts `PASS`** yet were not released: the
-   reviewers' findings were sound but a citation was not a byte-exact fragment
-   of the cited span (reviewers re-wrap and lightly re-word quotations).  The
-   strict check is doing what it was designed to do — a paraphrase is not
-   evidence — but it currently costs real false rejects, and the reviewers need
-   a citation style that survives it.
-2. **The reviewers are far too permissive on under-specification and
-   disagreement.**  Even taking the mutation caveat into account, 60–66 %
-   false-accept on the MCQ and rule cases is a decisive failure.
+* a `FAIL` with **no** counterexample and **no** missing condition is downgraded
+  to `UNCERTAIN` -- an unsubstantiated refusal must not be able to block a sound
+  item, which is indistinguishable from a reviewer that is guessing;
+* an `ambiguity` `PASS` whose own finding lists missing conditions is
+  self-contradictory and is downgraded to `UNCERTAIN`.
+
+This can never create a `PASS`; it can only remove an unsupported decision and
+leave the item under review.  It is covered by four tests.
 
 ### 3.5 Decision recorded by the harness
 
@@ -132,24 +171,23 @@ Two honest readings of that table:
                       "question.rule_violation_quality.v1"]}
 ```
 
-`recorded_qualification_id = null`.  **No qualification row was written**, so
-`_resolve_qualification` returns `HYBRID_QUALIFICATION_MISSING` for every
-candidate and the gate stays closed.  This is the designed outcome: the code path
-that would have published was exercised end to end and it refused.
+`recorded_qualification_id = null` in all three runs.  **No qualification row was
+written**, so `_resolve_qualification` returns `HYBRID_QUALIFICATION_MISSING` for
+every candidate and the gate stays closed.  This is the designed outcome: the
+code path that would have published was exercised end to end and it refused.
 
-The harness also prints `zero_false_accept_upper_bound_95 = 0.2209` over 12
-independent negative families.  **That number is not applicable here** — the
-one-sided bound is only defined for a *zero* false-accept observation, and this
-run has nine.  It is reported for completeness, not as a risk claim.
+The one-sided zero-false-accept bound is now reported as `null` whenever a false
+accept occurred, with an explicit note, because a bound on an event that did
+occur is not a risk statement.
 
 ## 4. Four quality requirements — status
 
 | Original requirement | Status |
 |---|---|
-| `question.ambiguity.v1 → CLEAR` | **implemented, not qualified** (65.5 % false accept) |
-| `question.answer_agreement.v1 → AGREE` | **implemented, not qualified** (72.4 % false accept, partly a mutation artifact) |
-| `question.mcq_distractor_quality.v1 → ACCEPTABLE` | **implemented, not qualified** (60.0 % false accept) |
-| `question.rule_violation_quality.v1 → SUPPORTED` | **implemented, not qualified** (63.6 % false accept) |
+| `question.ambiguity.v1 → CLEAR` | **implemented, unmeasured** — no applicable negative in this item population |
+| `question.answer_agreement.v1 → AGREE` | **implemented, not qualified** — 9/10 injected disagreements caught, 1 escaped |
+| `question.mcq_distractor_quality.v1 → ACCEPTABLE` | **implemented, not qualified** — 4/4 caught, 1 other row escaped |
+| `question.rule_violation_quality.v1 → SUPPORTED` | **implemented, not qualified** — 2/2 caught, but only 2 negatives |
 
 The semantics of all four are unchanged and no gate was relaxed.  None of them
 may currently be satisfied by the hybrid chain, because no qualification covers
@@ -168,31 +206,44 @@ the hybrid reviewers are as good as anything.  What can be said honestly is:
 * the four requirements were not lowered;
 * the deterministic hard gates are unchanged and were never overridden;
 * no question was published on unqualified evidence;
-* the hybrid chain measurably rejects some real defects reliably and is
-  measurably too permissive on others.
+* across three measured iterations the release false-accept rate fell from
+  31.0 % to 6.25 % and release precision rose from 0.50 to 0.875, but it is not
+  zero and the ambiguity case is not measured at all.
 
 ## 6. What has to change before this can qualify
 
-1. **Fix the mutation, then re-measure.**  `DISAGREEING_SOLUTION` must mutate the
-   blind contract's real conclusion/steps, not an unused key, before its
-   false-accept count can be attributed to the reviewers.
-2. **Make citations pass the strict check.**  Give the reviewers the exact
-   character window they are asked to quote, or normalise only whitespace on both
-   sides of the comparison while keeping comparison case- and word-exact.
-3. **Strengthen the two weak cases.**  Under-specification and disagreement need
-   prompts and worked counterexamples that explicitly enumerate the conventions
-   that must be checked (units, NULL/duplicate/order assumptions, self-inclusion,
-   scope limits) — the adversarial prompt already lists these, and the measured
-   result says listing them was not enough.
-4. **Grow the negative set.**  Ten to twenty-nine negatives per case is small;
-   even a clean run at this size would leave a wide bound, and the qualification
-   must report the bound rather than a claim.
+1. **Measure ambiguity on items that state parameters.**  The mutation now
+   correctly refuses to manufacture a defect, and the SQL prose items it was
+   pointed at have nothing removable.  Qualify against a population whose stems
+   carry numeric givens, units and explicit conditions -- the same population the
+   product actually generates calculation questions from.
+2. **Grow the negative set.**  Sixteen negatives across four cases, with zero for
+   ambiguity, is too thin to support any claim even if the next run is clean.
+   The three skipped authoring failures also need attention so item supply is not
+   the binding constraint.
+3. **Make citations survive the strict check.**  Five rows were blocked by the
+   verbatim-quote requirement.  Either give the reviewers an exact character
+   window to copy, or compare on a normalisation that still refuses paraphrase
+   (case- and word-exact, whitespace-insensitive) while tolerating line re-wrap.
+4. **Close the last disagreement escape.**  One rule-policy row still passed with
+   a rewritten second solution; the disagreement checklist needs a worked example
+   for prose rule items, where the result is a judgement rather than a number.
 5. Only then re-run the qualification.  Enabling publication before that would
-   publish questions at roughly the measured false-release rate.
+   publish questions at the measured false-release rate, and would publish
+   ambiguity decisions that were never measured.
 
 ## 7. Cost
 
-The qualification made 12 authoring + 12 blind-solve + ~86 reviewer requests.
-The reviewer pair cost roughly 5 200 input / 740 output tokens per row on the
-observed sample.  These are real billable DeepSeek requests; the chain is **not**
-free, and the limit is not an application-level USD cap.
+Across the three iterations the qualification made 36 authoring + 36 blind-solve
++ ~180 reviewer requests.  The reviewer pair cost roughly 5 200 input / 740
+output tokens per row on the observed sample.  These are real billable DeepSeek
+requests; the chain is **not** free, and the limit is not an application-level
+USD cap.
+
+Artifacts (private course material, therefore root-only mode 0600 on the
+application host):
+
+```text
+/srv/coursemate/validation/hybrid-strict-v1/qualification-run-20260929.json    (run 1)
+/srv/coursemate/validation/hybrid-strict-v1/qualification-run3-20260929.json   (run 3)
+```

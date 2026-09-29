@@ -7,6 +7,7 @@ is reported with its sample size instead of being called zero risk.
 """
 from __future__ import annotations
 
+import json
 import math
 
 import pytest
@@ -78,6 +79,88 @@ def test_a_mutation_that_cannot_apply_yields_no_row_rather_than_a_fake_defect() 
     }
 
 
+def test_the_disagreement_mutation_leaves_no_agreeing_content() -> None:
+    """A summary sentence alone is not a disagreement.
+
+    If the mutated second solution still shows the original answer in its steps,
+    a reviewer may legitimately report agreement, and the resulting
+    "false accept" measures the mutation rather than the reviewer.  So the
+    mutation must rewrite the substantive fields too.
+    """
+    base = _inputs(
+        solution_a={"candidate_answer": {"core_point": True, "count": 3}},
+        solution_b={
+            "schema_version": "blind-solve-output.v1",
+            "solvability": "SOLVABLE",
+            "conclusion": "The point is a core point; the count is 3.",
+            "steps": [
+                {"ordinal": 1, "operation": "count", "result": "3"},
+                {"ordinal": 2, "operation": "compare", "result": "core point"},
+            ],
+            "assumptions": [],
+        },
+    )
+    mutated = disagreeing_solution(base)
+    assert mutated is not None
+    payload = json.dumps(mutated.solution_b, ensure_ascii=False)
+    # The contradicted result is present in both the conclusion and the steps...
+    assert "false" in mutated.solution_b["conclusion"]
+    assert "false" in mutated.solution_b["steps"][-1]["result"]
+    assert mutated.solution_b["steps"][0]["result"] == "3"
+    # ...and the old agreeing verdict no longer stands as the conclusion result.
+    assert mutated.solution_b["steps"][-1]["result"] != "core point"
+    assert "core point" not in mutated.solution_b["conclusion"]
+    assert mutated.solution_b["solvability"] == "SOLVABLE"
+    assert mutated.question_revision != base.question_revision
+    assert payload  # the payload is well-formed JSON
+
+
+def test_the_missing_condition_mutation_removes_the_operative_givens() -> None:
+    base = _inputs(
+        question_text=(
+            "For epsilon = 1.0 and MinPts = 3, is the point (0,0) a core point? "
+            "Count the point itself as one of its own neighbours."
+        )
+    )
+    mutated = missing_condition(base)
+    assert mutated is not None
+    # The numeric givens are gone, so a unique answer is no longer determined.
+    assert "1.0" not in mutated.question_text
+    assert "MinPts = 3" not in mutated.question_text
+
+
+def test_a_prose_stem_with_no_removable_given_yields_no_ambiguity_negative() -> None:
+    """Deleting scene-setting prose does not make an item under-specified.
+
+    If it did, a reviewer that still answered CLEAR would be right while the row
+    was scored as a missed defect -- the same measurement error that made the
+    first disagreement mutation look like a reviewer failure.
+    """
+    prose = (
+        "A schedule is recoverable when every transaction that reads a value "
+        "written by an uncommitted transaction commits only after that writer "
+        "commits. Judge whether the supplied schedule is recoverable."
+    )
+    base = _inputs(question_text=prose)
+    assert missing_condition(base) is None
+    rows = build_rows([("family-prose", base)])
+    assert CASE_AMBIGUITY not in {
+        row.target_case for row in rows if row.label == NEGATIVE_LABEL
+    }
+
+
+def test_an_explicit_condition_marker_still_produces_a_negative() -> None:
+    base = _inputs(
+        question_text=(
+            "Decide whether the schedule is conflict-serializable, assuming that "
+            "the transaction order listed is the only one considered."
+        )
+    )
+    mutated = missing_condition(base)
+    assert mutated is not None
+    assert "assuming" not in mutated.question_text
+
+
 def test_a_stem_without_a_removable_condition_yields_no_ambiguity_negative() -> None:
     base = _inputs(question_text="State the value.")
     assert missing_condition(base) is None
@@ -112,6 +195,7 @@ def _outcome(
     verdicts: dict[str, str],
     language: str = "en",
     domain: str = "OFFICIAL",
+    target_case: str | None = None,
 ) -> RowOutcome:
     return RowOutcome(
         row_id=f"{family}:{label}",
@@ -122,7 +206,7 @@ def _outcome(
         question_type="NUMERIC",
         released=False,
         case_outcomes=dict(verdicts),
-        target_case=None,
+        target_case=target_case,
         defect=None,
         provenance="test fixture",
     )
@@ -184,11 +268,14 @@ def test_release_metrics_separate_false_accept_from_false_reject() -> None:
             family="p2",
             verdicts={CASE_AMBIGUITY: "FAIL", CASE_AGREEMENT: "PASS"},
         ),
-        # Three negatives: two refused, one wrongly released.
+        # Three negatives, each targeting the ambiguity case: two refused, one
+        # wrongly released.  The agreement verdict on these rows is evidence
+        # about a case their defect does not touch, so it is not tallied.
         *[
             _outcome(
                 label=NEGATIVE_LABEL,
                 family=f"n{index}",
+                target_case=CASE_AMBIGUITY,
                 verdicts=(
                     {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "FAIL"}
                     if index == 0
@@ -200,10 +287,10 @@ def test_release_metrics_separate_false_accept_from_false_reject() -> None:
     ]
     overall = summarise(outcomes)["overall"]
     assert overall["false_accept"] == 1
-    assert overall["true_reject"] == 5
+    assert overall["true_reject"] == 2
     assert overall["true_accept"] == 3
     assert overall["false_reject"] == 1
-    assert overall["false_accept_rate"] == pytest.approx(1 / 6)
+    assert overall["false_accept_rate"] == pytest.approx(1 / 3)
     assert overall["release_recall"] == pytest.approx(3 / 4)
 
 
@@ -253,6 +340,7 @@ def test_uncertain_is_counted_as_abstention_not_as_a_decision() -> None:
         _outcome(
             label=NEGATIVE_LABEL,
             family="n1",
+            target_case=CASE_AMBIGUITY,
             verdicts={CASE_AMBIGUITY: "UNCERTAIN", CASE_AGREEMENT: "FAIL"},
         ),
         _outcome(
@@ -266,8 +354,97 @@ def test_uncertain_is_counted_as_abstention_not_as_a_decision() -> None:
     assert overall["positive_abstain"] == 1
     assert overall["false_accept"] == 0
     assert overall["false_reject"] == 0
-    # Two of the four (row, case) decisions abstained.
-    assert overall["coverage"] == pytest.approx(0.5)
+    # Three attributed decisions (one negative case, two positive cases); two
+    # of them abstained, so coverage is one third.
+    assert overall["coverage"] == pytest.approx(1 / 3)
+
+
+def test_per_case_metrics_are_attributed_to_the_case_the_defect_targets() -> None:
+    """A negative row is evidence about one case, not about every case it reports.
+
+    An under-specified stem does not make the two solutions disagree, so a `PASS`
+    on `answer_agreement` for that row is the correct answer, not a false accept.
+    Counting it would inflate the agreement case with another case's rows.
+    """
+    rows = [
+        # Targets ambiguity only; agreement is correctly PASS.
+        _outcome(
+            label=NEGATIVE_LABEL,
+            family="n1",
+            verdicts={CASE_AMBIGUITY: "FAIL", CASE_AGREEMENT: "PASS"},
+        ),
+        # Targets agreement only; ambiguity is correctly PASS.
+        _outcome(
+            label=NEGATIVE_LABEL,
+            family="n2",
+            verdicts={CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "FAIL"},
+        ),
+    ]
+    rows[0].target_case = CASE_AMBIGUITY
+    rows[1].target_case = CASE_AGREEMENT
+    summary = summarise(rows)
+    by_case = {}
+    for key, tally in summary["scopes"].items():
+        case = key.split("|", 1)[0]
+        by_case[case] = tally
+    assert by_case[CASE_AMBIGUITY]["negatives"] == 1
+    assert by_case[CASE_AMBIGUITY]["false_accept"] == 0
+    assert by_case[CASE_AMBIGUITY]["true_reject"] == 1
+    assert by_case[CASE_AGREEMENT]["negatives"] == 1
+    assert by_case[CASE_AGREEMENT]["false_accept"] == 0
+    assert by_case[CASE_AGREEMENT]["true_reject"] == 1
+    # The row-level rule still requires the whole row to be refused.
+    assert summary["release"]["false_accept"] == 0
+
+
+def test_a_missed_target_case_is_the_one_that_shows_up_as_a_false_accept() -> None:
+    row = _outcome(
+        label=NEGATIVE_LABEL,
+        family="n1",
+        verdicts={CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"},
+    )
+    row.target_case = CASE_AMBIGUITY
+    row.released = True
+    summary = summarise([row])
+    ambiguity = next(
+        tally for key, tally in summary["scopes"].items() if key.startswith(CASE_AMBIGUITY)
+    )
+    assert ambiguity["false_accept"] == 1
+    # The agreement case has no attributed rows at all for this row.
+    assert not [
+        tally for key, tally in summary["scopes"].items() if key.startswith(CASE_AGREEMENT)
+    ]
+
+
+def test_the_zero_false_accept_bound_is_withheld_when_a_false_accept_occurred() -> None:
+    row = _outcome(
+        label=NEGATIVE_LABEL,
+        family="n1",
+        verdicts={CASE_AMBIGUITY: "PASS"},
+    )
+    row.target_case = CASE_AMBIGUITY
+    row.released = True
+    summary = summarise([row])
+    assert summary["release"]["false_accept"] == 1
+    assert summary["zero_false_accept_upper_bound_95"] is None
+    assert summary["zero_false_accept_bound_applicable"] is False
+
+
+def test_a_clean_run_still_reports_its_bound_and_sample_size() -> None:
+    rows = []
+    for index in range(7):
+        row = _outcome(
+            label=NEGATIVE_LABEL,
+            family=f"n{index}",
+            verdicts={CASE_AMBIGUITY: "FAIL"},
+        )
+        row.target_case = CASE_AMBIGUITY
+        rows.append(row)
+    summary = summarise(rows)
+    assert summary["zero_false_accept_bound_applicable"] is True
+    assert summary["zero_false_accept_upper_bound_95"] == pytest.approx(
+        1 - 0.05 ** (1 / 7)
+    )
 
 
 def test_evaluate_row_requires_the_conjunction_of_both_roles() -> None:
@@ -291,6 +468,9 @@ def test_evaluate_row_requires_the_conjunction_of_both_roles() -> None:
 
         def case_verdicts(self) -> dict[str, str]:
             return {CASE_AMBIGUITY: self._verdict}
+
+        def substantiation_reasons(self) -> list[str]:
+            return []
 
         @property
         def verification(self) -> ReferenceVerification:
@@ -331,6 +511,9 @@ def test_an_unverifiable_reference_makes_a_row_unreleasable() -> None:
 
         def case_verdicts(self) -> dict[str, str]:
             return {CASE_AMBIGUITY: "PASS"}
+
+        def substantiation_reasons(self) -> list[str]:
+            return []
 
         @property
         def verification(self) -> ReferenceVerification:

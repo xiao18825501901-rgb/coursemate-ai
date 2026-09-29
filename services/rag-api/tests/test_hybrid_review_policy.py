@@ -41,6 +41,7 @@ from app.learning.hybrid_review import (
     combine_case_verdicts,
     method_identity,
     project_case_verdicts,
+    substantiated_case_verdicts,
     verify_references,
 )
 
@@ -270,6 +271,74 @@ def test_a_reviewer_cannot_omit_a_required_case() -> None:
     )
     assert verification.case_set_exact is False
     assert verification.complete is False
+
+
+def test_an_unsubstantiated_fail_is_not_a_defect_finding() -> None:
+    """A bare FAIL is not evidence, and must not be able to block a sound item."""
+    findings = JudgeFindings(
+        findings=[_finding(CASE_AMBIGUITY, "FAIL"), _finding(CASE_AGREEMENT, "PASS")]
+    )
+    verdicts, reasons = substantiated_case_verdicts(findings)
+    assert verdicts[CASE_AMBIGUITY] == "UNCERTAIN"
+    assert verdicts[CASE_AGREEMENT] == "PASS"
+    assert "HYBRID_UNSUBSTANTIATED_FAIL:" + CASE_AMBIGUITY in reasons
+
+
+def test_a_fail_with_a_counterexample_or_a_missing_condition_stands() -> None:
+    with_counterexample = JudgeFindings(
+        findings=[
+            _finding(
+                CASE_AMBIGUITY,
+                "FAIL",
+                counterexample="With the same wording, 3 and 4 both satisfy the rule.",
+            ),
+            _finding(CASE_AGREEMENT, "PASS"),
+        ]
+    )
+    verdicts, _ = substantiated_case_verdicts(with_counterexample)
+    assert verdicts[CASE_AMBIGUITY] == "FAIL"
+
+    with_missing = JudgeFindings(
+        findings=[
+            _finding(
+                CASE_AMBIGUITY,
+                "FAIL",
+                missing_conditions=["the value of epsilon is never stated"],
+            ),
+            _finding(CASE_AGREEMENT, "PASS"),
+        ]
+    )
+    verdicts, _ = substantiated_case_verdicts(with_missing)
+    assert verdicts[CASE_AMBIGUITY] == "FAIL"
+
+
+def test_a_pass_that_names_a_missing_condition_contradicts_itself() -> None:
+    findings = JudgeFindings(
+        findings=[
+            _finding(
+                CASE_AMBIGUITY,
+                "PASS",
+                missing_conditions=["the rounding convention is not stated"],
+            ),
+            _finding(CASE_AGREEMENT, "PASS"),
+        ]
+    )
+    verdicts, reasons = substantiated_case_verdicts(findings)
+    assert verdicts[CASE_AMBIGUITY] == "UNCERTAIN"
+    assert "HYBRID_SELF_CONTRADICTED_PASS:" + CASE_AMBIGUITY in reasons
+
+
+def test_substantiation_never_produces_a_pass() -> None:
+    for verdict in ("PASS", "FAIL", "UNCERTAIN"):
+        findings = JudgeFindings(
+            findings=[
+                _finding(CASE_AMBIGUITY, verdict),
+                _finding(CASE_AGREEMENT, verdict),
+            ]
+        )
+        resolved, _ = substantiated_case_verdicts(findings)
+        if verdict != "PASS":
+            assert resolved[CASE_AMBIGUITY] != "PASS"
 
 
 def test_a_single_case_set_cannot_be_answered_with_one_finding() -> None:

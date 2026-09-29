@@ -16,27 +16,69 @@ statistical independence; do not reason about "the other reviewer".
 
 ## What to attack
 
-For every required case, actively search for the failure:
+For every required case, actively search for the failure. A `PASS` here means
+"the attack below was carried out and failed", not "nothing looked wrong".
 
 * **question.ambiguity.v1** -- find a second reasonable interpretation that
-  changes the answer. Check missing units, NULL/duplicate/ordering assumptions,
-  directed versus undirected conventions, whether an item includes itself, and
-  scope limits, when those are relevant. Do not invent an unreasonable
-  interpretation merely to reject a sound question.
+  changes the answer. Do not invent an unreasonable interpretation merely to
+  reject a sound question; do run every attack in this list and record what it
+  found:
+
+  1. Remove a stated value mentally: is the answer still determined, or was a
+     needed value never given at all?
+  2. Is a unit, scale, or rounding convention assumed rather than stated?
+  3. Is a boundary convention assumed -- does an interval include its endpoint,
+     does a neighbourhood include the point itself, is a relation directed?
+  4. For anything involving data, are the schema, dialect, ordering, NULL
+     handling, and duplicate-row handling stated?
+  5. Does answering require knowledge the supplied sources do not contain?
+
+  If any answer is yes and the stem does not settle it, this case is `FAIL`; if
+  the supplied material cannot settle it either way, `UNCERTAIN`.
+
 * **question.answer_agreement.v1** -- search for a shared mistake, an
   unjustified leap, or a counterexample inside the exact stated domain.
   Equivalent surface form is not sufficient; a different surface form is not
   automatically a disagreement.
+
+  Read the two solutions to their **final results** and compare what they
+  actually compute. If they state materially different concrete results, this
+  case is `FAIL`, even when both openings read alike, even when one solution
+  describes the difference politely, and even when one solution's closing
+  sentence claims agreement while its own steps produce a different value. Also
+  mark `FAIL` when both reach the same answer through a step the cited sources
+  do not support.
+
 * **question.mcq_distractor_quality.v1** (when required) -- challenge each
   option as potentially correct. Check semantic duplicates, mutually
-  non-exclusive answers, vague qualifiers, and hints that reveal the key.
+  non-exclusive answers, vague qualifiers, and hints that reveal the key. If any
+  other option can be read as stating the same thing as the correct one, this
+  case is `FAIL`.
 * **question.rule_violation_quality.v1** (when required) -- test whether the
   prerequisite actually holds. A conclusion can be unsupported without the cited
-  rule being universally false. Require a supported corrected step.
+  rule being universally false. Require a supported corrected step. If the rule
+  as quoted has lost the condition that makes it applicable, this case is
+  `FAIL`.
 
 A trusted deterministic `FAIL` cannot be overturned by a favourable model vote,
 and a limited deterministic test result is not a proof beyond its declared
 scope. Use the supplied spans directly; never look up an external source.
+
+Do not default to `PASS`. `PASS` is only correct after the attacks above have
+been carried out and have failed.
+
+## How to cite
+
+`quote` is checked **character by character** against the cited span (only runs
+of whitespace are normalised). Copy the characters; do not paraphrase, do not
+tidy the wording, do not merge two separate places into one quote.
+
+* Cite only spans you were actually given; an id you invent is not a reference.
+* Prefer one short, exactly copied fragment over several approximate ones.
+* If you cannot copy an exact fragment for a point, cite the span id without a
+  quotation rather than writing an approximate one. A quotation that does not
+  match is treated as a failed reference and refuses the whole item, so an
+  approximate quote is worse than no quote.
 
 ## Output
 

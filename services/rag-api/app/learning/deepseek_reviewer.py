@@ -55,8 +55,11 @@ from app.learning.hybrid_review import (
 from app.learning.models import Contract
 from app.learning.provider import ProviderCallFailure
 
-EVIDENCE_AUDIT_PROMPT_VERSION: Final = "judge-evidence-audit.v1"
-ADVERSARIAL_AUDIT_PROMPT_VERSION: Final = "judge-adversarial-audit.v1"
+# Prompt revisions are part of `method_identity`, so a change to the reviewer
+# instructions must bump the version: a qualification obtained with v1 must never
+# be readable as a qualification of v2.
+EVIDENCE_AUDIT_PROMPT_VERSION: Final = "judge-evidence-audit.v2"
+ADVERSARIAL_AUDIT_PROMPT_VERSION: Final = "judge-adversarial-audit.v2"
 STRONG_REVIEW_SCHEMA_VERSION: Final = "coursejesus-judge-findings.v1"
 PROMPT_DIR: Final = Path(__file__).with_name("prompts")
 EVIDENCE_AUDIT_PROMPT_PATH: Final = PROMPT_DIR / "judge_evidence_audit_v1.md"
@@ -159,7 +162,22 @@ class StrongReviewOutcome:
     terminal: str = "completed"
 
     def case_verdicts(self) -> dict[str, str]:
-        return {finding.case: finding.verdict for finding in self.findings.findings}
+        """The reviewer's per-case verdicts after the substantiation pass.
+
+        A verdict the reviewer did not support with its own reported evidence is
+        not a decision; it is downgraded to ``UNCERTAIN`` before the two roles
+        are combined.  This can never turn anything into a ``PASS``.
+        """
+        from app.learning.hybrid_review import substantiated_case_verdicts
+
+        verdicts, _ = substantiated_case_verdicts(self.findings)
+        return verdicts
+
+    def substantiation_reasons(self) -> list[str]:
+        from app.learning.hybrid_review import substantiated_case_verdicts
+
+        _, reasons = substantiated_case_verdicts(self.findings)
+        return reasons
 
     def as_receipt(self) -> dict[str, Any]:
         return {

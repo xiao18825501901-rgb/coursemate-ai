@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, replace
 from typing import Any, Final
 
@@ -70,25 +71,52 @@ def _revision(seed: str, mutation: str) -> str:
     return hashlib.sha256(f"{seed}\x00{mutation}".encode()).hexdigest()
 
 
+_NUMBER = re.compile(r"\b\d+(?:[.,]\d+)?\b")
+
+
 def _strip_condition(text: str) -> str:
-    """Remove one explicit condition, producing a genuinely under-specified item."""
+    """Remove a stated given, producing a genuinely under-specified item.
+
+    The removal has to be unambiguous.  Deleting an arbitrary trailing phrase
+    does **not** make an item under-specified -- the sentence that goes may have
+    been scene-setting, and a reviewer that still answers `CLEAR` would then be
+    right while the row is recorded as a missed defect.  So this mutation only
+    fires when it actually takes away something the answer depends on:
+
+    * a clause introduced by an explicit condition marker, or
+    * a clause carrying a numeric given.
+
+    When neither is present the item is left alone and
+    :func:`missing_condition` reports the mutation as inapplicable, so no
+    ambiguity negative is manufactured for it.
+    """
+    lowered = text.lower()
     for marker in (
         " given that ",
-        " where ",
         " assuming ",
-        " with ",
-        " in the case that ",
         " such that ",
+        " in the case that ",
+        " where ",
     ):
-        lowered = text.lower()
         index = lowered.find(marker)
         if index > 0:
-            return text[:index].rstrip(" ,;:") + "."
-    # No explicit condition marker: drop the final clause, which is where the
-    # operative condition of these items lives.
-    parts = [part for part in text.replace(";", ".").split(".") if part.strip()]
-    if len(parts) > 1:
-        return parts[0].strip() + "."
+            stripped = text[:index].rstrip(" ,;:") + "."
+            if stripped != text:
+                return stripped
+
+    # Drop whole sentences that state numeric givens.
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?;])\s+", text) if part.strip()]
+    kept = [part for part in sentences if not _NUMBER.search(part)]
+    if kept and len(kept) < len(sentences):
+        return " ".join(kept)
+
+    # Single sentence: drop the comma-separated clauses carrying the givens.
+    clauses = [part.strip() for part in re.split(r",\s*", text) if part.strip()]
+    kept_clauses = [part for part in clauses if not _NUMBER.search(part)]
+    if kept_clauses and len(kept_clauses) < len(clauses):
+        return ", ".join(kept_clauses)
+
+    # Nothing the answer depends on can be removed by deletion.
     return text
 
 
@@ -109,24 +137,59 @@ def missing_condition(row_inputs: ReviewerInputs) -> ReviewerInputs | None:
     )
 
 
+def _contradiction(value: Any) -> Any:
+    """Derive a concrete, materially different result from a correct one."""
+    if isinstance(value, bool):
+        return not value
+    if isinstance(value, (int, float)):
+        return value + 1
+    if isinstance(value, str):
+        return f"a different result from {value}"
+    if isinstance(value, dict):
+        return {key: _contradiction(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_contradiction(item) for item in value]
+    return "a materially different result"
+
+
 def disagreeing_solution(row_inputs: ReviewerInputs) -> ReviewerInputs | None:
-    """Answer agreement must fail: the two solutions now reach different results."""
+    """Answer agreement must fail: the two solutions reach different results.
+
+    The mutation has to make the *second solution itself* reach a different
+    concrete result.  Replacing only a summary sentence while its steps still
+    show the original answer leaves a reviewer genuinely able to report
+    agreement, so the steps are rewritten too and no agreeing content remains.
+    """
     solution_b = dict(row_inputs.solution_b)
-    answer = solution_b.get("answer")
+    author_answer = row_inputs.solution_a.get("candidate_answer")
+    if author_answer is None and not solution_b:
+        return None
+    contradicted = _contradiction(author_answer)
+    contradiction_text = json.dumps(contradicted, ensure_ascii=False, sort_keys=True)
+
     changed = False
-    if isinstance(answer, dict) and answer:
-        mutated_answer = dict(answer)
-        first_key = next(iter(mutated_answer))
-        mutated_answer[first_key] = "CONTRADICTED_BY_SECOND_SOLVER"
-        solution_b["answer"] = mutated_answer
-        changed = True
-    elif "steps" in solution_b:
+    if "conclusion" in solution_b or "steps" in solution_b:
         solution_b["conclusion"] = (
-            "The second solver reaches a different result from the first solver."
+            "Working independently from the same stated material, this solution "
+            f"obtains {contradiction_text}. That is a different result from the "
+            "other supplied solution, so the two do not reach the same answer."
         )
+        steps = solution_b.get("steps")
+        if isinstance(steps, list) and steps:
+            rewritten = []
+            for index, step in enumerate(steps):
+                if isinstance(step, dict):
+                    mutated_step = dict(step)
+                    if index == len(steps) - 1:
+                        mutated_step["result"] = contradiction_text
+                    rewritten.append(mutated_step)
+                else:  # pragma: no cover - the blind contract uses objects
+                    rewritten.append(step)
+            solution_b["steps"] = rewritten
+        solution_b.pop("answer", None)
         changed = True
     elif solution_b.get("raw"):
-        solution_b["raw"] = "a materially different result"
+        solution_b["raw"] = contradiction_text
         changed = True
     if not changed:
         return None

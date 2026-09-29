@@ -298,6 +298,28 @@ def main() -> int:
     )
     artifact["author_failures"] = author_failures
     artifact["row_failures"] = row_failures
+    # Which mutations could actually be applied.  A defect that cannot be
+    # injected produces no row, and leaving that gap visible is the difference
+    # between "measured" and "assumed".
+    per_case_base: dict[str, int] = {}
+    for _, inputs in base:
+        for case in inputs.required_cases:
+            per_case_base[case] = per_case_base.get(case, 0) + 1
+    per_case_negative = {case: 0 for case in per_case_base}
+    for row in rows:
+        if row.label == "INJECTED_DEFECT" and row.target_case:
+            per_case_negative[row.target_case] = (
+                per_case_negative.get(row.target_case, 0) + 1
+            )
+    artifact["mutation_coverage"] = {
+        case: {
+            "base_items": per_case_base[case],
+            "negatives_injected": per_case_negative.get(case, 0),
+            "skipped_not_applicable": per_case_base[case]
+            - per_case_negative.get(case, 0),
+        }
+        for case in sorted(per_case_base)
+    }
     write_artifact(args.out, artifact)
 
     recorded = None
