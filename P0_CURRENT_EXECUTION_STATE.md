@@ -104,6 +104,115 @@ The live database was read-only throughout and is unchanged afterwards
 `/srv/coursemate/validation/p0-diag/guard-check-20260929T205901Z.txt`.  This is the
 case the previous rule could not catch: two paths that agree on production.
 
+## Trusted backup and restore, proved (2026-09-30)
+
+The newest recovery unit before this round was `coursemate-v2-20260928T200126.170700Z`,
+taken 2026-09-29 04:01 — **before** the accidental migration 065.  There was no
+post-incident recovery point.  There is one now:
+
+```
+VERIFIED_BACKUP=/srv/coursemate/backups/coursemate-v2-20260929T211151.109907Z
+```
+
+Produced by the project's own `ops/production_backup_window.sh` (one writer pause,
+services restored afterwards), then verified and **restored once**:
+
+| check | result |
+|---|---|
+| `sha256sum --check SHA256SUMS` | OK for every artifact |
+| `rag.sqlite3` / `agent.sqlite3` / `ui.sqlite3` | `integrity_check=ok`, 0 foreign-key violations |
+| uploads | 850 files, 1 191 756 901 bytes |
+| UI shares | 16 files |
+| release config | `releaseConfigIncluded: false` — no manifest was supplied, recorded rather than carried forward stale |
+
+**Restore rehearsal** (`ops/restore_v2.py`, source = that unit, target = a
+separate directory, live data directory never named):
+
+| fact | restored | live |
+|---|---|---|
+| `integrity_check` | ok | ok |
+| foreign-key violations | 0 | 0 |
+| tables | 151 | 151 |
+| schema rows / max | 65 / 65 | 65 / 65 |
+| provenance | 49 READY, 9 NEEDS_REVIEW | 49 READY, 9 NEEDS_REVIEW |
+| courses / documents / chunks | 87 / 850 / 22 909 | 87 / 850 / 22 909 |
+| JEV receipts | 117 | 117 |
+| question-engine provenance | 58 | 58 |
+| uploads extracted | 850 files, 1 191 756 901 bytes | matches the manifest exactly |
+
+**Every field is identical between the restore and live.**  The rehearsal target
+was removed afterwards and the live services stayed active and healthy throughout
+(`rag-api` and `agent-api` both returned `{"status":"ok"}`).
+
+Disk after: 2.4 GiB free (the verified recovery unit is 1.7 GiB of that).
+
+## Two production defects found while taking that backup
+
+Both were pre-existing and both would have broken the deployment this round is
+building toward.  Neither was caused by the work in this round, but the first was
+**exposed** by it and is reported as such.
+
+### 1. Release `916b76c` was deployed without the agent-api Node dependencies
+
+`/srv/coursemate/current/services/agent-api` had no `node_modules`, and no release
+on the host had one either.  The running agent process predated the 916b76c
+cutover, so it kept serving until the backup window stopped it; the restart then
+exposed the defect:
+
+```
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'cors' imported from
+/srv/coursemate/releases/916b76c/services/agent-api/dist/src/app.js
+```
+
+The service crash-looped (`NRestarts` climbing, 5 s apart).  **Repair**: installed
+exactly what the release's own `package-lock.json` pins, into the release root,
+then restored the release directory to mode 555:
+
+```
+npm ci --omit=dev --workspace @coursemate/agent-api --include-workspace-root
+cors=2.8.6  express=5.2.1  helmet=8.3.0  openai=7.4.0  ajv=8.20.0
+express-rate-limit=8.6.2  @clerk/express=2.1.55
+```
+
+Verified afterwards: `coursejesus-openjev`, `coursemate-rag` and `coursemate-agent`
+all `active`, and `GET 127.0.0.1:28001/health` returns `{"status":"ok","service":"agent-api"}`.
+This is a repair to a live release and is recorded as one; the proper fix is that
+no release is published without its dependencies installed.
+
+### 2. Every ops shell script shipped with CRLF line endings
+
+The release tarball was packaged from a Windows working tree, so
+`production_backup_window.sh`, `backup_v2.sh`, `restore_v2.sh`, `monitor_v2.sh` and
+`production_switch_four_changes.sh` all arrived with CRLF.  On the Linux host bash
+reads `set -euo pipefail` as an option named `pipefail\r`:
+
+```
+/srv/coursemate/current/ops/production_backup_window.sh: line 6: set: pipefail: invalid option name
+```
+
+So the backup, restore, monitor and release-switch wrappers **could not run at all**
+as deployed.  A wrapper that silently cannot run is worse than a missing one: the
+operator believes the backup happened.  The git index was already LF — only the
+working tree the release was packaged from was not.
+
+**Fix**: `.gitattributes` now forces `eol=lf` for `*.sh` and `*.py`, and the shell
+scripts were renormalized to LF.  The backup in this round was then taken through
+the project's own wrapper from corrected copies, which is how we know the wrapper
+itself works.
+
+### 3. The backup tool needed Python 3.11 but its wrapper uses the host's 3.10
+
+`ops/backup_v2.py` imported `datetime.UTC` (3.11+), while `backup_v2.sh` and
+`production_backup_window.sh` default to `python3`, which is 3.10.12 on this host:
+
+```
+ImportError: cannot import name 'UTC' from 'datetime' (/usr/lib/python3.10/datetime.py)
+```
+
+**Fix**: `backup_v2.py` and `monitor_v2.py` use `timezone.utc`, which works on both.
+The backup above was taken with the host's `/usr/bin/python3` (3.10.12) through the
+documented wrapper, which is the direct proof of the fix.
+
 ## What the next round has to do first
 
 1. Take the trusted backup and prove a restore, and only then let anything write.
