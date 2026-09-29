@@ -57,22 +57,20 @@ findings, and the server verifies the references rather than trusting them.
 Each iteration changed only the *measurement* or the *reviewer instructions*, and
 each was re-measured end to end against real DeepSeek calls.
 
-| | run 1 | run 2 | run 3 | run 4 | run 5 | run 6 | run 7 |
-|---|---|---|---|---|---|---|---|
-| prompt revision | v1 | v2 | v2 | v2 | v2 | v2 | **v3** |
-| base items per kind | 4 | 4 | 4 | 4 | 8 | 8 | 8 |
-| evaluation rows | 43 | 43 | 27 | 30 | 67 | 64 | 69 |
-| positives / negatives | 11 / 29 | 12 / 30 | 10 / 16 | 10 / 18 | 24 / 40 | 22 / 33 | 24 / 41 |
-| **release false accept** | 9 (31.0 %) | 3 (10.0 %) | 1 (6.25 %) | **0 (0 %)** | 3 (7.5 %) | 4 (12.1 %) | **0 (0 %)** |
-| release precision | 0.50 | 0.667 | 0.875 | **1.00** | 0.85 | 0.80 | **1.00** |
-| release recall | 0.818 | 0.50 | 0.70 | 0.70 | 0.708 | 0.727 | **0.375** |
-| provider row failures (no retry) | 3 | 1 | 1 | 2 | 3 | 9 | 4 |
-| caught `DISAGREEING_SOLUTION` | 5 / 12 | 11 / 11 | 9 / 10 | 11 / 11 | 20 / 22 | 18 / 19 | **21 / 21** |
-| caught `DUPLICATE_CORRECT_OPTION` | 4 / 4 | 4 / 4 | 4 / 4 | 3 / 3 | 8 / 8 | 7 / 7 | **8 / 8** |
-| caught `UNSUPPORTED_RULE` | 3 / 3 | 4 / 4 | 2 / 2 | 3 / 3 | 7 / 7 | 4 / 4 | **7 / 7** |
-| caught `MISSING_CONDITION` | 8 / 10 | 8 / 11 | *no rows* | 1 / 1 | 2 / 3 | **0 / 3** | **5 / 5** |
-| decision (recorded) | DRAFT | DRAFT | DRAFT | ACCEPTED | DRAFT | DRAFT | ACCEPTED |
-| decision (current gate) | DRAFT | DRAFT | DRAFT | DRAFT | DRAFT | DRAFT | **DRAFT** |
+| | run 1 | run 2 | run 3 | run 4 | run 5 | run 6 | run 7 | run 8 |
+|---|---|---|---|---|---|---|---|---|
+| prompt revision | v1 | v2 | v2 | v2 | v2 | v2 | v3 | **v4** |
+| base items per kind | 4 | 4 | 4 | 4 | 8 | 8 | 8 | 8 |
+| evaluation rows | 43 | 43 | 27 | 30 | 67 | 64 | 69 | 67 |
+| positives / negatives | 11 / 29 | 12 / 30 | 10 / 16 | 10 / 18 | 24 / 40 | 22 / 33 | 24 / 41 | 19 / 41 |
+| **release false accept** | 9 (31.0 %) | 3 (10.0 %) | 1 (6.25 %) | **0 (0 %)** | 3 (7.5 %) | 4 (12.1 %) | **0 (0 %)** | 4 (9.8 %) |
+| release precision | 0.50 | 0.667 | 0.875 | **1.00** | 0.85 | 0.80 | **1.00** | 0.75 |
+| release recall | 0.818 | 0.50 | 0.70 | 0.70 | 0.708 | 0.727 | 0.375 | **0.632** |
+| caught `MISSING_CONDITION` | 8 / 10 | 8 / 11 | *no rows* | 1 / 1 | 2 / 3 | **0 / 3** | **5 / 5** | 2 / 5 |
+| caught `DISAGREEING_SOLUTION` | 5 / 12 | 11 / 11 | 9 / 10 | 11 / 11 | 20 / 22 | 18 / 19 | 21 / 21 | 21 / 21 |
+| caught `DUPLICATE_CORRECT_OPTION` | 4 / 4 | 4 / 4 | 4 / 4 | 3 / 3 | 8 / 8 | 7 / 7 | 8 / 8 | 7 / 7 |
+| caught `UNSUPPORTED_RULE` | 3 / 3 | 4 / 4 | 2 / 2 | 3 / 3 | 7 / 7 | 4 / 4 | 7 / 7 | 7 / 8 |
+| decision (current gate) | DRAFT | DRAFT | DRAFT | DRAFT | DRAFT | DRAFT | DRAFT | DRAFT |
 
 ### 3.00 Corpus diagnosis (run 6's precondition)
 
@@ -272,28 +270,99 @@ Per case, correctly attributed:
 
 The single escaped row was `rule_explanation-0:DISAGREEING_SOLUTION`.
 
+### 3.03 Run 8: the precision/recall dial, measured at both ends
+
+Prompt/schema v4 adds the discriminating field: each dependency is marked
+`stated_in_stem` **and** `answer_changes_if_absent`, and the reviewer must state
+the concrete different answer as `consequence` whenever the second is true.  An
+entry blocks the item only when it is unstated **and** changes the answer.
+
+Two measured points on the same axis, with the same corpus, procedure and model:
+
+| | run 7 (unstated blocks) | run 8 (unstated **and** answer-changing blocks) |
+|---|---|---|
+| release recall | 0.375 | **0.632** |
+| release precision | **1.00** | 0.75 |
+| false accepts | **0** | 4 / 41 |
+| false rejects | 13 / 24 | 7 / 19 |
+| `MISSING_CONDITION` caught | **5 / 5** | 2 / 5 |
+| `DISAGREEING_SOLUTION` caught | 21 / 21 | 21 / 21 |
+| `DUPLICATE_CORRECT_OPTION` caught | 8 / 8 | 7 / 7 |
+| `UNSUPPORTED_RULE` caught | 7 / 7 | 7 / 8 |
+| gate verdict | DRAFT (recall 0.375 < 0.5) | DRAFT (4 false accepts) |
+
+Both ends are honest and both are unacceptable, for opposite reasons:
+
+* run 7 is safe and unusable — it refuses 62.5 % of sound items, and refusing
+  most items is not a quality standard;
+* run 8 is usable and unsafe — asking "would the answer change?" let the
+  reviewers mark genuinely-missing data as harmless, and under-specification
+  detection fell from 5/5 to 2/5.
+
+So the dial moved exactly as designed and neither setting qualifies.  The
+information needed to pick a middle is **not present in a single verdict**: the
+three other defect kinds are stable and reliable across both runs
+(`DISAGREEING_SOLUTION` 21/21, `DUPLICATE_CORRECT_OPTION` 7–8/8,
+`UNSUPPORTED_RULE` 7/7–8), and only under-specification is unstable.
+
+What this rules out, and what it points to:
+
+* It rules out finding a good wording.  Eight runs and four prompt revisions have
+  moved this case between "never detects" and "detects everything, refuses
+  everything" without landing in between.
+* It points at the decomposition rather than the wording.  Under-specification is
+  being asked of the same two passes that also judge correctness and rules, and
+  it is the only case whose answer depends on a *judgement about the reader*
+  rather than about the item.  A dedicated pass whose only job is to answer "is
+  every quantity the answer needs present in the stem or the supplied sources,
+  and if not, what different answer results" — with the two existing roles
+  unchanged — is the next thing to measure, not another revision of these two
+  prompts.
+
+### 3.04 What is stable and what is not
+
+After eight runs the picture is separable and worth stating plainly:
+
+| case | status across runs |
+|---|---|
+| `question.answer_agreement.v1` | **reliable** — 21/21 in the last two runs, 0 false accepts for agreement in run 8 |
+| `question.mcq_distractor_quality.v1` | **reliable** — 7–8/8, 0 false accepts for MCQ in runs 7 and 8 |
+| `question.rule_violation_quality.v1` | **reliable** — 7/7 and 7/8 |
+| `question.ambiguity.v1` | **unstable** — the only case that moves the gate, and the only one that never settled |
+
+Three of the four original quality requirements are met by this reviewer pair
+with no measured false accept in the last two runs.  The fourth is the whole of
+the remaining problem, and it is in every required case set.
+
+## 4. Four quality requirements — status
+
+| Original requirement | Status |
+|---|---|
+| `question.answer_agreement.v1 → AGREE` | **reliable** — 21/21 injected disagreements caught in each of the last two runs; 0 agreement false accepts in run 8 |
+| `question.mcq_distractor_quality.v1 → ACCEPTABLE` | **reliable** — 7–8/8 caught; 0 MCQ false accepts in runs 7 and 8 |
+| `question.rule_violation_quality.v1 → SUPPORTED` | **reliable** — 7/7 and 7/8 caught; 1 escape in run 8 |
+| `question.ambiguity.v1 → CLEAR` | **UNSTABLE** — never settles; between "detects nothing" and "refuses everything" across four prompt revisions |
+
+The semantics of all four are unchanged and no gate was relaxed.  Three are
+measurably met; because ambiguity is in every required case set, none of them may
+currently be satisfied by the hybrid chain.
+
 ### 3.3 The remaining blockers, precisely
 
-1. **Recall, not detection, is now the binding constraint.**  Detection is
-   solved: run 7 caught every injected defect of every kind.  What stops
-   qualification is that the same rule refuses 54 % of sound controls, by
-   treating conventions a competent reader would supply as "unstated
-   dependencies".  The ambiguity enumeration needs a sharper criterion than
-   "is it written in the stem" — the natural next step is to require the
-   reviewer to say, for each entry, **whether the answer changes when the entry
-   is absent**, and to fail only on entries where it does.  That keeps the
-   decisive rule (`MISSING_CONDITION` is exactly a case where the answer changes)
-   while dropping the harmless bookkeeping entries that currently cause the false
-   rejects.
-2. **Provider reliability.**  9 of 64 rows failed at the provider in run 6 and 4
-   of 69 in run 7.  Those failures are recorded and never retried, so they cost
-   coverage rather than corrupting results, but the cause still needs separating
-   (schema rejection, output-token ceiling, transient upstream error) before the
-   chain carries an unattended publication path.
-3. **Ten rows were blocked by the strict verbatim-quote check** in run 7.  That
-   check is correct — a paraphrase is not evidence — but it costs real false
-   rejects and needs either an exact character window for the reviewers to copy,
-   or a comparison that still refuses paraphrase while tolerating re-wrapping.
+1. **Under-specification is unstable, and it gates everything.**  Run 7 detects
+   it perfectly and refuses too much; run 8 accepts too much and is usable.  Both
+   are DRAFT, for opposite reasons.  The next step is a **dedicated pass** for
+   this one case rather than a fifth revision of the two general prompts
+   (§3.03).
+2. **Provider reliability.**  7 of 67 rows failed at the provider in run 8 and 9
+   of 64 in run 6, on the same procedure.  Those failures are recorded and never
+   retried, so they cost coverage rather than corrupting results, but the cause
+   still needs separating (schema rejection, output-token ceiling, transient
+   upstream error) before the chain carries an unattended publication path.
+3. **The strict verbatim-quote check** blocked 5–10 rows per run.  It is correct
+   -- a paraphrase is not evidence -- but it costs real false rejects and needs
+   either an exact character window for the reviewers to copy, or a comparison
+   that still refuses paraphrase while tolerating re-wrapping.
 
 ### 3.4 The substantiation rule added in this round
 
@@ -368,14 +437,14 @@ table above but the raw file is gone.  The helper now names artifacts by run.
 
 | Original requirement | Status |
 |---|---|
-| `question.ambiguity.v1 → CLEAR` | **implemented, detectable** — 5/5 under-specified items refused; recall still too low to qualify |
-| `question.answer_agreement.v1 → AGREE` | **implemented, reliable** — 21/21 injected disagreements caught |
-| `question.mcq_distractor_quality.v1 → ACCEPTABLE` | **implemented, reliable** — 8/8 caught |
-| `question.rule_violation_quality.v1 → SUPPORTED` | **implemented, reliable** — 7/7 caught |
+| `question.ambiguity.v1 → CLEAR` | **implemented, UNSTABLE** — 5/5 detected at recall 0.375 (run 7), 2/5 at recall 0.632 (run 8) |
+| `question.answer_agreement.v1 → AGREE` | **reliable** — 21/21 injected disagreements caught |
+| `question.mcq_distractor_quality.v1 → ACCEPTABLE` | **reliable** — 8/8 and 7/7 caught |
+| `question.rule_violation_quality.v1 → SUPPORTED` | **reliable** — 7/7 and 7/8 caught |
 
-The semantics of all four are unchanged and no gate was relaxed.  Detection is
-solved for all four; what is not yet met is the coverage floor, so the hybrid
-chain still may not satisfy any of them.
+The semantics of all four are unchanged and no gate was relaxed.  Three are
+measurably met; ambiguity is unstable and gates everything, so the hybrid chain
+still may not satisfy any of them.
 
 ## 5. Quality non-inferiority
 
@@ -391,29 +460,31 @@ the hybrid reviewers are as good as anything.  What can be said honestly is:
 * the deterministic hard gates are unchanged and were never overridden;
 * no question was published on unqualified evidence, and production holds no
   qualification row;
-* the reviewer pair now refuses every injected defect of every kind, at the cost
-  of refusing too many sound items to meet the coverage floor.
+* three of the four cases are now measurably reliable, and the fourth moves
+  between "detects nothing" and "refuses everything" depending on one prompt
+  field.
 
 ## 6. What has to change before this can qualify
 
-1. **Sharpen the enumeration criterion.**  Ask the reviewer, for each dependency,
-   whether the answer changes when that entry is absent, and fail only when it
-   does.  This should keep the `MISSING_CONDITION` result while removing the
-   bookkeeping entries that currently produce 13 false rejects in 24.
-2. **Diagnose the provider-failure rate.**  Nine of 64 rows failed in run 6 and
-   four of 69 in run 7 on the same procedure.  Separate schema rejection from
+1. **Split the under-specification judgement out of the two general passes.**
+   Four prompt revisions moved it between the two extremes without landing
+   between them, because the same call is being asked to judge the item *and* to
+   model the reader.  A dedicated pass whose only output is the enumeration, with
+   the two existing roles unchanged, is the next measurement.
+2. **Diagnose the provider-failure rate.**  Seven of 67 rows failed in run 8 and
+   nine of 64 in run 6 on the same procedure.  Separate schema rejection from
    output-token ceiling from transient upstream error.
-3. **Make citations survive the strict check** (10 rows blocked in run 7).
+3. **Make citations survive the strict check** (5–10 rows blocked per run).
 4. **Keep the sample large** — floors are 8 negatives per case, 16 independent
-   families globally, and now a release-recall floor of 0.5.
+   families globally, and a release-recall floor of 0.5.
 5. Only then re-run the qualification.  Re-running is only necessary for
    reviewer-side changes: a gate-side change can be applied to stored evidence
    with `scripts/re_evaluate_qualification.py`.
 
 ## 7. Cost
 
-Across the seven iterations the qualification made 111 authoring + 111
-blind-solve + roughly 460 reviewer requests, plus 23 authoring calls for the
+Across the eight iterations the qualification made 120 authoring + 120
+blind-solve + roughly 520 reviewer requests, plus 23 authoring calls for the
 corpus diagnosis.  The reviewer pair cost roughly 5 200 input / 740 output tokens
 per row on the observed sample.  These are real billable DeepSeek requests; the
 chain is **not** free, and the limit is not an application-level USD cap.
@@ -422,6 +493,10 @@ Artifacts (private course material, therefore root-only mode 0600 on the
 application host):
 
 ```text
-/srv/coursemate/validation/hybrid-strict-v1/qualification-run-20260929.json    (run 1)
-/srv/coursemate/validation/hybrid-strict-v1/qualification-run3-20260929.json   (run 3)
+/srv/coursemate/validation/hybrid-strict-v1/qualification-run-20260929.json               (run 1)
+/srv/coursemate/validation/hybrid-strict-v1/qualification-run3-20260929.json              (run 3)
+/srv/coursemate/validation/hybrid-strict-v1/qualification-run4-20260929.json              (run 4)
+/srv/coursemate/validation/hybrid-strict-v1/qualification-run6-20260929.json              (run 6)
+/srv/coursemate/validation/hybrid-strict-v1/qualification-run7-enumeration-20260929.json  (run 7)
+/srv/coursemate/validation/hybrid-strict-v1/qualification-run8-answer-changing-20260929.json (run 8)
 ```

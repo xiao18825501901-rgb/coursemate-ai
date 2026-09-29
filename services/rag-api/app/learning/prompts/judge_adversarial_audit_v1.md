@@ -25,26 +25,38 @@ For every required case, actively search for the failure. A `PASS` here means
   found.
 
   This case is decided from an **enumeration**, not from an impression. Fill
-  `dependencies` with one entry per thing the answer depends on -- a value, a
-  unit, a scale, a rounding rule, an ordering, a NULL or duplicate-row
-  convention, an inclusion convention, a prerequisite, a definition the answer
-  relies on -- and set `stated_in_stem` to `true` only when the stem itself
-  provides it. Run these attacks while building the list:
+  `dependencies` with one entry per thing the answer turns on and, for each
+  entry, answer two questions:
+
+  * `stated_in_stem` -- does the stem itself provide it?
+  * `answer_changes_if_absent` -- **if it were absent, would the answer be
+    different?** When `true`, also give `consequence`: the concrete different
+    answer that would result. When `false`, leave `consequence` out.
+
+  Run these attacks while building the list:
 
   1. Remove a stated value mentally: is the answer still determined, or was a
      needed value never given at all?
-  2. Is a unit, scale, or rounding convention assumed rather than stated?
+  2. Is a unit, scale, or rounding convention assumed rather than stated -- and
+     does a different one actually change the answer?
   3. Is a boundary convention assumed -- does an interval include its endpoint,
      does a neighbourhood include the point itself, is a relation directed?
   4. For anything involving data, are the schema, dialect, ordering, NULL
-     handling, and duplicate-row handling stated?
+     handling, and duplicate-row handling stated, and does the answer turn on
+     them?
   5. Does answering require knowledge the supplied sources do not contain?
   6. Has a qualifying clause been dropped, so that a requirement the answer
      turns on is no longer stated anywhere in the stem?
 
-  The server reads the list. **If any entry is `stated_in_stem: false`, the case
-  is `FAIL` regardless of the verdict you wrote.** A `PASS` with an **empty**
-  list is treated as an abstention, not an approval.
+  The server reads the list. The case is `FAIL` when any entry is unstated *and*
+  changes the answer, regardless of the verdict you wrote. A `PASS` with an
+  **empty** list is treated as an abstention, not an approval.
+
+  Be precise about the second field. A convention that is unstated but that no
+  alternative would change is **not** a defect: mark
+  `answer_changes_if_absent: false`. Marking entries as answer-changing "to be
+  safe" refuses sound questions, and you must be able to state the different
+  answer for every entry you do mark.
 
 * **question.answer_agreement.v1** -- search for a shared mistake, an
   unjustified leap, or a counterexample inside the exact stated domain.
@@ -106,8 +118,9 @@ with one finding per required case:
 * `solution_step_ids`: the supplied `step_<ordinal>` ids you relied on;
 * `counterexample`: the concrete counterexample you found, or `null`;
 * `missing_conditions`: the conditions that are required but absent;
-* `dependencies`: for the ambiguity case, the enumeration described above (a
-  list of `{datum, stated_in_stem}`); leave it empty for the other cases.
+* `dependencies`: for the ambiguity case, the enumeration described above -- a
+  list of `{datum, stated_in_stem, answer_changes_if_absent, consequence}`;
+  leave it empty for the other cases.
 
 Give concise, externally checkable findings rather than hidden reasoning. Do not
 use probabilities, verbosity, the deadline or the presumed identity of the

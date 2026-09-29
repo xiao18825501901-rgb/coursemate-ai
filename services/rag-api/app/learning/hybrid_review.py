@@ -108,13 +108,50 @@ class JudgeDependency(Contract):
 
     The ambiguity case is the one the reviewer configuration could not decide
     from a bare verdict, so it is not asked for one: the reviewer enumerates what
-    the answer depends on and marks each item as stated in the stem or not, and
-    the server derives the verdict from that enumeration.  A claim that an item
-    is "fully specified" is only as good as the list behind it.
+    the answer depends on and the server derives the verdict from that
+    enumeration.  A claim that an item is "fully specified" is only as good as
+    the list behind it.
+
+    The first version of this rule failed an item whenever *any* entry was
+    unstated, and it refused more than half of the sound controls: reviewers
+    listed conventions a competent reader supplies (a rounding convention, an
+    implicit ordering) alongside genuinely absent data.  The second field is what
+    separates the two.  An entry only blocks the item when its absence **changes
+    the answer**, and the reviewer has to say what the different answer would be
+    -- so blanket marking is not a shortcut, it requires producing the
+    consequence for each entry.
     """
 
     datum: Annotated[str, StringConstraints(strip_whitespace=True, min_length=4, max_length=400)]
     stated_in_stem: bool
+    answer_changes_if_absent: bool = False
+    consequence: (
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=4, max_length=600)]
+        | None
+    ) = None
+
+    @model_validator(mode="after")
+    def a_consequence_is_required_when_the_answer_changes(self) -> JudgeDependency:
+        if self.answer_changes_if_absent and not self.consequence:
+            raise ValueError(
+                "a dependency whose absence changes the answer must state the "
+                "different answer that would result"
+            )
+        if not self.answer_changes_if_absent and self.consequence:
+            raise ValueError(
+                "a dependency whose absence does not change the answer has no "
+                "consequence to report"
+            )
+        return self
+
+    @property
+    def blocks_the_item(self) -> bool:
+        """True when this entry is missing and its absence changes the answer."""
+        return (
+            not self.stated_in_stem
+            and self.answer_changes_if_absent
+            and bool(self.consequence and self.consequence.strip())
+        )
 
 
 class JudgeFinding(Contract):
@@ -213,18 +250,22 @@ def substantiated_case_verdicts(findings: JudgeFindings) -> tuple[dict[str, str]
     deterministically, in the reviewer's own terms, before the two roles are
     combined:
 
-    * **an unstated dependency is a concrete defect.**  For the ambiguity case the
-      reviewer must enumerate what the answer depends on and mark each item as
-      stated in the stem or not.  If it marks any of them unstated, the item is
-      under-specified and the case is ``FAIL`` whatever verdict was claimed --
-      the reviewer has itself identified the missing datum.
+    * **a missing dependency that changes the answer is a concrete defect.**  For
+      the ambiguity case the reviewer must enumerate what the answer depends on
+      and, for each entry, say whether it is stated in the stem and whether its
+      absence changes the answer.  An entry that is unstated **and** changes the
+      answer is a defect whoever noticed it, so the case is ``FAIL`` whatever
+      verdict was claimed.  An unstated entry that does not change the answer is
+      recorded and ignored: reviewers list conventions a competent reader
+      supplies, and failing an item for those refused more than half of the sound
+      controls.
     * **``CLEAR`` must be backed by an enumeration.**  A ``PASS`` on ambiguity
       with no dependency list at all is a claim without a check, and is
       downgraded to ``UNCERTAIN``.  This is the rule that turns "the reviewers
       never noticed the removed requirement" into an abstention rather than a
       release.
     * **a ``FAIL`` with nothing behind it** -- no counterexample, no missing
-      condition, no unstated dependency -- is not a defect finding.  Treating it
+      condition, no blocking dependency -- is not a defect finding.  Treating it
       as one would let a reviewer block a sound question arbitrarily.  It is
       downgraded to ``UNCERTAIN``.
 
@@ -236,8 +277,7 @@ def substantiated_case_verdicts(findings: JudgeFindings) -> tuple[dict[str, str]
     reasons: list[str] = []
     for finding in findings.findings:
         verdict = finding.verdict
-        unstated = [item for item in finding.dependencies if not item.stated_in_stem]
-        if unstated:
+        if any(item.blocks_the_item for item in finding.dependencies):
             verdicts[finding.case] = "FAIL"
             reasons.append("HYBRID_UNSTATED_DEPENDENCY:" + finding.case)
             continue

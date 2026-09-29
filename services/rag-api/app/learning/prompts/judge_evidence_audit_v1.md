@@ -35,23 +35,33 @@ Answer **every** required case with its original meaning, using
   means "clear and fully specified under the supplied rules".
 
   This case is decided from an **enumeration**, not from an impression. Fill
-  `dependencies` with one entry per thing the answer depends on -- a value, a
-  unit, a scale, a rounding rule, an ordering, a NULL or duplicate-row
-  convention, an inclusion convention, a prerequisite, a definition the answer
-  relies on -- and for each entry set `stated_in_stem` to `true` only when the
-  stem itself provides it.
+  `dependencies` with one entry per thing the answer depends on and, for each
+  entry, answer two questions:
 
-  * The server reads that list. **If any entry is `stated_in_stem: false`, the
-    case is `FAIL` regardless of the verdict you wrote**, because you have
-    yourself identified a datum the reader is not given.
-  * A `PASS` with an **empty** `dependencies` list is treated as an abstention,
-    not an approval. List what you actually checked.
-  * Keep entries short and concrete ("the value of epsilon", "whether the
-    neighbourhood counts the point itself"), not restatements of the topic.
+  * `stated_in_stem` -- does the stem itself provide it?
+  * `answer_changes_if_absent` -- **if it were absent, would the answer be
+    different?** When this is `true` you must also give `consequence`: the
+    concrete different answer that would result. When it is `false`, leave
+    `consequence` out.
 
-  Then set `verdict` to `PASS` only when every entry you listed is stated in the
-  stem, `FAIL` when a required datum, convention or prerequisite is absent, and
-  `UNCERTAIN` only when the supplied material genuinely cannot settle it.
+  The distinction matters, and both directions count:
+
+  * "the value of epsilon" -- the stem never states it, and a different epsilon
+    gives a different neighbourhood count. That is `stated_in_stem: false`,
+    `answer_changes_if_absent: true`, with the consequence spelled out. The
+    server fails the item on this entry.
+  * "the output is expressed in base ten" -- the stem may not say so, but no
+    other answer becomes correct either way. That is `stated_in_stem: false`,
+    `answer_changes_if_absent: false`. The server records it and does **not**
+    fail the item. Do not inflate these into defects.
+
+  The server reads the list. The case is `FAIL` when any entry is unstated *and*
+  changes the answer, regardless of the verdict you wrote. A `PASS` with an
+  **empty** list is treated as an abstention, not an approval, so list what you
+  actually checked. Keep entries short and concrete ("the value of epsilon",
+  "whether the neighbourhood counts the point itself"), not restatements of the
+  topic, and do not mark everything as answer-changing to be safe: an entry
+  marked answer-changing without a real consequence is a false refusal.
 
 * **question.answer_agreement.v1** -- the two anonymised solutions reach the
   same substantive result **and** are justified for this item. Two matching
@@ -118,8 +128,9 @@ schema and contain one finding per required case, with:
   `step_<ordinal>` form;
 * `counterexample`: a concrete counterexample, or `null`;
 * `missing_conditions`: any condition that is required but absent;
-* `dependencies`: for the ambiguity case, the enumeration described above (a
-  list of `{datum, stated_in_stem}`); leave it empty for the other cases.
+* `dependencies`: for the ambiguity case, the enumeration described above -- a
+  list of `{datum, stated_in_stem, answer_changes_if_absent, consequence}`;
+  leave it empty for the other cases.
 
 Use the requested output language for explanations while preserving technical
 terms and source quotations exactly. A schema failure, a missing case or an

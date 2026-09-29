@@ -33,6 +33,7 @@ from app.learning.hybrid_review import (
     CASE_DISTRACTORS,
     CASE_RULE,
     STRONG_REVIEW_ROLES,
+    JudgeDependency,
     JudgeFinding,
     JudgeFindings,
     JudgeSourceRef,
@@ -341,12 +342,13 @@ def test_substantiation_never_produces_a_pass() -> None:
             assert resolved[CASE_AMBIGUITY] != "PASS"
 
 
-def test_an_unstated_dependency_forces_ambiguity_to_fail() -> None:
+def test_a_missing_dependency_that_changes_the_answer_fails_the_item() -> None:
     """The reviewer's own enumeration is the strongest thing it can report.
 
     This is the rule that turns "the reviewers never noticed the removed
-    requirement" into a refusal: if the reviewer lists a datum the answer needs
-    and marks it unstated, the case is FAIL whatever verdict it also wrote.
+    requirement" into a refusal: if the reviewer lists a datum whose absence
+    changes the answer and marks it unstated, the case is FAIL whatever verdict
+    it also wrote.
     """
     findings = JudgeFindings(
         findings=[
@@ -354,7 +356,15 @@ def test_an_unstated_dependency_forces_ambiguity_to_fail() -> None:
                 CASE_AMBIGUITY,
                 "PASS",
                 dependencies=[
-                    {"datum": "the value of epsilon", "stated_in_stem": False},
+                    {
+                        "datum": "the value of epsilon",
+                        "stated_in_stem": False,
+                        "answer_changes_if_absent": True,
+                        "consequence": (
+                            "a different epsilon counts a different number of "
+                            "neighbours, so a different point becomes a core point"
+                        ),
+                    },
                     {"datum": "whether the point itself counts", "stated_in_stem": True},
                 ],
             ),
@@ -364,6 +374,74 @@ def test_an_unstated_dependency_forces_ambiguity_to_fail() -> None:
     verdicts, reasons = substantiated_case_verdicts(findings)
     assert verdicts[CASE_AMBIGUITY] == "FAIL"
     assert "HYBRID_UNSTATED_DEPENDENCY:" + CASE_AMBIGUITY in reasons
+
+
+def test_a_missing_convention_that_changes_nothing_is_not_a_defect() -> None:
+    """This is the rule that keeps the gate usable.
+
+    The first enumeration version failed an item whenever any entry was
+    unstated, and refused more than half of the sound controls because reviewers
+    listed conventions a competent reader supplies.  A convention whose absence
+    changes no answer must be recorded and ignored.
+    """
+    findings = JudgeFindings(
+        findings=[
+            _finding(
+                CASE_AMBIGUITY,
+                "PASS",
+                dependencies=[
+                    {
+                        "datum": "the output is expressed in base ten",
+                        "stated_in_stem": False,
+                        "answer_changes_if_absent": False,
+                    },
+                    {"datum": "the two integers in the stem", "stated_in_stem": True},
+                ],
+            ),
+            _finding(CASE_AGREEMENT, "PASS"),
+        ]
+    )
+    verdicts, reasons = substantiated_case_verdicts(findings)
+    assert verdicts[CASE_AMBIGUITY] == "PASS"
+    assert reasons == []
+
+
+def test_an_answer_changing_dependency_requires_a_stated_consequence() -> None:
+    with pytest.raises(ValueError):
+        JudgeDependency(
+            datum="the value of epsilon",
+            stated_in_stem=False,
+            answer_changes_if_absent=True,
+        )
+    with pytest.raises(ValueError):
+        JudgeDependency(
+            datum="the output convention",
+            stated_in_stem=True,
+            answer_changes_if_absent=False,
+            consequence="nothing would change",
+        )
+
+
+def test_a_stated_dependency_never_blocks_even_if_it_would_change_the_answer() -> None:
+    findings = JudgeFindings(
+        findings=[
+            _finding(
+                CASE_AMBIGUITY,
+                "PASS",
+                dependencies=[
+                    {
+                        "datum": "the value of epsilon",
+                        "stated_in_stem": True,
+                        "answer_changes_if_absent": True,
+                        "consequence": "a different epsilon changes the count",
+                    }
+                ],
+            ),
+            _finding(CASE_AGREEMENT, "PASS"),
+        ]
+    )
+    verdicts, _ = substantiated_case_verdicts(findings)
+    assert verdicts[CASE_AMBIGUITY] == "PASS"
 
 
 def test_a_clear_claim_without_an_enumeration_is_only_an_abstention() -> None:
@@ -397,13 +475,22 @@ def test_a_fully_stated_enumeration_permits_clear() -> None:
 def test_the_enumeration_rule_applies_to_other_cases_too_but_never_creates_a_pass() -> None:
     findings = JudgeFindings(
         findings=[
-            _finding(CASE_AMBIGUITY, "PASS", dependencies=[
-                {"datum": "the stated values", "stated_in_stem": True}
-            ]),
+            _finding(
+                CASE_AMBIGUITY,
+                "PASS",
+                dependencies=[{"datum": "the stated values", "stated_in_stem": True}],
+            ),
             _finding(
                 CASE_AGREEMENT,
                 "PASS",
-                dependencies=[{"datum": "the shared result", "stated_in_stem": False}],
+                dependencies=[
+                    {
+                        "datum": "the shared result",
+                        "stated_in_stem": False,
+                        "answer_changes_if_absent": True,
+                        "consequence": "the two solutions would then disagree",
+                    }
+                ],
             ),
         ]
     )
