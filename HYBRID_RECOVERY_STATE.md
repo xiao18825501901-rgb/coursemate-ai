@@ -105,7 +105,7 @@ deployment sets them and are *not* a publication condition under this policy.
 | `OPENJEV_ADVISORY_SCOPE` | **ACHIEVED** — advisory-only observer, no field that grants or vetoes |
 | `DETERMINISTIC_CHECKS` | **ACHIEVED** — six hard gates unchanged, never overridable |
 | `DEEPSEEK_REVIEW_A_B` | **ACHIEVED (live)** — two isolated roles, distinct response ids, references verified |
-| `HYBRID_SCOPED_QUALIFICATION` | **NOT ESTABLISHED.** Three of the four cases are now measurably reliable (agreement 21/21, MCQ 8/8, rule 7/7–8).  Under-specification is unstable and gates everything: run 7 detects 5/5 but refuses 62.5 % of sound items (recall 0.375), run 8 is usable (recall 0.632) but accepts 4/41 negatives and detects only 2/5.  Both are DRAFT.  Production holds no qualification row. |
+| `HYBRID_SCOPED_QUALIFICATION` | **NOT ESTABLISHED.** Three of the four cases are measurably reliable (agreement 20–21/21, MCQ 7–8/8, rule 5/5–7/8).  Under-specification gates every question and no measured configuration makes it both safe and usable: strict rule 5/5 detection at recall 0.375, moderate 2/5 at 0.632, dedicated pass 4/5 at 0.238.  Production holds no qualification row. |
 | `CAMPUS_EXERCISE_RESTORED` | **NOT ACHIEVED** — nothing publishable |
 | `PRIVATE_EXERCISE_RESTORED` | **NOT ACHIEVED** — nothing publishable |
 | `SQL_COLD_POOL_GRADED` | **NOT ACHIEVED** — both configurations remain `BLOCKED` at 0/5 |
@@ -116,13 +116,16 @@ deployment sets them and are *not* a publication condition under this policy.
 | `QUALITY_NONINFERIORITY_EVIDENCE` | **UNKNOWN** — no paired same-sample gold exists |
 | `MAP50_13_PAUSED` | **PAUSED** — unchanged |
 
-The blocker is now a single, well-characterised case.  Across eight runs and four
-prompt revisions the under-specification judgement has moved between two extremes
-and never settled between them, while the other three cases stayed stable.  The
-measured trade-off curve is in `HYBRID_QUALIFICATION_AND_REGRESSION.md` §3.03, and
-the next action is a dedicated pass for that one case rather than a fifth
-revision of the two general prompts — the same call is currently being asked to
-judge the item *and* to model the reader, and that is what does not converge.
+The blocker is a single, now fully-mapped case.  Nine runs and five rule
+iterations have established that the under-specification judgement cannot be made
+both safe and usable by instructing this reviewer configuration: detection and
+coverage move together, and no point on the measured frontier qualifies.  The
+other three quality cases are reliable and the whole hybrid mechanism — receipts,
+isolation, qualification, coverage floor — works and refuses correctly.
+
+Details, the frontier table, and the remaining options (a different instrument
+for this one case, or an explicitly accepted and measured risk level) are in
+`HYBRID_QUALIFICATION_AND_REGRESSION.md` §3.05–§6.
 
 ## 7. Explicitly paused / not done
 
