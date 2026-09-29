@@ -57,23 +57,64 @@ findings, and the server verifies the references rather than trusting them.
 Each iteration changed only the *measurement* or the *reviewer instructions*, and
 each was re-measured end to end against real DeepSeek calls.
 
-| | run 1 | run 2 | run 3 | run 4 | run 5 |
-|---|---|---|---|---|---|
-| reviewer prompt revision | v1 | v2 | v2 | v2 | v2 |
-| base items per kind | 4 | 4 | 4 | 4 | 8 |
-| evaluation rows | 43 | 43 | 27 | 30 | 67 |
-| positives / negatives | 11 / 29 | 12 / 30 | 10 / 16 | 10 / 18 | 24 / 40 |
-| **release false accept** | 9 (31.0 %) | 3 (10.0 %) | 1 (6.25 %) | **0 (0 %)** | 3 (7.5 %) |
-| release precision | 0.50 | 0.667 | 0.875 | **1.00** | 0.85 |
-| release recall | 0.818 | 0.50 | 0.70 | 0.70 | 0.708 |
-| false rejects | 2 | 6 | 3 | 3 | 7 |
-| provider row failures (no retry) | 3 | 1 | 1 | 2 | 3 |
-| caught `DISAGREEING_SOLUTION` | 5 / 12 | 11 / 11 | 9 / 10 | 11 / 11 | 20 / 22 |
-| caught `DUPLICATE_CORRECT_OPTION` | 4 / 4 | 4 / 4 | 4 / 4 | 3 / 3 | 8 / 8 |
-| caught `UNSUPPORTED_RULE` | 3 / 3 | 4 / 4 | 2 / 2 | 3 / 3 | 7 / 7 |
-| caught `MISSING_CONDITION` | 8 / 10 | 8 / 11 | *no rows* | 1 / 1 | 2 / 3 |
-| decision | `DRAFT` | `DRAFT` | `DRAFT` | **`SCOPED_QUALITY_ACCEPTED`** | `DRAFT` |
-| qualification row written | no | no | no | **yes** | no |
+| | run 1 | run 2 | run 3 | run 4 | run 5 | run 6 |
+|---|---|---|---|---|---|---|
+| reviewer prompt revision | v1 | v2 | v2 | v2 | v2 | v2 |
+| base items per kind | 4 | 4 | 4 | 4 | 8 | 8 |
+| evaluation rows | 43 | 43 | 27 | 30 | 67 | 64 |
+| positives / negatives | 11 / 29 | 12 / 30 | 10 / 16 | 10 / 18 | 24 / 40 | 22 / 33 |
+| **release false accept** | 9 (31.0 %) | 3 (10.0 %) | 1 (6.25 %) | **0 (0 %)** | 3 (7.5 %) | 4 (12.1 %) |
+| release precision | 0.50 | 0.667 | 0.875 | **1.00** | 0.85 | 0.80 |
+| release recall | 0.818 | 0.50 | 0.70 | 0.70 | 0.708 | 0.727 |
+| provider row failures (no retry) | 3 | 1 | 1 | 2 | 3 | **9** |
+| caught `DISAGREEING_SOLUTION` | 5 / 12 | 11 / 11 | 9 / 10 | 11 / 11 | 20 / 22 | 18 / 19 |
+| caught `DUPLICATE_CORRECT_OPTION` | 4 / 4 | 4 / 4 | 4 / 4 | 3 / 3 | 8 / 8 | 7 / 7 |
+| caught `UNSUPPORTED_RULE` | 3 / 3 | 4 / 4 | 2 / 2 | 3 / 3 | 7 / 7 | 4 / 4 |
+| caught `MISSING_CONDITION` | 8 / 10 | 8 / 11 | *no rows* | 1 / 1 | 2 / 3 | **0 / 3** |
+| decision | `DRAFT` | `DRAFT` | `DRAFT` | `SCOPED_ACCEPTED` | `DRAFT` | `DRAFT` |
+| qualification row written | no | no | no | **yes** | no | no |
+
+### 3.00 Corpus diagnosis (run 6's precondition)
+
+Before spending more review calls, the item population itself was measured with
+`--diagnose-only`, which authors the items and reports their *shape* without
+recording any stem text (the stems are private course material):
+
+```text
+items 23 (one blind-solve failure), MISSING_CONDITION applicable 2 / 23
+  NUMERIC        n=7  digit_groups per stem = [0,0,0,0,0,0,0]
+  MCQ_SINGLE     n=8  digit_groups per stem = [0,0,0,0,0,0,0,0]
+  EXPLANATION    n=8  digit_groups per stem = [0,0,1,0,0,0,0,0]
+  condition-marker present in 0 / 23 stems
+```
+
+**Every numeric question the author writes states its givens in prose, not as
+digits.** That is why the ambiguity defect could be injected on only 2 items in
+23: the mutation had nothing to remove.  The blocker was the corpus, not the
+prompt -- which is what the earlier runs had already suggested and this
+measurement settled.
+
+### 3.00.1 Run 6: the ambiguity case is not detectable at all
+
+Run 6 generalised the mutation to prose constraints (dropping the clause that
+states a requirement: `only if`, `at least`, `must be`, `cannot be`, …) and made
+the prose-answer disagreement state its rejection outright instead of wrapping
+the original text.
+
+* The prose-answer fix **worked**: `DISAGREEING_SOLUTION` 20/22 → **18/19**.
+* The ambiguity defect is **not detected at all**: `MISSING_CONDITION` caught
+  **0 of 3**, and all three under-specified items were released.
+
+Across three different ambiguity-defect designs the catch rate is 2/3, 1/1 and
+0/3.  `question.ambiguity.v1` is present in **every** required case set, so this
+single case keeps the entire gate closed, and no prompt wording has moved it.
+
+Run 6 also exposed a second, independent reliability problem: **9 of 64 rows
+(14 %) failed with `HYBRID_REVIEW_PROVIDER_FAILED`** — up from 1–3 in earlier
+runs, on the same procedure and prompt revision.  Those rows are recorded as
+failures and never retried, so the rate costs coverage rather than corrupting a
+result, but a 14 % provider-failure rate is itself disqualifying for an
+unattended publication path.
 
 ### 3.0 The decisive finding: run 4's pass was a small-sample artifact
 
@@ -173,19 +214,21 @@ The single escaped row was `rule_explanation-0:DISAGREEING_SOLUTION`.
 
 ### 3.3 The two remaining blockers, precisely
 
-1. **`question.ambiguity.v1` is the binding case, and it is in every required
-   case set.**  Only three applicable negatives could be built even at 8 items
-   per kind, because the mutation now refuses to manufacture under-specification:
-   it fires only when it removes a stated given.  Against those three the
-   reviewers produced one false accept *and* six false rejects -- they are not
-   discriminating this case, and no qualification can cover a question type that
-   requires it.  Fixing this needs **items that actually state parameters**
-   (numeric givens, units, explicit conventions) so the mutation has something
-   real to remove; the current SQL prose items mostly do not.
-2. **Three false accepts and seven false rejects remain at 40 negatives.**  The
-   escapes were 2 disagreement rows on prose rule items and 1 under-specified MCQ;
-   the false rejects include several `HYBRID_CASE_FAIL:question.ambiguity.v1` on
-   positive controls, which is the other face of blocker 1.
+1. **`question.ambiguity.v1` is not detectable by this reviewer configuration,
+   and it is in every required case set.**  Three different defect designs across
+   four runs give catch rates of 2/3, 1/1 and 0/3; run 6 released all three
+   under-specified items.  The corpus diagnosis above explains the earlier
+   no-rows result but not this one: in run 6 the defects were real and injectable,
+   and the reviewers passed them.  No prompt change has moved this case, so the
+   next attempt must change the *task shape*, not the wording -- for example
+   requiring the reviewer to enumerate the data and conventions the answer
+   depends on and mark each one as stated or unstated, with the verdict derived
+   server-side from that enumeration, instead of asking for a bare judgement.
+2. **Provider reliability and the remaining escapes.**  9 of 64 rows failed at
+   the provider in run 6 (14 %), and 4 negatives were still released (2
+   disagreement on MCQ items and 2 under-specified rows).  6 rows were blocked by
+   the strict verbatim-quote check, which is correct behaviour but costs false
+   rejects.
 
 ### 3.4 The substantiation rule added in this round
 
@@ -248,17 +291,21 @@ directory at mode 0600 and were never copied anywhere world-readable:
 /srv/coursemate/validation/hybrid-strict-v1/qualification-run-20260929.json    (run 1)
 /srv/coursemate/validation/hybrid-strict-v1/qualification-run3-20260929.json   (run 3)
 /srv/coursemate/validation/hybrid-strict-v1/qualification-run4-20260929.json   (run 4)
-/srv/coursemate/validation/hybrid-strict-v1/qualification-run5-20260929.json   (run 5)
+/srv/coursemate/validation/hybrid-strict-v1/qualification-run6-20260929.json   (run 6)
 ```
+
+Run 5's raw artifact was overwritten by a filename collision in the cleanup
+helper before it was renamed correctly; its measurements are preserved in the
+table above but the raw file is gone.  The helper now names artifacts by run.
 
 ## 4. Four quality requirements — status
 
 | Original requirement | Status |
 |---|---|
-| `question.ambiguity.v1 → CLEAR` | **implemented, not measured** — only 3 applicable negatives; 1 false accept and 6 false rejects against them |
-| `question.answer_agreement.v1 → AGREE` | **implemented, not qualified** — 20/22 injected disagreements caught, 2 escaped |
-| `question.mcq_distractor_quality.v1 → ACCEPTABLE` | **implemented, not qualified** — 8/8 caught, but 1 other row escaped |
-| `question.rule_violation_quality.v1 → SUPPORTED` | **implemented, not qualified** — 7/7 caught, but 3 other rows escaped |
+| `question.ambiguity.v1 → CLEAR` | **implemented, NOT DETECTABLE** — 0/3 under-specified items refused; three defect designs all failed |
+| `question.answer_agreement.v1 → AGREE` | **implemented, close** — 18/19 injected disagreements caught |
+| `question.mcq_distractor_quality.v1 → ACCEPTABLE` | **implemented, close** — 7/7 caught, but 2 disagreement rows on MCQ items escaped |
+| `question.rule_violation_quality.v1 → SUPPORTED` | **implemented, close** — 4/4 caught |
 
 The semantics of all four are unchanged and no gate was relaxed.  None of them
 may currently be satisfied by the hybrid chain, because no qualification covers
@@ -278,40 +325,38 @@ the hybrid reviewers are as good as anything.  What can be said honestly is:
 * the deterministic hard gates are unchanged and were never overridden;
 * no question was published on unqualified evidence, and production holds no
   qualification row;
-* across five measured iterations the release false-accept rate fell from 31.0 %
-  to 7.5 % on a sample five times larger than the first, release precision rose
-  from 0.50 to 0.85, and two named defect types are now caught 100 % of the time
-  — but the rate is not zero, and the binding case is not measurable yet.
+* three of the four cases are now close to reliable on injected defects, and the
+  fourth (`ambiguity`) is not detectable at all by this configuration.
 
 ## 6. What has to change before this can qualify
 
-1. **The corpus, not the prompt.**  Every wording change so far has failed to fix
-   ambiguity, because the binding constraint is that the authored SQL items do
-   not state removable parameters: only 3 ambiguity negatives could be built from
-   24 items.  The qualification must run over a population that actually states
-   numeric givens, units and explicit conventions — i.e. the calculation and
-   parameterised questions the product really generates.
-2. **Raise the sample further.**  Run 4 versus run 5 is the proof that 18
-   negatives is not enough.  The floors are now 8 per case and 16 independent
-   families globally; a real attempt should go well beyond them.
-3. **Make citations survive the strict check.**  Three to five rows per run are
-   blocked by the verbatim-quote requirement, which is correct but costs false
-   rejects.  Give the reviewers an exact character window, or compare on a
-   normalisation that still refuses paraphrase.
-4. **Close the prose-rule disagreement escapes.**  Two of the three run-5 escapes
-   were disagreement mutations on prose rule items, where the "result" is a
-   judgement rather than a number and the checklist has no worked example.
+1. **Change the ambiguity task shape, not its wording.**  Five prompt and
+   mutation iterations have left the catch rate at or near zero.  Ask the
+   reviewer to enumerate the data and conventions the answer depends on and mark
+   each as stated or unstated, then derive the verdict server-side from that
+   enumeration.  That converts an unbounded judgement into a bounded list and
+   reuses the substantiation rule that already exists.
+2. **Diagnose the 14 % provider-failure rate.**  Nine of 64 rows failed at the
+   provider in run 6 on the same procedure that failed 1–3 rows earlier.  Those
+   failures are never retried, so a real publication path would lose a seventh of
+   its candidates; the cause (schema rejection, output-token ceiling, transient
+   upstream error) needs to be separated before the chain is relied on.
+3. **Fix the remaining escapes** — two disagreement mutations on MCQ items — and
+   reduce the false rejects caused by the strict verbatim-quote check.
+4. **Keep the sample large.**  Run 4 versus run 5 already showed that a clean
+   18-negative sample is not evidence; the floors are 8 per case and 16
+   independent families globally, and a real attempt should exceed them.
 5. Only then re-run the qualification.  Enabling publication before that would
    publish at the measured false-release rate, and would publish ambiguity
-   decisions that were never measured.
+   decisions that were never detected once.
 
 ## 7. Cost
 
-Across the five iterations the qualification made 72 authoring + 72 blind-solve +
-roughly 320 reviewer requests.  The reviewer pair cost roughly 5 200 input / 740
-output tokens per row on the observed sample.  These are real billable DeepSeek
-requests; the chain is **not** free, and the limit is not an application-level
-USD cap.
+Across the six iterations the qualification made 96 authoring + 96 blind-solve +
+roughly 400 reviewer requests, plus 23 authoring calls for the corpus diagnosis.
+The reviewer pair cost roughly 5 200 input / 740 output tokens per row on the
+observed sample.  These are real billable DeepSeek requests; the chain is **not**
+free, and the limit is not an application-level USD cap.
 
 Artifacts (private course material, therefore root-only mode 0600 on the
 application host):

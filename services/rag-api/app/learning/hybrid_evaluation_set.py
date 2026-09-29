@@ -73,6 +73,54 @@ def _revision(seed: str, mutation: str) -> str:
 
 _NUMBER = re.compile(r"\b\d+(?:[.,]\d+)?\b")
 
+# Prose constraints that carry the operative requirement of a technical item.
+# Removing the clause that states the requirement leaves the stem asking for a
+# judgement it no longer gives the reader the means to make, which is exactly
+# what makes an item under-specified.  The list is deliberately short and
+# high-precision: each phrase states a requirement, a bound, or a dependency, so
+# dropping the clause that contains it removes a stated criterion rather than
+# scenery.
+_CONSTRAINT_MARKERS = (
+    "if and only if",
+    "only if",
+    "only when",
+    "only after",
+    "only before",
+    "provided that",
+    "at least",
+    "at most",
+    "no more than",
+    "no fewer than",
+    "exactly one",
+    "must be",
+    "must not",
+    "cannot be",
+    "is required to",
+    "is forbidden",
+)
+
+
+def _drop_constraint_clause(text: str) -> str | None:
+    """Remove the clause stating an operative requirement, or ``None``."""
+    lowered = text.lower()
+    clauses = [part for part in re.split(r"(?<=[.;])\s+|,\s*", text) if part.strip()]
+    if len(clauses) < 2:
+        return None
+    for marker in _CONSTRAINT_MARKERS:
+        for index, clause in enumerate(clauses):
+            if marker not in clause.lower():
+                continue
+            kept = [part for position, part in enumerate(clauses) if position != index]
+            remainder = " ".join(kept).strip()
+            # The remainder has to still be a question about the same subject;
+            # a stem reduced to a fragment is a different defect.
+            if len(remainder) < 40 or remainder == text:
+                continue
+            if lowered.startswith(clause.lower()) and len(kept) < 1:
+                continue
+            return remainder if remainder.endswith((".", "?", "!")) else remainder + "."
+    return None
+
 
 def _strip_condition(text: str) -> str:
     """Remove a stated given, producing a genuinely under-specified item.
@@ -125,6 +173,13 @@ def _strip_condition(text: str) -> str:
         if replaced != text:
             return replaced
 
+    # The item states its requirement in prose rather than in numbers -- which
+    # is what the authored corpus actually looks like.  Removing the clause that
+    # carries the requirement is the same defect in a different notation.
+    constrained = _drop_constraint_clause(text)
+    if constrained is not None:
+        return constrained
+
     # Nothing the answer depends on can be removed by deletion or substitution.
     return text
 
@@ -153,7 +208,11 @@ def _contradiction(value: Any) -> Any:
     if isinstance(value, (int, float)):
         return value + 1
     if isinstance(value, str):
-        return f"a different result from {value}"
+        # A prose answer cannot be negated mechanically, so the mutation states
+        # the rejection explicitly instead of wrapping the original text in a
+        # hedge -- a wrapper reads like the same answer and a reviewer that
+        # reports agreement on it is not wrong.
+        return "REJECTED: the opposite of the other solution's stated result"
     if isinstance(value, dict):
         return {key: _contradiction(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
@@ -173,16 +232,25 @@ def disagreeing_solution(row_inputs: ReviewerInputs) -> ReviewerInputs | None:
     author_answer = row_inputs.solution_a.get("candidate_answer")
     if author_answer is None and not solution_b:
         return None
+    prose_answer = isinstance(author_answer, str)
     contradicted = _contradiction(author_answer)
     contradiction_text = json.dumps(contradicted, ensure_ascii=False, sort_keys=True)
 
     changed = False
     if "conclusion" in solution_b or "steps" in solution_b:
-        solution_b["conclusion"] = (
-            "Working independently from the same stated material, this solution "
-            f"obtains {contradiction_text}. That is a different result from the "
-            "other supplied solution, so the two do not reach the same answer."
-        )
+        if prose_answer:
+            solution_b["conclusion"] = (
+                "Working independently from the same stated material, this "
+                "solution reaches the opposite conclusion to the other supplied "
+                "solution. It rejects that solution's result outright rather "
+                "than restating it, so the two solutions do not agree."
+            )
+        else:
+            solution_b["conclusion"] = (
+                "Working independently from the same stated material, this solution "
+                f"obtains {contradiction_text}. That is a different result from the "
+                "other supplied solution, so the two do not reach the same answer."
+            )
         steps = solution_b.get("steps")
         if isinstance(steps, list) and steps:
             rewritten = []
@@ -191,6 +259,10 @@ def disagreeing_solution(row_inputs: ReviewerInputs) -> ReviewerInputs | None:
                     mutated_step = dict(step)
                     if index == len(steps) - 1:
                         mutated_step["result"] = contradiction_text
+                        if prose_answer:
+                            mutated_step["operation"] = (
+                                "reject the other solution's stated result"
+                            )
                     rewritten.append(mutated_step)
                 else:  # pragma: no cover - the blind contract uses objects
                     rewritten.append(step)

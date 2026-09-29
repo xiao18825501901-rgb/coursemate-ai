@@ -144,6 +144,52 @@ def test_an_inline_numeric_given_is_replaced_rather_than_left_alone() -> None:
     assert mutated.question_revision != base.question_revision
 
 
+def test_a_prose_answer_disagreement_is_stated_not_hedged() -> None:
+    """The authored corpus answers in prose, so the mutation must reject, not wrap.
+
+    Wrapping the original text ("a different result from <the same words>") reads
+    like the same answer, and a reviewer that then reports agreement is right.
+    """
+    base = _inputs(
+        solution_a={"candidate_answer": "The proposed statement violates the rule."},
+        solution_b={
+            "schema_version": "blind-solve-output.v1",
+            "solvability": "SOLVABLE",
+            "conclusion": "The proposed statement violates the rule.",
+            "steps": [
+                {"ordinal": 1, "operation": "apply the rule", "result": "violates"}
+            ],
+            "assumptions": [],
+        },
+    )
+    mutated = disagreeing_solution(base)
+    assert mutated is not None
+    conclusion = mutated.solution_b["conclusion"]
+    assert "opposite" in conclusion
+    assert "reject" in conclusion.lower()
+    assert mutated.solution_b["steps"][-1]["result"] != "violates"
+
+
+def test_the_constraint_clause_mutation_removes_a_stated_requirement() -> None:
+    """Prose items state their requirement in words, not digits.
+
+    The diagnosis of the authored corpus showed every NUMERIC item had zero
+    digits in its stem, so the digit-based mutation could fire on 2 of 23 items.
+    """
+    base = _inputs(
+        question_text=(
+            "A schedule is recoverable when every transaction that reads a value "
+            "written by an uncommitted transaction commits only after that writer "
+            "commits. Decide whether the supplied schedule is recoverable."
+        )
+    )
+    mutated = missing_condition(base)
+    assert mutated is not None
+    assert "only after" not in mutated.question_text
+    assert "recoverable" in mutated.question_text
+    assert len(mutated.question_text) >= 40
+
+
 def test_a_stem_with_no_given_at_all_still_yields_no_negative() -> None:
     base = _inputs(question_text="Explain what makes a schedule recoverable.")
     assert missing_condition(base) is None
@@ -154,12 +200,13 @@ def test_a_prose_stem_with_no_removable_given_yields_no_ambiguity_negative() -> 
 
     If it did, a reviewer that still answered CLEAR would be right while the row
     was scored as a missed defect -- the same measurement error that made the
-    first disagreement mutation look like a reviewer failure.
+    first disagreement mutation look like a reviewer flaw.  This stem states no
+    requirement and carries no given, so nothing can be removed from it.
     """
     prose = (
-        "A schedule is recoverable when every transaction that reads a value "
-        "written by an uncommitted transaction commits only after that writer "
-        "commits. Judge whether the supplied schedule is recoverable."
+        "The lecture introduced the idea of a recoverable schedule and contrasted "
+        "it with several other schedule classes. Discuss what the term means and "
+        "why the distinction matters in practice."
     )
     base = _inputs(question_text=prose)
     assert missing_condition(base) is None

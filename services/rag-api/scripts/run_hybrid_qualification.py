@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -162,6 +163,54 @@ def _reviewer_inputs(candidate, blueprint, evidence, blind) -> ReviewerInputs:
     )
 
 
+def diagnose_item(*, family: str, inputs: ReviewerInputs, candidate) -> dict[str, object]:
+    """Describe one item's *shape* without recording any of its text.
+
+    Whether a defect can be injected is a property of the item, not of the
+    reviewers, so a run that cannot build negatives for a case is a corpus
+    problem.  This record is what makes that visible: it reports the structural
+    facts (lengths, counts, which mutations applied) and never the stem itself,
+    because the stems are private course material.
+    """
+    from app.learning.hybrid_evaluation_set import _MUTATIONS
+
+    text = inputs.question_text
+    sentences = [part for part in re.split(r"(?<=[.!?;])\s+", text) if part.strip()]
+    clauses = [part for part in re.split(r",\s*", text) if part.strip()]
+    applied: dict[str, bool] = {}
+    for case in inputs.required_cases:
+        name, mutate = _MUTATIONS[case]
+        applied[name] = mutate(inputs) is not None
+    return {
+        "family": family,
+        "question_type": inputs.question_type,
+        "required_cases": list(inputs.required_cases),
+        "stem_chars": len(text),
+        "digit_groups": len(re.findall(r"\d+(?:[.,]\d+)?", text)),
+        "sentences": len(sentences),
+        "clauses": len(clauses),
+        "has_condition_marker": any(
+            marker in text.lower()
+            for marker in (" given that ", " assuming ", " such that ", " in the case that ", " where ")
+        ),
+        "evidence_spans": len(inputs.evidence),
+        "evidence_chars": sum(len(fragment["content"]) for fragment in inputs.evidence),
+        "options": len(inputs.options),
+        "mutations_applied": applied,
+        "author_answer_kind": type(inputs.solution_a.get("candidate_answer")).__name__,
+    }
+
+
+def _mutation_summary(diagnostics: list[dict[str, object]]) -> dict[str, dict[str, int]]:
+    summary: dict[str, dict[str, int]] = {}
+    for record in diagnostics:
+        applied = record.get("mutations_applied") or {}
+        for name, ok in applied.items():  # type: ignore[union-attr]
+            bucket = summary.setdefault(name, {"applicable": 0, "skipped": 0})
+            bucket["applicable" if ok else "skipped"] += 1
+    return summary
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", required=True)
@@ -170,6 +219,9 @@ def main() -> int:
     parser.add_argument("--private-course", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--per-type", type=int, default=8)
+    # Authoring-only: report the item population's shape and which defect
+    # mutations can actually be injected, without making a single review call.
+    parser.add_argument("--diagnose-only", action="store_true")
     parser.add_argument("--max-output-tokens", type=int, default=4000)
     parser.add_argument("--record", action="store_true")
     parser.add_argument("--qualification-id", default="hybrid-qual-live-v1")
@@ -213,6 +265,7 @@ def main() -> int:
         settings.model_copy(update={"database_path": Path(args.database)})
     )
     base: list[tuple[str, ReviewerInputs]] = []
+    diagnostics: list[dict[str, object]] = []
     author_failures: list[dict[str, str]] = []
     for kind in ITEM_KINDS:
         for index in range(args.per_type):
@@ -233,12 +286,52 @@ def main() -> int:
                     {"kind": kind, "index": str(index), "error": type(error).__name__}
                 )
                 continue
-            base.append(
-                (
-                    f"{kind.lower()}-{index}",
-                    _reviewer_inputs(candidate, blueprint, evidence, blind),
+            inputs = _reviewer_inputs(candidate, blueprint, evidence, blind)
+            if args.diagnose_only:
+                diagnostics.append(
+                    diagnose_item(
+                        family=f"{kind.lower()}-{index}",
+                        inputs=inputs,
+                        candidate=candidate,
+                    )
+                )
+                continue
+            base.append((f"{kind.lower()}-{index}", inputs))
+            diagnostics.append(
+                diagnose_item(
+                    family=f"{kind.lower()}-{index}",
+                    inputs=inputs,
+                    candidate=candidate,
                 )
             )
+
+    if args.diagnose_only:
+        diagnosis = {
+            "schema": "coursejesus.hybrid-item-population-diagnosis.v1",
+            "status": "DIAGNOSIS_ONLY",
+            "node_id": args.node,
+            "per_type": args.per_type,
+            "items": len(diagnostics),
+            "author_failures": author_failures,
+            "mutation_applicability": _mutation_summary(diagnostics),
+            "diagnostics": diagnostics,
+        }
+        write_artifact(args.out, diagnosis)
+        print(
+            json.dumps(
+                {
+                    "status": "DIAGNOSIS_ONLY",
+                    "items": len(diagnostics),
+                    "author_failures": author_failures,
+                    "mutation_applicability": diagnosis["mutation_applicability"],
+                    "artifact": args.out,
+                    "diagnostics": diagnostics,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
 
     rows = build_rows(base)
     reviewer = DeepSeekStrongReviewer(
