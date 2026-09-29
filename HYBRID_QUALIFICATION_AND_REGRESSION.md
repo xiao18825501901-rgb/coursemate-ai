@@ -157,6 +157,55 @@ but **no human has yet reviewed a real card in production**, so the card's own
 quality is unmeasured.  What is measured is that the pipeline refuses without one
 and accepts with one, and that the card cannot widen its own authority.
 
+## 2.2 Review-only recovery of the nine real stored candidates
+
+The brief says that when a candidate's author, blind solve and deterministic
+results are already complete and only the semantic review is missing, the review
+should be added and the author should **not** be called again.
+`app/learning/candidate_recovery.py` is that path, and it was run against the
+real `NEEDS_REVIEW` revisions on a restored copy of the live database.
+
+**How the rebuild is trusted.**  Nothing is assumed.  The blueprint is read from
+`blueprint_json` and re-hashed to its recorded `blueprint_hash`; the evidence pack
+is rebuilt from the objective and must reproduce the recorded
+`evidence_pack_hash`; the candidate's revision hash is recomputed from the split
+public/private fields and must equal the stored `question_revision_hash`; and the
+blind receipt's input hash is recomputed from the recorded question, options and
+rules and must equal the stored `blind_input_hash`.  Any mismatch is a **refusal,
+not a repair** — a rebuilt candidate that does not hash to what was stored is a
+different candidate, and reviewing it would produce a receipt for an item nobody
+authored.
+
+**Result on the real data.**
+
+| outcome | count |
+|---|---|
+| rebuilt, every hash verified, all six hard gates PASS | **8** |
+| refused — `CANDIDATE_HASH_MISMATCH`, "the stored blueprint does not match its hash" | **1** |
+
+Eight review cards were generated for those eight candidates **without a single
+provider call**, so every candidate can be put in front of the owner before any
+money is spent on reviewing it.
+
+**The refusal is a finding, not a nuisance.**  One stored provenance row's
+`blueprint_json` does not reproduce its recorded `blueprint_hash`
+(`qe_22cfcc081c3e4fa2899d53fd400671e2`, course `cs3481`).  Either the row was
+written differently from how the others were, or something changed it.  It is not
+repaired, it is not reviewed, and it is reported: a candidate whose provenance
+cannot be reproduced is exactly the case the verification exists to catch.
+Diagnosing it is left as an explicit open item rather than guessed at.
+
+**The rebuilt gates start unreviewed on purpose.**  `deterministic_report_for`
+recomputes the six hard gates from the recovered inputs but deliberately passes
+*fallback* semantic signals, so the real hybrid review decides the semantic cases
+from scratch.  Reusing the stored semantic decision would be reusing the very
+thing this path exists to replace.
+
+**Tests.**  `test_candidate_recovery.py` (8) covers a verified rebuild, the
+authored content surviving the round trip, the unreviewed starting state, tampered
+hashes being refused rather than repaired, provenance immutability still blocking
+a tamper without being bypassed, and an unknown revision being refused.
+
 ## 3. The qualification runs (three measured iterations)
 
 * Runner: `scripts/run_hybrid_qualification.py`

@@ -8,17 +8,78 @@ candidate was **not** cut over, and what the rollback position is.
 
 ## 1. What is running right now
 
+**Incident recorded in §0: migration 065 was applied to the live database by
+accident.  It was purely additive; §0 states exactly what changed and verifies
+it.**
+
 | Component | Value | Verified by |
 |---|---|---|
 | application release | `/srv/coursemate/releases/916b76c` (`916b76ce0534e4ce50a589521b0b618850df6956`) | `readlink -f /srv/coursemate/current` |
 | services | `coursemate-rag`, `coursemate-agent`, `coursejesus-openjev` all `active` | `systemctl is-active` |
 | RAG process | uvicorn `127.0.0.1:28000`, runtime `/srv/coursemate/runtime/rag-e0980c8` | `systemctl cat coursemate-rag` |
-| schema | **64** | read-only `schema_migrations` count on the live file |
-| database | `/srv/coursemate/data/releases/20260919T202006Z/rag.sqlite3`, `integrity_check=ok`, 0 FK violations, 146 tables | read-only probe |
+| schema | **65** (was 64; see §0) | read-only `schema_migrations` probe |
+| database | `/srv/coursemate/data/releases/20260919T202006Z/rag.sqlite3`, `integrity_check=ok`, 0 FK violations | read-only probe |
 | site | `coursejesus.com` on the existing Netlify site, unchanged | not rebuilt this round |
 
 Nothing about the public site, the Clerk configuration, the API origins, the
 model role, the OSS storage configuration or the Windows helper was changed.
+
+## 0. Incident: an unintended migration on the live database
+
+**What happened.**  A new helper, `work/hybrid-p0-20260929/remote_recover.sh`,
+sourced the deployment environment — which sets `RAG_DATABASE_PATH` to the live
+file — and then ran `Database(...).initialize()` intending to migrate only a
+restored copy.  The copy path was set for the review script but **not** exported
+for the migration call, so the migration ran against production.  This is
+recorded here because it happened and because the readers of this document need
+to know the live schema is at 65.
+
+**What it changed, verified read-only afterwards.**
+
+| Check | Result |
+|---|---|
+| `PRAGMA integrity_check` | `ok` |
+| `PRAGMA foreign_key_check` | 0 violations |
+| new tables | 5, all **empty** (`hybrid_review_calls`, `hybrid_local_observations`, `hybrid_quality_receipts`, `hybrid_qualifications`, `hybrid_human_reviews`) |
+| new objects besides tables | 1 index, 4 append-only triggers |
+| migration ledger | 65 rows, newest is the 065 row |
+| `assessment_question_revisions` | 58 (unchanged) |
+| `question_engine_provenance` | 58 (unchanged); 49 `READY` / 9 `NEEDS_REVIEW` (unchanged) |
+| `jev_decision_receipts` | 117 (unchanged) |
+| `courses` / `documents` / `chunks` | 87 / 850 / 22 909 (unchanged) |
+| `assessment_configurations` / `_preparations` / `_questions` | 11 / 11 / 27 (unchanged) |
+| `assessment_grading_receipts` / `assessment_submission_revisions` | 4 / 4 (unchanged) |
+| pre-existing table DDL | no pre-existing table gained a column; the migration only creates new objects |
+| RAG service after the migration | `active`, 0 restarts, loopback `/health` 200 |
+
+**Why the running release is unaffected.**  Migration 065 contains only
+`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `CREATE TRIGGER IF
+NOT EXISTS` and one `INSERT OR IGNORE` ledger row.  It alters nothing that exists,
+and the deployed `916b76c` release never reads the new tables: its readiness
+predicate filters `schema_migrations` to `version <= 64`, which still returns
+exactly 1..64.  The service was verified healthy after the change and did not
+restart.
+
+**What was *not* done, and is still owed.**  The release plan requires a verified
+consistent backup and an isolated restore before a schema change, and a staged
+immutable release cut over in order.  None of that happened for this migration:
+it reached production without the backup or the cutover.  The additive nature of
+the change is what makes it recoverable rather than damaging, and the isolated
+rehearsal evidence from earlier in the round is what establishes that the same
+migration is data-preserving — but the process breach is real and is recorded
+rather than glossed.
+
+**Rollback position after the incident.**  A code-only symlink rollback to
+`916b76c` (or an earlier release) remains valid: those releases read only
+`schema_migrations` versions up to 64 and never touch the new tables, which was
+verified by reproducing the previous release's own readiness predicate.  No
+database restore is proposed.  The five new tables are empty, so nothing has to
+be preserved out of them to roll back.
+
+**Fix applied so it cannot recur.**  `review_existing_candidates.py` now refuses
+to open the path that `RAG_DATABASE_PATH` points at unless it is explicitly given
+`--allow-live-database`, and the helper script exports the copy path *before* any
+migration call and aborts if the target is the live file.
 
 ## 2. The candidate that was prepared and verified
 
