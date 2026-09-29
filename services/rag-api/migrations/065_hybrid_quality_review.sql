@@ -94,16 +94,20 @@ CREATE TABLE IF NOT EXISTS hybrid_quality_receipts (
     local_observation_ids_json TEXT NOT NULL DEFAULT '[]'
         CHECK(json_valid(local_observation_ids_json)),
     local_status TEXT NOT NULL DEFAULT 'NOT_APPLICABLE',
+    human_card_id TEXT,
     deterministic_report_json TEXT NOT NULL CHECK(json_valid(deterministic_report_json)),
     deterministic_digest TEXT NOT NULL CHECK(length(deterministic_digest) = 64),
     reasons_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(reasons_json)),
     status TEXT NOT NULL CHECK(status IN ('QUALITY_ACCEPTED','QUALITY_NOT_ACCEPTED')),
-    created_at TEXT NOT NULL DEFAULT(strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-    UNIQUE(question_revision_hash, policy_revision, method_identity)
+    created_at TEXT NOT NULL DEFAULT(strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
+-- A revision may be reviewed more than once: a human card can arrive after an
+-- automatic review refused the item, and the second attempt must be recordable
+-- without deleting the first.  Receipts stay append-only; readers take the
+-- newest accepted one for the revision, and the gate verifies by receipt id.
 CREATE INDEX IF NOT EXISTS hybrid_quality_receipts_by_question
-ON hybrid_quality_receipts(question_revision_hash, policy_revision);
+ON hybrid_quality_receipts(question_revision_hash, policy_revision, created_at);
 
 CREATE TABLE IF NOT EXISTS hybrid_qualifications (
     id TEXT PRIMARY KEY,
@@ -156,6 +160,38 @@ CREATE TRIGGER IF NOT EXISTS hybrid_review_calls_no_delete
 BEFORE DELETE ON hybrid_review_calls
 BEGIN
     SELECT RAISE(ABORT, 'Hybrid review calls are immutable');
+END;
+
+CREATE TABLE IF NOT EXISTS hybrid_human_reviews (
+    id TEXT PRIMARY KEY,
+    question_revision_hash TEXT NOT NULL CHECK(length(question_revision_hash) = 64),
+    policy_revision TEXT NOT NULL,
+    case_key TEXT NOT NULL CHECK(case_key = 'question.ambiguity.v1'),
+    decision TEXT NOT NULL CHECK(decision IN ('PASS','FAIL')),
+    dependencies_json TEXT NOT NULL CHECK(json_valid(dependencies_json)),
+    reviewer_user_id TEXT NOT NULL,
+    owner_user_id TEXT NOT NULL,
+    reviewed_at TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    card_version TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT(strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
+CREATE INDEX IF NOT EXISTS hybrid_human_reviews_by_question
+ON hybrid_human_reviews(question_revision_hash, policy_revision, reviewed_at);
+
+-- A person's decision is audit history: it is superseded by a later card, never
+-- edited in place, so which card a publication relied on stays recoverable.
+CREATE TRIGGER IF NOT EXISTS hybrid_human_reviews_no_update
+BEFORE UPDATE ON hybrid_human_reviews
+BEGIN
+    SELECT RAISE(ABORT, 'Hybrid human review cards are immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS hybrid_human_reviews_no_delete
+BEFORE DELETE ON hybrid_human_reviews
+BEGIN
+    SELECT RAISE(ABORT, 'Hybrid human review cards are immutable');
 END;
 
 INSERT OR IGNORE INTO schema_migrations(version,name)

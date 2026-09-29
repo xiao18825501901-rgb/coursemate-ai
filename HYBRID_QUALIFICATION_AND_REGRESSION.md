@@ -99,6 +99,64 @@ two billable requests; no retry.
 So the pipeline is real: the model returns traceable, quoted, schema-valid
 findings, and the server verifies the references rather than trusting them.
 
+## 2.1 The human review card for the one case a model cannot decide
+
+Nine runs established that the reviewer configuration cannot make the
+under-specification judgement both safely and usefully, and that no wording moves
+it.  The brief anticipates this and asks for what genuinely needs a person to be
+concentrated into a small card rather than spread across the pipeline.
+`app/learning/human_review_card.py` is that card, confined to **one of the four
+cases**.
+
+**What it is.**  A structured decision on `question.ambiguity.v1` carrying the
+same dependency enumeration the automatic pass produces, so the person confirms
+or corrects facts rather than signing a blank.  The card presents six concrete
+questions: every value the answer is computed from; units, scale and rounding;
+any boundary convention the answer turns on; schema, dialect, ordering and NULL
+or duplicate-row treatment; anything outside the supplied sources; and any
+dropped requirement clause.
+
+**What it cannot do.**  It cannot touch `answer_agreement`,
+`mcq_distractor_quality` or `rule_violation_quality` — those stay with the two
+isolated reviewers and the executable oracle.  It cannot override a deterministic
+failure: `HybridQualityService.review` returns before any reviewer runs when the
+report is `REJECTED`, so a card is never even consulted.  It cannot pass an item
+whose own enumeration records a missing, answer-changing dependency — the schema
+refuses that card.  It cannot outlive its item: validity is re-checked on every
+read against the exact revision hash, the policy revision and a 30-day age, and a
+malformed stored row is skipped rather than repaired into a pass.
+
+**The one deliberate asymmetry.**  The automatic specification pass may only
+refuse or abstain; it can never upgrade a case the reviewers refused.  A valid
+human card is authoritative *in both directions* for that case alone.  That
+asymmetry is the point of having a card, and it is stated in the code rather than
+implied.
+
+**Store.**  `hybrid_human_reviews`, append-only with triggers rejecting `UPDATE`
+and `DELETE`; a later card supersedes an earlier one while both are kept, so
+which card a publication relied on stays recoverable.  The receipt records the
+card id, and the gate re-verifies the card — including its age — inside the
+publication transaction.
+
+**One finding the tests pinned.**  Provenance is append-only, so a card arriving
+*after* a revision was persisted as `NEEDS_REVIEW` cannot rewrite that verdict:
+persistence is idempotent for the revision hash, and the card has to be applied to
+a later immutable revision of the same slot, which the assessment-slot recovery
+path already supports.  Silently rewriting the first verdict is exactly what the
+append-only design forbids.
+
+**Tests.**  `test_human_review_card.py` (14) covers authority in both directions,
+the inability to touch other cases, the substantiation rules, expiry,
+supersession, immutability and the malformed-row path.
+`test_hybrid_publication.py` adds two end-to-end cases: a card makes a
+specification-refused revision `READY` with the card id on the receipt, and a
+card cannot override a deterministic rejection.
+
+**Honest limitation.**  The card is exercised by tests against the real pipeline,
+but **no human has yet reviewed a real card in production**, so the card's own
+quality is unmeasured.  What is measured is that the pipeline refuses without one
+and accepts with one, and that the card cannot widen its own authority.
+
 ## 3. The qualification runs (three measured iterations)
 
 * Runner: `scripts/run_hybrid_qualification.py`
@@ -389,19 +447,6 @@ Three of the four original quality requirements are met by this reviewer pair
 with no measured false accept in the last two runs.  The fourth is the whole of
 the remaining problem, and it is in every required case set.
 
-## 4. Four quality requirements — status
-
-| Original requirement | Status |
-|---|---|
-| `question.answer_agreement.v1 → AGREE` | **reliable** — 20–21/21 injected disagreements caught in each of the last three runs |
-| `question.mcq_distractor_quality.v1 → ACCEPTABLE` | **reliable** — 7–8/8 caught; 0 MCQ false accepts in the last three runs |
-| `question.rule_violation_quality.v1 → SUPPORTED` | **reliable** — 5/5 and 7/8 caught |
-| `question.ambiguity.v1 → CLEAR` | **frontier mapped, no qualifying setting** — 5/5 at recall 0.375, 4/5 at 0.238, 2/5 at 0.632 |
-
-The semantics of all four are unchanged and no gate was relaxed.  Three are
-measurably met; ambiguity gates every question and no measured configuration makes
-it both safe and usable, so the hybrid chain still may not satisfy any of them.
-
 ### 3.3 The remaining blockers, precisely
 
 1. **Under-specification is unstable, and it gates everything.**  Run 7 detects
@@ -554,14 +599,14 @@ table above but the raw file is gone.  The helper now names artifacts by run.
 
 | Original requirement | Status |
 |---|---|
-| `question.ambiguity.v1 → CLEAR` | **implemented, UNSTABLE** — 5/5 detected at recall 0.375 (run 7), 2/5 at recall 0.632 (run 8) |
-| `question.answer_agreement.v1 → AGREE` | **reliable** — 21/21 injected disagreements caught |
-| `question.mcq_distractor_quality.v1 → ACCEPTABLE` | **reliable** — 8/8 and 7/7 caught |
-| `question.rule_violation_quality.v1 → SUPPORTED` | **reliable** — 7/7 and 7/8 caught |
+| `question.ambiguity.v1 → CLEAR` | **frontier mapped; now covered by a human card** — automatic detection 5/5 at recall 0.375, 4/5 at 0.238, 2/5 at 0.632, and none qualifies; a person's card decides this case alone (§2.1) |
+| `question.answer_agreement.v1 → AGREE` | **reliable** — 20–21/21 injected disagreements caught in each of the last three runs |
+| `question.mcq_distractor_quality.v1 → ACCEPTABLE` | **reliable** — 7–8/8 caught; 0 MCQ false accepts in the last three runs |
+| `question.rule_violation_quality.v1 → SUPPORTED` | **reliable** — 5/5 and 7/8 caught |
 
 The semantics of all four are unchanged and no gate was relaxed.  Three are
-measurably met; ambiguity is unstable and gates everything, so the hybrid chain
-still may not satisfy any of them.
+measurably met automatically; the fourth is not, which is why it is the one case
+a human card covers — and why that card is confined to it.
 
 ## 5. Quality non-inferiority
 
@@ -583,15 +628,11 @@ the hybrid reviewers are as good as anything.  What can be said honestly is:
 
 ## 6. What has to change before this can qualify
 
-1. **Change the instrument, not the instruction, for under-specification.**
-   Five rule iterations across three designs (`strict`, `moderate`, `dedicated`)
-   have mapped the frontier — detection 5/5 at recall 0.375, 4/5 at 0.238, 2/5
-   at 0.632 — and no point on it qualifies.  The reviewers systematically
-   over-report "a different answer would result" on sound items, so raising
-   detection raises refusals with it.  Closing this needs an executable check
-   (for the arithmetic and query items where one exists), a human review step
-   for this single case, or a model whose under-specification judgement is
-   calibrated — not a sixth wording.
+1. **Under-specification now has an instrument that is not a model.**  The
+   automatic frontier holds no qualifying point, so this one case is decided by a
+   human card (§2.1) while the other three stay automatic.  What remains is to
+   *use* the card: put real candidates in front of the owner and measure the
+   card's own quality, which is unmeasured because no human has reviewed one yet.
 2. **Diagnose the provider-failure rate.**  6 of 66 rows failed in run 9 (one of
    them in the specification pass).  Those failures are recorded and never
    retried, so they cost coverage rather than corrupting a result, but the cause

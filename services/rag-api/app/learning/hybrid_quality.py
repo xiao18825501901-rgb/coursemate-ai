@@ -54,6 +54,7 @@ from app.learning.hybrid_review import (
     combine_case_verdicts,
     project_case_verdicts,
 )
+from app.learning.human_review_card import HumanReviewStore
 from app.learning.models import Contract, Identifier
 from app.learning.question_author import AuthoredQuestionCandidate
 from app.learning.question_blueprint import QuestionBlueprint
@@ -157,10 +158,11 @@ class HybridReviewResult:
     projected: dict[str, str]
     qualification_id: str
     method_identity: str
-    review_call_ids: tuple[str, str]
+    review_call_ids: tuple[str, ...]
     local_observation_ids: tuple[str, ...]
     local_status: str
     reasons: tuple[str, ...]
+    human_card_id: str | None = None
 
     @property
     def accepted(self) -> bool:
@@ -317,6 +319,7 @@ class HybridQualityService:
         self.reviewer = reviewer
         self.qualifications = qualifications or HybridQualificationStore(database)
         self.local_observer = local_observer
+        self.human_reviews = HumanReviewStore(database)
 
     @property
     def method_identity(self) -> str:
@@ -379,10 +382,23 @@ class HybridQualityService:
             first.role: first.case_verdicts(),
             second.role: second.case_verdicts(),
         }
+        # A person may decide the one case the reviewers cannot: the card is
+        # looked up by the exact question revision, re-validated on read, and
+        # merged after the two-role rule so it can only move the case towards
+        # refusal.  It can never touch the other three cases.
+        card_id: str | None = None
+        card: Any | None = None
+        if CASE_AMBIGUITY in required_cases:
+            found = self.human_reviews.current_for(
+                question_revision_hash=candidate.question_revision
+            )
+            if found is not None:
+                card_id, card = found
         combined, reasons = combine_case_verdicts(
             required_cases=required_cases,
             by_role=by_role,
             specification=(specification.enumeration if specification is not None else None),
+            human_card=card,
         )
         if specification is None:
             reasons.append("HYBRID_SPECIFICATION_PASS_MISSING")
@@ -439,6 +455,7 @@ class HybridQualityService:
             reasons=reasons,
             status=status,
             qualification_id=qualification_id,
+            human_card_id=card_id,
         )
         signals = self._signals(
             required_cases=required_cases,
@@ -456,6 +473,7 @@ class HybridQualityService:
             local_observation_ids=tuple(observation_ids),
             local_status=local_status,
             reasons=tuple(reasons),
+            human_card_id=card_id,
         )
 
     # ------------------------------------------------------------------ inputs
@@ -692,6 +710,7 @@ class HybridQualityService:
         reasons: list[str],
         status: str,
         qualification_id: str,
+        human_card_id: str | None = None,
     ) -> None:
         from app.jev.models import owner_scope_hash
 
@@ -703,8 +722,9 @@ class HybridQualityService:
                 "method_identity,qualification_id,owner_scope_hash,course_id,workspace_id,node_id,"
                 "spec_version,language,domain,required_cases_json,case_outcomes_json,"
                 "projected_verdicts_json,review_call_ids_json,local_observation_ids_json,"
-                "local_status,deterministic_report_json,deterministic_digest,reasons_json,status) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "local_status,human_card_id,deterministic_report_json,deterministic_digest,"
+                "reasons_json,status) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     receipt_id,
                     candidate.question_revision,
@@ -726,6 +746,7 @@ class HybridQualityService:
                     _canonical(list(review_call_ids)),
                     _canonical(list(observation_ids)),
                     local_status,
+                    human_card_id,
                     _canonical(deterministic_report.model_dump(mode="json")),
                     deterministic_digest,
                     _canonical(reasons),

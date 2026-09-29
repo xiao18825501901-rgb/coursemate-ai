@@ -231,9 +231,15 @@ def _pipeline(tmp_path: Path) -> dict[str, Any]:
 
 
 def _service(
-    context: dict[str, Any], *, verdict: str = "PASS", fabricate: bool = False
+    context: dict[str, Any],
+    *,
+    verdict: str = "PASS",
+    fabricate: bool = False,
+    block_specification: bool = False,
 ) -> tuple[HybridQualityService, StubJudgeProvider]:
-    provider = StubJudgeProvider(verdict=verdict, fabricate=fabricate)
+    provider = StubJudgeProvider(
+        verdict=verdict, fabricate=fabricate, block_specification=block_specification
+    )
     reviewer = DeepSeekStrongReviewer(provider, model_alias="deepseek-flash")
     return HybridQualityService(context["database"], reviewer), provider
 
@@ -311,6 +317,147 @@ def _persist(context: dict[str, Any], result, *, oracle_checks=()) -> Any:
     )
 
 
+def test_a_human_card_unblocks_the_case_the_reviewers_cannot_decide(
+    tmp_path: Path,
+) -> None:
+    """The whole point of the card, measured end to end.
+
+    The automatic specification pass refuses the ambiguity case, so the item is
+    not publishable however the other reviewers vote.  A person's card on that
+    exact revision decides the case, and the revision becomes READY -- with the
+    card id recorded on the receipt and the other three cases still decided by
+    the reviewers.
+    """
+    from datetime import UTC, datetime
+
+    from app.learning.human_review_card import HumanReviewCard, HumanReviewStore
+
+    context = _pipeline(tmp_path)
+    service, _ = _service(context, block_specification=True)
+    _qualify(context, service)
+
+    blocked = _review(context, service)
+    assert blocked is not None
+    assert blocked.accepted is False
+    assert blocked.human_card_id is None
+    assert "HYBRID_UNSTATED_DEPENDENCY:question.ambiguity.v1" in blocked.reasons
+
+    card = HumanReviewCard(
+        question_revision_hash=context["candidate"].question_revision,
+        decision="PASS",
+        dependencies=[
+            {
+                "datum": "the values the task gives in its own stem",
+                "stated_in_stem": True,
+            }
+        ],
+        reviewer_user_id="user-owner",
+        reviewed_at=datetime.now(UTC).isoformat(),
+        note="read the stem against the checklist",
+    )
+    card_id = HumanReviewStore(context["database"]).record(card, owner_user_id=OWNER)
+
+    approved = _review(context, service)
+    assert approved is not None and approved.accepted is True, approved.reasons
+    assert approved.human_card_id == card_id
+    persisted = _persist(context, approved)
+    assert persisted.status == "READY"
+    with context["database"].connect() as connection:
+        row = connection.execute(
+            "SELECT human_card_id,case_outcomes_json FROM hybrid_quality_receipts "
+            "WHERE id=?",
+            (approved.receipt_id,),
+        ).fetchone()
+    assert str(row["human_card_id"]) == card_id
+    assert json.loads(str(row["case_outcomes_json"]))["question.ambiguity.v1"] == "PASS"
+
+
+def test_a_card_arriving_after_a_negative_persist_needs_a_new_revision(
+    tmp_path: Path,
+) -> None:
+    """Provenance is append-only, so a card cannot rewrite an existing verdict.
+
+    Once a revision has been persisted as ``NEEDS_REVIEW`` the persistence layer
+    is idempotent for that revision hash, which is exactly what keeps audit
+    history honest.  A card that arrives afterwards therefore has to be applied
+    to a later immutable revision of the same slot -- which the assessment-slot
+    recovery path already does -- rather than silently rewriting the first one.
+    """
+    from datetime import UTC, datetime
+
+    from app.learning.human_review_card import HumanReviewCard, HumanReviewStore
+
+    context = _pipeline(tmp_path)
+    service, _ = _service(context, block_specification=True)
+    _qualify(context, service)
+
+    blocked = _review(context, service)
+    assert blocked is not None and blocked.accepted is False
+    assert _persist(context, blocked).status == "NEEDS_REVIEW"
+
+    HumanReviewStore(context["database"]).record(
+        HumanReviewCard(
+            question_revision_hash=context["candidate"].question_revision,
+            decision="PASS",
+            dependencies=[
+                {"datum": "the values the task gives", "stated_in_stem": True}
+            ],
+            reviewer_user_id="user-owner",
+            reviewed_at=datetime.now(UTC).isoformat(),
+        ),
+        owner_user_id=OWNER,
+    )
+    approved = _review(context, service)
+    assert approved is not None and approved.accepted is True
+    # Same revision hash: the first verdict stands, and the audit row count is
+    # unchanged rather than overwritten.
+    again = _persist(context, approved)
+    assert again.status == "NEEDS_REVIEW"
+    assert again.idempotent is True
+
+
+def test_a_card_does_not_override_a_deterministic_or_oracle_failure(
+    tmp_path: Path,
+) -> None:
+    """The card decides one semantic case; it is not a general bypass."""
+    from datetime import UTC, datetime
+
+    from app.learning.human_review_card import HumanReviewCard, HumanReviewStore
+
+    context = _pipeline(tmp_path)
+    service, _ = _service(context)
+    _qualify(context, service)
+    HumanReviewStore(context["database"]).record(
+        HumanReviewCard(
+            question_revision_hash=context["candidate"].question_revision,
+            decision="PASS",
+            dependencies=[
+                {"datum": "the values the task gives", "stated_in_stem": True}
+            ],
+            reviewer_user_id="user-owner",
+            reviewed_at=datetime.now(UTC).isoformat(),
+        ),
+        owner_user_id=OWNER,
+    )
+    result = _review(context, service)
+    assert result is not None and result.accepted
+
+    rejected = context["report"].model_copy(update={"status": "REJECTED"})
+    assert (
+        service.review(
+            candidate=context["candidate"],
+            blueprint=context["blueprint"],
+            evidence=context["evidence"],
+            blind_receipt=context["blind"],
+            deterministic_report=rejected,
+            owner_user_id=OWNER,
+            workspace_id=WORKSPACE,
+            course_id=COURSE,
+            node_id=NODE,
+            spec_version=1,
+        )
+        is None
+    )
 def test_an_executable_oracle_failure_rejects_the_candidate(tmp_path: Path) -> None:
     """A deterministic failure is produced by running the answer, not by asking.
 

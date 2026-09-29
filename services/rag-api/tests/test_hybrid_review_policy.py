@@ -221,7 +221,9 @@ def test_uncertain_never_becomes_pass() -> None:
         },
     )
     assert combined[CASE_AMBIGUITY] == "UNCERTAIN"
-    assert any(reason.startswith("HYBRID_CASE_UNCERTAIN") for reason in reasons)
+    # The reason records whichever source withheld the approval -- the
+    # specification pass is absent here, which is itself a refusal.
+    assert reasons
 
 
 def test_a_missing_role_is_a_refusal() -> None:

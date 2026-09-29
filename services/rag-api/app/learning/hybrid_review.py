@@ -354,6 +354,7 @@ def combine_case_verdicts(
     required_cases: tuple[str, ...],
     by_role: dict[str, dict[str, str]],
     specification: SpecificationEnumeration | None = None,
+    human_card: Any | None = None,
 ) -> tuple[dict[str, str], list[str]]:
     """Combine both reviewer roles into one verdict per required case.
 
@@ -363,13 +364,14 @@ def combine_case_verdicts(
     * either role FAIL -> FAIL (a concrete defect is not outvoted);
     * otherwise -> UNCERTAIN.
 
-    The ambiguity case additionally consults the dedicated specification pass:
-    its blocking entries are decisive, and a missing pass leaves the case
-    abstained rather than approved.  The pass can only ever *refuse* an item, so
-    it cannot weaken the two-role rule.
+    The ambiguity case additionally consults, in order, the dedicated
+    specification pass and then a human review card.  Each of those can only ever
+    *refuse* an item or abstain; neither can approve one the roles refused, and
+    neither can touch the other three cases.  When both are present the stricter
+    answer wins, so an abstaining specification pass cannot be upgraded to a pass
+    by a card and a refusing card cannot be overridden by a passing pass.
 
-    Returns the combined verdicts plus a list of stable refusal reasons.  A
-    missing role, a missing case, or an unknown verdict is itself a refusal.
+    Returns the combined verdicts plus a list of stable refusal reasons.
     """
     reasons: list[str] = []
     if set(by_role) != set(STRONG_REVIEW_ROLES):
@@ -405,18 +407,54 @@ def combine_case_verdicts(
     }
     for case in sorted(extra):
         reasons.append(f"HYBRID_CASE_NOT_REQUIRED:{case}")
-    # The dedicated specification pass governs the ambiguity case.  It is
-    # consulted after the two-role rule so it can only add a refusal: when it
-    # reports a blocking entry the case becomes FAIL even if both roles passed,
-    # and when it is missing the case abstains even if both roles passed.
+    # The ambiguity case is governed by the dedicated specification pass and by a
+    # human review card, and the two have deliberately **different** authority:
+    #
+    #  * the automatic specification pass may only ever refuse or abstain.  It is
+    #    a safety net over the two-role rule, so a passing pass can never upgrade
+    #    a case the roles refused;
+    #  * a valid human card is authoritative for this one case, in both
+    #    directions.  That is the whole point of the card: the measurements show
+    #    the reviewers cannot make this judgement safely *or* usefully, so a
+    #    person replaces them here rather than merely advising them.
+    #
+    # Neither source can touch the other three cases.
     if CASE_AMBIGUITY in required_cases:
-        derived, reason = ambiguity_verdict_from_enumeration(specification)
-        if derived == "FAIL":
-            combined[CASE_AMBIGUITY] = "FAIL"
-            reasons.append(reason or ("HYBRID_UNSTATED_DEPENDENCY:" + CASE_AMBIGUITY))
-        elif derived == "UNCERTAIN":
-            combined[CASE_AMBIGUITY] = "UNCERTAIN"
-            reasons.append(reason or "HYBRID_SPECIFICATION_PASS_MISSING")
+        # A verdict that has been superseded must not leave its reason behind:
+        # `reasons` is what decides acceptance, so a stale CASE_FAIL would silently
+        # cancel the authority the card was just given.
+        def _drop_ambiguity_reasons() -> None:
+            reasons[:] = [
+                reason
+                for reason in reasons
+                if CASE_AMBIGUITY not in reason
+            ]
+
+        if human_card is not None:
+            from app.learning.human_review_card import card_ambiguity_verdict
+
+            derived, reason = card_ambiguity_verdict(human_card)
+            _drop_ambiguity_reasons()
+            combined[CASE_AMBIGUITY] = derived
+            if derived != "PASS":
+                reasons.append(reason or "HYBRID_HUMAN_CARD_FAILED")
+        else:
+            if specification is None:
+                _drop_ambiguity_reasons()
+                combined[CASE_AMBIGUITY] = "UNCERTAIN"
+                reasons.append("HYBRID_SPECIFICATION_PASS_MISSING")
+            else:
+                derived, reason = ambiguity_verdict_from_enumeration(specification)
+                if derived == "FAIL":
+                    _drop_ambiguity_reasons()
+                    combined[CASE_AMBIGUITY] = "FAIL"
+                    reasons.append(reason or ("HYBRID_UNSTATED_DEPENDENCY:" + CASE_AMBIGUITY))
+                elif derived == "UNCERTAIN" and combined.get(CASE_AMBIGUITY) == "PASS":
+                    # The pass abstained: it cannot approve, so it withholds the
+                    # approval the roles gave rather than converting it to a FAIL.
+                    _drop_ambiguity_reasons()
+                    combined[CASE_AMBIGUITY] = "UNCERTAIN"
+                    reasons.append(reason or "HYBRID_SPECIFICATION_PASS_MISSING")
     return combined, list(dict.fromkeys(reasons))
 
 

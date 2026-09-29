@@ -21,6 +21,7 @@ from app.errors import ApiError
 from app.jev.models import owner_scope_hash
 from app.jev.service import SemanticDecisionService
 from app.learning.blind_solve import BlindSolveReceipt, BlindSolveRequest
+from app.learning.human_review_card import MAX_CARD_AGE_DAYS as MAX_HUMAN_CARD_AGE_DAYS
 from app.learning.models import Contract
 from app.learning.provider import structured_input_hash
 from app.learning.question_author import AuthoredQuestionCandidate, QuestionAuthorOutput
@@ -448,6 +449,33 @@ def durable_hybrid_receipt_for_dimension(
         return False
     if not roles.issubset({"evidence_audit", "adversarial_audit", "specification_audit"}):
         return False
+    # A human card may only ever have decided the ambiguity case, and when the
+    # receipt claims one it must still be valid for this exact revision: an
+    # expired, superseded-by-nothing, or wrong-revision card cannot carry a
+    # publication.
+    human_card_id = row["human_card_id"]
+    if human_card_id is not None and dimension == "AMBIGUITY":
+        card = connection.execute(
+            "SELECT * FROM hybrid_human_reviews WHERE id=?", (str(human_card_id),)
+        ).fetchone()
+        if card is None:
+            return False
+        if (
+            str(card["question_revision_hash"]) != str(question_revision_hash)
+            or str(card["case_key"]) != "question.ambiguity.v1"
+            or str(card["policy_revision"]) != str(row["policy_revision"])
+        ):
+            return False
+        try:
+            reviewed = datetime.fromisoformat(
+                str(card["reviewed_at"]).replace("Z", "+00:00")
+            )
+        except ValueError:
+            return False
+        if reviewed.tzinfo is None:
+            return False
+        if (datetime.now(UTC) - reviewed).days > MAX_HUMAN_CARD_AGE_DAYS:
+            return False
     return True
 
 
