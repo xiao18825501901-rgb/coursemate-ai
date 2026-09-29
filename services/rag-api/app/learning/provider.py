@@ -21,6 +21,7 @@ from app.evaluation.provider_safety import (
     validate_deepseek_base_url,
     validate_model_studio_base_url,
 )
+from app.provider_client import ProviderTimeouts, build_openai_client, timeouts_for
 
 Output = TypeVar("Output", bound=BaseModel)
 
@@ -222,6 +223,8 @@ class LearningProvider:
         self.model = settings.v3_model
         self.is_deepseek = self.model == "deepseek-flash"
         self.client: OpenAI | None = None
+        # The phase budgets this provider may use, recorded on every run.
+        self.timeouts: ProviderTimeouts = ProviderTimeouts()
         # Optional evidence sink used by bounded acceptance runners.  Production
         # behavior is unchanged when absent.  A configured sink is fail-closed:
         # if SEND_INTENT cannot be durably recorded, the provider request is not
@@ -262,6 +265,20 @@ class LearningProvider:
         if host.endswith(".maas.aliyuncs.com"):
             return "ENDPOINT_WORKSPACE"
         return "ENDPOINT_UNVERIFIED"
+
+    def _timeouts_for_run(self, max_output_tokens: int) -> ProviderTimeouts:
+        """The policy this call will use, once the output budget is known.
+
+        A larger output budget legitimately needs a longer read, so the read and
+        write budgets follow the configured model timeout, widened when the caller
+        asks for more than the configured maximum.  Every value stays finite.
+        """
+        configured = float(self.settings.v3_model_timeout_seconds)
+        extra = max(0, max_output_tokens - self.settings.v3_max_output_tokens)
+        # Roughly one second of generation per extra thousand tokens, which is a
+        # bounded allowance rather than an open-ended one.
+        allowance = configured + (extra / 1000.0)
+        return timeouts_for(read_seconds=allowance, write_seconds=allowance)
 
     def generate(
         self,
@@ -329,6 +346,10 @@ class LearningProvider:
             "input_tokens": 0,
             "output_tokens": 0,
             "provider_response_id": None,
+            # What this call was allowed to take, per phase.  Recorded rather than
+            # assumed, because the SDK default was 5 s connect against 600 s read
+            # and neither number appeared anywhere.
+            "timeouts": self._timeouts_for_run(effective_max_output_tokens).as_receipt(),
         }
         response_received = False
         send_intent_recorded = False
@@ -380,11 +401,18 @@ class LearningProvider:
                 if len(serialized) > 60000:
                     raise ApiError(422, "CONTEXT_BUDGET", "The bounded unit context is too large.")
                 if self.client is None:
-                    self.client = OpenAI(
+                    # The model timeout is the read budget, not the whole story: the
+                    # connect, write and pool budgets are explicit too, and the
+                    # policy object is recorded in the run so a receipt says what
+                    # the call was allowed to take.
+                    self.timeouts = timeouts_for(
+                        read_seconds=settings.v3_model_timeout_seconds,
+                        write_seconds=settings.v3_model_timeout_seconds,
+                    )
+                    self.client = build_openai_client(
                         api_key=settings.v3_model_api_key.get_secret_value(),
                         base_url=base_url,
-                        max_retries=0,
-                        timeout=settings.v3_model_timeout_seconds,
+                        timeouts=self.timeouts,
                     )
                 provider_input: Any = serialized
                 if safe_images:

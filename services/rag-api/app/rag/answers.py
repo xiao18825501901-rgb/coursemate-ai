@@ -8,6 +8,11 @@ from app.evaluation.deepseek_contract import REASONING_DISABLED
 from app.evaluation.provider_safety import validate_deepseek_base_url
 from app.jev import callsites
 from app.jev.service import SemanticDecisionService
+from app.provider_client import build_openai_client, timeouts_for
+
+# A grounded answer is a short completion; two minutes of read budget is already
+# far beyond a healthy response and is still finite.
+ANSWER_READ_SECONDS = 120.0
 
 
 def evidence_bundle_support(
@@ -67,10 +72,13 @@ class OpenAIAnswerProvider:
         base_url: str | None = None,
         max_output_tokens: int = 1_200,
     ) -> None:
-        self.client = client or (
-            OpenAI(api_key=api_key, base_url=base_url)
-            if base_url
-            else OpenAI(api_key=api_key)
+        # The SDK defaults were max_retries=2 and a 600 s read budget.  Building the
+        # client through the shared policy makes the retry count and every phase
+        # budget explicit instead.
+        self.client = client or build_openai_client(
+            api_key=api_key,
+            base_url=base_url,
+            timeouts=timeouts_for(read_seconds=ANSWER_READ_SECONDS),
         )
         self.model = model
         self.max_output_tokens = max_output_tokens
@@ -112,7 +120,11 @@ class DeepSeekAnswerProvider:
         max_output_tokens: int = 1_200,
     ) -> None:
         validate_deepseek_base_url(base_url)
-        self.client = client or OpenAI(api_key=api_key, base_url=base_url)
+        self.client = client or build_openai_client(
+            api_key=api_key,
+            base_url=base_url,
+            timeouts=timeouts_for(read_seconds=ANSWER_READ_SECONDS),
+        )
         self.model = model
         self.max_output_tokens = max_output_tokens
 

@@ -5,6 +5,11 @@ from typing import Protocol
 
 from openai import OpenAI
 
+from app.provider_client import build_openai_client, timeouts_for
+
+# Embedding calls are the shortest paid calls in the service.
+EMBEDDING_READ_SECONDS = 60.0
+
 
 class EmbeddingProvider(Protocol):
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
@@ -22,10 +27,12 @@ class OpenAIEmbeddingProvider:
         client: OpenAI | None = None,
         base_url: str | None = None,
     ) -> None:
-        self.client = client or (
-            OpenAI(api_key=api_key, base_url=base_url)
-            if base_url
-            else OpenAI(api_key=api_key)
+        # Embeddings are short calls; they still get an explicit retry count and an
+        # explicit budget rather than the SDK's two silent retries and 600 s read.
+        self.client = client or build_openai_client(
+            api_key=api_key,
+            base_url=base_url,
+            timeouts=timeouts_for(read_seconds=EMBEDDING_READ_SECONDS),
         )
         self.model = model
 

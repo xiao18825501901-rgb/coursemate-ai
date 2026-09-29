@@ -173,6 +173,10 @@ class BlindSolveProviderRun(Contract):
     started_at: ShortText
     finished_at: ShortText
     latency_ms: int = Field(ge=0)
+    # Additive: the phase budgets this call was allowed to use.  Absent on
+    # records written before the policy existed, so a stored run still
+    # validates; present, it says what connect, read, write and pool were.
+    timeouts: dict[str, float] | None = None
     input_tokens: int = Field(ge=0)
     output_tokens: int = Field(ge=0)
     provider_response_id: ShortText | None = None

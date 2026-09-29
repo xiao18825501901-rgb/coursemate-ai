@@ -31,7 +31,9 @@ def test_learning_provider_uses_safe_deepseek_runtime_settings(
                 output_text='{"value":"ok"}',
             )
 
-    monkeypatch.setattr("app.learning.provider.OpenAI", FakeOpenAI)
+    # The client is built by the shared policy module, so that is where the
+    # stand-in has to be installed.
+    monkeypatch.setattr("app.provider_client.OpenAI", FakeOpenAI)
     provider = LearningProvider(
         Settings(  # type: ignore[call-arg]
             _env_file=None,
@@ -55,9 +57,25 @@ def test_learning_provider_uses_safe_deepseek_runtime_settings(
     assert result == ExampleOutput(value="ok")
     assert run["status"] == "COMPLETED"
     assert run["provider"] == "DEEPSEEK_API"
-    assert captured["timeout"] == 180
+    # Explicit and per-phase: the SDK defaults were max_retries=2 with a 5 s
+    # connect against a 600 s read, and neither number was recorded anywhere.
+    import httpx
+
+    timeout = captured["timeout"]
+    assert isinstance(timeout, httpx.Timeout)
+    assert timeout.connect == 10.0
+    assert timeout.read == 180
+    assert timeout.write == 180
+    assert timeout.pool == 30.0
     assert captured["max_retries"] == 0
     assert captured["base_url"] == "https://api.deepseek.com"
+    assert run["timeouts"] == {
+        "connectSeconds": 10.0,
+        "readSeconds": 180.0,
+        "writeSeconds": 180.0,
+        "poolSeconds": 30.0,
+        "operationDeadlineSeconds": 370.0,
+    }
     # DeepSeek contract: native thinking off, json_schema structured output, and
     # NO Qwen-only enable_thinking field anywhere in the request body.
     assert captured["request"]["extra_body"]["reasoning"] == {"effort": "none"}
@@ -86,7 +104,7 @@ def test_learning_provider_historical_model_studio_path_still_validates(
                 output_text='{"value":"ok"}',
             )
 
-    monkeypatch.setattr("app.learning.provider.OpenAI", FakeOpenAI)
+    monkeypatch.setattr("app.provider_client.OpenAI", FakeOpenAI)
     provider = LearningProvider(
         Settings(  # type: ignore[call-arg]
             _env_file=None,

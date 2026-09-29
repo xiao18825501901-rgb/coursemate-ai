@@ -302,7 +302,7 @@ def _learning_provider_with_capture(monkeypatch: pytest.MonkeyPatch) -> tuple[Le
                 output_text='{"value":"ok"}',
             )
 
-    monkeypatch.setattr("app.learning.provider.OpenAI", FakeOpenAI)
+    monkeypatch.setattr("app.provider_client.OpenAI", FakeOpenAI)
     provider = LearningProvider(
         Settings(
             _env_file=None,
@@ -364,7 +364,7 @@ def test_learning_provider_durably_reports_complete_response_before_schema_rejec
                 output_text="not valid json",
             )
 
-    monkeypatch.setattr("app.learning.provider.OpenAI", FakeOpenAI)
+    monkeypatch.setattr("app.provider_client.OpenAI", FakeOpenAI)
     provider = LearningProvider(
         Settings(
             _env_file=None,
@@ -431,7 +431,7 @@ def test_learning_provider_does_not_send_when_transport_intent_cannot_be_saved(
             called = True
             raise AssertionError("the provider send must remain unreachable")
 
-    monkeypatch.setattr("app.learning.provider.OpenAI", FakeOpenAI)
+    monkeypatch.setattr("app.provider_client.OpenAI", FakeOpenAI)
     provider = LearningProvider(
         Settings(
             _env_file=None,
@@ -605,7 +605,7 @@ async def test_host_spy_zero_qwen_egress_across_roles(monkeypatch: pytest.Monkey
                 status="completed", output_text='{"value":"ok"}',
             )
 
-    monkeypatch.setattr("app.learning.provider.OpenAI", LearningFakeOpenAI)
+    monkeypatch.setattr("app.provider_client.OpenAI", LearningFakeOpenAI)
     from pydantic import BaseModel
 
     class _Out(BaseModel):
@@ -647,7 +647,7 @@ async def test_host_spy_zero_qwen_egress_across_roles(monkeypatch: pytest.Monkey
             qa_capture.update(kwargs)
             self.responses = SimpleNamespace(create=lambda **kw: iter([]))
 
-    monkeypatch.setattr("app.rag.answers.OpenAI", QaFakeOpenAI)
+    monkeypatch.setattr("app.provider_client.OpenAI", QaFakeOpenAI)
     qa = DeepSeekAnswerProvider(api_key="redacted")
     list(qa.stream_answer(question="q", context="c", instructions="i"))
     egress["rag_qa"] = [str(qa_capture.get("base_url", ""))]

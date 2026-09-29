@@ -80,10 +80,10 @@ def test_rag_provider_settings_fall_back_to_legacy_openai_variables(
 
 
 def test_embedding_provider_configures_only_a_non_empty_base_url(monkeypatch: Any) -> None:
-    import app.rag.embeddings as embedding_module
+    from app.rag.embeddings import EMBEDDING_READ_SECONDS
 
     sdk = RecordingOpenAI()
-    monkeypatch.setattr(embedding_module, "OpenAI", sdk)
+    monkeypatch.setattr("app.provider_client.OpenAI", sdk)
 
     custom = OpenAIEmbeddingProvider(
         api_key="placeholder-key",
@@ -98,20 +98,27 @@ def test_embedding_provider_configures_only_a_non_empty_base_url(monkeypatch: An
 
     assert custom.client is not None
     assert default.client is not None
-    assert sdk.calls == [
-        {
-            "api_key": "placeholder-key",
-            "base_url": "https://workspace.example.com/compatible-mode/v1",
-        },
-        {"api_key": "placeholder-key"},
-    ]
+    # Only a non-empty base_url is passed, and every client now also carries the
+    # explicit retry count and per-phase budgets instead of the SDK defaults.
+    assert len(sdk.calls) == 2
+    assert sdk.calls[0]["api_key"] == "placeholder-key"
+    assert (
+        sdk.calls[0]["base_url"] == "https://workspace.example.com/compatible-mode/v1"
+    )
+    assert sdk.calls[1]["api_key"] == "placeholder-key"
+    assert "base_url" not in sdk.calls[1]
+    for call in sdk.calls:
+        assert call["max_retries"] == 0
+        assert call["timeout"].connect == 10.0
+        assert call["timeout"].read == EMBEDDING_READ_SECONDS
+        assert call["timeout"].pool == 30.0
 
 
 def test_answer_provider_configures_only_a_non_empty_base_url(monkeypatch: Any) -> None:
-    import app.rag.answers as answer_module
+    from app.rag.answers import ANSWER_READ_SECONDS
 
     sdk = RecordingOpenAI()
-    monkeypatch.setattr(answer_module, "OpenAI", sdk)
+    monkeypatch.setattr("app.provider_client.OpenAI", sdk)
 
     OpenAIAnswerProvider(
         api_key="placeholder-key",
@@ -124,13 +131,18 @@ def test_answer_provider_configures_only_a_non_empty_base_url(monkeypatch: Any) 
         base_url=None,
     )
 
-    assert sdk.calls == [
-        {
-            "api_key": "placeholder-key",
-            "base_url": "https://workspace.example.com/compatible-mode/v1",
-        },
-        {"api_key": "placeholder-key"},
-    ]
+    assert len(sdk.calls) == 2
+    assert sdk.calls[0]["api_key"] == "placeholder-key"
+    assert (
+        sdk.calls[0]["base_url"] == "https://workspace.example.com/compatible-mode/v1"
+    )
+    assert sdk.calls[1]["api_key"] == "placeholder-key"
+    assert "base_url" not in sdk.calls[1]
+    for call in sdk.calls:
+        assert call["max_retries"] == 0
+        assert call["timeout"].connect == 10.0
+        assert call["timeout"].read == ANSWER_READ_SECONDS
+        assert call["timeout"].pool == 30.0
 
 
 def test_injected_clients_remain_unchanged() -> None:
