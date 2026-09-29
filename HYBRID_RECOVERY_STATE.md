@@ -105,7 +105,7 @@ deployment sets them and are *not* a publication condition under this policy.
 | `OPENJEV_ADVISORY_SCOPE` | **ACHIEVED** — advisory-only observer, no field that grants or vetoes |
 | `DETERMINISTIC_CHECKS` | **ACHIEVED** — six hard gates unchanged, never overridable |
 | `DEEPSEEK_REVIEW_A_B` | **ACHIEVED (live)** — two isolated roles, distinct response ids, references verified |
-| `HYBRID_SCOPED_QUALIFICATION` | **NOT ESTABLISHED** — five measured runs; run 4 recorded a qualification on a thin sample, run 5 refuted it on 67 rows, and the raised floors now make run 4 non-qualifying.  Production holds no qualification row. |
+| `HYBRID_SCOPED_QUALIFICATION` | **NOT ESTABLISHED, but detection is solved** — run 7 caught every injected defect of every kind (including 5/5 under-specified items, previously 0/3) with 0 false accepts in 41 negatives, but refused 13 of 24 sound controls, so the new release-recall floor refuses it.  Production holds no qualification row. |
 | `CAMPUS_EXERCISE_RESTORED` | **NOT ACHIEVED** — nothing publishable |
 | `PRIVATE_EXERCISE_RESTORED` | **NOT ACHIEVED** — nothing publishable |
 | `SQL_COLD_POOL_GRADED` | **NOT ACHIEVED** — both configurations remain `BLOCKED` at 0/5 |
@@ -116,22 +116,22 @@ deployment sets them and are *not* a publication condition under this policy.
 | `QUALITY_NONINFERIORITY_EVIDENCE` | **UNKNOWN** — no paired same-sample gold exists |
 | `MAP50_13_PAUSED` | **PAUSED** — unchanged |
 
-The binding blocker is one case: `question.ambiguity.v1` is required by every
-question, and this reviewer configuration does **not detect it** — three
-different defect designs across four runs give catch rates of 2/3, 1/1 and 0/3,
-with run 6 releasing all three under-specified items.  A corpus diagnosis also
-showed why the earlier run produced no rows at all: every authored NUMERIC item
-states its givens in prose, with zero digits in the stem, so the digit-based
-mutation had nothing to remove.  The detailed measurements, the run-4/run-5
-demonstration that a thin clean sample cannot be trusted, and the 14 %
-provider-failure rate observed in run 6 are all in
-`HYBRID_QUALIFICATION_AND_REGRESSION.md`.
+The binding blocker moved twice and is now **recall, not detection**:
 
-The conclusion is that the remaining work is a **task-shape** change for the
-ambiguity case -- enumerate the data and conventions the answer depends on, mark
-each as stated or unstated, and derive the verdict server-side -- not another
-prompt wording change.  That is recorded as the next action in §6 of that
-document.
+1. Until run 6, `question.ambiguity.v1` — required by every question — was not
+   detectable at all (0/3 under-specified items refused).
+2. Run 7 changed the ambiguity case into an enumeration whose verdict the server
+   derives, and detection is solved: 5/5, 21/21, 8/8, 7/7 on the four defect
+   kinds, 0 false accepts in 41 negatives.
+3. The same rule now over-fires: 13 of 24 sound controls are refused on
+   "unstated dependency", so release recall is 0.375.  A procedure that reaches
+   zero false accepts by refusing most sound items is the "all blocked" baseline
+   the policy forbids, so the gate gained a release-recall floor and run 7
+   re-evaluates to `DRAFT`.
+
+The next action is therefore to sharpen the enumeration criterion — ask whether
+the answer *changes* when an entry is absent, and fail only then — rather than to
+change any wording.  Details in `HYBRID_QUALIFICATION_AND_REGRESSION.md` §6.
 
 ## 7. Explicitly paused / not done
 
