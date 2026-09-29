@@ -213,6 +213,56 @@ ImportError: cannot import name 'UTC' from 'datetime' (/usr/lib/python3.10/datet
 The backup above was taken with the host's `/usr/bin/python3` (3.10.12) through the
 documented wrapper, which is the direct proof of the fix.
 
+## A plain file copy of the live database is not a backup (measured)
+
+While the verified recovery unit was being taken, an `scp` of the live
+`rag.sqlite3` was also pulled to the development machine, to have an off-box copy.
+It does **not** open:
+
+```
+bytes=688529408   sha256=71f5d98175388a0f02209bad9fbd9a0d813c299bb99ae98e4ff4dd4f4574f5b9
+PRAGMA integrity_check -> sqlite3.DatabaseError:
+  malformed database schema (akm-job-d8f8959c079a3a68e6d20bec9b2bdb6d)
+```
+
+The live file grew during the transfer (688 455 680 to 688 529 408 bytes), so the
+copy is a torn snapshot.  This is exactly the failure the project's backup tool
+avoids by using SQLite's own `backup` API under a writer pause, and it is worth
+recording because it is the mistake a file copy looks like it should not make.
+The torn copy was deleted and was never used as a backup; the evidence line above
+is kept at `out/torn-copy-evidence.txt` in the round's work directory.
+
+## One explicit HTTP policy for every paid model client
+
+Measured on the installed SDK (`openai` 2.53.0):
+
+```
+DEFAULT_MAX_RETRIES: 2
+DEFAULT_TIMEOUT: Timeout(connect=5.0, read=600, write=600, pool=600)
+```
+
+Three clients were constructed with neither argument and inherited exactly that —
+`OpenAIAnswerProvider`, `DeepSeekAnswerProvider` and `OpenAIEmbeddingProvider`.
+Two silent automatic retries mean one learner question could become three
+billable provider calls with no record that the first two happened, which is the
+opposite of "no silent automatic retry" and it corrupts every count of what was
+sent.  The budget was equally unrecorded: five seconds to connect against ten
+minutes to read — the asymmetry the plan warns about, where a short window is not
+an operation timeout and a long read is not a deadline.
+
+`app/provider_client.py` now owns the policy: every phase is named, every value is
+finite and validated, the whole-operation bound is derived from the phases, and
+`build_openai_client` refuses a non-zero retry count outright.  The learning
+provider keeps its configured model timeout as the read and write budget and
+records the policy on every run.  The four provider-run contracts gained an
+optional `timeouts` field, so a stored run written before the policy still
+validates.
+
+A source-level guard in `tests/test_provider_timeouts.py` asserts that no module
+outside `provider_client.py` calls `OpenAI(...)`: inheriting the defaults is
+silent, which is why the guard is at the source level and not only at the call
+site.
+
 ## What the next round has to do first
 
 1. Take the trusted backup and prove a restore, and only then let anything write.
