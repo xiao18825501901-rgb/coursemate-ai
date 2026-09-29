@@ -117,10 +117,21 @@ deployment sets them and are *not* a publication condition under this policy.
 | `MAP50_13_PAUSED` | **PAUSED** — unchanged |
 
 The binding blocker is one case: `question.ambiguity.v1` is required by every
-question, only three applicable negatives could be built for it, and against
-those the reviewers produced one false accept and six false rejects.  The
-detailed measurements, and the run-4/run-5 demonstration that a thin clean
-sample cannot be trusted, are in `HYBRID_QUALIFICATION_AND_REGRESSION.md`.
+question, and this reviewer configuration does **not detect it** — three
+different defect designs across four runs give catch rates of 2/3, 1/1 and 0/3,
+with run 6 releasing all three under-specified items.  A corpus diagnosis also
+showed why the earlier run produced no rows at all: every authored NUMERIC item
+states its givens in prose, with zero digits in the stem, so the digit-based
+mutation had nothing to remove.  The detailed measurements, the run-4/run-5
+demonstration that a thin clean sample cannot be trusted, and the 14 %
+provider-failure rate observed in run 6 are all in
+`HYBRID_QUALIFICATION_AND_REGRESSION.md`.
+
+The conclusion is that the remaining work is a **task-shape** change for the
+ambiguity case -- enumerate the data and conventions the answer depends on, mark
+each as stated or unstated, and derive the verdict server-side -- not another
+prompt wording change.  That is recorded as the next action in §6 of that
+document.
 
 ## 7. Explicitly paused / not done
 
