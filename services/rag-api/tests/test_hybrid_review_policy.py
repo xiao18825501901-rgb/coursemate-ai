@@ -626,19 +626,30 @@ def test_a_missing_convention_that_changes_nothing_is_not_a_defect() -> None:
 
 
 def test_an_answer_changing_dependency_requires_a_stated_consequence() -> None:
+    """The rule that matters is strict; a field nothing reads is not a rejection.
+
+    A blocking entry without its consequence is refused, because the server cannot
+    tell a real defect from a careless marking.  A consequence on an entry that does
+    not change the answer is *discarded* rather than refused: the field is only read
+    when an entry blocks, so it cannot change any decision, and rejecting the whole
+    response over it threw away complete paid calls -- five of them in one bounded
+    frozen evaluation, every one reported as
+    findings.0.dependencies.N: value_error.
+    """
     with pytest.raises(ValueError):
         JudgeDependency(
             datum="the value of epsilon",
             stated_in_stem=False,
             answer_changes_if_absent=True,
         )
-    with pytest.raises(ValueError):
-        JudgeDependency(
-            datum="the output convention",
-            stated_in_stem=True,
-            answer_changes_if_absent=False,
-            consequence="nothing would change",
-        )
+    discarded = JudgeDependency(
+        datum="the output convention",
+        stated_in_stem=True,
+        answer_changes_if_absent=False,
+        consequence="nothing would change",
+    )
+    assert discarded.consequence is None
+    assert discarded.blocks_the_item is False
 
 
 def test_a_stated_dependency_never_blocks_even_if_it_would_change_the_answer() -> None:

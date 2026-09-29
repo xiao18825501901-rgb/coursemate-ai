@@ -198,17 +198,29 @@ class JudgeDependency(Contract):
         | None
     ) = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def drop_a_consequence_that_cannot_matter(cls, value: Any) -> Any:
+        """Discard a consequence on an entry that does not change the answer.
+
+        The field is only read when an entry blocks the item, so an unused one
+        cannot change any decision.  Rejecting the whole response over it did real
+        damage: a bounded frozen evaluation lost five review calls to exactly this,
+        all of them `findings.0.dependencies.N: value_error`, which threw away a
+        complete paid response for a field nothing reads.  The rule that matters --
+        a blocking entry must state the different answer that would result -- is
+        still enforced below.
+        """
+        if isinstance(value, dict) and not value.get("answer_changes_if_absent"):
+            value = {key: item for key, item in value.items() if key != "consequence"}
+        return value
+
     @model_validator(mode="after")
     def a_consequence_is_required_when_the_answer_changes(self) -> JudgeDependency:
         if self.answer_changes_if_absent and not self.consequence:
             raise ValueError(
                 "a dependency whose absence changes the answer must state the "
                 "different answer that would result"
-            )
-        if not self.answer_changes_if_absent and self.consequence:
-            raise ValueError(
-                "a dependency whose absence does not change the answer has no "
-                "consequence to report"
             )
         return self
 
@@ -573,10 +585,11 @@ def verify_references(
                 unknown_spans.append(reference.source_span_id)
                 continue
             text = span_text_by_id.get(reference.source_span_id, "")
-            if reference.quote is not None:
-                if _collapse(reference.quote) not in _collapse(text):
-                    untraceable.append(reference.source_span_id)
-                    continue
+            if reference.quote is not None and (
+                _collapse(reference.quote) not in _collapse(text)
+            ):
+                untraceable.append(reference.source_span_id)
+                continue
             resolved.setdefault(
                 reference.source_span_id,
                 ResolvedSpan(
