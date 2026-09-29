@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import Settings  # noqa: E402
 from app.db import Database  # noqa: E402
+from app.db_target import DatabaseTargetError, target_from_environment  # noqa: E402
 from app.learning.candidate_recovery import (  # noqa: E402
     CandidateRecoveryError,
     deterministic_report_for,
@@ -33,48 +34,43 @@ from app.learning.candidate_recovery import (  # noqa: E402
 from app.learning.human_review_card import CARD_QUESTIONS, build_card_prompt  # noqa: E402
 
 
-def _database(path: str, *, allow_mismatch: bool = False) -> Database:
-    """Open the target database, refusing when the environment disagrees with it.
+def _database(
+    path: str,
+    *,
+    allowed_root: str,
+    production_paths: tuple[str, ...],
+    expected_schema: int | None,
+) -> tuple[Database, dict[str, object]]:
+    """Establish the target with the strict copy guard, then open it.
 
-    The incident this guards against was precise: a helper sourced the
-    deployment environment and a component then read ``RAG_DATABASE_PATH``
-    **implicitly**, so a migration intended for a restored copy ran against the
-    live file.  The dangerous condition is therefore *the environment and the
-    requested target disagreeing*, not one particular path.
-
-    So the check is: if ``RAG_DATABASE_PATH`` is set and resolves to a different
-    file than the one asked for, refuse.  Pointing both at a copy is fine;
-    pointing the argument at a copy while the environment still names live is
-    exactly the mistake, and it stops here rather than at the data.
+    The earlier rule -- refuse when the environment and the argument disagree --
+    was necessary and not sufficient.  Two production paths agree with each other
+    and are still production; a symlink, a hard link or a case alias names
+    production while comparing unequal as text.  The guard therefore refuses a
+    target that *is* production whatever the environment says, checks identity
+    rather than spelling, keeps the target inside the authorised work root, and
+    records the fingerprint of the copy and of the file it came from.
     """
-    resolved = Path(path).resolve()
-    import os
-
-    declared = os.environ.get("RAG_DATABASE_PATH")
-    if declared and Path(declared).resolve() != resolved and not allow_mismatch:
-        raise SystemExit(
-            json.dumps(
-                {
-                    "status": "REFUSED",
-                    "code": "DATABASE_TARGET_MISMATCH",
-                    "message": (
-                        "RAG_DATABASE_PATH and --database name different files; "
-                        "a component could read the implicit path.  Point both at "
-                        "the intended database, or pass --allow-database-mismatch "
-                        "if that really is intended."
-                    ),
-                }
-            )
+    try:
+        target = target_from_environment(
+            purpose="QUALIFICATION_RUN",
+            explicit_path=path,
+            allowed_root=allowed_root,
+            production_paths=tuple(production_paths),
+            expected_schema=expected_schema,
         )
+    except DatabaseTargetError as refusal:
+        raise SystemExit(json.dumps(refusal.as_dict(), ensure_ascii=False)) from refusal
     settings = Settings()
-    return Database(
+    database = Database(
         settings.model_copy(
             update={
-                "database_path": resolved,
-                "upload_dir": resolved.parent / "uploads",
+                "database_path": target.path,
+                "upload_dir": target.path.parent / "uploads",
             }
         )
     )
+    return database, target.as_receipt()
 
 
 def _card_payload(record) -> dict[str, object]:
@@ -124,19 +120,37 @@ def main() -> int:
     parser.add_argument("--out", default="")
     parser.add_argument("--max-output-tokens", type=int, default=4000)
     parser.add_argument(
-        "--allow-database-mismatch",
-        action="store_true",
-        help="permit RAG_DATABASE_PATH and --database to name different files",
+        "--allowed-root",
+        required=True,
+        help="the work root the target copy must live inside",
+    )
+    parser.add_argument(
+        "--production-database",
+        action="append",
+        default=[],
+        help="a production database path this target is checked against; repeatable",
+    )
+    parser.add_argument(
+        "--expected-schema",
+        type=int,
+        default=None,
+        help="the schema version the copy must be at, read read-only",
     )
     args = parser.parse_args()
 
-    database = _database(args.database, allow_mismatch=args.allow_database_mismatch)
+    database, target_receipt = _database(
+        args.database,
+        allowed_root=args.allowed_root,
+        production_paths=tuple(args.production_database),
+        expected_schema=args.expected_schema,
+    )
 
     if args.list:
         rows = list_recoverable(database, limit=args.limit)
         print(
             json.dumps(
                 {
+                    "database_target": target_receipt,
                     "candidates": [
                         {
                             "question_revision_id": row["question_revision_id"],
@@ -200,7 +214,7 @@ def main() -> int:
 
     settings = Settings()
     provider = LearningProvider(
-        settings.model_copy(update={"database_path": Path(args.database)})
+        settings.model_copy(update={"database_path": database.path})
     )
     reviewer = DeepSeekStrongReviewer(
         provider,
@@ -225,6 +239,7 @@ def main() -> int:
         print(
             json.dumps(
                 {
+                    "database_target": target_receipt,
                     "status": "REVIEW_FAILED",
                     "code": getattr(error, "code", type(error).__name__),
                 }
@@ -234,6 +249,7 @@ def main() -> int:
     print(
         json.dumps(
             {
+                "database_target": target_receipt,
                 "status": "REVIEWED" if outcome else "NOT_ELIGIBLE",
                 "accepted": outcome.accepted if outcome else False,
                 "receipt_id": outcome.receipt_id if outcome else None,

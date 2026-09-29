@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from hashlib import sha256
 from time import perf_counter
-from typing import Any, Literal, TypeVar
+from typing import Any, Final, Literal, TypeVar
 from urllib.parse import urlsplit
 
 from openai import OpenAI
@@ -38,12 +38,144 @@ class ProviderImage:
 
 
 class ProviderCallFailure(Exception):
-    """Carries safe call metadata without retaining private prompt or response bodies."""
+    """Carries safe call metadata without retaining private prompt bodies.
+
+    The run record also carries the call's own failure taxonomy -- error_class,
+    terminal status, the HTTP status when there was one, the exception chain and,
+    when a response did arrive, the response text.  A complete response that
+    failed schema validation is not an upstream outage, and without these fields
+    that distinction is unenforceable after the fact.
+    """
 
     def __init__(self, cause: Exception, run: dict[str, Any]) -> None:
         super().__init__(type(cause).__name__)
         self.cause = cause
         self.run = run
+
+
+# The named layers a provider call can fail in.  They are deliberately about
+# *where* the failure happened, not how bad it was: a local input-validation
+# failure and an upstream outage both stop a run, and conflating them is what
+# makes "provider failure rate" meaningless.
+FAILURE_LAYER_LOCAL_INPUT_VALIDATION: Final = "LOCAL_INPUT_VALIDATION"
+FAILURE_LAYER_LOCAL_CONFIGURATION: Final = "LOCAL_CONFIGURATION"
+FAILURE_LAYER_LOCAL_DURABILITY: Final = "LOCAL_DURABILITY"
+FAILURE_LAYER_HTTP_OR_PERMISSION: Final = "HTTP_OR_PERMISSION"
+FAILURE_LAYER_UPSTREAM_TRANSPORT: Final = "UPSTREAM_TRANSPORT"
+FAILURE_LAYER_PROVIDER_INCOMPLETE: Final = "PROVIDER_INCOMPLETE"
+FAILURE_LAYER_PROVIDER_EMPTY_OR_REFUSAL: Final = "PROVIDER_EMPTY_OR_REFUSAL"
+FAILURE_LAYER_RESPONSE_SCHEMA: Final = "RESPONSE_SCHEMA"
+FAILURE_LAYER_SEMANTIC_OR_REFERENCE: Final = "SEMANTIC_OR_REFERENCE"
+FAILURE_LAYER_UNKNOWN: Final = "UNKNOWN"
+
+FAILURE_LAYERS: Final = (
+    FAILURE_LAYER_LOCAL_INPUT_VALIDATION,
+    FAILURE_LAYER_LOCAL_CONFIGURATION,
+    FAILURE_LAYER_LOCAL_DURABILITY,
+    FAILURE_LAYER_HTTP_OR_PERMISSION,
+    FAILURE_LAYER_UPSTREAM_TRANSPORT,
+    FAILURE_LAYER_PROVIDER_INCOMPLETE,
+    FAILURE_LAYER_PROVIDER_EMPTY_OR_REFUSAL,
+    FAILURE_LAYER_RESPONSE_SCHEMA,
+    FAILURE_LAYER_SEMANTIC_OR_REFERENCE,
+    FAILURE_LAYER_UNKNOWN,
+)
+
+# ApiError codes the adapter raises itself, and the layer each belongs to.
+_LOCAL_ERROR_LAYERS: Final[dict[str, str]] = {
+    "MODEL_LIVE_BLOCKED": FAILURE_LAYER_LOCAL_CONFIGURATION,
+    "MODEL_ENDPOINT_INVALID": FAILURE_LAYER_LOCAL_CONFIGURATION,
+    "CONTEXT_BUDGET": FAILURE_LAYER_LOCAL_INPUT_VALIDATION,
+    "IMAGE_MODEL_LIMIT": FAILURE_LAYER_LOCAL_INPUT_VALIDATION,
+    "MODEL_OUTPUT_LIMIT_INVALID": FAILURE_LAYER_LOCAL_INPUT_VALIDATION,
+    "MODEL_EMPTY_OUTPUT": FAILURE_LAYER_PROVIDER_EMPTY_OR_REFUSAL,
+    "MODEL_INCOMPLETE": FAILURE_LAYER_PROVIDER_INCOMPLETE,
+    "AUTO_LEDGER_WRITE_FAILED": FAILURE_LAYER_LOCAL_DURABILITY,
+}
+_SCHEMA_ERROR_CLASSES: Final[frozenset[str]] = frozenset({"SCHEMA_INVALID", "ValidationError"})
+_TRANSPORT_ERROR_CLASSES: Final[frozenset[str]] = frozenset(
+    {
+        "APITimeoutError",
+        "APIConnectionError",
+        "ConnectError",
+        "ConnectTimeout",
+        "ReadTimeout",
+        "WriteTimeout",
+        "PoolTimeout",
+        "RemoteProtocolError",
+        "InternalServerError",
+        "ServiceUnavailableError",
+        "APIError",
+    }
+)
+_HTTP_ERROR_CLASSES: Final[frozenset[str]] = frozenset(
+    {
+        "APIStatusError",
+        "BadRequestError",
+        "AuthenticationError",
+        "PermissionDeniedError",
+        "NotFoundError",
+        "UnprocessableEntityError",
+        "RateLimitError",
+        "ConflictError",
+    }
+)
+
+
+def classify_failure_layer(*, error_class: str, status: str) -> str:
+    """Name the layer a failed call failed in, from the recorded facts only.
+
+    An unknown code is reported as UNKNOWN rather than being folded into the
+    nearest-sounding bucket: an unattributed failure is a fact worth keeping.
+    """
+    if status == "BLOCKED":
+        return _LOCAL_ERROR_LAYERS.get(error_class, FAILURE_LAYER_LOCAL_CONFIGURATION)
+    if error_class in _LOCAL_ERROR_LAYERS:
+        return _LOCAL_ERROR_LAYERS[error_class]
+    if error_class in _SCHEMA_ERROR_CLASSES:
+        return FAILURE_LAYER_RESPONSE_SCHEMA
+    if error_class in _TRANSPORT_ERROR_CLASSES:
+        return FAILURE_LAYER_UPSTREAM_TRANSPORT
+    if error_class in _HTTP_ERROR_CLASSES:
+        return FAILURE_LAYER_HTTP_OR_PERMISSION
+    return FAILURE_LAYER_UNKNOWN
+
+
+def _cause_chain(error: BaseException, *, limit: int = 4) -> list[str]:
+    """The exception type chain, which is where an httpx timeout shows itself."""
+    chain: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and len(chain) < limit and id(current) not in seen:
+        seen.add(id(current))
+        chain.append(type(current).__name__)
+        current = current.__cause__ or current.__context__
+    return chain
+
+
+def _timeout_kind(error: BaseException) -> str | None:
+    """Which timeout fired, when the chain names one."""
+    for name in _cause_chain(error):
+        folded = name.casefold()
+        if "timeout" in folded:
+            if "connect" in folded:
+                return "CONNECT"
+            if "read" in folded:
+                return "READ"
+            if "write" in folded:
+                return "WRITE"
+            if "pool" in folded:
+                return "POOL"
+            return "UNSPECIFIED"
+    return None
+
+
+def _http_status(error: BaseException) -> int | None:
+    for candidate in (error, error.__cause__):
+        value = getattr(candidate, "status_code", None)
+        if isinstance(value, int) and 100 <= value <= 599:
+            return value
+    return None
 
 
 def _structured_input_payload(
@@ -348,6 +480,26 @@ class LearningProvider:
                         "MODEL_INCOMPLETE",
                         "Incomplete output was not recorded as teaching coverage.",
                     )
+                if not raw_output_text or not raw_output_text.strip():
+                    # An empty body from a call that reported itself complete is
+                    # its own failure: it is not a schema defect in our request and
+                    # it is not an upstream outage, and calling it SCHEMA_INVALID
+                    # would hide a provider-side refusal.
+                    emit(
+                        "CONTRACT_REJECTED",
+                        role=role,
+                        input_hash=run["input_hash"],
+                        provider_response_id=response.id,
+                        reason="MODEL_EMPTY_OUTPUT",
+                    )
+                    contract_terminal_recorded = True
+                    raise ApiError(
+                        502,
+                        "MODEL_EMPTY_OUTPUT",
+                        "A completed response carried no output text.",
+                    )
+                run["response_text"] = raw_output_text
+                run["response_received"] = True
                 output = schema.model_validate_json(raw_output_text)
                 emit(
                     "CONTRACT_VALID",
@@ -392,26 +544,43 @@ class LearningProvider:
                 isinstance(error, ApiError)
                 and error.code == "AUTO_LEDGER_WRITE_FAILED"
             )
+            terminal_status = (
+                "UNKNOWN"
+                if ledger_failed
+                else
+                "BLOCKED"
+                if isinstance(error, ApiError)
+                and error.code in {"MODEL_LIVE_BLOCKED", "MODEL_ENDPOINT_INVALID"}
+                else "FAILED"
+                if response_received or isinstance(error, (ApiError, ValueError))
+                else "UNKNOWN"
+            )
+            error_class = (
+                error.code
+                if isinstance(error, ApiError)
+                else "SCHEMA_INVALID"
+                if isinstance(error, ValueError)
+                else type(error).__name__[:100]
+            )
             run.update(
                 finished_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                 latency_ms=max(0, round((perf_counter() - started) * 1000)),
-                status=(
-                    "UNKNOWN"
-                    if ledger_failed
-                    else
-                    "BLOCKED"
-                    if isinstance(error, ApiError)
-                    and error.code in {"MODEL_LIVE_BLOCKED", "MODEL_ENDPOINT_INVALID"}
-                    else "FAILED"
-                    if response_received or isinstance(error, (ApiError, ValueError))
-                    else "UNKNOWN"
+                status=terminal_status,
+                error_class=error_class,
+                # The facts needed to attribute the failure, recorded at the only
+                # place that still has them.
+                failure_layer=classify_failure_layer(
+                    error_class=error_class, status=terminal_status
                 ),
-                error_class=(
-                    error.code
-                    if isinstance(error, ApiError)
-                    else "SCHEMA_INVALID"
-                    if isinstance(error, ValueError)
-                    else type(error).__name__[:100]
+                http_status=_http_status(error),
+                timeout_kind=_timeout_kind(error),
+                cause_chain=_cause_chain(error),
+                response_received=response_received,
+                max_output_tokens=effective_max_output_tokens,
+                response_digest=(
+                    sha256(run["response_text"].encode()).hexdigest()
+                    if run.get("response_text") is not None
+                    else None
                 ),
             )
             raise ProviderCallFailure(error, run) from error

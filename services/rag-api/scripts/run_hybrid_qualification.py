@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import Settings  # noqa: E402
 from app.db import Database  # noqa: E402
+from app.db_target import DatabaseTargetError, target_from_environment  # noqa: E402
 from app.learning.blind_solve import run_blind_solve  # noqa: E402
 from app.learning.deepseek_reviewer import (  # noqa: E402
     DeepSeekStrongReviewer,
@@ -235,17 +236,46 @@ def main() -> int:
     # an everything-blocked baseline is not a quality standard.  This floor is a
     # coverage requirement, not an accuracy claim.
     parser.add_argument("--min-release-recall", type=float, default=0.5)
+    parser.add_argument(
+        "--allowed-root",
+        required=True,
+        help="the work root the target copy must live inside",
+    )
+    parser.add_argument(
+        "--production-database",
+        action="append",
+        default=[],
+        help="a production database path this target is checked against; repeatable",
+    )
+    parser.add_argument(
+        "--expected-schema",
+        type=int,
+        default=None,
+        help="the schema version the copy must be at, read read-only",
+    )
     args = parser.parse_args()
 
     settings = Settings()
-    # The database and upload root are taken from the explicit arguments so a
-    # qualification run can measure against a restored copy without ever
-    # pointing the process at the live file.
+    # The database and upload root come from the explicit arguments, and the
+    # target must survive the strict copy guard first: a run measures against a
+    # restored copy and never points the process at the live file, whether or not
+    # the environment agrees with the argument.
+    try:
+        target = target_from_environment(
+            purpose="QUALIFICATION_RUN",
+            explicit_path=args.database,
+            allowed_root=args.allowed_root,
+            production_paths=tuple(args.production_database),
+            expected_schema=args.expected_schema,
+        )
+    except DatabaseTargetError as refusal:
+        print(json.dumps(refusal.as_dict(), ensure_ascii=False))
+        return 6
     database = Database(
         settings.model_copy(
             update={
-                "database_path": Path(args.database),
-                "upload_dir": Path(args.database).parent / "uploads",
+                "database_path": target.path,
+                "upload_dir": target.path.parent / "uploads",
             }
         )
     )
@@ -266,7 +296,7 @@ def main() -> int:
     evidence = build_evidence_pack(database, objective=objective, access=access)
 
     provider = LearningProvider(
-        settings.model_copy(update={"database_path": Path(args.database)})
+        settings.model_copy(update={"database_path": target.path})
     )
     base: list[tuple[str, ReviewerInputs]] = []
     diagnostics: list[dict[str, object]] = []

@@ -61,6 +61,10 @@ V3_MIGRATIONS = (
     "063_auto_knowledge_spec_split_source_replay.sql",
     "064_durable_assessment_preparation.sql",
     "065_hybrid_quality_review.sql",
+    # 065 is not modified.  A provider failure needs its own append-only table
+    # because hybrid_review_calls is keyed on (revision, role, input_hash) and
+    # a recorded failure there would block the legitimate retry of that input.
+    "066_hybrid_provider_failure_ledger.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -122,7 +126,7 @@ V3_REPLAY_SUPERSEDED_BY = {
     "064_durable_assessment_preparation.sql": 64,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 65
+LATEST_V3_SCHEMA_VERSION = 66
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (

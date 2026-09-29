@@ -29,11 +29,10 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Final
+from typing import Annotated, Any, Final
 from uuid import uuid4
 
 from pydantic import Field, StringConstraints, model_validator
-from typing import Annotated
 
 from app.db import Database
 from app.learning.blind_solve import BlindSolveReceipt
@@ -44,6 +43,7 @@ from app.learning.deepseek_reviewer import (
     StrongReviewError,
     StrongReviewOutcome,
 )
+from app.learning.human_review_card import HumanReviewStore
 from app.learning.hybrid_review import (
     CASE_ACCEPT_LABEL,
     CASE_AMBIGUITY,
@@ -54,7 +54,6 @@ from app.learning.hybrid_review import (
     combine_case_verdicts,
     project_case_verdicts,
 )
-from app.learning.human_review_card import HumanReviewStore
 from app.learning.models import Contract, Identifier
 from app.learning.question_author import AuthoredQuestionCandidate
 from app.learning.question_blueprint import QuestionBlueprint
@@ -366,7 +365,20 @@ class HybridQualityService:
         # Advisory local observation first: it may point at something worth
         # checking, and it must never be able to block the strong path.
         observations = self._observe(inputs)
-        first, second = self.reviewer.review(inputs)
+        try:
+            first, second = self.reviewer.review(inputs)
+        except StrongReviewError as failure:
+            # Record the failure's own facts -- layer, error class, terminal
+            # status, HTTP status, whether a response arrived, latency and usage
+            # -- before re-raising.  Without this the only surviving trace is a
+            # code string, and no later run can say where the call failed.
+            self._record_provider_failure(
+                candidate=candidate,
+                blueprint=blueprint,
+                evidence=evidence,
+                failure=failure,
+            )
+            raise
         specification = getattr(self.reviewer, "last_specification", None)
         review_call_ids = self._record_calls(
             candidate=candidate,
@@ -545,6 +557,29 @@ class HybridQualityService:
 
     # ------------------------------------------------------------ persistence
 
+    def _record_provider_failure(
+        self,
+        *,
+        candidate: AuthoredQuestionCandidate,
+        blueprint: QuestionBlueprint,
+        evidence: QuestionEvidencePack,
+        failure: StrongReviewError,
+    ) -> str:
+        """Persist one failed strong-review call, then let the caller re-raise."""
+        from app.learning.provider_failure_ledger import record_provider_failure
+
+        run = dict(getattr(failure, "provider_run", None) or {})
+        return record_provider_failure(
+            self.database,
+            policy_revision=POLICY_REVISION,
+            role=str(run.get("role") or "unknown"),
+            run=run,
+            question_revision_hash=candidate.question_revision,
+            blueprint_hash=candidate.blueprint_hash,
+            evidence_pack_hash=evidence.identity(),
+            message=f"{failure.code}: {failure}",
+        )
+
     def _record_calls(
         self,
         *,
@@ -585,8 +620,14 @@ class HybridQualityService:
                     if is_specification
                     else outcome.findings.model_dump(mode="json")
                 )
+                # A plain INSERT, not INSERT OR REPLACE.  SQLite fires a BEFORE
+                # DELETE trigger from REPLACE only when recursive_triggers is on,
+                # and it defaults to off, so REPLACE silently overwrote an
+                # append-only row.  The unique key now includes the prompt and
+                # schema versions, so a genuinely new method records a new call
+                # and an exact duplicate refuses instead of erasing history.
                 connection.execute(
-                    "INSERT OR REPLACE INTO hybrid_review_calls("
+                    "INSERT INTO hybrid_review_calls("
                     "id,question_revision_hash,blueprint_hash,evidence_pack_hash,policy_revision,"
                     "role,call_id,model,provider,protocol,region,template_version,schema_version,"
                     "input_hash,response_digest,response_json,findings_json,verification_json,"

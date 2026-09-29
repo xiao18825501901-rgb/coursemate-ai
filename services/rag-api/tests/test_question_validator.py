@@ -249,6 +249,61 @@ def test_marks_or_source_identity_mismatch_is_a_hard_rejection() -> None:
     assert gate_status(wrong_source, "INPUT_IDENTITY") == "FAIL"
 
 
+def test_a_stored_legacy_blueprint_identity_binds_and_the_rendering_is_named() -> None:
+    """The measured defect, pinned end to end.
+
+    A candidate rebuilt from a provenance row written before 2026-09-27 carries a
+    blueprint hash under the historical integral-float rendering.  Comparing only
+    against the canonical hash rejected it on a difference that is purely how an
+    equal number is written.  The gate must pass, and the report must say which
+    rendering it passed under, so a byte-identical binding is still distinguishable
+    from a numerically-identical one.
+    """
+    import hashlib
+    import json
+
+    from app.learning.question_blueprint import render_integral_floats_as_ints
+
+    blueprint_record = blueprint(marks=100)
+    legacy_payload = render_integral_floats_as_ints(blueprint_record.model_dump(mode="json"))
+    legacy_hash = hashlib.sha256(
+        json.dumps(
+            legacy_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    assert legacy_hash != blueprint_record.identity()
+
+    report = validate(
+        blueprint=blueprint_record,
+        candidate=candidate(blueprint_hash=legacy_hash, marks=100),
+    )
+    assert gate_status(report, "INPUT_IDENTITY") == "PASS"
+    assert report.identity_rendering == "INTEGRAL_FLOAT_AS_INT"
+    assert any(
+        "INTEGRAL_FLOAT_AS_INT" in gate.reason
+        for gate in report.hard_gates
+        if gate.gate == "INPUT_IDENTITY"
+    )
+
+    # A canonical binding is unchanged and is still reported as such.
+    canonical = validate(
+        blueprint=blueprint_record,
+        candidate=candidate(
+            blueprint_hash=blueprint_record.identity(),
+            marks=100,
+        ),
+    )
+    assert gate_status(canonical, "INPUT_IDENTITY") == "PASS"
+    assert canonical.identity_rendering == "CANONICAL"
+
+    # The tolerance is narrow: a real difference still fails every rendering.
+    tampered = validate(
+        blueprint=blueprint_record.model_copy(update={"objective_text": "another task"}),
+        candidate=candidate(blueprint_hash=blueprint_record.identity(), marks=100),
+    )
+    assert gate_status(tampered, "INPUT_IDENTITY") == "FAIL"
+
+
 def test_stale_or_failed_blind_solve_can_never_validate_current_revision() -> None:
     stale = validate(blind_receipt=blind_receipt(question_revision="1" * 64))
     failed = validate(blind_receipt=blind_receipt(status="failed"))

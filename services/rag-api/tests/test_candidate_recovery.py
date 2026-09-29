@@ -12,14 +12,6 @@ import json
 from pathlib import Path
 
 import pytest
-
-from app.learning.candidate_recovery import (
-    CandidateRecoveryError,
-    deterministic_report_for,
-    list_recoverable,
-    recover_candidate,
-)
-
 from test_question_persistence import (  # noqa: E402 - shared fixture builder
     COURSE,
     NODE,
@@ -27,6 +19,13 @@ from test_question_persistence import (  # noqa: E402 - shared fixture builder
     WORKSPACE,
     persist,
     pipeline,
+)
+
+from app.learning.candidate_recovery import (
+    CandidateRecoveryError,
+    deterministic_report_for,
+    list_recoverable,
+    recover_candidate,
 )
 
 
@@ -149,13 +148,12 @@ def test_provenance_immutability_blocks_a_tamper_without_bypassing_it(
     import sqlite3
 
     database, revision_id, _ = _persist_needs_review(tmp_path)
-    with database.connect() as connection:
-        with pytest.raises(sqlite3.IntegrityError):
-            connection.execute(
-                "UPDATE question_engine_provenance SET blueprint_hash=? "
-                "WHERE question_revision_id=?",
-                ("0" * 64, revision_id),
-            )
+    with database.connect() as connection, pytest.raises(sqlite3.IntegrityError):
+        connection.execute(
+            "UPDATE question_engine_provenance SET blueprint_hash=? "
+            "WHERE question_revision_id=?",
+            ("0" * 64, revision_id),
+        )
 
 
 def _blueprint(marks: float = 15, objective_text: str = "compute the total"):
@@ -210,21 +208,29 @@ def test_the_historical_integral_float_rendering_is_accepted_and_named() -> None
     blueprints are in the earlier form.
     """
     import hashlib
+    import json
 
     from app.learning.candidate_recovery import (
-        _canonical,
         _integral_floats_as_ints,
         blueprint_identity_match,
     )
 
     blueprint = _blueprint(marks=100)
     legacy_payload = _integral_floats_as_ints(blueprint.model_dump(mode="json"))
-    legacy_hash = hashlib.sha256(_canonical(legacy_payload).encode()).hexdigest()
+    legacy_hash = hashlib.sha256(
+        json.dumps(
+            legacy_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
     assert legacy_hash != blueprint.identity()
 
     matched, rendering = blueprint_identity_match(blueprint, legacy_hash)
     assert matched is True
     assert rendering == "INTEGRAL_FLOAT_AS_INT"
+    # The same rendering is available as a first-class blueprint operation, which
+    # is what the deterministic validator now goes through.
+    assert blueprint.identity_under("INTEGRAL_FLOAT_AS_INT") == legacy_hash
+    assert blueprint.identity_under("CANONICAL") == blueprint.identity()
 
 
 def test_a_genuine_mismatch_fails_both_renderings() -> None:

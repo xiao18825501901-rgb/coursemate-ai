@@ -23,7 +23,12 @@ from app.learning.question_author import (
     RULE_VIOLATION_POLICY_VERSION,
     AuthoredQuestionCandidate,
 )
-from app.learning.question_blueprint import QuestionBlueprint
+from app.learning.question_blueprint import (
+    IDENTITY_CANONICAL,
+    IDENTITY_INTEGRAL_FLOAT_AS_INT,
+    QuestionBlueprint,
+    blueprint_identity_match,
+)
 from app.learning.question_evidence import QuestionEvidencePack
 from app.learning.sql_oracle import OracleCheck
 
@@ -125,6 +130,11 @@ class QuestionValidationReport(Contract):
     # Additive: the executable checks that were actually run, if any.  An empty
     # list means none were applicable, which is not the same as passing one.
     oracle_checks: list[OracleCheck] = Field(default_factory=list, max_length=16)
+    # Additive: which rendering of the blueprint identity the candidate matched
+    # under.  CANONICAL is a byte-identical binding; INTEGRAL_FLOAT_AS_INT is the
+    # named historical rendering, where only the JSON form of an integral number
+    # differs.  Defaulting to CANONICAL keeps every stored report readable.
+    identity_rendering: Literal["CANONICAL", "INTEGRAL_FLOAT_AS_INT"] = "CANONICAL"
 
     @property
     def ready_eligible(self) -> bool:
@@ -144,14 +154,26 @@ def _compact(value: str) -> str:
     return re.sub(r"[^\w]+", "", value.casefold(), flags=re.UNICODE)
 
 
-def _input_identity_matches(
+def _input_identity_match(
     candidate: AuthoredQuestionCandidate,
     blueprint: QuestionBlueprint,
     evidence: QuestionEvidencePack,
-) -> bool:
+) -> tuple[bool, str]:
+    """Is the candidate bound to this exact blueprint and evidence pack?
+
+    The blueprint half goes through the same named rendering the recovery stage
+    uses, and the answer says which rendering matched.  Comparing against the
+    canonical hash alone was a real defect: nineteen stored blueprints predate
+    2026-09-27 and serialise an integral `marks` as an integer, so rebuilding them
+    produced a candidate that recovery accepted and this gate then rejected on a
+    hash that differs only in how an equal number is written.  A genuine mismatch
+    still fails every rendering, and a byte-identical match is still reported as
+    `CANONICAL` rather than being flattened into the legacy one.
+    """
+    bound, rendering = blueprint_identity_match(blueprint, candidate.blueprint_hash)
     return (
         candidate.blueprint_id == blueprint.blueprint_id
-        and candidate.blueprint_hash == blueprint.identity()
+        and bound
         and candidate.evidence_pack_hash == evidence.identity()
         and candidate.course_id == blueprint.course_id == evidence.course_id
         and candidate.node_id == blueprint.node_id == evidence.node_id
@@ -160,7 +182,15 @@ def _input_identity_matches(
         and blueprint.spec_version == evidence.spec_version
         and blueprint.spec_content_hash == evidence.spec_content_hash
         and blueprint.source_scope == evidence.source_scope()
-    )
+    ), rendering
+
+
+def _input_identity_matches(
+    candidate: AuthoredQuestionCandidate,
+    blueprint: QuestionBlueprint,
+    evidence: QuestionEvidencePack,
+) -> bool:
+    return _input_identity_match(candidate, blueprint, evidence)[0]
 
 
 def _source_scope_matches(
@@ -423,14 +453,21 @@ def validate_question_candidate(
     -- it means no executable check was applicable, and the semantic gates still
     have to carry the item on their own.
     """
-    identity = _input_identity_matches(candidate, blueprint, evidence)
+    identity, identity_rendering = _input_identity_match(candidate, blueprint, evidence)
     marks = candidate.marks == blueprint.marks
     sources = _source_scope_matches(candidate, evidence)
     conditions = _conditions_present(candidate, blueprint)
     shape = _question_shape_matches(candidate, blueprint, evidence)
     blind = blind_receipt.is_current_for(candidate.question_revision)
     hard_gates = [
-        _gate("INPUT_IDENTITY", identity, "candidate is bound to the exact blueprint/evidence"),
+        _gate(
+            "INPUT_IDENTITY",
+            identity,
+            "candidate is bound to the exact blueprint/evidence"
+            if identity_rendering == IDENTITY_CANONICAL
+            else "candidate is bound to the exact blueprint/evidence "
+            f"({IDENTITY_INTEGRAL_FLOAT_AS_INT} rendering)",
+        ),
         _gate("MARKS_MATCH", marks, "marks remain server-authored by the blueprint"),
         _gate("SOURCE_SCOPE", sources, "all question and solution refs are in the evidence pack"),
         _gate("CONDITIONS_PRESENT", conditions, "all explicit blueprint conditions are stated"),
@@ -477,4 +514,9 @@ def validate_question_candidate(
         hard_gates=hard_gates,
         semantic_signals=semantic_signals.ordered(),
         oracle_checks=list(oracle_checks),
+        identity_rendering=(
+            identity_rendering
+            if identity_rendering == IDENTITY_CANONICAL
+            else IDENTITY_INTEGRAL_FLOAT_AS_INT
+        ),
     )

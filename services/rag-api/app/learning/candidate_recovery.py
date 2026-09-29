@@ -25,7 +25,6 @@ receipt for an item nobody authored.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -38,7 +37,18 @@ from app.learning.question_author import (
     PrivateCandidateSolution,
     PublicAuthoredQuestion,
 )
-from app.learning.question_blueprint import QuestionBlueprint, resolve_objective
+from app.learning.question_blueprint import (
+    QuestionBlueprint,
+    blueprint_identity_match,
+    resolve_objective,
+)
+
+# Re-exported for callers that already import the rendering from here; the
+# implementation lives beside QuestionBlueprint.identity() so the recovery stage
+# and the deterministic validator cannot accept different renderings.
+from app.learning.question_blueprint import (
+    render_integral_floats_as_ints as _integral_floats_as_ints,  # noqa: F401
+)
 from app.learning.question_evidence import EvidencePackAccess, build_evidence_pack
 from app.learning.workspaces import workspace_for
 
@@ -89,52 +99,10 @@ def _loads(value: Any, *, field: str) -> Any:
         ) from error
 
 
-def _canonical(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-
-
-def _integral_floats_as_ints(value: Any) -> Any:
-    """Render integral floats the way an earlier version of the model did."""
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, float) and value.is_integer():
-        return int(value)
-    if isinstance(value, dict):
-        return {key: _integral_floats_as_ints(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_integral_floats_as_ints(item) for item in value]
-    return value
-
-
-def blueprint_identity_match(
-    blueprint: QuestionBlueprint, recorded_hash: str
-) -> tuple[bool, str]:
-    """Does this blueprint reproduce the stored identity, and in which rendering?
-
-    The strict answer is the canonical JSON hash the model computes today.  A
-    second, deliberately narrow rendering is also accepted, and the reason is a
-    measured fact about this database rather than a convenience:
-
-    ``marks`` was serialised as an **integer** (``100``) in the rows written on
-    2026-09-25 and as a **float** (``100.0``) in the rows written from
-    2026-09-27 onward.  Nineteen of the fifty-eight stored blueprints are in the
-    earlier form, and because the identity is a hash of the canonical JSON,
-    ``100`` and ``100.0`` hash differently even though the values are numerically
-    equal and every other byte of the row is identical.
-
-    So this second rendering changes exactly one thing -- an integral float is
-    written as an integer -- and it is accepted only when it reproduces the
-    recorded hash exactly.  A genuine mismatch still fails both renderings, and
-    the caller records which rendering was used, so a reader can tell a
-    byte-identical rebuild from a numerically-identical one.
-    """
-    dumped = blueprint.model_dump(mode="json")
-    if hashlib.sha256(_canonical(dumped).encode()).hexdigest() == recorded_hash:
-        return True, "CANONICAL"
-    legacy = _integral_floats_as_ints(dumped)
-    if hashlib.sha256(_canonical(legacy).encode()).hexdigest() == recorded_hash:
-        return True, "INTEGRAL_FLOAT_AS_INT"
-    return False, "MISMATCH"
+# The identity rendering used to live here.  It now lives beside
+# QuestionBlueprint.identity() so the recovery stage and the deterministic
+# validator cannot drift apart on which renderings they accept -- that drift is
+# exactly what made one stored candidate pass recovery and fail INPUT_IDENTITY.
 
 
 def list_recoverable(

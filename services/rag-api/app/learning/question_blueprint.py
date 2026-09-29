@@ -29,7 +29,7 @@ import json
 import re
 import sqlite3
 from dataclasses import dataclass
-from typing import Annotated, Final, Literal, cast
+from typing import Annotated, Any, Final, Literal, cast
 
 from pydantic import Field, StringConstraints, field_validator, model_validator
 
@@ -177,6 +177,70 @@ class QuestionBlueprint(Contract):
             self.model_dump(mode="json"), ensure_ascii=False, sort_keys=True, separators=(",", ":")
         )
         return hashlib.sha256(canonical.encode()).hexdigest()
+
+    def identity_under(self, rendering: str) -> str:
+        """The same identity under a named historical rendering."""
+        return _hash_payload(_render(self.model_dump(mode="json"), rendering))
+
+
+# The canonical rendering is the one the model produces today.  A second,
+# deliberately narrow rendering is also recognised, and the reason is a measured
+# fact about this database rather than a convenience: `marks` was serialised as an
+# **integer** (`100`) in the provenance rows written on 2026-09-25 and as a
+# **float** (`100.0`) in the rows written from 2026-09-27 onward.  Nineteen of the
+# fifty-eight stored blueprints are in the earlier form, and because the identity
+# is a hash of canonical JSON, `100` and `100.0` hash differently even though the
+# values are numerically equal and every other byte of the row is identical.
+IDENTITY_CANONICAL: Final = "CANONICAL"
+IDENTITY_INTEGRAL_FLOAT_AS_INT: Final = "INTEGRAL_FLOAT_AS_INT"
+IDENTITY_MISMATCH: Final = "MISMATCH"
+IDENTITY_RENDERINGS: Final = (IDENTITY_CANONICAL, IDENTITY_INTEGRAL_FLOAT_AS_INT)
+
+
+def render_integral_floats_as_ints(value: Any) -> Any:
+    """Render integral floats the way an earlier version of the model did.
+
+    Booleans are left alone: ``True`` is not the integer 1 here, and collapsing it
+    would make two genuinely different blueprints hash the same.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {key: render_integral_floats_as_ints(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [render_integral_floats_as_ints(item) for item in value]
+    return value
+
+
+def _render(payload: Any, rendering: str) -> Any:
+    if rendering == IDENTITY_CANONICAL:
+        return payload
+    if rendering == IDENTITY_INTEGRAL_FLOAT_AS_INT:
+        return render_integral_floats_as_ints(payload)
+    raise ValueError(f"unknown identity rendering: {rendering}")
+
+
+def _hash_payload(payload: Any) -> str:
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def blueprint_identity_match(
+    blueprint: QuestionBlueprint, recorded_hash: str
+) -> tuple[bool, str]:
+    """Does this blueprint reproduce the stored identity, and in which rendering?
+
+    The strict answer is tried first.  The legacy rendering is accepted **only**
+    when it reproduces the recorded hash exactly, and the caller records which one
+    was used, so a reader can always tell a byte-identical rebuild from a
+    numerically-identical one.  A genuine mismatch fails both.
+    """
+    for rendering in IDENTITY_RENDERINGS:
+        if blueprint.identity_under(rendering) == recorded_hash:
+            return True, rendering
+    return False, IDENTITY_MISMATCH
 
 
 class ObjectiveResolutionError(RuntimeError):
