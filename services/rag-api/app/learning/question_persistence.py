@@ -23,8 +23,10 @@ from app.jev.service import SemanticDecisionService
 from app.learning.blind_solve import BlindSolveReceipt, BlindSolveRequest
 from app.learning.human_review_card import MAX_CARD_AGE_DAYS as MAX_HUMAN_CARD_AGE_DAYS
 from app.learning.models import Contract
-from app.learning.provider import structured_input_hash
-from app.learning.question_author import AuthoredQuestionCandidate, QuestionAuthorOutput
+from app.learning.question_author import (
+    AuthoredQuestionCandidate,
+    author_input_hash,
+)
 from app.learning.question_blueprint import QuestionBlueprint, TeachingObjective, resolve_objective
 from app.learning.question_evidence import (
     EvidencePackAccess,
@@ -676,12 +678,11 @@ def persist_question_candidate(
         if input_hashes and all(value is not None for value in input_hashes.values())
         else None
     )
-    author_current = candidate.provider_run.input_hash == structured_input_hash(
-        QuestionAuthorOutput,
-        context={
-            "blueprint": blueprint.model_dump(mode="json"),
-            "evidence_pack": fresh_evidence.model_dump(mode="json"),
-        },
+    # The context is built by the author module, so this check cannot drift from
+    # what the author call actually received.
+    author_current = (
+        candidate.provider_run.input_hash
+        == author_input_hash(blueprint, fresh_evidence)
     )
     request = BlindSolveRequest(
         question_text=candidate.public_question.question_text,

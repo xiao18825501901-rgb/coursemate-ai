@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -43,15 +43,10 @@ from app.learning.hybrid_qualification import (  # noqa: E402
     qualify,
     write_artifact,
 )
+from app.learning.hybrid_quality import review_domain, review_language  # noqa: E402
 from app.learning.hybrid_review import (  # noqa: E402
-    CASE_AGREEMENT,
-    CASE_AMBIGUITY,
-    CASE_DISTRACTORS,
-    CASE_RULE,
     case_set_for_blueprint,
 )
-from app.learning.hybrid_quality import review_domain, review_language  # noqa: E402
-from app.learning.orchestrator import LearningOrchestrator  # noqa: E402
 from app.learning.provider import LearningProvider  # noqa: E402
 from app.learning.question_author import (  # noqa: E402
     QUESTION_AUTHOR_PROMPT_VERSION,
@@ -157,14 +152,22 @@ def _reviewer_inputs(candidate, blueprint, evidence, blind) -> ReviewerInputs:
         solution_b=blind_payload,
         rubric=tuple(blueprint.scoring_criteria),
         evidence=tuple(
-            {"evidence_id": f.evidence_id, "content": f.content}
+            {
+                "evidence_id": f.evidence_id,
+                "content": f.content,
+                # The locator travels with the span so the server can resolve a
+                # cited id back to a frozen, addressable place in the source.
+                "locator": f.locator,
+            }
             for f in evidence.fragments
         ),
         deterministic={"AUTHOR_COMPLETED": "PASS", "BLIND_COMPLETED": "PASS"},
     )
 
 
-def diagnose_item(*, family: str, inputs: ReviewerInputs, candidate) -> dict[str, object]:
+def diagnose_item(  # noqa: PLR0913 - one record per item, reported verbatim
+    *, family: str, inputs: ReviewerInputs, candidate, blueprint=None
+) -> dict[str, object]:
     """Describe one item's *shape* without recording any of its text.
 
     Whether a defect can be injected is a property of the item, not of the
@@ -182,7 +185,7 @@ def diagnose_item(*, family: str, inputs: ReviewerInputs, candidate) -> dict[str
     for case in inputs.required_cases:
         name, mutate = _MUTATIONS[case]
         applied[name] = mutate(inputs) is not None
-    return {
+    record = {
         "family": family,
         "question_type": inputs.question_type,
         "required_cases": list(inputs.required_cases),
@@ -192,7 +195,13 @@ def diagnose_item(*, family: str, inputs: ReviewerInputs, candidate) -> dict[str
         "clauses": len(clauses),
         "has_condition_marker": any(
             marker in text.lower()
-            for marker in (" given that ", " assuming ", " such that ", " in the case that ", " where ")
+            for marker in (
+                " given that ",
+                " assuming ",
+                " such that ",
+                " in the case that ",
+                " where ",
+            )
         ),
         "evidence_spans": len(inputs.evidence),
         "evidence_chars": sum(len(fragment["content"]) for fragment in inputs.evidence),
@@ -200,6 +209,63 @@ def diagnose_item(*, family: str, inputs: ReviewerInputs, candidate) -> dict[str
         "mutations_applied": applied,
         "author_answer_kind": type(inputs.solution_a.get("candidate_answer")).__name__,
     }
+    record.update(_contract_diagnosis(candidate, blueprint, inputs))
+    return record
+
+
+def _contract_diagnosis(candidate, blueprint, inputs: ReviewerInputs) -> dict[str, object]:
+    """Whether the item carries a usable student-visible task contract.
+
+    This is the fact a qualification run is most likely to be blocked by now: an
+    item without a contract, or whose contract names a profile the server has not
+    registered, has no positive completeness evidence and therefore cannot be
+    approved however well the reviewers behave.  Reporting it here means a
+    diagnosis-only run answers that question without paying for a single review
+    call.
+    """
+    from app.learning.task_spec import certify_completeness, render_public_projection
+
+    if not getattr(candidate, "task_contract", None):
+        return {
+            "task_contract": False,
+            "profile": None,
+            "certificate_status": "NO_CONTRACT",
+            "certificate_failing_checks": [],
+        }
+    draft = candidate.task_contract
+    base = {
+        "task_contract": True,
+        "profile": draft.profile_id,
+        "profile_version": draft.profile_version,
+        "declared_conventions": sorted(item.key for item in draft.conventions),
+        "fact_roles": sorted({item.role for item in draft.facts}),
+        "answer_equivalence": draft.answer_equivalence,
+        "task_boundary_chars": len(draft.task_boundary),
+    }
+    if blueprint is None:
+        base["certificate_status"] = "NO_BLUEPRINT"
+        base["certificate_failing_checks"] = []
+        return base
+    spec = candidate.task_spec(blueprint)
+    projection = render_public_projection(spec)
+    certificate = certify_completeness(
+        spec,
+        projection=projection,
+        available_span_ids=[fragment["evidence_id"] for fragment in inputs.evidence],
+        reviewable_language=inputs.language,
+    )
+    base.update(
+        {
+            "certificate_status": certificate.status,
+            "certificate_failing_checks": [
+                check.name for check in certificate.checks if check.status == "FAIL"
+            ],
+            "projection_chars": len(projection.text),
+            "projection_digest": projection.text_digest,
+            "certifies": certificate.certifies,
+        }
+    )
+    return base
 
 
 def _mutation_summary(diagnostics: list[dict[str, object]]) -> dict[str, dict[str, int]]:
@@ -253,7 +319,23 @@ def main() -> int:
         default=None,
         help="the schema version the copy must be at, read read-only",
     )
+    parser.add_argument(
+        "--kinds",
+        default="",
+        help=(
+            "comma-separated subset of item kinds to build; empty means all of "
+            "ITEM_KINDS.  A bounded probe costs one author and one blind call per "
+            "item, so restricting the kinds is how a diagnostic stays cheap."
+        ),
+    )
     args = parser.parse_args()
+    selected_kinds = tuple(
+        part.strip().upper() for part in args.kinds.split(",") if part.strip()
+    ) or ITEM_KINDS
+    unknown_kinds = [kind for kind in selected_kinds if kind not in ITEM_KINDS]
+    if unknown_kinds:
+        print(json.dumps({"status": "FAILED", "error": f"unknown kinds {unknown_kinds}"}))
+        return 7
 
     settings = Settings()
     # The database and upload root come from the explicit arguments, and the
@@ -300,8 +382,11 @@ def main() -> int:
     )
     base: list[tuple[str, ReviewerInputs]] = []
     diagnostics: list[dict[str, object]] = []
-    author_failures: list[dict[str, str]] = []
-    for kind in ITEM_KINDS:
+    author_failures: list[dict[str, object]] = []
+    # Complete provider responses whose parsing failed, kept so they can be
+    # re-parsed offline.  Never printed; written only when the caller asked.
+    raw_responses: list[dict[str, object]] = []
+    for kind in selected_kinds:
         for index in range(args.per_type):
             blueprint = _blueprint(
                 objective=objective,
@@ -316,9 +401,50 @@ def main() -> int:
                 candidate = author_question(provider, blueprint=blueprint, evidence=evidence)
                 blind = run_blind_solve(provider, candidate=candidate, evidence=evidence)
             except Exception as error:  # noqa: BLE001 - each item is independent
-                author_failures.append(
-                    {"kind": kind, "index": str(index), "error": type(error).__name__}
-                )
+                # The code and the provider facts are recorded, not just the
+                # exception class: the first live run reported three bare
+                # "AuthorGenerationError" lines and could not be attributed at all.
+                failure: dict[str, object] = {
+                    "kind": kind,
+                    "index": str(index),
+                    "error": type(error).__name__,
+                    "code": getattr(error, "code", None),
+                    # The refusal message names the rule that refused the item.
+                    # These messages are written to be free of question text, so
+                    # recording them is what makes a run attributable.
+                    "message": str(error)[:300],
+                }
+                provider_run = getattr(error, "provider_run", None)
+                if isinstance(provider_run, dict):
+                    failure.update(
+                        {
+                            "provider_status": provider_run.get("status"),
+                            "error_class": provider_run.get("error_class"),
+                            "failure_layer": provider_run.get("failure_layer"),
+                            "provider_response_id": provider_run.get("provider_response_id"),
+                            # Which fields the response failed on, without the
+                            # values: that is what makes a schema rejection
+                            # attributable instead of a bare error class.
+                            "schema_error_summary": provider_run.get("schema_error_summary"),
+                        }
+                    )
+                    captured = provider_run.get("response_text")
+                    if isinstance(captured, str) and captured:
+                        # The complete response is persisted before anything is
+                        # concluded about it, exactly as the plan requires, so a
+                        # rejection can be re-parsed locally instead of being
+                        # bought again.  It is private course material: the file
+                        # is written beside the artifact for the caller to protect.
+                        failure["raw_response_chars"] = len(captured)
+                        raw_responses.append(
+                            {
+                                "kind": kind,
+                                "index": str(index),
+                                "provider_response_id": provider_run.get("provider_response_id"),
+                                "response_text": captured,
+                            }
+                        )
+                author_failures.append(failure)
                 continue
             inputs = _reviewer_inputs(candidate, blueprint, evidence, blind)
             if args.diagnose_only:
@@ -327,6 +453,7 @@ def main() -> int:
                         family=f"{kind.lower()}-{index}",
                         inputs=inputs,
                         candidate=candidate,
+                        blueprint=blueprint,
                     )
                 )
                 continue
@@ -336,8 +463,16 @@ def main() -> int:
                     family=f"{kind.lower()}-{index}",
                     inputs=inputs,
                     candidate=candidate,
+                    blueprint=blueprint,
                 )
             )
+
+    if raw_responses:
+        raw_path = Path(f"{args.out}.raw-responses.json")
+        raw_path.write_text(
+            json.dumps(raw_responses, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        os.chmod(raw_path, 0o600)
 
     if args.diagnose_only:
         diagnosis = {

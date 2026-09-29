@@ -263,6 +263,68 @@ outside `provider_client.py` calls `OpenAI(...)`: inheriting the defaults is
 silent, which is why the guard is at the source level and not only at the call
 site.
 
+## The first code-certified live item (2026-09-30)
+
+A bounded live probe (`--diagnose-only --kinds NUMERIC --per-type 1`, two provider
+calls: one author, one blind solve) now produces an item whose student-visible
+task contract the server certifies:
+
+```
+author_failures:        []
+task_contract:          true
+profile:                P-DISCRETE v1
+declared conventions:   ANSWER_FORM, BOUNDARY_INCLUSION, DATA_COMPLETENESS
+fact roles:             GIVEN
+answer equivalence:     EXACT
+certificate_status:     COMPLETE_FOR_REGISTERED_PROFILE
+certificate_failing:    []
+projection:             1029 chars, digest 3c48deea9e87926817d9180135522c6d34c85d804af20db9e6d7de4034b82bbd
+```
+
+This is the positive path the round was built to reach: the author states what the
+learner can see, the server renders the public projection from that contract, and
+completeness is certified by code against a registered profile rather than asserted
+by a reviewer.  The item is not published yet -- that needs a scoped qualification
+installed through the normal management entry point.
+
+### Four defects the probe found before deployment
+
+The probe cost six author/blind calls in total across four iterations and found
+four defects that local fixtures could not show, because the fixture provider
+returns before the response is ever read:
+
+1. **Every live call would have failed.**  The complete response was written into
+   the run dict before schema validation, and the run dict is the receipt shape
+   that `AuthorProviderRun` validates with `extra="forbid"`.  Symptom:
+   `2 validation errors ... response_text Extra inputs are not permitted`.  The
+   response and the rejection reason now live in local variables and are attached
+   only to the failure, which is read rather than validated.  A regression test now
+   drives the live branch and asserts the run carries only receipt keys.
+2. **A closed enum destroyed whole paid calls.**  An invented convention key made
+   `QuestionAuthorOutput` validation reject the entire response.  Convention keys
+   and fact origins are now bounded free strings, and the *certificate* enforces the
+   known set: an unrecognised key fails a check that names it instead of discarding
+   the work.  Same for `role`, which stays closed because it is semantic.
+3. **The rendered projection exceeded its own bound.**  `PublicProjection.text`
+   inherited the single-statement limit of 800 characters, and a live item rendered
+   1029.  The renderer raised instead of returning the block the learner is
+   supposed to see.  It has its own bound now, with a regression test.
+4. **The author context was defined twice and drifted.**  Adding the profile
+   registry to the author call silently made every item's author receipt stale, and
+   the symptom was a READY item quietly becoming NEEDS_REVIEW with
+   `AUTHOR_PROVENANCE_INCOMPLETE`.  `author_context()` and `author_input_hash()` are
+   now the single definition, used by both the call and the currency check.
+
+Two further changes were required by what the probe measured rather than by
+inspection: the prompt now carries an explicit JSON skeleton for the contract (the
+model had returned `fact` instead of `statement`), and the server's profile registry
+travels in the author context so the model chooses against the registered
+requirements instead of its own idea of them (it had claimed P-SQL for a NUMERIC
+item and declared conventions that profile does not accept -- correctly refused, but
+the model had never been told what each profile requires).
+
+Still true: **a diagnosis-only probe authors items; it publishes nothing.**
+
 ## What the next round has to do first
 
 1. Take the trusted backup and prove a restore, and only then let anything write.

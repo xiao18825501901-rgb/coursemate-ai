@@ -231,7 +231,15 @@ class SpyProvider:
         return self.output, completed_run()
 
 
-def test_author_receives_only_blueprint_and_evidence_and_answer_stays_private() -> None:
+def test_author_receives_only_server_owned_inputs_and_answer_stays_private() -> None:
+    """The isolation property, stated as the property rather than as a key list.
+
+    The author may see the frozen problem, its own sources and the server's
+    registered profile requirements -- and nothing else.  In particular it never
+    sees a private solution, another reviewer's verdict, a local model's label or
+    any learner data.  Pinning an exact key set made a legitimate addition look
+    like a leak; this checks what the boundary is actually for.
+    """
     provider = SpyProvider()
 
     candidate = author_question(provider, blueprint=blueprint(), evidence=evidence_pack())
@@ -239,7 +247,28 @@ def test_author_receives_only_blueprint_and_evidence_and_answer_stays_private() 
     assert len(provider.calls) == 1
     call = provider.calls[0]
     assert call["schema"] is QuestionAuthorOutput
-    assert set(call["context"]) == {"blueprint", "evidence_pack"}
+    context = call["context"]
+    assert set(context) == {"blueprint", "evidence_pack", "task_profiles"}
+    # Nothing private, nothing from another model, nothing about a learner.
+    serialized_context = str(context).casefold()
+    for forbidden in (
+        "candidate_answer",
+        "solution_steps",
+        "correct_option_index",
+        "distractor_rationales",
+        "blind",
+        "verdict",
+        "owner_user_id",
+        "reviewer",
+    ):
+        assert forbidden not in serialized_context, forbidden
+    # The registry is the server's own configuration, and it is what the author
+    # is told to choose a profile against.
+    profiles = {item["profile_id"] for item in context["task_profiles"]}
+    assert profiles == {"P-SQL", "P-DISCRETE", "P-COURSE-RULE"}
+    for item in context["task_profiles"]:
+        assert item["required_conventions"]
+        assert item["question_types"]
     assert call["context"]["evidence_pack"]["fragments"][0]["content"].startswith(
         "A core point"
     )

@@ -57,7 +57,13 @@ TaskRole = Literal[
     "SOURCE_RULE",
     "CLAIM_TO_CRITIQUE",
 ]
-FactOrigin = Literal["PROBLEM_DATA", "COURSE_SOURCE", "EXERCISE_CONVENTION"]
+# Origin is descriptive rather than decisive, so it is a bounded free string: a
+# model that writes "PROBLEM_STATEMENT" instead of "PROBLEM_DATA" has not made the
+# question wrong, and failing a whole paid authoring call over a synonym throws
+# away work for no safety gain.
+FactOrigin = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)
+]
 Equivalence = Literal[
     "EXACT",
     "NUMERIC_TOLERANCE",
@@ -66,7 +72,12 @@ Equivalence = Literal[
     "ORDERED_LIST",
     "SEMANTIC_RUBRIC",
 ]
-ConventionKey = Literal[
+# The keys a profile can require.  A convention is a bounded free string and the
+# *certificate* is what enforces the known set: a profile requires exact keys, so
+# an invented key simply fails the check that names it and the item is held with a
+# precise reason.  Closing this enum at parse time instead lets one synonym reject
+# an entire authoring call, which is what happened on the first live run.
+KNOWN_CONVENTION_KEYS: Final[tuple[str, ...]] = (
     "DIALECT",
     "DATA_COMPLETENESS",
     "NULL_SEMANTICS",
@@ -77,9 +88,21 @@ ConventionKey = Literal[
     "BOUNDARY_INCLUSION",
     "SELF_INCLUSION",
     "ANSWER_FORM",
+)
+ConventionKey = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)
 ]
 
-ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=800)]
+ShortText = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=800)
+]
+# The rendered projection is a whole condition block: a boundary sentence plus
+# every premise and convention.  Bounding it at the single-statement limit was a
+# real defect -- a live item rendered 1000+ characters and the renderer raised
+# instead of returning the block the learner is supposed to see.
+ProjectionText = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=8_000)
+]
 Hex64 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 
 ROLE_PREMISE: Final[frozenset[str]] = frozenset({"GIVEN", "EXERCISE_ASSUMPTION", "SOURCE_RULE"})
@@ -205,7 +228,7 @@ class PublicProjection(Contract):
     claims_to_critique: list[str] = Field(default_factory=list, max_length=20)
     conventions: list[str] = Field(default_factory=list, max_length=20)
     answer_equivalence: Equivalence
-    text: ShortText
+    text: ProjectionText
     text_digest: Hex64
     renderer_version: str = PROJECTION_VERSION
 
@@ -500,6 +523,19 @@ def certify_completeness(
             )
         )
     stated = spec.convention_keys()
+    unrecognised = sorted(stated - set(KNOWN_CONVENTION_KEYS))
+    checks.append(
+        _check(
+            "conventions_are_known",
+            not unrecognised,
+            "every declared convention is one this server recognises"
+            if not unrecognised
+            else (
+                "the contract declares conventions this server does not know, so "
+                f"it cannot be shown to satisfy: {unrecognised}"
+            ),
+        )
+    )
     for key in profile.required_conventions:
         checks.append(
             _check(

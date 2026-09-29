@@ -9,7 +9,7 @@ from typing import Any, Final, Literal, TypeVar
 from urllib.parse import urlsplit
 
 from openai import OpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from app.config import Settings
 from app.errors import ApiError
@@ -169,6 +169,23 @@ def _timeout_kind(error: BaseException) -> str | None:
                 return "POOL"
             return "UNSPECIFIED"
     return None
+
+
+def schema_error_summary(error: Any, *, limit: int = 12) -> list[str]:
+    """Bounded, value-free description of a pydantic schema rejection.
+
+    Format is "field.path: error_kind", for example
+    "task_contract.facts.0.role: literal_error".  The offending value is
+    deliberately not included: it is model output derived from private course
+    material, and the field is what a diagnosis needs.
+    """
+    entries: list[str] = []
+    for item in getattr(error, "errors", lambda: [])():
+        location = ".".join(str(part) for part in item.get("loc", ())) or "<root>"
+        entries.append(f"{location}: {item.get('type', 'unknown')}")
+        if len(entries) >= limit:
+            break
+    return entries
 
 
 def _http_status(error: BaseException) -> int | None:
@@ -354,6 +371,8 @@ class LearningProvider:
         response_received = False
         send_intent_recorded = False
         contract_terminal_recorded = False
+        raw_output_text: str | None = None
+        rejection_summary: list[str] | None = None
         try:
             if any(
                 len(item.content) > settings.v3_problem_image_max_bytes
@@ -526,9 +545,24 @@ class LearningProvider:
                         "MODEL_EMPTY_OUTPUT",
                         "A completed response carried no output text.",
                     )
-                run["response_text"] = raw_output_text
-                run["response_received"] = True
-                output = schema.model_validate_json(raw_output_text)
+                # The complete response and the rejection reason are kept in
+                # *local* variables, not in the run.  The run is the receipt shape
+                # that AuthorProviderRun and StrongReviewRun validate with
+                # extra="forbid", so writing a diagnostic key into it made every
+                # live call fail validation -- which is exactly what the staging
+                # probe caught.  They are attached to the failure below, where the
+                # run is read rather than validated.
+                try:
+                    output = schema.model_validate_json(raw_output_text)
+                except ValidationError as schema_error:
+                    # A complete response that did not match the schema is a schema
+                    # failure, not an outage, and the failing *field* is what makes
+                    # it attributable.  Only the locations and error kinds are kept:
+                    # the values would be private course material.
+                    rejection_summary = schema_error_summary(schema_error)
+                    raise
+                else:
+                    rejection_summary = None
                 emit(
                     "CONTRACT_VALID",
                     role=role,
@@ -605,11 +639,16 @@ class LearningProvider:
                 cause_chain=_cause_chain(error),
                 response_received=response_received,
                 max_output_tokens=effective_max_output_tokens,
+                schema_error_summary=rejection_summary,
                 response_digest=(
-                    sha256(run["response_text"].encode()).hexdigest()
-                    if run.get("response_text") is not None
+                    sha256(raw_output_text.encode()).hexdigest()
+                    if isinstance(raw_output_text, str)
                     else None
                 ),
+                # Persisted here and nowhere else: a failure keeps the complete
+                # response so it can be re-parsed offline, and a success does not
+                # carry it into the receipt.
+                response_text=raw_output_text if response_received else None,
             )
             raise ProviderCallFailure(error, run) from error
         run.update(

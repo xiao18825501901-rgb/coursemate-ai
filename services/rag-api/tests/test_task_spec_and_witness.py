@@ -6,6 +6,7 @@ simulated, and the certificate in each case is issued by the code under test.
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from app.learning.ambiguity_witness import (
     AmbiguityWitnessClaim,
@@ -44,13 +45,19 @@ def _spec(**overrides):
                 fact_id="schema",
                 role="GIVEN",
                 origin="PROBLEM_DATA",
-                statement="Table Member(member_id TEXT, name TEXT) and Subscription(member TEXT, start_date TEXT).",
+                statement=(
+                    "Table Member(member_id TEXT, name TEXT) and "
+                    "Subscription(member TEXT, start_date TEXT)."
+                ),
             )
         ],
         "conventions": [
             TaskConvention(key="DIALECT", statement="SQLite 3 semantics."),
             TaskConvention(key="DATA_COMPLETENESS", statement="The rows given are all the rows."),
-            TaskConvention(key="DUPLICATE_ROWS", statement="Duplicate rows are distinct unless DISTINCT is written."),
+            TaskConvention(
+                key="DUPLICATE_ROWS",
+                statement="Duplicate rows are distinct unless DISTINCT is written.",
+            ),
             TaskConvention(key="ROW_ORDER", statement="Row order is not significant."),
         ],
         "answer_equivalence": "SET_UNORDERED",
@@ -102,7 +109,11 @@ def test_a_claim_to_critique_is_rendered_apart_and_is_not_a_premise() -> None:
                 statement="K-means recomputes centroids before assigning points.",
             ),
         ],
-        conventions=[TaskConvention(key="ANSWER_FORM", statement="State the rule and the correction.")],
+        conventions=[
+            TaskConvention(
+                key="ANSWER_FORM", statement="State the rule and the correction."
+            )
+        ],
         profile_id="P-COURSE-RULE",
     )
     projection = render_public_projection(spec)
@@ -114,8 +125,30 @@ def test_a_claim_to_critique_is_rendered_apart_and_is_not_a_premise() -> None:
     assert spec.facts[1].statement not in projection.premises
 
 
+def test_a_projection_longer_than_a_single_statement_still_renders() -> None:
+    """A condition block is many statements, so it is not a single short text.
+
+    A live item rendered more than a thousand characters and the renderer raised
+    instead of returning the block: the bound was the single-statement one.
+    """
+    facts = [
+        TaskFact(
+            fact_id=f"given-{index}",
+            role="GIVEN",
+            origin="PROBLEM_DATA",
+            statement=("Given datum number " + str(index) + ": " + "x" * 120),
+        )
+        for index in range(1, 12)
+    ]
+    spec = _spec(facts=facts)
+    projection = render_public_projection(spec)
+    assert len(projection.text) > 800
+    for fact in facts:
+        assert fact.statement in projection.text
+
+
 def test_a_source_rule_without_a_span_is_refused_at_construction() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         TaskFact(
             fact_id="rule",
             role="SOURCE_RULE",

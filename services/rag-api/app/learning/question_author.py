@@ -17,10 +17,15 @@ from pydantic import Field, StringConstraints, model_validator
 
 from app.errors import ApiError
 from app.learning.models import Contract, Identifier, Text
-from app.learning.provider import ProviderCallFailure
+from app.learning.provider import (
+    ProviderCallFailure,
+    schema_error_summary,
+    structured_input_hash,
+)
 from app.learning.question_blueprint import Hex64, QuestionBlueprint
 from app.learning.question_evidence import QuestionEvidencePack
 from app.learning.task_spec import (
+    REGISTERED_PROFILES,
     StudentVisibleTaskSpec,
     TaskContractDraft,
     TaskSpecError,
@@ -95,7 +100,13 @@ class QuestionAuthorOutput(Contract):
     # row written before this field existed still validates and still reproduces
     # its own revision identity; the identity function drops the key when it is
     # absent rather than hashing a null the old payload never had.
-    task_contract: TaskContractDraft | None = None
+    #
+    # Held as a plain mapping here and validated separately, because a contract
+    # that does not satisfy its own schema is a diagnosable fact about the
+    # contract.  Validating it inline would collapse that into a blanket
+    # "the author output was invalid" and make the failure impossible to attribute
+    # -- which is exactly what happened on the first live run.
+    task_contract: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def consecutive_steps_and_unique_sources(self) -> QuestionAuthorOutput:
@@ -428,6 +439,49 @@ def _assert_contract_scope(
         )
 
 
+def author_context(
+    blueprint: QuestionBlueprint, evidence: QuestionEvidencePack
+) -> dict[str, Any]:
+    """The exact context an author call receives, built in exactly one place.
+
+    The persistence stage has to recompute this context's hash to decide whether
+    an author receipt is still current, and it used to carry its own copy of the
+    structure.  A copy drifts: adding the profile registry here silently made every
+    item's author receipt stale, and the symptom was a READY item quietly becoming
+    NEEDS_REVIEW with AUTHOR_PROVENANCE_INCOMPLETE.  Both sides now call this.
+    """
+    return {
+        "blueprint": blueprint.model_dump(mode="json"),
+        "evidence_pack": evidence.model_dump(mode="json"),
+        # The server's own profile registry travels with the request, so the author
+        # chooses against the registered requirements rather than from its own idea
+        # of what a profile wants.  A live run claimed P-SQL for a NUMERIC item and
+        # declared conventions that profile does not accept; the certificate refused
+        # it correctly, but the model had been told the profiles exist without being
+        # told what each one requires.
+        "task_profiles": [
+            {
+                "profile_id": profile.profile_id,
+                "version": profile.version,
+                "description": profile.description,
+                "question_types": sorted(profile.question_types),
+                "required_roles": sorted(profile.required_roles),
+                "required_conventions": list(profile.required_conventions),
+            }
+            for profile in REGISTERED_PROFILES
+        ],
+    }
+
+
+def author_input_hash(
+    blueprint: QuestionBlueprint, evidence: QuestionEvidencePack
+) -> str:
+    """The identity an author receipt is bound to, from the same context."""
+    return structured_input_hash(
+        QuestionAuthorOutput, context=author_context(blueprint, evidence)
+    )
+
+
 def author_question(
     provider: AuthorProvider,
     *,
@@ -446,10 +500,7 @@ def author_question(
             "AUTHOR_PROVIDER_BLOCKED",
             "Question authoring permits only the verified DeepSeek Responses path.",
         )
-    context = {
-        "blueprint": blueprint.model_dump(mode="json"),
-        "evidence_pack": evidence.model_dump(mode="json"),
-    }
+    context = author_context(blueprint, evidence)
     try:
         raw_output, raw_run = provider.generate(
             QuestionAuthorOutput,
@@ -469,11 +520,26 @@ def author_question(
     except ProviderCallFailure as failure:
         raise _failure_from_provider(failure) from failure
     except (OSError, ValueError) as error:
+        # The rejection reason is kept in the message so a run can attribute it:
+        # the blanket code alone made the first live failure impossible to read.
         raise AuthorGenerationError(
-            "AUTHOR_OUTPUT_INVALID", "The private author result failed its contract."
+            "AUTHOR_OUTPUT_INVALID",
+            f"The private author result failed its contract: {type(error).__name__}: {error}"[:400],
         ) from error
 
     _assert_output_scope(output, blueprint=blueprint, evidence=evidence)
+    draft: TaskContractDraft | None = None
+    if output.task_contract is not None:
+        try:
+            draft = TaskContractDraft.model_validate(output.task_contract)
+        except ValueError as error:
+            # The failing fields, without their values: that is what makes the
+            # refusal actionable rather than a repeatable mystery.
+            raise AuthorGenerationError(
+                "AUTHOR_CONTRACT_INVALID",
+                "The task contract did not satisfy its own schema: "
+                + ", ".join(schema_error_summary(error)),
+            ) from error
     blueprint_hash = blueprint.identity()
     evidence_hash = evidence.identity()
     revision = _question_revision_identity(
@@ -481,11 +547,11 @@ def author_question(
         evidence_pack_hash=evidence_hash,
         output=output,
     )
-    if output.task_contract is not None:
+    if draft is not None:
         try:
             _assert_contract_scope(
                 build_task_spec(
-                    output.task_contract,
+                    draft,
                     blueprint=blueprint,
                     question_revision_hash=revision,
                 ),
@@ -518,5 +584,5 @@ def author_question(
             source_refs=output.source_refs,
         ),
         provider_run=run,
-        task_contract=output.task_contract,
+        task_contract=draft,
     )

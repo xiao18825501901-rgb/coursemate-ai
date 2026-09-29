@@ -48,12 +48,44 @@ private object and not in the public question text does not exist.
 * `answer_equivalence` -- how two answers are compared. Use `SET_UNORDERED` when duplicate rows do
   not matter and row order does not, `BAG_UNORDERED` when duplicates matter but order does not,
   `ORDERED_LIST` when order matters, `NUMERIC_TOLERANCE`, `EXACT`, or `SEMANTIC_RUBRIC` with a note.
-* `profile_id` / `profile_version` -- the registered task profile this item fits, or null. The
-  registered profiles are `P-SQL` (a relational task whose schema and rows are fully stated),
-  `P-DISCRETE` (a finite graph, counting or clustering task over data given in the item) and
-  `P-COURSE-RULE` (a task decided by a rule in a supplied span). If your item fits none of them,
-  return null rather than a profile it does not match; an unqualified shape is not a failure, but
-  claiming a profile you do not satisfy is.
+* `profile_id` / `profile_version` -- choose from `task_profiles` in the request, which lists
+  each profile with the exact question types it covers and the exact conventions it requires.
+  Pick the one whose `question_types` contains your `question_type`, and state **every** key in its
+  `required_conventions`. If no profile covers this item, return null: an unqualified shape is not
+  a failure, but claiming a profile you do not satisfy is, and the server checks.
+
+Return `task_contract` with **exactly these key names**. A first live run returned
+`fact` instead of `statement`, and the whole item was refused for it:
+
+```json
+{
+  "task_contract": {
+    "task_boundary": "<one sentence: what the learner must produce>",
+    "facts": [
+      {
+        "fact_id": "given-1",
+        "role": "GIVEN",
+        "origin": "PROBLEM_DATA",
+        "statement": "<exactly the sentence the learner sees>",
+        "source_span_id": null
+      }
+    ],
+    "conventions": [
+      { "key": "ROUNDING", "statement": "<the convention, as the learner sees it>" }
+    ],
+    "answer_equivalence": "EXACT",
+    "equivalence_note": null,
+    "profile_id": "P-DISCRETE",
+    "profile_version": 1
+  }
+}
+```
+
+`role` is one of `GIVEN`, `EXERCISE_ASSUMPTION`, `SOURCE_RULE`, `CLAIM_TO_CRITIQUE`.
+`origin` is one of `PROBLEM_DATA`, `COURSE_SOURCE`, `EXERCISE_CONVENTION`. `facts`
+must contain at least one entry. Every key shown above is required except
+`source_span_id`, `equivalence_note`, `profile_id` and `profile_version`, and no key
+outside this shape is accepted.
 
 Do not return a completeness certificate, a qualification, a verdict or a READY flag. Those are
 server-owned: the server renders the public projection from your contract and decides completeness
