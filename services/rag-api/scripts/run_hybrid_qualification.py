@@ -307,7 +307,27 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", required=True)
     parser.add_argument("--workspace", required=True)
-    parser.add_argument("--node", required=True)
+    # One node per family was the old shape, and it made every item in a run a
+    # sibling of every other: three nodes covered the whole sample, and "fresh"
+    # meant the same generator over the same material.  A run now takes many nodes,
+    # so each family is a different topic from a different place in the course.
+    parser.add_argument(
+        "--node",
+        action="append",
+        default=[],
+        help="an objective node; repeat for several, or use --nodes",
+    )
+    parser.add_argument(
+        "--nodes",
+        default="",
+        help="comma-separated node ids, appended to any --node values",
+    )
+    parser.add_argument(
+        "--max-nodes",
+        type=int,
+        default=0,
+        help="use at most this many nodes; 0 means all of them",
+    )
     parser.add_argument("--private-course", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--per-type", type=int, default=8)
@@ -361,6 +381,18 @@ def main() -> int:
     if unknown_kinds:
         print(json.dumps({"status": "FAILED", "error": f"unknown kinds {unknown_kinds}"}))
         return 7
+    selected_nodes = list(args.node) + [
+        part.strip() for part in args.nodes.split(",") if part.strip()
+    ]
+    # Preserve order, drop duplicates: a node named twice would double-count its
+    # family, which corrupts the independent-family floor.
+    selected_nodes = list(dict.fromkeys(selected_nodes))
+    if args.max_nodes > 0:
+        selected_nodes = selected_nodes[: args.max_nodes]
+    if not selected_nodes:
+        print(json.dumps({"status": "FAILED", "error": "no --node or --nodes given"}))
+        return 8
+    print(json.dumps({"nodes": len(selected_nodes), "kinds": list(selected_kinds)}))
 
     settings = Settings()
     # The database and upload root come from the explicit arguments, and the
@@ -398,9 +430,13 @@ def main() -> int:
         course_id=str(workspace["course_id"]),
         private_course_id=str(workspace["private_course_id"]),
     )
-    with database.connect() as connection:
-        objective = resolve_objective(connection, node_id=args.node)
-    evidence = build_evidence_pack(database, objective=objective, access=access)
+    def resolve_node(node_id: str):
+        """The objective and its frozen evidence pack for one node."""
+        with database.connect() as connection:
+            node_objective = resolve_objective(connection, node_id=node_id)
+        return node_objective, build_evidence_pack(
+            database, objective=node_objective, access=access
+        )
 
     provider = LearningProvider(
         settings.model_copy(update={"database_path": target.path})
@@ -415,18 +451,33 @@ def main() -> int:
     # Complete provider responses whose parsing failed, kept so they can be
     # re-parsed offline.  Never printed; written only when the caller asked.
     raw_responses: list[dict[str, object]] = []
-    for kind in selected_kinds:
+    for node_id in selected_nodes:
+      try:
+        objective, evidence = resolve_node(node_id)
+      except Exception as error:  # noqa: BLE001 - a node without evidence is skipped
+        author_failures.append(
+            {"node_id": node_id, "kind": "-", "index": "-",
+             "error": type(error).__name__, "code": getattr(error, "code", None),
+             "message": str(error)[:200]}
+        )
+        continue
+      node_tag = node_id.replace("auto-node-", "")[:8]
+      for kind in selected_kinds:
         for index in range(args.per_type):
-            blueprint = _blueprint(
-                objective=objective,
-                evidence=evidence,
-                course_id=str(workspace["course_id"]),
-                node_id=args.node,
-                spec_hash=objective.spec_content_hash,
-                kind=kind,
-                index=index,
-            )
+            # The blueprint is built inside the guard: a node whose objective cannot
+            # form a valid blueprint is a skip for that item, not the end of a
+            # seventy-item run.  A first launch died exactly that way on one node
+            # whose objective text names a topic rather than an observable action.
             try:
+                blueprint = _blueprint(
+                    objective=objective,
+                    evidence=evidence,
+                    course_id=str(workspace["course_id"]),
+                    node_id=node_id,
+                    spec_hash=objective.spec_content_hash,
+                    kind=kind,
+                    index=index,
+                )
                 candidate = author_question(provider, blueprint=blueprint, evidence=evidence)
                 blind = run_blind_solve(provider, candidate=candidate, evidence=evidence)
             except Exception as error:  # noqa: BLE001 - each item is independent
@@ -434,6 +485,7 @@ def main() -> int:
                 # exception class: the first live run reported three bare
                 # "AuthorGenerationError" lines and could not be attributed at all.
                 failure: dict[str, object] = {
+                    "node_id": node_id,
                     "kind": kind,
                     "index": str(index),
                     "error": type(error).__name__,
@@ -467,6 +519,7 @@ def main() -> int:
                         failure["raw_response_chars"] = len(captured)
                         raw_responses.append(
                             {
+                                "node_id": node_id,
                                 "kind": kind,
                                 "index": str(index),
                                 "provider_response_id": provider_run.get("provider_response_id"),
@@ -479,21 +532,21 @@ def main() -> int:
             if args.diagnose_only:
                 diagnostics.append(
                     diagnose_item(
-                        family=f"{kind.lower()}-{index}",
+                        family=f"{node_tag}-{kind.lower()}-{index}",
                         inputs=inputs,
                         candidate=candidate,
                         blueprint=blueprint,
                     )
                 )
                 continue
-            family = f"{kind.lower()}-{index}"
+            family = f"{node_tag}-{kind.lower()}-{index}"
             base.append((family, inputs))
             certificate = _certificate_for(candidate, blueprint, evidence, inputs)
             if certificate is not None:
                 certificates[family] = certificate
             diagnostics.append(
                 diagnose_item(
-                    family=f"{kind.lower()}-{index}",
+                    family=f"{node_tag}-{kind.lower()}-{index}",
                     inputs=inputs,
                     candidate=candidate,
                     blueprint=blueprint,
@@ -511,7 +564,7 @@ def main() -> int:
         diagnosis = {
             "schema": "coursejesus.hybrid-item-population-diagnosis.v1",
             "status": "DIAGNOSIS_ONLY",
-            "node_id": args.node,
+            "node_ids": list(selected_nodes),
             "per_type": args.per_type,
             "items": len(diagnostics),
             "author_failures": author_failures,

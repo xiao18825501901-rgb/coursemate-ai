@@ -243,17 +243,31 @@ def resolve_database_target(
                 environment_path=str(declared_env),
             )
 
-    # 3. A target that is production is refused, whether or not anything agrees.
-    for production in productions:
-        same, how = _same_file(declared, production)
-        if same:
+    # 3. Production is handled according to the declared purpose, and never by
+    #    accident.  Every other purpose refuses a production target outright,
+    #    whether or not anything agrees with it.  A PRODUCTION_WRITE inverts the
+    #    rule -- it is the one purpose whose target *must* be a declared production
+    #    path -- because the alternative is that the legitimate installation step
+    #    is impossible and gets done by hand, which is how the incident happened.
+    production_matches = [p for p in productions if _same_file(declared, p)[0]]
+    if purpose == "PRODUCTION_WRITE":
+        if not production_matches:
+            raise DatabaseTargetError(
+                "DATABASE_TARGET_NOT_PRODUCTION",
+                "A production write must name a declared production database.",
+                purpose=purpose,
+                declared_path=str(declared),
+                production_paths=[str(p) for p in productions],
+            )
+    else:
+        for production in production_matches:
             raise DatabaseTargetError(
                 "DATABASE_TARGET_IS_PRODUCTION",
                 "The named target is the production database.",
                 purpose=purpose,
                 declared_path=str(declared),
                 production_path=str(production),
-                matched_by=how,
+                matched_by=_same_file(declared, production)[1],
             )
 
     # 4. Links and aliases are refused before the file is touched.
@@ -309,7 +323,7 @@ def resolve_database_target(
             purpose=purpose,
             declared_path=str(declared),
         )
-    if not _contains(root, resolved):
+    if purpose != "PRODUCTION_WRITE" and not _contains(root, resolved):
         raise DatabaseTargetError(
             "DATABASE_TARGET_OUTSIDE_ALLOWED_ROOT",
             "The target is outside the authorised work root.",
@@ -318,17 +332,18 @@ def resolve_database_target(
             resolved_path=str(resolved),
             allowed_root=str(root),
         )
-    for production in productions:
-        same, how = _same_file(resolved, production)
-        if same:
-            raise DatabaseTargetError(
-                "DATABASE_TARGET_IS_PRODUCTION",
-                "The target resolves onto the production database.",
-                purpose=purpose,
-                resolved_path=str(resolved),
-                production_path=str(production),
-                matched_by=how,
-            )
+    if purpose != "PRODUCTION_WRITE":
+        for production in productions:
+            same, how = _same_file(resolved, production)
+            if same:
+                raise DatabaseTargetError(
+                    "DATABASE_TARGET_IS_PRODUCTION",
+                    "The target resolves onto the production database.",
+                    purpose=purpose,
+                    resolved_path=str(resolved),
+                    production_path=str(production),
+                    matched_by=how,
+                )
 
     # 6. Permission facts are recorded, and a read-only identity can be demanded.
     writable = os.access(resolved, os.W_OK)

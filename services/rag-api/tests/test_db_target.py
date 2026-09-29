@@ -214,6 +214,53 @@ def test_two_pointing_at_the_same_copy_is_accepted(layout) -> None:
     assert os.path.realpath(target.path) == os.path.realpath(layout["copy"])
 
 
+def test_a_production_write_must_name_a_declared_production_path(layout) -> None:
+    """The one purpose whose target must be production, and only when named.
+
+    Every other purpose refuses a production target outright.  Without this rule
+    the honest installation step is impossible, and work that cannot be done
+    through the guard is work that gets done around it -- which is how the
+    accidental migration happened.
+    """
+    target = resolve_database_target(
+        purpose="PRODUCTION_WRITE",
+        explicit_path=layout["production"],
+        allowed_root=layout["root"],
+        production_paths=(layout["production"],),
+        environment_path=layout["production"],
+        verify_schema=False,
+    )
+    assert target.purpose == "PRODUCTION_WRITE"
+    assert os.path.realpath(target.path) == os.path.realpath(layout["production"])
+
+    # The same purpose pointed at something that is not production is refused.
+    with pytest.raises(DatabaseTargetError) as caught:
+        resolve_database_target(
+            purpose="PRODUCTION_WRITE",
+            explicit_path=layout["copy"],
+            allowed_root=layout["root"],
+            production_paths=(layout["production"],),
+            verify_schema=False,
+        )
+    assert caught.value.code == "DATABASE_TARGET_NOT_PRODUCTION"
+
+    # A production write may not be reached through a symlink either.
+    link = layout["root"] / "prod-alias.sqlite3"
+    try:
+        os.symlink(layout["production"], link)
+    except (OSError, NotImplementedError):
+        return
+    with pytest.raises(DatabaseTargetError) as caught:
+        resolve_database_target(
+            purpose="PRODUCTION_WRITE",
+            explicit_path=link,
+            allowed_root=layout["root"],
+            production_paths=(layout["production"],),
+            verify_schema=False,
+        )
+    assert caught.value.code == "DATABASE_TARGET_SYMLINK"
+
+
 def test_a_source_fingerprint_can_be_demanded(layout) -> None:
     with pytest.raises(DatabaseTargetError) as caught:
         _resolve(layout, path=layout["copy"], require_source_fingerprint=True)
