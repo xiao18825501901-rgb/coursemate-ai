@@ -9,6 +9,7 @@ missing or uncertain signal can only keep a candidate under review, never upgrad
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any, Literal
 
 from pydantic import Field, model_validator
@@ -24,6 +25,7 @@ from app.learning.question_author import (
 )
 from app.learning.question_blueprint import QuestionBlueprint
 from app.learning.question_evidence import QuestionEvidencePack
+from app.learning.sql_oracle import OracleCheck
 
 AmbiguityVerdict = Literal["CLEAR", "AMBIGUOUS", "UNDER_SPECIFIED", "CONTRADICTORY", "UNCERTAIN"]
 AgreementVerdict = Literal["AGREE", "DISAGREE", "AMBIGUOUS", "UNCERTAIN"]
@@ -120,10 +122,17 @@ class QuestionValidationReport(Contract):
     status: Literal["VALIDATED", "NEEDS_REVIEW", "REJECTED"]
     hard_gates: list[HardGateResult] = Field(min_length=6, max_length=6)
     semantic_signals: list[SemanticSignal] = Field(min_length=2, max_length=3)
+    # Additive: the executable checks that were actually run, if any.  An empty
+    # list means none were applicable, which is not the same as passing one.
+    oracle_checks: list[OracleCheck] = Field(default_factory=list, max_length=16)
 
     @property
     def ready_eligible(self) -> bool:
         return self.status == "VALIDATED"
+
+    @property
+    def oracle_failed(self) -> bool:
+        return any(check.failed for check in self.oracle_checks)
 
 
 def _gate(gate: HardGateName, passed: bool, reason: str) -> HardGateResult:
@@ -403,8 +412,17 @@ def validate_question_candidate(
     evidence: QuestionEvidencePack,
     blind_receipt: BlindSolveReceipt,
     semantic_signals: QuestionSemanticSignals,
+    oracle_checks: Sequence[OracleCheck] = (),
 ) -> QuestionValidationReport:
-    """Evaluate six hard gates and the applicable independently receipted semantic dimensions."""
+    """Evaluate six hard gates, the applicable semantic dimensions, and any oracle.
+
+    An executable oracle failure is a **deterministic** failure: it is produced by
+    running the answer, not by asking a model about it.  It therefore rejects the
+    candidate outright, exactly as a failed hard gate does, and no model vote may
+    override it.  An empty or ``NOT_SUPPORTED`` oracle set never counts as a pass
+    -- it means no executable check was applicable, and the semantic gates still
+    have to carry the item on their own.
+    """
     identity = _input_identity_matches(candidate, blueprint, evidence)
     marks = candidate.marks == blueprint.marks
     sources = _source_scope_matches(candidate, evidence)
@@ -420,6 +438,7 @@ def validate_question_candidate(
         _gate("BLIND_SOLVE_CURRENT", blind, "blind solve is completed for this exact revision"),
     ]
     hard_failure = any(gate.status == "FAIL" for gate in hard_gates)
+    oracle_failure = any(check.failed for check in oracle_checks)
     ambiguity = semantic_signals.ambiguity
     agreement = semantic_signals.answer_agreement
     base_semantic_pass = (
@@ -445,10 +464,17 @@ def validate_question_candidate(
         )
     )
     semantic_pass = base_semantic_pass and specialized_pass
-    status = "REJECTED" if hard_failure else "VALIDATED" if semantic_pass else "NEEDS_REVIEW"
+    status = (
+        "REJECTED"
+        if (hard_failure or oracle_failure)
+        else "VALIDATED"
+        if semantic_pass
+        else "NEEDS_REVIEW"
+    )
     return QuestionValidationReport(
         question_revision=candidate.question_revision,
         status=status,
         hard_gates=hard_gates,
         semantic_signals=semantic_signals.ordered(),
+        oracle_checks=list(oracle_checks),
     )

@@ -17,11 +17,66 @@ published through it.  The fail-closed design did its job.
 | Root cause of the 49 | migration 065 used bare `CREATE TABLE`/`CREATE TRIGGER`; migrations are replayed on every startup |
 | Fix | every statement in 065 is `IF NOT EXISTS`, so the file is replay-safe |
 | All 49 re-run | **221 passed, 0 failed** |
-| New hybrid tests | `test_hybrid_review_policy.py` 20, `test_hybrid_publication.py` 10, `test_hybrid_qualification.py` 10 — **40 passed, 0 failed** |
+| New hybrid tests | `test_hybrid_review_policy.py`, `test_hybrid_publication.py`, `test_hybrid_qualification.py` — all passing |
+| New oracle tests | `test_sql_oracle.py` — **21 passed** |
+| Broad targeted regression (oracle + hybrid + question engine + migrations) | **162 passed, 0 failed** |
 | Skips | 3 platform/optional-SDK skips (Windows symlink privilege, POSIX permission bits, `typesafe-sdk` not installed) — all pre-existing |
 
 The three skips are the same three reported by the previous round and are not
 related to this change.
+
+## 1.1 The executable SQL oracle (added this round)
+
+The brief asks for executable oracles and the Question Engine had none: the six
+hard gates prove identity, marks, source scope, conditions, shape and blind-solve
+currency, but nothing ever *ran* an answer.  `app/learning/sql_oracle.py` closes
+that gap.
+
+**Isolation.**  Each statement runs in a private in-memory SQLite database built
+from caller-supplied schema and rows, behind an authorizer that permits only
+`SELECT`/`READ`/`FUNCTION`.  `ATTACH`, `PRAGMA` writes, `load_extension`, temp
+tables and every write verb are refused, and only one statement can be prepared,
+so `SELECT 1; DROP TABLE t` cannot run its second half.
+
+**Boundedness.**  Statement length, row count, column count, result cells and a
+wall-clock progress handler are all capped.  Exceeding any bound is
+`NOT_SUPPORTED`, never a pass; a truncated result is refused rather than compared.
+
+**Declared scope.**  `OracleCheck.scope` states, in the type itself, that a `PASS`
+means "these agree on the supplied schema and rows" and is *not* a proof of
+equivalence.  A test pins the counterexample: two statements that agree on one
+instance and diverge on the next, so the limit is demonstrated rather than
+asserted.
+
+**The comparison semantics are the point**, because they are where SQL answers
+actually differ.  Tests pin each one:
+
+| case | result |
+|---|---|
+| `DISTINCT` vs not, compared as a **set** | `PASS` (the bug is invisible) |
+| `DISTINCT` vs not, compared as a **bag** | `FAIL` (the bug is caught) |
+| `LEFT JOIN … ON` vs the predicate moved to `WHERE` | `FAIL` |
+| row order with and without `ORDER BY` | `FAIL` under `ORDERED`, `PASS` under `BAG` |
+| a missing join condition multiplying rows | caught by the bag comparison |
+| `NULL` vs `NULL` in a result row | equal; `NULL` vs `0` is not |
+| a statement that cannot execute | `NOT_SUPPORTED`, not a pass |
+
+**It is deterministic, and it is not overridable.**  `validate_question_candidate`
+now takes `oracle_checks`, and **any** oracle `FAIL` sets the report to
+`REJECTED` — the same terminal a failed hard gate produces — regardless of what
+either reviewer said.  `test_an_executable_oracle_failure_rejects_the_candidate`
+runs the whole chain with both reviewers passing and a covering qualification in
+place, and the candidate is still refused.
+
+**An inapplicable check is neither a pass nor a block.**  `NOT_SUPPORTED` leaves
+the item to the semantic gates, which is what an item with no executable oracle
+needs; the test asserts the candidate still becomes `READY` in that case.
+
+The oracle also carries one genuinely executable under-specification check:
+`required_parameters_are_stated` fails when a question declares the parameters
+its answer depends on and the stem does not contain them.  That is narrow on
+purpose — it is a declared-parameter check, not a general under-specification
+judge, and it returns `NOT_SUPPORTED` when nothing was declared.
 
 ## 2. Live verification of the two reviewer roles
 

@@ -157,6 +157,14 @@ def _recomputed_report(
         evidence=evidence,
         blind_receipt=blind_receipt,
         semantic_signals=semantic,
+        # The oracle's own result is recorded evidence from the point where the
+        # statement was executed; it is not recomputable here because the SQL
+        # payload is not persisted with the revision, and it is *not* trusted for
+        # anything except reproducing the report it belongs to.  Every input the
+        # recomputation is actually about -- identity, marks, sources,
+        # conditions, shape, the blind receipt and the semantic signals -- is
+        # recomputed from scratch.
+        oracle_checks=supplied.oracle_checks,
     )
     if recomputed.model_dump(mode="json") != supplied.model_dump(mode="json"):
         raise QuestionPersistenceError(

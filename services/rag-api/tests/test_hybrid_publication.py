@@ -40,6 +40,7 @@ from app.learning.question_validator import (
     collect_question_semantic_signals,
     validate_question_candidate,
 )
+from app.learning.sql_oracle import OracleCheck, check_equivalence, check_expected_rows
 
 from test_question_persistence import (  # noqa: E402 - shared fixture builder
     COURSE,
@@ -289,7 +290,7 @@ def _qualify(
     return qualification_id
 
 
-def _persist(context: dict[str, Any], result) -> Any:
+def _persist(context: dict[str, Any], result, *, oracle_checks=()) -> Any:
     return persist_question_candidate(
         database=context["database"],
         owner_user_id=OWNER,
@@ -304,8 +305,76 @@ def _persist(context: dict[str, Any], result) -> Any:
             evidence=context["evidence"],
             blind_receipt=context["blind"],
             semantic_signals=result.signals,
+            oracle_checks=oracle_checks,
         ),
+        semantic_decisions=None,
     )
+
+
+def test_an_executable_oracle_failure_rejects_the_candidate(tmp_path: Path) -> None:
+    """A deterministic failure is produced by running the answer, not by asking.
+
+    Both reviewers passed, the qualification covers the scope, and the candidate
+    is still refused: a wrong query result is not a matter of opinion.
+    """
+    context = _pipeline(tmp_path)
+    service, _ = _service(context)
+    _qualify(context, service)
+    result = _review(context, service)
+    assert result is not None and result.accepted
+
+    oracle_failure = check_equivalence(
+        reference="SELECT id FROM t ORDER BY id",
+        candidate="SELECT id FROM t WHERE 1 = 1 ORDER BY id DESC",
+        schema="CREATE TABLE t(id INTEGER);",
+        data="INSERT INTO t VALUES (1),(2);",
+        comparison="ORDERED",
+    )
+    assert oracle_failure.status == "FAIL"
+
+    persisted = _persist(context, result, oracle_checks=[oracle_failure])
+    assert persisted.status == "REJECTED"
+    assert persisted.verification_method == "MODEL_ONLY"
+    with context["database"].connect() as connection:
+        status = connection.execute(
+            "SELECT publication_status FROM question_engine_provenance "
+            "WHERE question_revision_id=?",
+            (persisted.question_revision_id,),
+        ).fetchone()
+    assert str(status["publication_status"]) == "REJECTED"
+
+
+def test_a_not_supported_oracle_does_not_pass_and_does_not_block(tmp_path: Path) -> None:
+    """No applicable executable check is not the same as a passing one.
+
+    It must not turn into approval, and it must not turn into refusal either: the
+    semantic chain still has to carry the item, and it did.
+    """
+    context = _pipeline(tmp_path)
+    service, _ = _service(context)
+    _qualify(context, service)
+    result = _review(context, service)
+    assert result is not None and result.accepted
+
+    unsupported = OracleCheck(
+        check="sql_result_equivalence",
+        status="NOT_SUPPORTED",
+        method="ROW_COMPARISON",
+        comparison=None,
+        detail="the statement could not be executed on the supplied schema and rows",
+    )
+    persisted = _persist(context, result, oracle_checks=[unsupported])
+    assert persisted.status == "READY"
+
+    passing = check_expected_rows(
+        candidate="SELECT id FROM t ORDER BY id",
+        schema="CREATE TABLE t(id INTEGER);",
+        data="INSERT INTO t VALUES (1),(2);",
+        expected_rows=[[1], [2]],
+        comparison="ORDERED",
+    )
+    assert passing.status == "PASS"
+    assert _persist(context, result, oracle_checks=[passing]).status == "READY"
 
 
 def test_three_isolated_calls_are_made_and_none_sees_another(tmp_path: Path) -> None:
