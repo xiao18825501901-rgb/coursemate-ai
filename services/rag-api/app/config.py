@@ -190,6 +190,25 @@ class Settings(BaseSettings):
     openjev_model_revision: str = Field(
         default="", validation_alias=AliasChoices("OPENJEV_MODEL_REVISION")
     )
+    # ---- hybrid-strict-v1 strong-review chain -------------------------------
+    #
+    # The Question Engine's original four quality requirements are unchanged.
+    # What changes is *which reviewed method* may satisfy them: alongside the
+    # historical local/TypeSafe receipt chain, a deployment may configure two
+    # independently requested DeepSeek reviewer roles plus a scoped
+    # qualification.  Off by default, and the default is the point: with
+    # ``HYBRID_QUALITY_ENABLED`` unset the pipeline is byte-identical to before,
+    # hard gates still fail closed, and no extra paid call is ever made.
+    #
+    # Enabling this is explicitly a billable decision: the two reviewer calls per
+    # candidate are real provider requests and are counted as such.  A missing or
+    # out-of-scope qualification refuses publication rather than passing it.
+    hybrid_quality_enabled: bool = Field(
+        default=False, validation_alias=AliasChoices("HYBRID_QUALITY_ENABLED")
+    )
+    hybrid_review_max_output_tokens: int = Field(
+        default=4000, ge=500, le=8000
+    )
     # The task-level transient credential: a personal access token pasted for one import task,
     # held in the service process, destroyed before indexing starts.
     #

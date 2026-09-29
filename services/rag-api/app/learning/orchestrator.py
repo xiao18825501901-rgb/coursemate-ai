@@ -83,6 +83,7 @@ class LearningOrchestrator:
         settings: Settings,
         retriever: HybridRetriever,
         jev: SemanticDecisionService | None = None,
+        hybrid_reviewer: Any | None = None,
     ) -> None:
         self.db = database
         self.settings = settings
@@ -91,6 +92,9 @@ class LearningOrchestrator:
         # Non-authoritative semantic-decision layer; None (default) disables Jev
         # entirely so the deterministic path is byte-identical to before.
         self.jev = jev
+        # ``hybrid-strict-v1`` strong-review chain; None (default) leaves the
+        # Question Engine byte-identical to the local-review-only behaviour.
+        self.hybrid_reviewer = hybrid_reviewer
         self.knowledge = KnowledgeService(database, jev)
         self.plans = TeachingPlanRepository(database)
         self.problems = ProblemRepository(database)
@@ -106,6 +110,7 @@ class LearningOrchestrator:
             semantic_decisions=jev,
             metered_generate=self.generate,
             learning_loop=self.learning_loop,
+            hybrid_reviewer=hybrid_reviewer,
         )
 
     def problem_index(

@@ -12,6 +12,7 @@ import hashlib
 import json
 import sqlite3
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Literal
 from uuid import uuid4
 
@@ -237,18 +238,46 @@ def _durable_jev_receipts(
     report: QuestionValidationReport,
     expected_input_hashes: dict[str, str] | None,
 ) -> bool:
+    """Re-check every semantic signal's durable, currently-scoped evidence.
+
+    A signal on the historical ``jev`` path must have its own receipt row whose
+    input hash and scope still match.  A signal on the ``hybrid`` path must have
+    an accepted :class:`hybrid_quality_receipts` row for this exact revision,
+    blueprint, evidence pack and owner scope, whose two strong-review calls are
+    themselves durable, reference-verified and terminal.  The hybrid path is
+    re-checked here rather than trusted from the report so a later deletion or a
+    scope change cannot promote a stale candidate.
+    """
     definitions = {
         "AMBIGUITY": "question.ambiguity.v1",
         "AUTHOR_BLIND_AGREEMENT": "question.answer_agreement.v1",
         "MCQ_DISTRACTOR_QUALITY": "question.mcq_distractor_quality.v1",
         "RULE_VIOLATION_QUALITY": "question.rule_violation_quality.v1",
     }
-    if expected_input_hashes is None:
+    if not report.semantic_signals:
         return False
-    expected_scope = owner_scope_hash(owner_user_id, "question_validation")
+    hybrid_receipts: dict[str, bool] = {}
     for signal in report.semantic_signals:
         if not signal.used_jev or signal.receipt_id is None:
             return False
+        if signal.path == "hybrid":
+            if signal.receipt_id not in hybrid_receipts:
+                hybrid_receipts[signal.receipt_id] = _durable_hybrid_receipt(
+                    connection,
+                    receipt_id=signal.receipt_id,
+                    owner_user_id=owner_user_id,
+                    workspace_id=workspace_id,
+                    blueprint=blueprint,
+                    candidate=candidate,
+                    verdict=signal.verdict,
+                    dimension=signal.dimension,
+                )
+            if not hybrid_receipts[signal.receipt_id]:
+                return False
+            continue
+        if expected_input_hashes is None:
+            return False
+        expected_scope = owner_scope_hash(owner_user_id, "question_validation")
         row = connection.execute(
             "SELECT * FROM jev_decision_receipts WHERE id=?",
             (signal.receipt_id,),
@@ -278,6 +307,120 @@ def _durable_jev_receipts(
         if not expected:
             return False
     return True
+
+
+def _durable_hybrid_receipt(
+    connection: sqlite3.Connection,
+    *,
+    receipt_id: str,
+    owner_user_id: str,
+    workspace_id: str,
+    blueprint: QuestionBlueprint,
+    candidate: AuthoredQuestionCandidate,
+    verdict: str,
+    dimension: str,
+) -> bool:
+    """Verify one hybrid receipt and its two underlying strong-review calls."""
+    return durable_hybrid_receipt_for_dimension(
+        connection,
+        receipt_id=receipt_id,
+        owner_user_id=owner_user_id,
+        workspace_id=workspace_id,
+        course_id=blueprint.course_id,
+        node_id=blueprint.node_id,
+        spec_version=blueprint.spec_version,
+        question_revision_hash=candidate.question_revision,
+        verdict=verdict,
+        dimension=dimension,
+    )
+
+
+def durable_hybrid_receipt_for_dimension(
+    connection: sqlite3.Connection,
+    *,
+    receipt_id: str,
+    owner_user_id: str,
+    workspace_id: str,
+    course_id: str,
+    node_id: str,
+    spec_version: int,
+    question_revision_hash: str,
+    verdict: str,
+    dimension: str,
+) -> bool:
+    """The scope-and-integrity re-check shared by publication and slot reuse.
+
+    One hybrid receipt legitimately covers every required case of one revision,
+    so it is verified *per dimension* against its recorded projection rather
+    than required to be unique across dimensions.
+    """
+    row = connection.execute(
+        "SELECT * FROM hybrid_quality_receipts WHERE id=?", (receipt_id,)
+    ).fetchone()
+    if row is None:
+        return False
+    if (
+        str(row["status"]) != "QUALITY_ACCEPTED"
+        or str(row["question_revision_hash"]) != str(question_revision_hash)
+        or str(row["workspace_id"]) != workspace_id
+        or str(row["course_id"]) != course_id
+        or str(row["node_id"]) != node_id
+        or str(row["spec_version"]) != str(spec_version)
+        or str(row["owner_scope_hash"])
+        != owner_scope_hash(owner_user_id, "question_validation")
+    ):
+        return False
+    try:
+        projected = json.loads(str(row["projected_verdicts_json"]))
+        call_ids = json.loads(str(row["review_call_ids_json"]))
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(projected, dict) or projected.get(dimension) != verdict:
+        return False
+    if not isinstance(call_ids, list) or len(call_ids) != 2 or len(set(call_ids)) != 2:
+        return False
+    # The qualification is re-checked here, not trusted from review time: a
+    # scope withdrawn between the review and the publication transaction must
+    # block the publication rather than be carried by a stale receipt.
+    qualification = connection.execute(
+        "SELECT status,active,expires_at,method_identity,policy_revision "
+        "FROM hybrid_qualifications WHERE id=?",
+        (str(row["qualification_id"]),),
+    ).fetchone()
+    if qualification is None:
+        return False
+    if (
+        str(qualification["status"]) != "SCOPED_QUALITY_ACCEPTED"
+        or int(qualification["active"]) != 1
+        or str(qualification["method_identity"]) != str(row["method_identity"])
+        or str(qualification["policy_revision"]) != str(row["policy_revision"])
+    ):
+        return False
+    try:
+        expires = datetime.fromisoformat(
+            str(qualification["expires_at"]).replace("Z", "+00:00")
+        )
+    except ValueError:
+        return False
+    if expires.tzinfo is None or expires <= datetime.now(UTC):
+        return False
+    roles = set()
+    for call_id in call_ids:
+        call = connection.execute(
+            "SELECT * FROM hybrid_review_calls WHERE id=?", (call_id,)
+        ).fetchone()
+        if call is None:
+            return False
+        if (
+            str(call["question_revision_hash"]) != str(question_revision_hash)
+            or str(call["terminal"]) != "completed"
+            or int(call["references_verified"]) != 1
+            or not str(call["response_json"]).strip()
+            or not str(call["response_digest"]).strip()
+        ):
+            return False
+        roles.add(str(call["role"]))
+    return roles == {"evidence_audit", "adversarial_audit"}
 
 
 def _readiness(
@@ -393,7 +536,7 @@ def persist_question_candidate(
     candidate: AuthoredQuestionCandidate,
     blind_receipt: BlindSolveReceipt,
     validation_report: QuestionValidationReport,
-    semantic_decisions: SemanticDecisionService,
+    semantic_decisions: SemanticDecisionService | None = None,
 ) -> QuestionPersistenceResult:
     """Persist one immutable revision; READY is owner-scoped and never exposes the answer."""
     try:
@@ -433,41 +576,48 @@ def persist_question_candidate(
         evidence=fresh_evidence,
         blind_receipt=blind_receipt,
     )
-    ambiguity_hash = semantic_decisions.bounded_choice_input_hash(
-        "question.ambiguity.v1",
-        fields=ambiguity_fields,
-        candidate_ids=(
-            "CLEAR",
-            "AMBIGUOUS",
-            "UNDER_SPECIFIED",
-            "CONTRADICTORY",
-            "UNCERTAIN",
-        ),
+    # The Jev input hashes are only meaningful for signals that actually came
+    # from the Jev chain.  A hybrid-strict-v1 report carries its own durable
+    # receipt instead, so a deployment without a qualified local reviewer can
+    # still publish a fully reviewed question.
+    needs_jev_hashes = any(
+        signal.used_jev and signal.path == "jev" for signal in report.semantic_signals
     )
-    agreement_hash = semantic_decisions.bounded_choice_input_hash(
-        "question.answer_agreement.v1",
-        fields=agreement_fields,
-        candidate_ids=("AGREE", "DISAGREE", "AMBIGUOUS", "UNCERTAIN"),
-    )
-    input_hashes = {
-        "AMBIGUITY": ambiguity_hash,
-        "AUTHOR_BLIND_AGREEMENT": agreement_hash,
-    }
-    specialized_fields = question_specialized_semantic_input_fields(
-        candidate=candidate,
-        blueprint=blueprint,
-        evidence=fresh_evidence,
-    )
-    if specialized_fields is not None:
-        dimension, definition_key, fields, candidates = specialized_fields
-        input_hashes[dimension] = semantic_decisions.bounded_choice_input_hash(
-            definition_key,
-            fields=fields,
-            candidate_ids=candidates,
+    input_hashes: dict[str, str | None] = {}
+    if needs_jev_hashes and semantic_decisions is not None:
+        input_hashes = {
+            "AMBIGUITY": semantic_decisions.bounded_choice_input_hash(
+                "question.ambiguity.v1",
+                fields=ambiguity_fields,
+                candidate_ids=(
+                    "CLEAR",
+                    "AMBIGUOUS",
+                    "UNDER_SPECIFIED",
+                    "CONTRADICTORY",
+                    "UNCERTAIN",
+                ),
+            ),
+            "AUTHOR_BLIND_AGREEMENT": semantic_decisions.bounded_choice_input_hash(
+                "question.answer_agreement.v1",
+                fields=agreement_fields,
+                candidate_ids=("AGREE", "DISAGREE", "AMBIGUOUS", "UNCERTAIN"),
+            ),
+        }
+        specialized_fields = question_specialized_semantic_input_fields(
+            candidate=candidate,
+            blueprint=blueprint,
+            evidence=fresh_evidence,
         )
+        if specialized_fields is not None:
+            dimension, definition_key, fields, candidates = specialized_fields
+            input_hashes[dimension] = semantic_decisions.bounded_choice_input_hash(
+                definition_key,
+                fields=fields,
+                candidate_ids=candidates,
+            )
     expected_input_hashes = (
         {dimension: value for dimension, value in input_hashes.items() if value is not None}
-        if all(value is not None for value in input_hashes.values())
+        if input_hashes and all(value is not None for value in input_hashes.values())
         else None
     )
     author_current = candidate.provider_run.input_hash == structured_input_hash(

@@ -49,6 +49,15 @@ HardGateName = Literal[
 
 
 class SemanticSignal(Contract):
+    """One dimension's recorded semantic evidence.
+
+    ``used_jev`` means "a receipted semantic review actually decided this
+    dimension"; ``path`` names which reviewed method produced it.  ``jev`` is
+    the historical local/TypeSafe receipt chain and ``hybrid`` is the
+    ``hybrid-strict-v1`` chain (two isolated strong reviews plus a scoped
+    qualification).  Both are receipt-bound; a fallback can claim neither.
+    """
+
     dimension: SemanticDimension
     verdict: SemanticVerdict
     used_jev: bool
@@ -67,10 +76,10 @@ class SemanticSignal(Contract):
         }[self.dimension]
         if self.verdict not in allowed:
             raise ValueError("semantic verdict does not belong to its dimension")
-        if self.used_jev and (self.receipt_id is None or self.path != "jev"):
-            raise ValueError("an acted-on Jev signal requires its receipt and jev path")
-        if not self.used_jev and self.path == "jev":
-            raise ValueError("a fallback signal cannot claim the jev path")
+        if self.used_jev and (self.receipt_id is None or self.path not in {"jev", "hybrid"}):
+            raise ValueError("an acted-on semantic signal requires its receipt and reviewed path")
+        if not self.used_jev and self.path in {"jev", "hybrid"}:
+            raise ValueError("a fallback signal cannot claim a reviewed path")
         return self
 
 

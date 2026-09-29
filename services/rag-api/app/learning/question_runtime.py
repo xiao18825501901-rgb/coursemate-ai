@@ -32,7 +32,8 @@ from app.learning.assessment_question_slots import (
     AssessmentQuestionSlot,
     default_assessment_question_slots,
 )
-from app.learning.blind_solve import BlindSolveError, run_blind_solve
+from app.learning.blind_solve import BlindSolveError, BlindSolveReceipt, run_blind_solve
+from app.learning.hybrid_quality import HybridReviewUnavailable
 from app.learning.models import Contract, Identifier, Text
 from app.learning.learning_loop import LearningLoopError, LearningLoopService
 from app.learning.practice_feedback import (
@@ -66,9 +67,12 @@ from app.learning.question_evidence import (
 )
 from app.learning.question_persistence import (
     QuestionPersistenceError,
+    durable_hybrid_receipt_for_dimension,
     persist_question_candidate,
 )
 from app.learning.question_validator import (
+    QuestionSemanticSignals,
+    QuestionValidationReport,
     collect_question_semantic_signals,
     required_specialized_semantic_dimension,
     validate_question_candidate,
@@ -262,12 +266,18 @@ class QuestionEngineRuntime:
         semantic_decisions: SemanticDecisionService | None,
         metered_generate: Callable[..., tuple[Any, dict[str, Any]]] | None = None,
         learning_loop: LearningLoopService | None = None,
+        hybrid_reviewer: Any | None = None,
     ) -> None:
         self.database = database
         self.provider = provider
         self.semantic_decisions = semantic_decisions
         self.metered_generate = metered_generate
         self.learning_loop = learning_loop or LearningLoopService(database)
+        # ``hybrid-strict-v1``.  Optional and strictly additive: when it is not
+        # configured the Question Engine behaves exactly as before, and when it
+        # is configured it can only ever *add* a qualified acceptance path.  A
+        # deterministic hard-gate failure is refused before it is consulted.
+        self.hybrid_reviewer = hybrid_reviewer
 
     def _provider_for_operation(
         self,
@@ -1520,6 +1530,67 @@ class QuestionEngineRuntime:
             generation_policy_version=ASSESSMENT_GENERATION_POLICY_VERSION,
         )
 
+    def _apply_hybrid_review(
+        self,
+        *,
+        candidate: Any,
+        blueprint: QuestionBlueprint,
+        evidence: QuestionEvidencePack,
+        blind: BlindSolveReceipt,
+        signals: QuestionSemanticSignals,
+        report: QuestionValidationReport,
+        owner_user_id: str,
+        workspace_id: str,
+        course_id: str,
+        node_id: str,
+        objective: TeachingObjective,
+    ) -> tuple[QuestionSemanticSignals, QuestionValidationReport]:
+        """Let the qualified hybrid chain decide when the local one could not.
+
+        The hybrid chain is consulted only when the local/TypeSafe chain did not
+        already validate the candidate.  A ``REJECTED`` report (a deterministic
+        hard-gate failure) is never passed on: a model vote cannot overturn a
+        deterministic refusal.  If the hybrid chain produces a durable,
+        reference-verified, in-scope receipt whose every required case passed,
+        its projected verdicts replace the fallback signals and the report is
+        recomputed through the unchanged validator.
+        """
+        if self.hybrid_reviewer is None or report.status == "REJECTED":
+            return signals, report
+        if report.status == "VALIDATED":
+            return signals, report
+        try:
+            outcome = self.hybrid_reviewer.review(
+                candidate=candidate,
+                blueprint=blueprint,
+                evidence=evidence,
+                blind_receipt=blind,
+                deterministic_report=report,
+                owner_user_id=owner_user_id,
+                workspace_id=workspace_id,
+                course_id=course_id,
+                node_id=node_id,
+                spec_version=objective.spec_version,
+            )
+        except QuestionEngineRuntimeError:
+            raise
+        except HybridReviewUnavailable as error:
+            raise QuestionEngineRuntimeError(error.code, str(error)) from error
+        if outcome is None:
+            return signals, report
+        if not outcome.accepted:
+            return signals, report
+        revised = validate_question_candidate(
+            candidate=candidate,
+            blueprint=blueprint,
+            evidence=evidence,
+            blind_receipt=blind,
+            semantic_signals=outcome.signals,
+        )
+        if revised.status != "VALIDATED":
+            return signals, report
+        return outcome.signals, revised
+
     def _execute_pipeline(
         self,
         *,
@@ -1589,7 +1660,20 @@ class QuestionEngineRuntime:
             blind_receipt=blind,
             semantic_signals=signals,
         )
-        if self.semantic_decisions is None:
+        signals, report = self._apply_hybrid_review(
+            candidate=candidate,
+            blueprint=blueprint,
+            evidence=evidence,
+            blind=blind,
+            signals=signals,
+            report=report,
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            course_id=course_id,
+            node_id=node_id,
+            objective=objective,
+        )
+        if self.semantic_decisions is None and self.hybrid_reviewer is None:
             raise QuestionEngineRuntimeError(
                 "QUESTION_REVIEW_UNAVAILABLE",
                 "Question semantic review is unavailable; no exercise was published.",
@@ -1689,7 +1773,22 @@ class QuestionEngineRuntime:
         if (
             set(dimensions) != set(expected_definitions)
             or not all(isinstance(receipt, str) and receipt for receipt in receipts)
-            or len(set(receipts)) != len(expected_definitions)
+        ):
+            raise QuestionEngineRuntimeError(
+                "ASSESSMENT_SLOT_RECEIPT_INVALID",
+                "The saved assessment slot receipts could not be verified.",
+            )
+        paths = [signal.get("path") for signal in signals]
+        jev_receipts = [
+            receipt
+            for signal, receipt in zip(signals, receipts, strict=True)
+            if str(signal.get("path")) == "jev"
+        ]
+        # The historical chain needs one distinct durable row per dimension.  A
+        # hybrid-strict-v1 receipt is a single row that covers every required
+        # case of the revision, so it is verified per dimension instead.
+        if len(set(jev_receipts)) != len(jev_receipts) or any(
+            path not in {"jev", "hybrid"} for path in paths
         ):
             raise QuestionEngineRuntimeError(
                 "ASSESSMENT_SLOT_RECEIPT_INVALID",
@@ -1698,13 +1797,33 @@ class QuestionEngineRuntime:
         with self.database.connect() as connection:
             receipt_rows = connection.execute(
                 "SELECT * FROM jev_decision_receipts WHERE id IN ("
-                + ",".join("?" for _ in receipts)
+                + ",".join("?" for _ in jev_receipts or [""])
                 + ")",
-                receipts,
+                jev_receipts or [""],
             ).fetchall()
         receipts_by_id = {str(receipt["id"]): receipt for receipt in receipt_rows}
         expected_scope = owner_scope_hash(owner_user_id, "question_validation")
         for signal in signals:
+            if str(signal.get("path")) == "hybrid":
+                with self.database.connect() as connection:
+                    current_receipt = durable_hybrid_receipt_for_dimension(
+                        connection,
+                        receipt_id=str(signal["receipt_id"]),
+                        owner_user_id=owner_user_id,
+                        workspace_id=workspace_id,
+                        course_id=blueprint.course_id,
+                        node_id=blueprint.node_id,
+                        spec_version=blueprint.spec_version,
+                        question_revision_hash=str(row["question_revision_hash"]),
+                        verdict=str(signal["verdict"]),
+                        dimension=str(signal["dimension"]),
+                    )
+                if not current_receipt:
+                    raise QuestionEngineRuntimeError(
+                        "ASSESSMENT_SLOT_RECEIPT_INVALID",
+                        "The saved assessment slot receipts could not be verified.",
+                    )
+                continue
             receipt = receipts_by_id.get(str(signal["receipt_id"]))
             try:
                 output = json.loads(str(receipt["output_json"])) if receipt is not None else None

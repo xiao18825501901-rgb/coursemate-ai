@@ -29,6 +29,9 @@ from app.errors import ApiError
 from app.jev.gateway import DisabledTransport, JevGateway, OpenJevTransport, Transport
 from app.jev.receipt_store import SqlReceiptStore
 from app.jev.service import SemanticDecisionService
+from app.learning.deepseek_reviewer import DeepSeekStrongReviewer
+from app.learning.hybrid_quality import HybridQualityService
+from app.learning.openjev_observer import OpenJevLocalObserver
 from app.learning.orchestrator import LearningOrchestrator
 from app.rag.answers import (
     AnswerProvider,
@@ -72,6 +75,37 @@ def jev_transport_from_settings(settings: Settings) -> Transport:
         bearer_token=token.get_secret_value(),
         expected_model_revision=settings.openjev_model_revision,
     )
+
+
+def hybrid_reviewer_from_settings(
+    settings: Settings,
+    database: Database,
+    *,
+    jev_service: SemanticDecisionService | None = None,
+) -> HybridQualityService | None:
+    """Build the ``hybrid-strict-v1`` reviewer chain, or ``None`` when disabled.
+
+    Off unless the deployment explicitly opts in, so the default Question Engine
+    path keeps its previous local-review-only behaviour and never makes an
+    unrequested paid call.  The reviewer reuses the already configured DeepSeek
+    generation role and its protected credential: no second provider, no second
+    key, and no silent downgrade of the configured quality.
+    """
+    if not settings.hybrid_quality_enabled:
+        return None
+    reviewer = DeepSeekStrongReviewer(
+        LearningProvider(settings),
+        model_alias=settings.v3_model,
+        provider_label=(
+            "DEEPSEEK_API" if settings.v3_model == "deepseek-flash" else "ALIBABA_MODEL_STUDIO_COMPATIBLE"
+        ),
+        protocol="responses",
+        max_output_tokens=settings.hybrid_review_max_output_tokens,
+    )
+    observer = (
+        OpenJevLocalObserver(jev_service) if jev_service is not None else None
+    )
+    return HybridQualityService(database, reviewer, local_observer=observer)
 
 
 def create_app(
@@ -185,6 +219,9 @@ def create_app(
             database, resolved_settings,
             HybridRetriever(ChunkRepository(database), embedding_provider),
             jev=application.state.jev_service,
+            hybrid_reviewer=hybrid_reviewer_from_settings(
+                resolved_settings, database, jev_service=application.state.jev_service
+            ),
         )
         application.state.official_knowledge_draft_builder = OfficialKnowledgeDraftBuilder(
             database, resolved_settings, application.state.learning

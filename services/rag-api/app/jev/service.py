@@ -349,7 +349,10 @@ class SemanticDecisionService:
             )
         except InputBudgetExceeded:
             return None
-        labels = candidate_labels or {}
+        if candidate_labels is None:
+            labels = self.definition_labels(definition_key, candidate_ids)
+        else:
+            labels = candidate_labels
         criteria = {str(candidate): labels.get(str(candidate), "") for candidate in candidate_ids}
         return compute_input_hash(
             definition_key,
@@ -357,6 +360,32 @@ class SemanticDecisionService:
         )
 
     # ---------------------------------------------------------------- primitives
+
+    def definition_labels(self, definition_key: str, candidate_ids: Sequence[str]) -> dict[str, str]:
+        """The catalogue's own natural-language criteria for this option set.
+
+        A ``Choice`` question is meaningless to an encoder when its options are
+        bare enum tokens: the upstream contract renders ``"{option}: {description}"``
+        and falls back to the bare option id when the description is empty.  The
+        catalogue has always declared real descriptions for these definitions, so
+        a call site that supplies no labels now inherits them instead of sending
+        empty strings -- empty strings are additionally rejected outright by the
+        private OpenJev service (``INVALID_QUESTION``), which turned every one of
+        the four hard-gate calls into a transport failure.
+
+        Matching is exact: labels are adopted only when the catalogue declares one
+        for *every* requested option id and for no other, so a definition whose
+        vocabulary has drifted falls back to the previous behaviour rather than
+        describing the wrong option.
+        """
+        criteria = self.catalog.get(definition_key).criteria
+        ordered = [str(cid) for cid in candidate_ids]
+        if not isinstance(criteria, dict) or list(criteria) != ordered:
+            return {}
+        labels = {str(key): str(value) for key, value in criteria.items()}
+        if any(not value.strip() for value in labels.values()):
+            return {}
+        return labels
 
     def choice(
         self,
@@ -370,7 +399,10 @@ class SemanticDecisionService:
         deterministic: str,
     ) -> DecisionResult:
         definition = self.catalog.get(definition_key)
-        labels = candidate_labels or {}
+        if candidate_labels is None:
+            labels = self.definition_labels(definition_key, candidate_ids)
+        else:
+            labels = candidate_labels
         criteria = {str(cid): labels.get(str(cid), "") for cid in candidate_ids}
         request = DecisionRequest(
             definition=definition,
