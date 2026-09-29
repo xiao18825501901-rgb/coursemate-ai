@@ -105,7 +105,7 @@ deployment sets them and are *not* a publication condition under this policy.
 | `OPENJEV_ADVISORY_SCOPE` | **ACHIEVED** — advisory-only observer, no field that grants or vetoes |
 | `DETERMINISTIC_CHECKS` | **ACHIEVED** — six hard gates unchanged, never overridable |
 | `DEEPSEEK_REVIEW_A_B` | **ACHIEVED (live)** — two isolated roles, distinct response ids, references verified |
-| `HYBRID_SCOPED_QUALIFICATION` | **NOT ESTABLISHED, but detection is solved** — run 7 caught every injected defect of every kind (including 5/5 under-specified items, previously 0/3) with 0 false accepts in 41 negatives, but refused 13 of 24 sound controls, so the new release-recall floor refuses it.  Production holds no qualification row. |
+| `HYBRID_SCOPED_QUALIFICATION` | **NOT ESTABLISHED.** Three of the four cases are now measurably reliable (agreement 21/21, MCQ 8/8, rule 7/7–8).  Under-specification is unstable and gates everything: run 7 detects 5/5 but refuses 62.5 % of sound items (recall 0.375), run 8 is usable (recall 0.632) but accepts 4/41 negatives and detects only 2/5.  Both are DRAFT.  Production holds no qualification row. |
 | `CAMPUS_EXERCISE_RESTORED` | **NOT ACHIEVED** — nothing publishable |
 | `PRIVATE_EXERCISE_RESTORED` | **NOT ACHIEVED** — nothing publishable |
 | `SQL_COLD_POOL_GRADED` | **NOT ACHIEVED** — both configurations remain `BLOCKED` at 0/5 |
@@ -116,22 +116,13 @@ deployment sets them and are *not* a publication condition under this policy.
 | `QUALITY_NONINFERIORITY_EVIDENCE` | **UNKNOWN** — no paired same-sample gold exists |
 | `MAP50_13_PAUSED` | **PAUSED** — unchanged |
 
-The binding blocker moved twice and is now **recall, not detection**:
-
-1. Until run 6, `question.ambiguity.v1` — required by every question — was not
-   detectable at all (0/3 under-specified items refused).
-2. Run 7 changed the ambiguity case into an enumeration whose verdict the server
-   derives, and detection is solved: 5/5, 21/21, 8/8, 7/7 on the four defect
-   kinds, 0 false accepts in 41 negatives.
-3. The same rule now over-fires: 13 of 24 sound controls are refused on
-   "unstated dependency", so release recall is 0.375.  A procedure that reaches
-   zero false accepts by refusing most sound items is the "all blocked" baseline
-   the policy forbids, so the gate gained a release-recall floor and run 7
-   re-evaluates to `DRAFT`.
-
-The next action is therefore to sharpen the enumeration criterion — ask whether
-the answer *changes* when an entry is absent, and fail only then — rather than to
-change any wording.  Details in `HYBRID_QUALIFICATION_AND_REGRESSION.md` §6.
+The blocker is now a single, well-characterised case.  Across eight runs and four
+prompt revisions the under-specification judgement has moved between two extremes
+and never settled between them, while the other three cases stayed stable.  The
+measured trade-off curve is in `HYBRID_QUALIFICATION_AND_REGRESSION.md` §3.03, and
+the next action is a dedicated pass for that one case rather than a fifth
+revision of the two general prompts — the same call is currently being asked to
+judge the item *and* to model the reader, and that is what does not converge.
 
 ## 7. Explicitly paused / not done
 
