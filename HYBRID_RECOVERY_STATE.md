@@ -81,7 +81,9 @@ rounds are left in place.
 | `services/rag-api/tests/test_hybrid_publication.py` | end-to-end publication contracts |
 | `services/rag-api/tests/test_hybrid_qualification.py` | metric and provenance contracts |
 | `app/learning/sql_oracle.py` | isolated, bounded SQL oracle used as a deterministic gate; also carries a narrow declared-parameter under-specification check |
+| `app/learning/human_review_card.py` | the human review card that decides the one case the reviewers cannot, and nothing else |
 | `services/rag-api/tests/test_sql_oracle.py` | the oracle's isolation, boundedness, comparison semantics and scope |
+| `services/rag-api/tests/test_human_review_card.py` | the card's authority, its limits, expiry, supersession and immutability |
 | `work/hybrid-p0-20260929/*` | read-only production probes and the OpenJev diagnostic |
 
 ## 5. Configuration surface
@@ -107,9 +109,9 @@ deployment sets them and are *not* a publication condition under this policy.
 | `OPENJEV_ADVISORY_SCOPE` | **ACHIEVED** — advisory-only observer, no field that grants or vetoes |
 | `DETERMINISTIC_CHECKS` | **ACHIEVED** — six hard gates unchanged and never overridable, plus a new isolated executable SQL oracle whose `FAIL` terminates the candidate as `REJECTED` regardless of any model verdict |
 | `DEEPSEEK_REVIEW_A_B` | **ACHIEVED (live)** — two isolated roles, distinct response ids, references verified |
-| `HYBRID_SCOPED_QUALIFICATION` | **NOT ESTABLISHED.** Three of the four cases are measurably reliable (agreement 20–21/21, MCQ 7–8/8, rule 5/5–7/8).  Under-specification gates every question and no measured configuration makes it both safe and usable: strict rule 5/5 detection at recall 0.375, moderate 2/5 at 0.632, dedicated pass 4/5 at 0.238.  Production holds no qualification row. |
-| `CAMPUS_EXERCISE_RESTORED` | **NOT ACHIEVED** — nothing publishable |
-| `PRIVATE_EXERCISE_RESTORED` | **NOT ACHIEVED** — nothing publishable |
+| `HYBRID_SCOPED_QUALIFICATION` | **automatic frontier holds no qualifying point; the ambiguity case now has a non-model instrument.** Three of the four cases are reliable automatically (agreement 20–21/21, MCQ 7–8/8, rule 5/5–7/8).  Under-specification gates every question and no measured automatic configuration makes it both safe and usable, so it is decided by a human review card confined to that case (§2.1 of the qualification report).  The card's own quality is unmeasured — no human has reviewed one yet.  Production holds no qualification row. |
+| `CAMPUS_EXERCISE_RESTORED` | **NOT ACHIEVED** — nothing publishable yet; the card path is built but unused |
+| `PRIVATE_EXERCISE_RESTORED` | **NOT ACHIEVED** — nothing publishable yet |
 | `SQL_COLD_POOL_GRADED` | **NOT ACHIEVED** — both configurations remain `BLOCKED` at 0/5 |
 | `N8_ASSESSMENT_GRADED` | **NOT ACHIEVED** |
 | `NORMAL_TEACHING_PRESERVED` | **PRESERVED** — source untouched, regression suite green |
