@@ -276,26 +276,36 @@ def ambiguity_gate_verdict(
        whose absence it says changes the answer -- is a *specific doubt*, not a
        witness.  It names one consequence rather than two admissible readings with
        their answers, so under the published rule it is not a valid counterexample
-       and it cannot fail an item.  It holds the item, which is the same safety
-       outcome on an uncertified item and stops the measured over-triggering from
-       refusing sound ones;
+       and it cannot fail an item.  It holds an item that has no positive evidence,
+       and it is answered by a completeness certificate when one exists;
     4. a pass requires positive completeness evidence for a registered profile
        **and** an active qualification for this scope.  Without both, the answer is
        UNCERTAIN, which is the honest reading of "nobody has shown this is
        answerable" and never a silent approval.
 
-    The safety of step 3 rests on step 4: an item with a doubt and no certificate
-    is never released, and a certificate only exists for a registered profile whose
-    required conventions the contract states.  What is given up is failing an item
-    on an objection nobody substantiated -- which is exactly the trade the nine
-    measured runs forced.
+    Step 3 was first written to hold every item with a blocking entry, and a bounded
+    frozen evaluation measured what that costs: 38 negatives and 43 positives, zero
+    false accepts, and a release recall of 0.353 against a pre-registered floor of
+    0.5.  The entry fired on 38 of 81 rows, including sound controls, which is the
+    same over-triggering the dedicated pass showed on its measured frontier
+    (detection 4/5, recall 0.238 -- the worst of the three designs).  So on an item
+    whose profile certificate is complete, the certificate answers the entry: it
+    positively establishes that every convention the shape requires is stated in
+    the learner-visible text, which is precisely what the entry claims is missing.
+
+    The safety argument does not rest on the enumeration staying in force: a
+    negative carries no certificate, so it is still held.  The accepted risk is an
+    unstated datum outside the profile required set that genuinely changes the
+    answer; that risk is bounded by the profile being what defines answerability for
+    the shape, and by the six hard gates and the oracle.
     """
     reasons: list[str] = []
     if any(verdict.status == "CONFIRMED_MATERIAL" for verdict in witness_verdicts):
         return "FAIL", ["HYBRID_WITNESS_CONFIRMED_MATERIAL"]
     if any(verdict.unresolved for verdict in witness_verdicts):
         return "UNCERTAIN", ["HYBRID_WITNESS_UNVERIFIED"]
-    if blocking_enumeration_entries:
+    certified = completeness is not None and completeness.certifies
+    if blocking_enumeration_entries and not certified:
         return "UNCERTAIN", ["HYBRID_UNSTATED_DEPENDENCY:question.ambiguity.v1"]
     if completeness is None or not completeness.certifies:
         reasons.append("HYBRID_COMPLETENESS_CERTIFICATE_MISSING")

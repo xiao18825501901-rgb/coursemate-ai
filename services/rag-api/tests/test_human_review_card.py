@@ -166,8 +166,8 @@ def test_without_a_card_the_case_needs_evidence_rather_than_two_votes() -> None:
             )
         ]
     )
-    # The pass withholds the approval: a blocking enumeration entry is a doubt the
-    # server cannot substantiate, so it holds the item rather than failing it.
+    # The pass no longer decides it: with a certificate the entry is answered and
+    # the case passes; without one the same entry holds the item.
     refused_by_pass, _ = combine_case_verdicts(
         required_cases=(CASE_AMBIGUITY,),
         by_role=_both_roles("PASS"),
@@ -175,7 +175,14 @@ def test_without_a_card_the_case_needs_evidence_rather_than_two_votes() -> None:
         completeness=certificate,
         qualification_active=True,
     )
-    assert refused_by_pass[CASE_AMBIGUITY] == "UNCERTAIN"
+    assert refused_by_pass[CASE_AMBIGUITY] == "PASS"
+    held_without_certificate, _ = combine_case_verdicts(
+        required_cases=(CASE_AMBIGUITY,),
+        by_role=_both_roles("PASS"),
+        specification=blocking,
+        qualification_active=True,
+    )
+    assert held_without_certificate[CASE_AMBIGUITY] == "UNCERTAIN"
 
     # And a bare refusal without a witness no longer decides it.
     refused_by_roles, _ = combine_case_verdicts(

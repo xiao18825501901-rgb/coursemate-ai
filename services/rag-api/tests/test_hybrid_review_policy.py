@@ -268,8 +268,9 @@ def test_the_specification_pass_can_only_hold_never_approve() -> None:
     )
     assert combined[CASE_AMBIGUITY] == "UNCERTAIN"
     assert any(r.startswith("HYBRID_UNSTATED_DEPENDENCY") for r in reasons)
-    # Even with every piece of positive evidence the enumeration still withholds
-    # the approval, because the doubt is unresolved rather than answered.
+    # With the server certificate the entry is answered rather than merely
+    # outvoted, and the case passes -- but the pass is the certificate's, never the
+    # enumeration's: without it the same row is UNCERTAIN.
     certified, _ = combine_case_verdicts(
         required_cases=(CASE_AMBIGUITY, CASE_AGREEMENT),
         by_role={
@@ -280,7 +281,16 @@ def test_the_specification_pass_can_only_hold_never_approve() -> None:
         completeness=_certificate(),
         qualification_active=True,
     )
-    assert certified[CASE_AMBIGUITY] == "UNCERTAIN"
+    assert certified[CASE_AMBIGUITY] == "PASS"
+    uncertified, _ = combine_case_verdicts(
+        required_cases=(CASE_AMBIGUITY, CASE_AGREEMENT),
+        by_role={
+            EVIDENCE_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"},
+            ADVERSARIAL_AUDIT_ROLE: {CASE_AMBIGUITY: "PASS", CASE_AGREEMENT: "PASS"},
+        },
+        specification=blocking,
+    )
+    assert uncertified[CASE_AMBIGUITY] == "UNCERTAIN"
 
 
 def test_one_concrete_failure_is_not_outvoted_by_the_other_role() -> None:

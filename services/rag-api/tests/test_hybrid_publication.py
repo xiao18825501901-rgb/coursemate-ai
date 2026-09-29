@@ -168,7 +168,7 @@ class StubJudgeProvider:
         return schema.model_validate({"findings": findings}), run
 
 
-def _pipeline(tmp_path: Path) -> dict[str, Any]:
+def _pipeline(tmp_path: Path, *, with_contract: bool = True) -> dict[str, Any]:
     database, config = database_with_objective(tmp_path)
     with database.connect() as connection:
         objective = resolve_objective(connection, node_id=NODE)
@@ -201,6 +201,10 @@ def _pipeline(tmp_path: Path) -> dict[str, Any]:
     )
     provider = LearningProvider(config)
     candidate = author_question(provider, blueprint=blueprint, evidence=evidence)
+    if not with_contract:
+        # An item whose author produced no student-visible contract has no positive
+        # completeness evidence, which is the state the human-card path exists for.
+        candidate = candidate.model_copy(update={"task_contract": None})
     blind = run_blind_solve(provider, candidate=candidate, evidence=evidence)
     # The local/TypeSafe chain is deliberately absent: this test proves the
     # hybrid chain alone can carry a publication when it is qualified.
@@ -324,17 +328,21 @@ def test_a_human_card_unblocks_the_case_the_reviewers_cannot_decide(
 ) -> None:
     """The whole point of the card, measured end to end.
 
-    The automatic specification pass refuses the ambiguity case, so the item is
-    not publishable however the other reviewers vote.  A person's card on that
-    exact revision decides the case, and the revision becomes READY -- with the
-    card id recorded on the receipt and the other three cases still decided by
-    the reviewers.
+    The automatic specification pass raises an unstated-dependency doubt, and the
+    item has no completeness certificate, so it is not publishable however the
+    other reviewers vote.  A person's card on that exact revision decides the case,
+    and the revision becomes READY -- with the card id recorded on the receipt and
+    the other three cases still decided by the reviewers.
+
+    The item is built without a contract deliberately: with a certificate that
+    covers the profile required conventions, the doubt is answered by evidence
+    rather than by a person, and the card is not the deciding instrument.
     """
     from datetime import UTC, datetime
 
     from app.learning.human_review_card import HumanReviewCard, HumanReviewStore
 
-    context = _pipeline(tmp_path)
+    context = _pipeline(tmp_path, with_contract=False)
     service, _ = _service(context, block_specification=True)
     _qualify(context, service)
 
@@ -389,7 +397,7 @@ def test_a_card_arriving_after_a_negative_persist_needs_a_new_revision(
 
     from app.learning.human_review_card import HumanReviewCard, HumanReviewStore
 
-    context = _pipeline(tmp_path)
+    context = _pipeline(tmp_path, with_contract=False)
     service, _ = _service(context, block_specification=True)
     _qualify(context, service)
 

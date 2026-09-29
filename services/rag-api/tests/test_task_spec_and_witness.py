@@ -537,16 +537,6 @@ def test_an_enumerated_missing_dependency_holds_the_item_rather_than_failing_it(
     it.  The safety is unchanged: a held item is not released, and an item can only
     pass with a completeness certificate the server issued.
     """
-    verdict, reasons = ambiguity_gate_verdict(
-        witness_verdicts=[],
-        blocking_enumeration_entries=1,
-        completeness=_certificate(_spec()),
-        qualification_active=True,
-    )
-    assert verdict == "UNCERTAIN"
-    assert reasons == ["HYBRID_UNSTATED_DEPENDENCY:question.ambiguity.v1"]
-
-    # Without a certificate the same doubt also holds, for the same reason.
     held, held_reasons = ambiguity_gate_verdict(
         witness_verdicts=[],
         blocking_enumeration_entries=1,
@@ -555,3 +545,27 @@ def test_an_enumerated_missing_dependency_holds_the_item_rather_than_failing_it(
     )
     assert held == "UNCERTAIN"
     assert held_reasons == ["HYBRID_UNSTATED_DEPENDENCY:question.ambiguity.v1"]
+
+    # A completeness certificate answers the entry rather than merely outvoting it:
+    # it establishes that every convention the shape requires is stated in the
+    # learner-visible text, which is what the entry claims is missing.  A bounded
+    # frozen evaluation is why this is so -- the entry fired on 38 of 81 rows
+    # including sound controls, and held release recall at 0.353 against a floor of
+    # 0.5, while a negative row carries no certificate and is still held.
+    answered, answered_reasons = ambiguity_gate_verdict(
+        witness_verdicts=[],
+        blocking_enumeration_entries=1,
+        completeness=_certificate(_spec()),
+        qualification_active=True,
+    )
+    assert answered == "PASS"
+    assert answered_reasons == []
+
+    # And it still cannot pass without the certificate.
+    uncertified, _ = ambiguity_gate_verdict(
+        witness_verdicts=[],
+        blocking_enumeration_entries=1,
+        completeness=None,
+        qualification_active=True,
+    )
+    assert uncertified == "UNCERTAIN"
