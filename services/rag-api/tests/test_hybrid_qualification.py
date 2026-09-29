@@ -317,10 +317,88 @@ def test_a_case_without_negatives_is_not_qualified() -> None:
         min_positives_per_case=3,
         min_negatives_per_case=3,
         min_independent_negatives=0,
+        min_release_recall=0.0,
     )
     assert decision["status"] == "DRAFT"
     assert decision["cases"] == []
     assert CASE_AMBIGUITY in decision["unmeasured_cases"]
+
+
+def test_zero_false_accepts_by_refusing_everything_is_not_a_qualification() -> None:
+    """An everything-blocked procedure is not a safe procedure.
+
+    The first enumeration-based run reached zero false accepts out of 41
+    negatives while refusing 13 of 24 sound controls.  Without a coverage floor
+    that would have qualified a method that publishes almost nothing, which is
+    the "all blocked, therefore zero risk" baseline the policy forbids.
+    """
+    outcomes = [
+        _outcome(
+            label=NEGATIVE_LABEL,
+            family=f"n{index}",
+            target_case=CASE_AMBIGUITY,
+            verdicts={CASE_AMBIGUITY: "FAIL"},
+        )
+        for index in range(20)
+    ]
+    outcomes.extend(
+        _outcome(
+            label=POSITIVE_LABEL,
+            family=f"p{index}",
+            verdicts={CASE_AMBIGUITY: "FAIL"},
+        )
+        for index in range(20)
+    )
+    refused = qualify(
+        outcomes,
+        method_identity="a" * 64,
+        observed_model_facts={},
+        min_positives_per_case=8,
+        min_negatives_per_case=8,
+        min_independent_negatives=16,
+        min_release_recall=0.5,
+    )
+    assert refused["summary"]["release"]["false_accept"] == 0
+    assert refused["release_recall"] == 0.0
+    assert refused["coverage_sufficient"] is False
+    assert refused["status"] == "DRAFT"
+    assert refused["cases"] == []
+
+
+def test_a_safe_and_usable_procedure_qualifies() -> None:
+    outcomes = [
+        _outcome(
+            label=NEGATIVE_LABEL,
+            family=f"n{index}",
+            target_case=CASE_AMBIGUITY,
+            verdicts={CASE_AMBIGUITY: "FAIL"},
+        )
+        for index in range(20)
+    ]
+    outcomes.extend(
+        _outcome(
+            label=POSITIVE_LABEL,
+            family=f"p{index}",
+            verdicts={CASE_AMBIGUITY: "PASS"},
+        )
+        for index in range(20)
+    )
+    for outcome in outcomes:
+        outcome.released = all(
+            verdict == "PASS" for verdict in outcome.case_outcomes.values()
+        )
+    accepted = qualify(
+        outcomes,
+        method_identity="a" * 64,
+        observed_model_facts={},
+        min_positives_per_case=8,
+        min_negatives_per_case=8,
+        min_independent_negatives=16,
+        min_release_recall=0.5,
+    )
+    assert accepted["release_recall"] == 1.0
+    assert accepted["status"] == "SCOPED_QUALITY_ACCEPTED"
+    assert accepted["cases"] == [CASE_AMBIGUITY]
 
 
 def test_a_thin_but_clean_sample_cannot_qualify_a_method() -> None:
@@ -354,6 +432,7 @@ def test_a_thin_but_clean_sample_cannot_qualify_a_method() -> None:
         min_positives_per_case=3,
         min_negatives_per_case=3,
         min_independent_negatives=16,
+        min_release_recall=0.0,
     )
     assert strict["sample_sufficient"] is False
     assert strict["status"] == "DRAFT"
@@ -367,6 +446,7 @@ def test_a_thin_but_clean_sample_cannot_qualify_a_method() -> None:
         min_positives_per_case=3,
         min_negatives_per_case=3,
         min_independent_negatives=0,
+        min_release_recall=0.0,
     )
     assert lax["status"] == "SCOPED_QUALITY_ACCEPTED"
 

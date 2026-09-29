@@ -231,6 +231,10 @@ def main() -> int:
     # accepts, so a thin clean sample must not be able to qualify a method.
     parser.add_argument("--min-negatives", type=int, default=8)
     parser.add_argument("--min-independent-negatives", type=int, default=16)
+    # A procedure can reach zero false accepts by refusing almost everything, and
+    # an everything-blocked baseline is not a quality standard.  This floor is a
+    # coverage requirement, not an accuracy claim.
+    parser.add_argument("--min-release-recall", type=float, default=0.5)
     args = parser.parse_args()
 
     settings = Settings()
@@ -379,6 +383,7 @@ def main() -> int:
         min_positives_per_case=args.min_positives,
         min_negatives_per_case=args.min_negatives,
         min_independent_negatives=args.min_independent_negatives,
+        min_release_recall=args.min_release_recall,
     )
     artifact = qualification_artifact(
         rows=rows,

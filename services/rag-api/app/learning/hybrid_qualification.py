@@ -298,21 +298,35 @@ def qualify(
     min_positives_per_case: int,
     min_negatives_per_case: int,
     min_independent_negatives: int,
+    min_release_recall: float,
 ) -> dict[str, Any]:
     """Turn measurements into a scoped qualification decision.
 
     A case is only admitted to the qualification when it has at least
     ``min_positives_per_case`` positives and ``min_negatives_per_case``
-    negatives, and when *no* item anywhere was wrongly released.
+    negatives, when *no* item anywhere was wrongly released, and when the
+    procedure actually releases a usable share of the sound items.
 
-    The floors matter, and this round is the evidence for why.  A run with 30
-    rows and 18 negatives recorded a passing qualification; the same procedure
-    on 67 rows and 40 negatives recorded three false accepts and refused.  A
-    clean small sample is not evidence of a clean procedure, so the floors are
-    deliberately high and the independent-negative count is checked globally,
-    not only per case.  Cases below the floor are reported as unmeasured and are
-    therefore absent from the qualification's case set, which leaves them
-    fail-closed at publication.
+    Two of those conditions exist because this round measured what happens
+    without them:
+
+    * **the negative floor.**  A run with 30 rows and 18 negatives recorded a
+      passing qualification; the same procedure on 67 rows and 40 negatives
+      recorded three false accepts.  A clean small sample is not evidence of a
+      clean procedure, so the floors are deliberately high and the
+      independent-negative count is checked globally, not only per case.
+    * **the recall floor.**  A procedure can reach zero false accepts by
+      refusing almost everything.  The first enumeration-based run did exactly
+      that -- 0 false accepts out of 41 negatives while rejecting 13 of 24 sound
+      controls -- and "everything is blocked, therefore nothing bad was
+      released" is explicitly not an acceptable quality baseline.  A method has
+      to be both safe and usable.
+
+    ``min_release_recall`` is a *coverage* floor (does the procedure publish
+    usable work at all), not an invented accuracy score; see the versioned
+    profile note in the decision record.  Cases below any floor are reported as
+    unmeasured and are therefore absent from the qualification's case set, which
+    leaves them fail-closed at publication.
     """
     summary = summarise(outcomes)
     scopes = summary["scopes"]
@@ -331,6 +345,8 @@ def qualify(
         entry["scopes"].append({"language": language, "domain": domain, **tally})
     independent_negatives = summary["independent_negative_families"]
     sample_sufficient = independent_negatives >= min_independent_negatives
+    recall = summary["release"]["release_recall"]
+    coverage_sufficient = recall is not None and recall >= min_release_recall
     for case, entry in per_case_evidence.items():
         if (
             entry["positives"] >= min_positives_per_case
@@ -338,6 +354,7 @@ def qualify(
             and entry["false_accept"] == 0
             and summary["release"]["false_accept"] == 0
             and sample_sufficient
+            and coverage_sufficient
         ):
             admitted_cases.add(case)
             for scope in entry["scopes"]:
@@ -356,6 +373,9 @@ def qualify(
         "unmeasured_cases": sorted(set(per_case_evidence) - admitted_cases),
         "sample_sufficient": sample_sufficient,
         "min_independent_negatives": min_independent_negatives,
+        "coverage_sufficient": coverage_sufficient,
+        "min_release_recall": min_release_recall,
+        "release_recall": recall,
         "per_case_evidence": per_case_evidence,
         "summary": summary,
         "observed_model_facts": observed_model_facts,
@@ -373,6 +393,10 @@ def qualify(
             "A clean small sample is not evidence of a clean procedure: the same "
             "runner recorded a pass at 18 negatives and three false accepts at 40. "
             "The floors therefore apply to the independent-negative count as well.",
+            "Zero false accepts is not sufficient on its own: a procedure that "
+            "refuses most sound items also releases nothing bad, and an "
+            "everything-blocked baseline is not an acceptable quality standard. "
+            "The release-recall floor is what distinguishes safe from merely closed.",
             "No paired same-sample comparison against a healthy historical reviewer "
             "exists, so quality non-inferiority is NOT established by this record.",
         ],

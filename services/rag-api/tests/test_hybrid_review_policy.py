@@ -341,6 +341,77 @@ def test_substantiation_never_produces_a_pass() -> None:
             assert resolved[CASE_AMBIGUITY] != "PASS"
 
 
+def test_an_unstated_dependency_forces_ambiguity_to_fail() -> None:
+    """The reviewer's own enumeration is the strongest thing it can report.
+
+    This is the rule that turns "the reviewers never noticed the removed
+    requirement" into a refusal: if the reviewer lists a datum the answer needs
+    and marks it unstated, the case is FAIL whatever verdict it also wrote.
+    """
+    findings = JudgeFindings(
+        findings=[
+            _finding(
+                CASE_AMBIGUITY,
+                "PASS",
+                dependencies=[
+                    {"datum": "the value of epsilon", "stated_in_stem": False},
+                    {"datum": "whether the point itself counts", "stated_in_stem": True},
+                ],
+            ),
+            _finding(CASE_AGREEMENT, "PASS"),
+        ]
+    )
+    verdicts, reasons = substantiated_case_verdicts(findings)
+    assert verdicts[CASE_AMBIGUITY] == "FAIL"
+    assert "HYBRID_UNSTATED_DEPENDENCY:" + CASE_AMBIGUITY in reasons
+
+
+def test_a_clear_claim_without_an_enumeration_is_only_an_abstention() -> None:
+    findings = JudgeFindings(
+        findings=[_finding(CASE_AMBIGUITY, "PASS"), _finding(CASE_AGREEMENT, "PASS")]
+    )
+    verdicts, reasons = substantiated_case_verdicts(findings)
+    assert verdicts[CASE_AMBIGUITY] == "UNCERTAIN"
+    assert "HYBRID_AMBIGUITY_NOT_ENUMERATED:" + CASE_AMBIGUITY in reasons
+
+
+def test_a_fully_stated_enumeration_permits_clear() -> None:
+    findings = JudgeFindings(
+        findings=[
+            _finding(
+                CASE_AMBIGUITY,
+                "PASS",
+                dependencies=[
+                    {"datum": "the two integers", "stated_in_stem": True},
+                    {"datum": "base-ten output convention", "stated_in_stem": True},
+                ],
+            ),
+            _finding(CASE_AGREEMENT, "PASS"),
+        ]
+    )
+    verdicts, reasons = substantiated_case_verdicts(findings)
+    assert verdicts[CASE_AMBIGUITY] == "PASS"
+    assert reasons == []
+
+
+def test_the_enumeration_rule_applies_to_other_cases_too_but_never_creates_a_pass() -> None:
+    findings = JudgeFindings(
+        findings=[
+            _finding(CASE_AMBIGUITY, "PASS", dependencies=[
+                {"datum": "the stated values", "stated_in_stem": True}
+            ]),
+            _finding(
+                CASE_AGREEMENT,
+                "PASS",
+                dependencies=[{"datum": "the shared result", "stated_in_stem": False}],
+            ),
+        ]
+    )
+    verdicts, _ = substantiated_case_verdicts(findings)
+    assert verdicts[CASE_AGREEMENT] == "FAIL"
+    assert verdicts[CASE_AMBIGUITY] == "PASS"
+
+
 def test_a_single_case_set_cannot_be_answered_with_one_finding() -> None:
     with pytest.raises(ValueError):
         JudgeFindings(findings=[_finding(CASE_AMBIGUITY, "PASS")])

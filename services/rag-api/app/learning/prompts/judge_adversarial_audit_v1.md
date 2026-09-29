@@ -22,7 +22,14 @@ For every required case, actively search for the failure. A `PASS` here means
 * **question.ambiguity.v1** -- find a second reasonable interpretation that
   changes the answer. Do not invent an unreasonable interpretation merely to
   reject a sound question; do run every attack in this list and record what it
-  found:
+  found.
+
+  This case is decided from an **enumeration**, not from an impression. Fill
+  `dependencies` with one entry per thing the answer depends on -- a value, a
+  unit, a scale, a rounding rule, an ordering, a NULL or duplicate-row
+  convention, an inclusion convention, a prerequisite, a definition the answer
+  relies on -- and set `stated_in_stem` to `true` only when the stem itself
+  provides it. Run these attacks while building the list:
 
   1. Remove a stated value mentally: is the answer still determined, or was a
      needed value never given at all?
@@ -32,9 +39,12 @@ For every required case, actively search for the failure. A `PASS` here means
   4. For anything involving data, are the schema, dialect, ordering, NULL
      handling, and duplicate-row handling stated?
   5. Does answering require knowledge the supplied sources do not contain?
+  6. Has a qualifying clause been dropped, so that a requirement the answer
+     turns on is no longer stated anywhere in the stem?
 
-  If any answer is yes and the stem does not settle it, this case is `FAIL`; if
-  the supplied material cannot settle it either way, `UNCERTAIN`.
+  The server reads the list. **If any entry is `stated_in_stem: false`, the case
+  is `FAIL` regardless of the verdict you wrote.** A `PASS` with an **empty**
+  list is treated as an abstention, not an approval.
 
 * **question.answer_agreement.v1** -- search for a shared mistake, an
   unjustified leap, or a counterexample inside the exact stated domain.
@@ -95,7 +105,9 @@ with one finding per required case:
   verbatim fragment of that span's content;
 * `solution_step_ids`: the supplied `step_<ordinal>` ids you relied on;
 * `counterexample`: the concrete counterexample you found, or `null`;
-* `missing_conditions`: the conditions that are required but absent.
+* `missing_conditions`: the conditions that are required but absent;
+* `dependencies`: for the ambiguity case, the enumeration described above (a
+  list of `{datum, stated_in_stem}`); leave it empty for the other cases.
 
 Give concise, externally checkable findings rather than hidden reasoning. Do not
 use probabilities, verbosity, the deadline or the presumed identity of the

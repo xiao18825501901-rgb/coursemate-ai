@@ -57,10 +57,10 @@ from app.learning.provider import ProviderCallFailure
 
 # Prompt revisions are part of `method_identity`, so a change to the reviewer
 # instructions must bump the version: a qualification obtained with v1 must never
-# be readable as a qualification of v2.
-EVIDENCE_AUDIT_PROMPT_VERSION: Final = "judge-evidence-audit.v2"
-ADVERSARIAL_AUDIT_PROMPT_VERSION: Final = "judge-adversarial-audit.v2"
-STRONG_REVIEW_SCHEMA_VERSION: Final = "coursejesus-judge-findings.v1"
+# be readable as a qualification of v2 (or v3).
+EVIDENCE_AUDIT_PROMPT_VERSION: Final = "judge-evidence-audit.v3"
+ADVERSARIAL_AUDIT_PROMPT_VERSION: Final = "judge-adversarial-audit.v3"
+STRONG_REVIEW_SCHEMA_VERSION: Final = "coursejesus-judge-findings.v2"
 PROMPT_DIR: Final = Path(__file__).with_name("prompts")
 EVIDENCE_AUDIT_PROMPT_PATH: Final = PROMPT_DIR / "judge_evidence_audit_v1.md"
 ADVERSARIAL_AUDIT_PROMPT_PATH: Final = PROMPT_DIR / "judge_adversarial_audit_v1.md"

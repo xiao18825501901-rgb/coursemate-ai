@@ -111,6 +111,18 @@ class StubJudgeProvider:
                         else None
                     ),
                     "missing_conditions": [],
+                    # An ambiguity PASS must be backed by an enumeration, so the
+                    # stub lists the datum it checked and marks it stated.
+                    "dependencies": (
+                        [
+                            {
+                                "datum": "the two integers the task asks about",
+                                "stated_in_stem": True,
+                            }
+                        ]
+                        if case == CASE_AMBIGUITY
+                        else []
+                    ),
                 }
             )
         output = schema.model_validate({"findings": findings})

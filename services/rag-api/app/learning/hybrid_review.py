@@ -103,6 +103,20 @@ class JudgeSourceRef(Contract):
     quote: ShortQuote
 
 
+class JudgeDependency(Contract):
+    """One datum, convention or prerequisite the answer depends on.
+
+    The ambiguity case is the one the reviewer configuration could not decide
+    from a bare verdict, so it is not asked for one: the reviewer enumerates what
+    the answer depends on and marks each item as stated in the stem or not, and
+    the server derives the verdict from that enumeration.  A claim that an item
+    is "fully specified" is only as good as the list behind it.
+    """
+
+    datum: Annotated[str, StringConstraints(strip_whitespace=True, min_length=4, max_length=400)]
+    stated_in_stem: bool
+
+
 class JudgeFinding(Contract):
     case: CaseKey
     verdict: CaseVerdict
@@ -111,6 +125,7 @@ class JudgeFinding(Contract):
     solution_step_ids: list[StepId] = Field(default_factory=list, max_length=32)
     counterexample: Counterexample | None = None
     missing_conditions: list[MissingCondition] = Field(default_factory=list, max_length=20)
+    dependencies: list[JudgeDependency] = Field(default_factory=list, max_length=24)
 
 
 class JudgeFindings(Contract):
@@ -194,19 +209,24 @@ def project_case_verdicts(case_outcomes: dict[str, str]) -> dict[str, str]:
 def substantiated_case_verdicts(findings: JudgeFindings) -> tuple[dict[str, str], list[str]]:
     """Enforce that a verdict is supported by what the reviewer itself reported.
 
-    A bare verdict is not evidence.  Two internal contradictions are therefore
-    resolved deterministically, in the reviewer's own terms, before the two roles
-    are combined:
+    A bare verdict is not evidence.  Three things are therefore resolved
+    deterministically, in the reviewer's own terms, before the two roles are
+    combined:
 
-    * a **``FAIL`` with nothing behind it** -- no counterexample and no missing
-      condition -- is not a defect finding.  Treating it as one would let a
-      reviewer block a sound question arbitrarily, which is indistinguishable
-      from a reviewer that is simply guessing.  It is downgraded to
-      ``UNCERTAIN``.
-    * an **``ambiguity`` ``PASS`` while the same finding lists missing
-      conditions** contradicts itself: the reviewer named a datum the answer
-      needs and still certified the item as fully specified.  It is downgraded to
-      ``UNCERTAIN``.
+    * **an unstated dependency is a concrete defect.**  For the ambiguity case the
+      reviewer must enumerate what the answer depends on and mark each item as
+      stated in the stem or not.  If it marks any of them unstated, the item is
+      under-specified and the case is ``FAIL`` whatever verdict was claimed --
+      the reviewer has itself identified the missing datum.
+    * **``CLEAR`` must be backed by an enumeration.**  A ``PASS`` on ambiguity
+      with no dependency list at all is a claim without a check, and is
+      downgraded to ``UNCERTAIN``.  This is the rule that turns "the reviewers
+      never noticed the removed requirement" into an abstention rather than a
+      release.
+    * **a ``FAIL`` with nothing behind it** -- no counterexample, no missing
+      condition, no unstated dependency -- is not a defect finding.  Treating it
+      as one would let a reviewer block a sound question arbitrarily.  It is
+      downgraded to ``UNCERTAIN``.
 
     Everything else is passed through unchanged.  This never turns anything into
     a ``PASS``; it can only remove an unsupported decision and leave the item
@@ -216,6 +236,11 @@ def substantiated_case_verdicts(findings: JudgeFindings) -> tuple[dict[str, str]
     reasons: list[str] = []
     for finding in findings.findings:
         verdict = finding.verdict
+        unstated = [item for item in finding.dependencies if not item.stated_in_stem]
+        if unstated:
+            verdicts[finding.case] = "FAIL"
+            reasons.append("HYBRID_UNSTATED_DEPENDENCY:" + finding.case)
+            continue
         if verdict == "FAIL":
             has_counterexample = bool(
                 finding.counterexample and finding.counterexample.strip()
@@ -224,13 +249,13 @@ def substantiated_case_verdicts(findings: JudgeFindings) -> tuple[dict[str, str]
             if not (has_counterexample or has_missing):
                 verdict = "UNCERTAIN"
                 reasons.append("HYBRID_UNSUBSTANTIATED_FAIL:" + finding.case)
-        elif (
-            verdict == "PASS"
-            and finding.case == CASE_AMBIGUITY
-            and finding.missing_conditions
-        ):
-            verdict = "UNCERTAIN"
-            reasons.append("HYBRID_SELF_CONTRADICTED_PASS:" + finding.case)
+        elif verdict == "PASS" and finding.case == CASE_AMBIGUITY:
+            if finding.missing_conditions:
+                verdict = "UNCERTAIN"
+                reasons.append("HYBRID_SELF_CONTRADICTED_PASS:" + finding.case)
+            elif not finding.dependencies:
+                verdict = "UNCERTAIN"
+                reasons.append("HYBRID_AMBIGUITY_NOT_ENUMERATED:" + finding.case)
         verdicts[finding.case] = verdict
     return verdicts, reasons
 
