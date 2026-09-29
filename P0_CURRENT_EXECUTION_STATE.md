@@ -397,6 +397,41 @@ self-consistency rule in its own dependency entries (a consequence present on an
 entry that does not change the answer, or the reverse), and it is the next concrete
 prompt fix -- not a network problem, and now provably not one.
 
+## The qualification entry point, and a production write that is possible
+
+The copy guard refused every production target, including the one legitimate case:
+installing the qualification that publication depends on.  Work that cannot be done
+through the guard is work that gets done around it, which is how the accidental
+migration happened, so the rule now follows the declared purpose.
+
+* Every purpose refuses a production path outright, whether or not anything agrees
+  with it -- the case the original rule passed.
+* `PRODUCTION_WRITE` inverts the rule: it *requires* a declared production path, so
+  a production write that names anything else is refused as
+  `DATABASE_TARGET_NOT_PRODUCTION`, and a production write reached through a
+  symbolic link is still refused.
+
+`scripts/install_hybrid_qualification.py` is the management entry point.  It refuses
+an artifact whose decision is not `SCOPED_QUALITY_ACCEPTED`, one with no dataset
+digest, method identity or expiry, and one that names no cases.  Without `--install`
+it resolves the target exactly as the real install would and prints what it would
+record, so the installation can be inspected before it happens.  A qualification row
+is therefore impossible to create except from an evaluation that actually passed --
+and impossible to create by seeding SQL.
+
+## The evaluation now draws each family from a different topic
+
+`run_hybrid_qualification.py` took one node per run, so every item in a run was a
+sibling of every other and "24 independent families" meant 24 siblings of three
+topics.  A run now takes many nodes (`--node` repeated, or `--nodes`), and the fresh
+run draws one family per node across 24 different topics of the SQL course, so the
+independence claim is about topics rather than repetitions.
+
+Two defects the first launch of that run exposed, both now fixed: a node whose
+objective text cannot form a valid blueprint ended the whole seventy-item run, and
+the blueprint was built outside the per-item guard.  A node that cannot produce an
+item is now a recorded skip.
+
 ## What the next round has to do first
 
 1. Take the trusted backup and prove a restore, and only then let anything write.
