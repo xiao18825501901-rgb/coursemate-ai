@@ -194,13 +194,18 @@ def create_backup() -> Path:
     backup_root = Path(backup_root_raw).expanduser().resolve()
     if backup_root == upload_root or upload_root in backup_root.parents:
         raise ValueError("BACKUP_ROOT must be outside the private upload tree.")
-    backup_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # The readiness monitor runs as the unprivileged service account and has to
+    # be able to inspect a backup before it can report on it; a backup nobody can
+    # verify is not a backup.  The root stays closed to everything but its owner
+    # and the service group, and the deployment's setgid bit is what keeps that
+    # group on the children created below.
+    backup_root.mkdir(mode=0o750, parents=True, exist_ok=True)
 
     created_at = datetime.now(timezone.utc)
     stamp = created_at.strftime("%Y%m%dT%H%M%S.%fZ")
     final_destination = backup_root / f"coursemate-v2-{stamp}"
     partial_destination = backup_root / f".coursemate-v2-{stamp}.{uuid4().hex}.partial"
-    partial_destination.mkdir(mode=0o700)
+    partial_destination.mkdir(mode=0o750)
     _sqlite_backup(rag_database, partial_destination / "rag.sqlite3")
     _sqlite_backup(agent_database, partial_destination / "agent.sqlite3")
     upload_file_count, upload_total_bytes = _archive_uploads(
