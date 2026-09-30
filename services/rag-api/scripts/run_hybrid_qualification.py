@@ -62,7 +62,13 @@ from app.learning.question_evidence import (  # noqa: E402
     build_evidence_pack,
 )
 
-ITEM_KINDS = ("NUMERIC", "MCQ_SINGLE", "RULE_EXPLANATION")
+# The kinds a configured assessment actually asks for are NUMERIC, MCQ_SINGLE,
+# SHORT_TEXT and a plain EXPLANATION.  RULE_EXPLANATION is kept because it is the
+# kind the rule-violation policy produces, but it is measured separately and its
+# results must not be read as evidence about a configured slot: an item that
+# requires the rule case is outside the installed qualification's case set and
+# can never be released, however good the item is.
+ITEM_KINDS = ("NUMERIC", "MCQ_SINGLE", "SHORT_TEXT", "EXPLANATION", "RULE_EXPLANATION")
 
 
 def _blueprint(
@@ -81,18 +87,34 @@ def _blueprint(
         policy = "question-generation-policy-v1"
         misconceptions = ["off_by_one", "wrong_definition"]
         criteria = [objective.acceptance, "the selected option is the only correct one"]
+    elif kind == "SHORT_TEXT":
+        question_type = "SHORT_TEXT"
+        answer_form = "SHORT_ANSWER"
+        policy = "question-generation-policy-v1"
+        misconceptions = []
+        criteria = [objective.acceptance, "the answer states the definition and its conditions"]
+    elif kind == "EXPLANATION":
+        question_type = "EXPLANATION"
+        answer_form = "WORKED_STEPS"
+        policy = "question-generation-policy-v1"
+        misconceptions = []
+        criteria = [objective.acceptance, "the steps are checkable and sufficient"]
     elif kind == "RULE_EXPLANATION":
         question_type = "EXPLANATION"
         answer_form = "WORKED_STEPS"
         policy = RULE_VIOLATION_POLICY_VERSION
         misconceptions = []
         criteria = [objective.acceptance, "the cited rule is applied correctly"]
-    else:
+    elif kind == "NUMERIC":
         question_type = "NUMERIC"
         answer_form = "NUMERIC_VALUE"
         policy = "question-generation-policy-v1"
         misconceptions = []
         criteria = [objective.acceptance, "the numeric result is exact"]
+    else:
+        # An unlisted kind must not silently become a NUMERIC item: that would
+        # measure a kind nobody asked about and report it under another name.
+        raise ValueError(f"unsupported item kind: {kind!r}")
     return QuestionBlueprint(
         blueprint_id=f"qual-{kind.lower()}-{index}",
         course_id=course_id,
