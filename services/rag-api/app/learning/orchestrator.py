@@ -72,15 +72,15 @@ LOGGER = logging.getLogger(__name__)
 # but it must be bounded, or a preparation that can never succeed (a node whose
 # objective cannot form a blueprint, say) would be retried forever at real cost.
 #
-# Briefly raised to 16, and reverted.  The raise was justified on the claim that the
-# dominant failure had been repaired, and for the preparations that were actually
-# stuck that claim was false: they fail inserting a model-call reservation, before any
-# provider call, because their operation reference does not resolve.  A deterministic
-# failure cannot be outlasted by a budget, and raising the bound spent forty-eight
-# attempts across six preparations in four seconds.  Nothing was billed, because no
-# call was ever reached, but the argument for the raise did not survive its own
-# measurement.  Restore the larger bound only against a failure that can vary.
-MAX_AUTO_PREPARATION_ATTEMPTS: Final = 8
+# History, because the same mistake is easy to repeat.  Raised to 16 on the claim that
+# the dominant failure had been repaired; for the preparations actually stuck that claim
+# was false, and forty-eight attempts were spent in four seconds against a failure that
+# could not vary.  Reverted.  The cause turned out to be str(None) fabricating an
+# operation id, which is now fixed, so the bound is raised again -- and this time the
+# justification is the one that was missing before: the failure can vary, so further
+# attempts can succeed.  Before raising this again, check that the failure being
+# repaired is the one the stuck rows are hitting.
+MAX_AUTO_PREPARATION_ATTEMPTS: Final = 24
 
 
 def encode(value: Any) -> str:
