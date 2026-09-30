@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import sqlite3
 from collections.abc import Callable
 from typing import Any, Literal, TypeVar, cast
@@ -63,6 +64,8 @@ from app.learning.question_runtime import (
 from app.learning.workspaces import document_version_for, original_path, workspace_for
 from app.rag.retrieval import HybridRetriever
 from app.repositories.chunks import RetrievalAccess
+
+LOGGER = logging.getLogger(__name__)
 
 
 def encode(value: Any) -> str:
@@ -665,10 +668,17 @@ class LearningOrchestrator:
             )
         except QuestionEngineRuntimeError as caught:
             error = caught
-        except Exception as caught:
+        except Exception as caught:  # noqa: BLE001 - attributed, never swallowed
+            # A bare code here discards the cause, and an unattributable worker
+            # failure is not diagnosable: three consecutive attempts were lost to
+            # this path in one rehearsal and nothing recorded said why.  The
+            # exception's own class and a bounded message now travel with the
+            # error, and the traceback goes to the log.
+            LOGGER.exception("assessment preparation worker failed")
             error = QuestionEngineRuntimeError(
                 "ASSESSMENT_WORKER_FAILED",
-                "The durable assessment worker failed before the configuration was complete.",
+                "The durable assessment worker failed before the configuration was "
+                f"complete: {type(caught).__name__}: {str(caught)[:300]}",
             )
 
         with self.db.connect() as db:
