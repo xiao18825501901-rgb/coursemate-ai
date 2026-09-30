@@ -8,6 +8,11 @@ What it refuses:
 
 * an artifact whose decision is not SCOPED_QUALITY_ACCEPTED;
 * an artifact with no dataset digest, no method identity, or no expiry;
+* an artifact measured under a method this code no longer implements -- the
+  prompt, schema and combination versions are part of the identity, so an
+  artifact that predates a change to any of them describes a procedure nobody
+  can reproduce, and installing it would record a qualification for that
+  vanished procedure;
 * a target that does not survive the copy guard for the purpose it names;
 * a production write that does not name a declared production database.
 
@@ -27,6 +32,35 @@ from app.config import Settings  # noqa: E402
 from app.db import Database  # noqa: E402
 from app.db_target import DatabaseTargetError, resolve_database_target  # noqa: E402
 from app.learning.hybrid_quality import HybridQualificationStore  # noqa: E402
+
+
+def _current_method_identity(observed: dict) -> str:
+    """The method identity this code implements, rebuilt from the artifact's own facts.
+
+    The provider, protocol and model alias come from the artifact because they are
+    runtime facts of the run that was measured; every prompt, schema and the
+    combination rule come from the code, because those are what the artifact
+    cannot tell us about.
+    """
+    from app.learning.deepseek_reviewer import (
+        ADVERSARIAL_AUDIT_PROMPT_VERSION,
+        EVIDENCE_AUDIT_PROMPT_VERSION,
+        SPECIFICATION_AUDIT_PROMPT_VERSION,
+        SPECIFICATION_SCHEMA_VERSION,
+        STRONG_REVIEW_SCHEMA_VERSION,
+    )
+    from app.learning.hybrid_review import method_identity
+
+    return method_identity(
+        model_alias=str(observed.get("model_alias") or ""),
+        provider=str(observed.get("provider") or ""),
+        protocol=str(observed.get("protocol") or ""),
+        evidence_prompt_version=EVIDENCE_AUDIT_PROMPT_VERSION,
+        adversarial_prompt_version=ADVERSARIAL_AUDIT_PROMPT_VERSION,
+        specification_prompt_version=SPECIFICATION_AUDIT_PROMPT_VERSION,
+        schema_version=STRONG_REVIEW_SCHEMA_VERSION,
+        specification_schema_version=SPECIFICATION_SCHEMA_VERSION,
+    )
 
 
 def _load_artifact(path: str) -> dict:
@@ -54,6 +88,16 @@ def _load_artifact(path: str) -> dict:
     cases = decision.get("cases")
     if not cases:
         raise ValueError("the accepted decision names no cases")
+    observed = decision.get("observed_model_facts")
+    if not isinstance(observed, dict):
+        raise ValueError("the accepted decision carries no observed model facts")
+    current = _current_method_identity(observed)
+    if decision.get("method_identity") != current:
+        raise ValueError(
+            "the artifact was measured under a different method identity than "
+            f"this code implements (artifact {decision.get('method_identity')}, "
+            f"code {current}); re-measure before installing"
+        )
     return payload
 
 
