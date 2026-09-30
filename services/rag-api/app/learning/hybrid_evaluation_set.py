@@ -355,25 +355,54 @@ def duplicate_correct_option(row_inputs: ReviewerInputs) -> ReviewerInputs | Non
     )
 
 
+# The over-general form the cited rule is weakened to.  It has to be a sentence a
+# span can actually carry, because the quote is checked against the frozen source
+# text before any reviewer sees the item.
+_WEAKENED_RULE = "Any difference from the reference is a violation."
+
+
 def unsupported_rule(row_inputs: ReviewerInputs) -> ReviewerInputs | None:
-    """Rule quality must fail: the cited rule loses the prerequisite it needs."""
-    if not row_inputs.evidence:
-        return None
+    """Rule quality must fail: the cited rule loses the prerequisite it needs.
+
+    The defect has to survive the deterministic identity gate, or the case is
+    never asked.  The earlier mutation failed that twice over: it set a
+    `rule_quote` that appears in no span at all, and it replaced
+    `proposed_statement` with a sentence the question text does not contain.
+    Both are refused by `INPUT_IDENTITY` -- `rule_quote in rule_fragment.content`
+    and `proposed_statement in question_text` -- so every row it produced was
+    rejected by a hard gate before a reviewer was consulted, and the recorded
+    "false accepts" described the mutation rather than the reviewers.
+
+    The rule is therefore weakened where it is actually cited: the span named by
+    `rule_source_ref` is rewritten to the over-general form *containing* the
+    quote, and `proposed_statement` is left alone.  The item then passes every
+    hard gate and its only defect is that the cited rule contradicts the rest of
+    the pack -- which is the judgement this case exists to make.
+    """
     solution_a = dict(row_inputs.solution_a)
     analysis = solution_a.get("rule_violation_analysis")
-    mutated = dict(analysis) if isinstance(analysis, dict) else {}
-    mutated["rule_quote"] = (
-        "A statement is a violation whenever it is different from the reference."
-    )
-    mutated["proposed_statement"] = (
-        "The step differs from the reference, therefore it is a violation."
-    )
+    if not isinstance(analysis, dict):
+        return None
+    source_ref = analysis.get("rule_source_ref")
+    if not isinstance(source_ref, str) or not source_ref:
+        return None
+    if not any(
+        fragment["evidence_id"] == source_ref for fragment in row_inputs.evidence
+    ):
+        return None
+    mutated = dict(analysis)
+    mutated["rule_quote"] = _WEAKENED_RULE
     mutated["correction"] = "Change the step so that it matches the reference."
     solution_a["rule_violation_analysis"] = mutated
-    target_id = row_inputs.evidence[0]["evidence_id"]
     evidence = tuple(
-        {**fragment, "content": "Any difference from the reference is a violation."}
-        if fragment["evidence_id"] == target_id
+        {
+            **fragment,
+            "content": (
+                f"{_WEAKENED_RULE} The course statement gives no further condition, "
+                "so the reference is the only thing the step has to match."
+            ),
+        }
+        if fragment["evidence_id"] == source_ref
         else fragment
         for fragment in row_inputs.evidence
     )
