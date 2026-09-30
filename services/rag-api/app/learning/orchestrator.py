@@ -649,6 +649,24 @@ class LearningOrchestrator:
                 (row["id"],),
             ).fetchone()
             slots = self.assessments.configuration_slots(db, str(row["configuration_id"]))
+            # A resumed preparation authors only what is missing.  Offering a slot that
+            # is already legitimately bound makes the engine author a *second* question
+            # for it, and the binding check then refuses the whole attempt as
+            # ASSESSMENT_SLOT_CONFLICT -- which is how three campus configurations
+            # stalled at 2/5 and 3/5 with a perfectly good question already saved for
+            # the slot they were re-authoring.  The existing binding is authoritative:
+            # it is reconciled by being reused, never by being authored again.  When
+            # nothing is missing the list is empty, the engine does no work, and the
+            # preparation completes on what is already there.
+            bound = {
+                str(binding["slot_id"])
+                for binding in db.execute(
+                    "SELECT slot_id FROM assessment_configuration_questions "
+                    "WHERE configuration_id=?",
+                    (str(row["configuration_id"]),),
+                )
+            }
+            slots = [slot for slot in slots if slot.slot_key not in bound]
 
         def cancelled() -> bool:
             with self.db.connect() as check:
