@@ -48,6 +48,17 @@ private object and not in the public question text does not exist.
 * `answer_equivalence` -- how two answers are compared. Use `SET_UNORDERED` when duplicate rows do
   not matter and row order does not, `BAG_UNORDERED` when duplicates matter but order does not,
   `ORDERED_LIST` when order matters, `NUMERIC_TOLERANCE`, `EXACT`, or `SEMANTIC_RUBRIC` with a note.
+The registry, so you can choose without decoding the context:
+
+| profile | covers these question types | and requires these conventions |
+|---|---|---|
+| `P-SQL` | MCQ_SINGLE, SHORT_TEXT, CODE, EXPLANATION | DIALECT, DATA_COMPLETENESS, DUPLICATE_ROWS, ROW_ORDER |
+| `P-DISCRETE` | NUMERIC, SHORT_TEXT, EXPLANATION, MCQ_SINGLE | DATA_COMPLETENESS, BOUNDARY_INCLUSION |
+| `P-COURSE-RULE` | EXPLANATION, SHORT_TEXT, MCQ_SINGLE | ANSWER_FORM |
+
+A NUMERIC question is covered by `P-DISCRETE` and by no other profile.  State every
+convention the chosen profile requires: a measured run lost more positive items to a
+missing convention than to any other single cause.
 * `profile_id` / `profile_version` -- choose from `task_profiles` in the request, which lists
   each profile with the exact question types it covers and the exact conventions it requires.
   Pick the one whose `question_types` contains your `question_type`, and state **every** key in its

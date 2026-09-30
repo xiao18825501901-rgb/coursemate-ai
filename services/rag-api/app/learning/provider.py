@@ -171,6 +171,31 @@ def _timeout_kind(error: BaseException) -> str | None:
     return None
 
 
+def extract_json_object(text: str) -> str | None:
+    """The one JSON object a response body contains, if it contains one.
+
+    Only the outermost balanced object is returned, and only when the text has a
+    single candidate: a body with two objects is ambiguous, so it is left alone and
+    refused as before.  The result is validated by the caller against the same
+    schema, so this changes what is *parsed*, never what is *accepted*.
+    """
+    stripped = text.strip()
+    if stripped.startswith("{") and stripped.endswith("}"):
+        return None  # already a bare object; the schema rejection is about content
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    candidate = stripped[start : end + 1]
+    if candidate.count("{") != candidate.count("}"):
+        return None
+    try:
+        json.loads(candidate)
+    except ValueError:
+        return None
+    return candidate
+
+
 def schema_error_summary(error: Any, *, limit: int = 12) -> list[str]:
     """Bounded, value-free description of a pydantic schema rejection.
 
@@ -555,12 +580,30 @@ class LearningProvider:
                 try:
                     output = schema.model_validate_json(raw_output_text)
                 except ValidationError as schema_error:
-                    # A complete response that did not match the schema is a schema
-                    # failure, not an outage, and the failing *field* is what makes
-                    # it attributable.  Only the locations and error kinds are kept:
-                    # the values would be private course material.
-                    rejection_summary = schema_error_summary(schema_error)
-                    raise
+                    # A complete response whose body is not parseable JSON can still
+                    # contain exactly one JSON object wrapped in prose or a fence.
+                    # Extracting it is not a relaxation: the extracted text is
+                    # validated against the same schema, so a response that does not
+                    # satisfy the contract is refused exactly as before.  One
+                    # measured run lost a paid call to "<root>: json_invalid".
+                    extracted = extract_json_object(raw_output_text)
+                    if extracted is None:
+                        rejection_summary = schema_error_summary(schema_error)
+                        raise
+                    try:
+                        output = schema.model_validate_json(extracted)
+                    except ValidationError:
+                        rejection_summary = schema_error_summary(schema_error)
+                        raise schema_error from None
+                    emit(
+                        "RESPONSE_EXTRACTED_JSON",
+                        role=role,
+                        input_hash=run["input_hash"],
+                        provider_response_id=response.id,
+                        response_chars=len(raw_output_text),
+                        extracted_chars=len(extracted),
+                    )
+                    rejection_summary = None
                 else:
                     rejection_summary = None
                 emit(

@@ -93,3 +93,23 @@ def test_no_module_constructs_a_paid_client_outside_the_policy() -> None:
         "every paid client must be built by app.provider_client.build_openai_client: "
         + ", ".join(offenders)
     )
+
+def test_a_json_object_wrapped_in_prose_is_extracted() -> None:
+    """A complete response is not thrown away over its packaging.
+
+    One measured run lost a paid call to "<root>: json_invalid" -- a complete body
+    that was valid JSON inside a fence or a sentence.  The extracted text is
+    validated against the same schema, so this changes what is parsed, never what
+    is accepted.
+    """
+    from app.learning.provider import extract_json_object
+
+    assert extract_json_object('{"a": 1}') is None  # bare: the content is the issue
+    assert extract_json_object("no object here") is None
+    assert extract_json_object('before {"a": 1} after') == '{"a": 1}'
+    assert extract_json_object('```json\n{"a": 2}\n```') == '{"a": 2}'
+    # Two objects are ambiguous, so nothing is extracted and the refusal stands.
+    assert extract_json_object('{"a": 1} and {"b": 2}') is None
+    # Unbalanced or unparseable candidates are left alone too.
+    assert extract_json_object('prefix {"a": 1') is None
+    assert extract_json_object("prefix {not json} suffix") is None

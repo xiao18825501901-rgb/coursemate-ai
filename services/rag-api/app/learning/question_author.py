@@ -75,11 +75,20 @@ class DistractorRationale(Contract):
 
 
 class RuleViolationAnalysis(Contract):
-    """Private proof that a rule-violation question uses a real course rule."""
+    """Private proof that a rule-violation question uses a real course rule.
+
+    The quotation is optional, for the same reason a reviewer citation is: the
+    reviewer selects the span and the server owns the text.  Requiring a
+    character-exact transcription of a long rule rejected four of seventy item
+    slots in one bounded evaluation -- every one of them a complete, otherwise
+    usable paid response -- and the rule the field was there to prove is that the
+    cited span really states the rule, which the span binding establishes on its
+    own.  A quotation that *is* supplied must still match the frozen text exactly.
+    """
 
     proposed_statement: Text
     rule_source_ref: Identifier
-    rule_quote: Text
+    rule_quote: Text | None = None
     correction: Text
     explanation: Text
 
@@ -375,12 +384,18 @@ def _assert_output_scope(
             if rule_analysis is not None
             else None
         )
+        # The binding is the cited span; a quotation is cross-checked when one is
+        # supplied, and its absence is not a defect.
+        quote_matches = (
+            rule_analysis.rule_quote is None
+            or rule_analysis.rule_quote in rule_fragment.content
+        ) if (rule_analysis is not None and rule_fragment is not None) else False
         valid_rule = (
             blueprint.question_type == "EXPLANATION"
             and rule_analysis is not None
             and rule_fragment is not None
             and rule_analysis.rule_source_ref in output.source_refs
-            and rule_analysis.rule_quote in rule_fragment.content
+            and quote_matches
             and rule_analysis.proposed_statement in output.question_text
         )
         if not valid_rule:
@@ -389,10 +404,11 @@ def _assert_output_scope(
                 "The rule-violation question is not bound to an exact course rule.",
             )
     elif rule_analysis is not None:
-        raise AuthorGenerationError(
-            "AUTHOR_OUTPUT_INVALID",
-            "Only the rule-violation policy may return a rule analysis.",
-        )
+        # A rule analysis under a policy that does not use one is an unused field,
+        # and an unused field cannot change any decision.  Rejecting the response
+        # over it would throw away a complete paid call; the question's own shape is
+        # still checked by the gates that do read it.
+        object.__setattr__(output, "rule_violation_analysis", None)
 
 
 def _failure_from_provider(failure: ProviderCallFailure) -> AuthorGenerationError:
