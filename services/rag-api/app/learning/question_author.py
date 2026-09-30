@@ -156,11 +156,25 @@ def _question_revision_identity(
     blueprint_hash: str,
     evidence_pack_hash: str,
     output: QuestionAuthorOutput,
+    schema_version: str | None = None,
 ) -> str:
+    """Hash one author output, optionally as an earlier schema version wrote it.
+
+    `schema_version` is an author-output field and therefore part of the hashed
+    payload.  Recomputing a *stored* revision with today's constant would compare
+    two different payloads and refuse every row authored before a schema bump --
+    which is what happened: every stored revision was written under
+    `question-author-output.v3` while this code defines `.v4`, so no historical
+    candidate could be rebuilt.  Reproducing a row means hashing what that row was
+    actually hashed from.
+    """
+    author_output = _revision_payload(output)
+    if schema_version is not None:
+        author_output["schema_version"] = schema_version
     revision_payload = {
         "blueprint_hash": blueprint_hash,
         "evidence_pack_hash": evidence_pack_hash,
-        "author_output": _revision_payload(output),
+        "author_output": author_output,
     }
     return hashlib.sha256(
         json.dumps(
@@ -268,8 +282,14 @@ class AuthoredQuestionCandidate(Contract):
             question_revision_hash=self.question_revision,
         )
 
-    def revision_identity(self) -> str:
-        """Recompute the immutable revision from the split public/private candidate."""
+    def revision_identity(self, *, schema_version: str | None = None) -> str:
+        """Recompute the immutable revision from the split public/private candidate.
+
+        `schema_version` defaults to the schema this code authors under.  A caller
+        reproducing a stored row passes the version recorded on that row instead,
+        because the version is inside the hashed payload and the two differ across
+        a schema bump.
+        """
         if self.public_question.source_refs != self.private_solution.source_refs:
             raise ValueError("public and private candidate source references do not match")
         output = QuestionAuthorOutput(
@@ -286,6 +306,7 @@ class AuthoredQuestionCandidate(Contract):
             blueprint_hash=self.blueprint_hash,
             evidence_pack_hash=self.evidence_pack_hash,
             output=output,
+            schema_version=schema_version,
         )
 
     def public_payload(self) -> dict[str, object]:

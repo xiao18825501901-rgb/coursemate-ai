@@ -214,9 +214,8 @@ def recover_candidate(
             "answer_policy": blueprint.answer_policy,
         }
     )
-    author_run = AuthorProviderRun.model_validate(
-        _loads(row["author_run_json"], field="author_run_json")
-    )
+    author_run_payload = _loads(row["author_run_json"], field="author_run_json")
+    author_run = AuthorProviderRun.model_validate(author_run_payload)
     candidate = AuthoredQuestionCandidate(
         blueprint_id=blueprint.blueprint_id,
         # The *stored* hash, not a recomputed one.  The revision identity was
@@ -235,10 +234,26 @@ def recover_candidate(
         private_solution=solution,
         provider_run=author_run,
     )
-    if candidate.revision_identity() != candidate.question_revision:
+    # The author-output schema version is part of the hashed revision payload, so
+    # a stored row has to be reproduced under the version that actually wrote it.
+    # Reading today's constant instead made *every* stored revision unreproducible
+    # once the schema was bumped -- all of them were written under
+    # `question-author-output.v3`, which is what the row itself records.
+    recorded_schema_version = (
+        author_run_payload.get("schema_version")
+        if isinstance(author_run_payload, dict)
+        else None
+    )
+    if not isinstance(recorded_schema_version, str) or not recorded_schema_version:
+        recorded_schema_version = None
+    if (
+        candidate.revision_identity(schema_version=recorded_schema_version)
+        != candidate.question_revision
+    ):
         raise CandidateRecoveryError(
             "CANDIDATE_REVISION_MISMATCH",
-            "The rebuilt candidate does not reproduce its stored revision hash.",
+            "The rebuilt candidate does not reproduce its stored revision hash "
+            f"under the recorded author-output schema {recorded_schema_version!r}.",
         )
 
     blind_run_payload = _loads(row["blind_run_json"], field="blind_run_json")
