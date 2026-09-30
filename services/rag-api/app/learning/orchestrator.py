@@ -71,7 +71,14 @@ LOGGER = logging.getLogger(__name__)
 # Retrying is what the mechanism needs -- one attempt advances about one slot --
 # but it must be bounded, or a preparation that can never succeed (a node whose
 # objective cannot form a blueprint, say) would be retried forever at real cost.
-MAX_AUTO_PREPARATION_ATTEMPTS: Final = 8
+#
+# Raised from 8 to 16 once the dominant cause of failure was repaired rather than
+# merely attributed.  Eight was chosen while attempts were being spent on a
+# malformed-JSON review response that could never succeed; the three campus
+# preparations exhausted it on exactly that defect and had been parked since.  With
+# the repair deployed, further attempts have a real chance, which is the condition
+# under which paying for them became worth it.
+MAX_AUTO_PREPARATION_ATTEMPTS: Final = 16
 
 
 def encode(value: Any) -> str:
