@@ -71,6 +71,20 @@ from app.learning.question_evidence import (  # noqa: E402
 ITEM_KINDS = ("NUMERIC", "MCQ_SINGLE", "SHORT_TEXT", "EXPLANATION", "RULE_EXPLANATION")
 
 
+def _node_tag(node_id: str) -> str:
+    """The short, collision-free tag a family id is built from.
+
+    Stripping one known prefix -- `replace("auto-node-", "")[:8]` -- gives every
+    `official-node-*` the same tag, "official", so families from different
+    official nodes would share an id, collide, and be counted as a single
+    independent family.  That would inflate the independence claim the whole
+    qualification rests on.  Only the last hyphen-separated segment is unique
+    across both prefixes, and for an auto node it yields exactly the tag earlier
+    runs used, so their results stay comparable.
+    """
+    return node_id.rsplit("-", 1)[-1][:8]
+
+
 def _blueprint(
     *,
     objective,
@@ -498,7 +512,7 @@ def main() -> int:
              "message": str(error)[:200]}
         )
         continue
-      node_tag = node_id.replace("auto-node-", "")[:8]
+      node_tag = _node_tag(node_id)
       for kind in selected_kinds:
         for index in range(args.per_type):
             # The blueprint is built inside the guard: a node whose objective cannot
