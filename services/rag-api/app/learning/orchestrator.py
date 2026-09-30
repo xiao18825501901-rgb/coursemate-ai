@@ -3,7 +3,7 @@ import json
 import logging
 import sqlite3
 from collections.abc import Callable
-from typing import Any, Literal, TypeVar, cast
+from typing import Any, Final, Literal, TypeVar, cast
 from uuid import uuid4
 
 from pydantic import BaseModel
@@ -66,6 +66,12 @@ from app.rag.retrieval import HybridRetriever
 from app.repositories.chunks import RetrievalAccess
 
 LOGGER = logging.getLogger(__name__)
+
+# How many times a blocked configured preparation may be resumed automatically.
+# Retrying is what the mechanism needs -- one attempt advances about one slot --
+# but it must be bounded, or a preparation that can never succeed (a node whose
+# objective cannot form a blueprint, say) would be retried forever at real cost.
+MAX_AUTO_PREPARATION_ATTEMPTS: Final = 8
 
 
 def encode(value: Any) -> str:
@@ -576,11 +582,24 @@ class LearningOrchestrator:
 
         with self.db.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            # A preparation blocked on a *settled* request is resumed here.  The
+            # unknown-request block is deliberately excluded: it exists so the
+            # system never resends a call whose fate is unknown, and resuming it
+            # could pay twice.  A QUESTION_NOT_READY block carries no such
+            # uncertainty -- its reservations are all COMPLETED and the item simply
+            # did not reach the bar -- so retrying authors a new item for the
+            # remaining slot rather than resending an old one.  Without this a
+            # blocked preparation is never picked up again, and finishing a
+            # configuration needs a person to resume it once per slot.
             row = db.execute(
                 "SELECT * FROM assessment_configuration_preparations "
-                "WHERE status='PREPARING' AND cancel_requested=0 "
-                "AND (lease_expires_at IS NULL OR lease_expires_at<strftime('%Y-%m-%dT%H:%M:%fZ','now')) "
-                "ORDER BY created_at,id LIMIT 1"
+                "WHERE status IN ('PREPARING','BLOCKED') AND cancel_requested=0 "
+                "AND COALESCE(error_code,'') <> 'MODEL_REQUEST_UNCERTAIN' "
+                "AND attempt < ? "
+                "AND (lease_expires_at IS NULL "
+                "OR lease_expires_at<strftime('%Y-%m-%dT%H:%M:%fZ','now')) "
+                "ORDER BY created_at,id LIMIT 1",
+                (MAX_AUTO_PREPARATION_ATTEMPTS,),
             ).fetchone()
             if row is None:
                 return None
@@ -604,8 +623,9 @@ class LearningOrchestrator:
             claimed = db.execute(
                 "UPDATE assessment_configuration_preparations SET lease_owner=?,"
                 "lease_expires_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','+30 minutes'),"
+                "status='PREPARING',attempt=attempt+1,"
                 "current_stage='CLAIMED',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
-                "WHERE id=? AND status='PREPARING' AND cancel_requested=0 "
+                "WHERE id=? AND status IN ('PREPARING','BLOCKED') AND cancel_requested=0 "
                 "AND (lease_expires_at IS NULL OR lease_expires_at<strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
                 (worker_id, row["id"]),
             )
