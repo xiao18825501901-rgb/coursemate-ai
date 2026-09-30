@@ -1627,7 +1627,14 @@ class QuestionEngineRuntime:
             # improves on a resample and retrying it would double the cost of every
             # such failure; a provider failure must not be resent at all, because the
             # deployment's unknown-request guard exists to stop exactly that.
-            if error.code != "AUTHOR_CONTRACT_INCOMPLETE":
+            # Both contract refusals are retried.  AUTHOR_CONTRACT_INVALID means the
+            # contract did not satisfy its own schema and AUTHOR_CONTRACT_INCOMPLETE
+            # means it declared a profile whose required roles it did not supply;
+            # both are detected before any review is paid for, and both are
+            # commissions a resample routinely fixes.  Production hit the first of
+            # them on a live SQL preparation six attempts in, which is what showed
+            # the distinction was too narrow.
+            if error.code not in {"AUTHOR_CONTRACT_INCOMPLETE", "AUTHOR_CONTRACT_INVALID"}:
                 raise
             candidate = author_question(
                 provider,
