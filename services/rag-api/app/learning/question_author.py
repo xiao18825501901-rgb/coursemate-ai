@@ -581,6 +581,28 @@ def author_question(
                 "The task contract did not satisfy its own schema: "
                 + ", ".join(schema_error_summary(error)),
             ) from error
+    if draft is not None:
+        # A schema-valid contract can still be one the declared profile cannot
+        # certify: P-COURSE-RULE requires a SOURCE_RULE and a CLAIM_TO_CRITIQUE
+        # fact, and a contract that declares that profile without supplying them
+        # passes its own schema and then fails completeness.  It used to fail
+        # *after* two paid reviews, which is the most expensive way to learn that
+        # the author omitted a role it was told to include -- a campus run lost
+        # thirteen of twenty-nine sound items that way.  Checked here, the refusal
+        # is immediate, attributable, and free.
+        from app.learning.task_spec import profile_by_id
+
+        profile = profile_by_id(draft.profile_id, version=draft.profile_version)
+        if profile is not None:
+            supplied = {fact.role for fact in draft.facts}
+            missing = sorted(profile.required_roles - supplied)
+            if missing:
+                raise AuthorGenerationError(
+                    "AUTHOR_CONTRACT_INCOMPLETE",
+                    f"The contract declares {profile.profile_id}, which requires a fact for "
+                    + ", ".join(missing)
+                    + "; without every required role the item cannot be certified.",
+                )
     blueprint_hash = blueprint.identity()
     evidence_hash = evidence.identity()
     revision = _question_revision_identity(
