@@ -1611,11 +1611,29 @@ class QuestionEngineRuntime:
             workspace_id=workspace_id,
             operation_id=model_operation_id,
         )
-        candidate = author_question(
-            provider,
-            blueprint=blueprint,
-            evidence=evidence,
-        )
+        try:
+            candidate = author_question(
+                provider,
+                blueprint=blueprint,
+                evidence=evidence,
+            )
+        except AuthorGenerationError as error:
+            # Re-ask exactly once, and only when the refusal is an incomplete task
+            # contract.  That failure is detected before any review is paid for, and
+            # it is a commission the author routinely gets right on a second sample:
+            # roughly two in five campus items were lost to a missing role, which is
+            # the dominant reason that course cannot reach the qualification's recall
+            # floor.  Nothing else is retried here.  AUTHOR_OUTPUT_INVALID rarely
+            # improves on a resample and retrying it would double the cost of every
+            # such failure; a provider failure must not be resent at all, because the
+            # deployment's unknown-request guard exists to stop exactly that.
+            if error.code != "AUTHOR_CONTRACT_INCOMPLETE":
+                raise
+            candidate = author_question(
+                provider,
+                blueprint=blueprint,
+                evidence=evidence,
+            )
         self._check_cancelled(should_cancel)
         blind = run_blind_solve(
             provider,
