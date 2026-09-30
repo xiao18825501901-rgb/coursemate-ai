@@ -681,6 +681,30 @@ class LearningOrchestrator:
                     ),
                 )
 
+        # A preparation written before this worker existed carries no operation, and
+        # str(None) is not a missing value -- it is the four-character string "None",
+        # which names no row.  The reservation the first provider call makes then fails
+        # its foreign key and the attempt dies before it starts, which is how six campus
+        # preparations spent every attempt they were given without ever reaching a
+        # model: instantly, silently, and unaffected by any number of retries.  The
+        # operation is resolved to a real identifier and registered here, so a stale row
+        # is repaired by the code that reads it rather than by rewriting the table.
+        operation_id = str(row["operation_id"] or "") or (
+            "assessment-prep-" + str(row["configuration_id"])[-32:]
+        )
+        with self.db.connect() as db:
+            db.execute(
+                "INSERT OR IGNORE INTO learning_operations("
+                "workspace_id,id,request_hash,kind,status) VALUES(?,?,?,?,?)",
+                (
+                    str(row["workspace_id"]),
+                    operation_id,
+                    "",
+                    "assessment.configured_preparation.worker",
+                    "RUNNING",
+                ),
+            )
+
         error: QuestionEngineRuntimeError | None = None
         try:
             self.question_engine.generate_assessment_set(
@@ -691,7 +715,7 @@ class LearningOrchestrator:
                 node_id=str(row["node_id"]),
                 preparation_key=str(row["configuration_id"]),
                 slots=slots,
-                operation_id=str(row["operation_id"]),
+                operation_id=operation_id,
                 should_cancel=cancelled,
                 progress=progress,
             )
