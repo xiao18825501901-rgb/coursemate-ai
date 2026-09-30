@@ -770,7 +770,14 @@ class LearningOrchestrator:
                     (prepared, row["id"]),
                 )
                 return {"id": str(row["id"]), "status": "CANCELLED"}
-            if prepared == len(slots):
+            # Completion is measured against the configuration's full slot count, not
+            # the length of the work list this attempt was given.  Those differ on a
+            # resume: a preparation with two slots already bound is offered only the
+            # three missing ones, so after filling them prepared is 5 while len(slots)
+            # is 3, the equality below never held, and the preparation sat BLOCKED with
+            # every slot bound and no way to finish.
+            total_slots = int(current["total_slots"] or 0) or len(slots)
+            if prepared >= total_slots:
                 if error is not None:
                     self._recover_completed_configuration(db, current, prepared)
                 else:
