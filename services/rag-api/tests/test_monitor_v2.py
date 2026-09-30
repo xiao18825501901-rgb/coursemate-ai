@@ -49,7 +49,9 @@ def test_backup_monitor_accepts_fresh_complete_backup_and_ignores_partial(tmp_pa
     result = monitor.check_backup(tmp_path, timedelta(hours=26), now)
 
     assert result.ok is True
-    assert result.detail == "latest backup age is 3600s"
+    # The detail now also reports the size the next backup would need and the
+    # space available, so the check states a capacity fact instead of only an age.
+    assert result.detail.startswith("latest backup age is 3600s")
 
 
 def test_backup_monitor_fails_closed_for_stale_or_incomplete_backup(tmp_path: Path) -> None:
@@ -65,6 +67,52 @@ def test_backup_monitor_fails_closed_for_stale_or_incomplete_backup(tmp_path: Pa
     incomplete = monitor.check_backup(tmp_path, timedelta(hours=26), now)
     assert incomplete.ok is False
     assert incomplete.detail == "no completed backup was found"
+
+
+def _free_space(monkeypatch: pytest.MonkeyPatch, monitor: ModuleType, free: int) -> None:
+    class _Usage:
+        def __init__(self, free_bytes: int) -> None:
+            self.free = free_bytes
+
+    monkeypatch.setattr(monitor.shutil, "disk_usage", lambda _path: _Usage(free))
+
+
+def test_backup_monitor_fails_when_the_next_backup_does_not_fit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An absolute free-space floor does not express this failure.
+
+    On the deployment this check was written for, the floor is 1 GiB while one
+    backup occupies 1.7 GiB: the disk passes its own check and still has no room
+    for the next backup.  Comparing free space with the last backup's real size
+    turns that into a reported condition instead of a silent cliff.
+    """
+    monitor = _monitor_module()
+    now = datetime(2026, 8, 14, tzinfo=UTC)
+    backup = _completed_backup(tmp_path, now - timedelta(hours=1))
+    backup.joinpath("big.bin").write_bytes(b"x" * 4096)
+    _free_space(monkeypatch, monitor, 1024)
+
+    result = monitor.check_backup(tmp_path, timedelta(hours=26), now)
+
+    assert result.ok is False
+    assert "does not fit" in result.detail
+    assert "occupies" in result.detail
+    assert "1024 bytes are free" in result.detail
+
+
+def test_backup_monitor_accepts_a_backup_that_still_fits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monitor = _monitor_module()
+    now = datetime(2026, 8, 14, tzinfo=UTC)
+    _completed_backup(tmp_path, now - timedelta(hours=1))
+    _free_space(monkeypatch, monitor, 10**12)
+
+    result = monitor.check_backup(tmp_path, timedelta(hours=26), now)
+
+    assert result.ok is True
+    assert "bytes free" in result.detail
 
 
 def test_backup_monitor_ignores_symlinked_completed_backup(

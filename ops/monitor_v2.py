@@ -127,14 +127,50 @@ def check_backup(backup_root: Path, max_age: timedelta, now: datetime) -> Check:
         candidates.append((created_at.astimezone(timezone.utc), candidate))
     if not candidates:
         return Check("backup", False, "no completed backup was found")
-    created_at, _ = max(candidates, key=lambda item: item[0])
+    created_at, latest = max(candidates, key=lambda item: item[0])
     age = now.astimezone(timezone.utc) - created_at
     if age < -timedelta(minutes=5):
         return Check("backup", False, "latest backup timestamp is in the future")
     age_seconds = max(0, round(age.total_seconds()))
     if age > max_age:
         return Check("backup", False, f"latest backup is stale ({age_seconds}s old)")
-    return Check("backup", True, f"latest backup age is {age_seconds}s")
+
+    # A backup that cannot be replaced is the failure this check exists to prevent,
+    # and an absolute free-space threshold does not express it: on this deployment
+    # the floor is 1 GiB while one backup occupies 1.7 GiB, so the disk can pass
+    # its own check and still have no room for the next backup.  Measuring the
+    # last backup and comparing it with free space turns that silent cliff into a
+    # reported condition with the numbers attached.
+    previous_size = _directory_size(latest)
+    try:
+        free_bytes = shutil.disk_usage(backup_root).free
+    except OSError:
+        free_bytes = None
+    headroom = f"latest backup age is {age_seconds}s"
+    if previous_size:
+        headroom += f", the last one occupies {previous_size} bytes"
+    if free_bytes is not None:
+        headroom += f", {free_bytes} bytes free"
+        if previous_size and free_bytes < previous_size:
+            return Check(
+                "backup",
+                False,
+                "the next backup does not fit: the last one occupies "
+                f"{previous_size} bytes and only {free_bytes} bytes are free",
+            )
+    return Check("backup", True, headroom)
+
+
+def _directory_size(path: Path) -> int:
+    """Bytes actually stored under one backup directory."""
+    total = 0
+    for entry in path.rglob("*"):
+        try:
+            if entry.is_file() and not entry.is_symlink():
+                total += entry.stat().st_size
+        except OSError:
+            continue
+    return total
 
 
 def check_disk(path: Path, minimum_free_bytes: int) -> Check:
