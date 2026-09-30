@@ -32,10 +32,10 @@ from app.learning.task_spec import (
     build_task_spec,
 )
 
-QUESTION_AUTHOR_PROMPT_VERSION: Final = "question-author.v4"
+QUESTION_AUTHOR_PROMPT_VERSION: Final = "question-author.v5"
 QUESTION_AUTHOR_SCHEMA_VERSION: Final = "question-author-output.v4"
 RULE_VIOLATION_POLICY_VERSION: Final = "question-rule-violation-policy-v1"
-PROMPT_PATH: Final = Path(__file__).with_name("prompts") / "question_author_v4.md"
+PROMPT_PATH: Final = Path(__file__).with_name("prompts") / "question_author_v5.md"
 
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 
@@ -211,7 +211,11 @@ class AuthorProviderRun(Contract):
     region: ShortText
     role: Literal["QUESTION_AUTHOR"]
     template_version: Literal[
-        "question-author.v1", "question-author.v2", "question-author.v3", "question-author.v4"
+        "question-author.v1",
+    "question-author.v2",
+    "question-author.v3",
+    "question-author.v4",
+    "question-author.v5",
     ]
     schema_version: Literal[
         "question-author-output.v1",

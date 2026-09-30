@@ -50,19 +50,29 @@ private object and not in the public question text does not exist.
   `ORDERED_LIST` when order matters, `NUMERIC_TOLERANCE`, `EXACT`, or `SEMANTIC_RUBRIC` with a note.
 The registry, so you can choose without decoding the context:
 
-| profile | covers these question types | and requires these conventions |
-|---|---|---|
-| `P-SQL` | MCQ_SINGLE, SHORT_TEXT, CODE, EXPLANATION | DIALECT, DATA_COMPLETENESS, DUPLICATE_ROWS, ROW_ORDER |
-| `P-DISCRETE` | NUMERIC, SHORT_TEXT, EXPLANATION, MCQ_SINGLE | DATA_COMPLETENESS, BOUNDARY_INCLUSION |
-| `P-COURSE-RULE` | EXPLANATION, SHORT_TEXT, MCQ_SINGLE | ANSWER_FORM |
+| profile | covers these question types | and requires these conventions | and requires these fact roles |
+|---|---|---|---|
+| `P-SQL` | MCQ_SINGLE, SHORT_TEXT, CODE, EXPLANATION | DIALECT, DATA_COMPLETENESS, DUPLICATE_ROWS, ROW_ORDER | GIVEN |
+| `P-DISCRETE` | NUMERIC, SHORT_TEXT, EXPLANATION, MCQ_SINGLE | DATA_COMPLETENESS, BOUNDARY_INCLUSION | GIVEN |
+| `P-COURSE-RULE` | EXPLANATION, SHORT_TEXT, MCQ_SINGLE | ANSWER_FORM | SOURCE_RULE, CLAIM_TO_CRITIQUE |
 
 A NUMERIC question is covered by `P-DISCRETE` and by no other profile.  State every
 convention the chosen profile requires: a measured run lost more positive items to a
 missing convention than to any other single cause.
 * `profile_id` / `profile_version` -- choose from `task_profiles` in the request, which lists
-  each profile with the exact question types it covers and the exact conventions it requires.
-  Pick the one whose `question_types` contains your `question_type`, and state **every** key in its
-  `required_conventions`. If no profile covers this item, return null: an unqualified shape is not
+  each profile with the exact question types it covers, the exact conventions it requires, and the
+  exact fact roles it requires.  Pick the one whose `question_types` contains your `question_type`,
+  state **every** key in its `required_conventions`, and include at least one `facts` entry for
+  **every** role in its `required_roles` -- a `SOURCE_RULE` fact for `SOURCE_RULE`, and a
+  `CLAIM_TO_CRITIQUE` fact for `CLAIM_TO_CRITIQUE`, which is the statement the learner is asked to
+  judge.
+
+  This matters as much as the conventions, and it fails the same way: declaring `P-COURSE-RULE`
+  without supplying both of its required roles produces an incomplete contract, and an incomplete
+  contract cannot be certified -- the item is refused however good the question is.  A measured
+  campus run lost thirteen of twenty-nine sound items to exactly this omission.
+
+  If no profile covers this item, return null: an unqualified shape is not
   a failure, but claiming a profile you do not satisfy is, and the server checks.
 
 Return every key the schema requires. A bounded evaluation lost eleven of seventy
