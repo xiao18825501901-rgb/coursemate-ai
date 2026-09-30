@@ -27,10 +27,18 @@ from typing import Annotated, Any, Final, Literal
 
 from pydantic import Field, StringConstraints, model_validator
 
+from app.learning.answer_agreement import compare_answers
 from app.learning.models import Contract
 
 POLICY_REVISION: Final = "hybrid-strict-v1"
 CASE_MAPPING_VERSION: Final = "hybrid-case-mapping.v1"
+# The combination rule is part of the measured method, so it is versioned into
+# the method identity alongside the prompts.  v2 adds the server's own
+# comparison of the two solutions' machine-readable answers to the
+# answer-agreement case.  Without this the identity would describe only the
+# questions that were asked, and a qualification measured under v1 would go on
+# authorising a procedure that now decides one of its cases differently.
+COMBINATION_VERSION: Final = "hybrid-combination.v2"
 
 CASE_AMBIGUITY: Final = "question.ambiguity.v1"
 CASE_AGREEMENT: Final = "question.answer_agreement.v1"
@@ -435,6 +443,8 @@ def combine_case_verdicts(
     witness_verdicts: list[Any] | None = None,
     completeness: Any | None = None,
     qualification_active: bool = False,
+    solution_a: dict[str, Any] | None = None,
+    solution_b: dict[str, Any] | None = None,
 ) -> tuple[dict[str, str], list[str]]:
     """Combine both reviewer roles into one verdict per required case.
 
@@ -487,6 +497,29 @@ def combine_case_verdicts(
     }
     for case in sorted(extra):
         reasons.append(f"HYBRID_CASE_NOT_REQUIRED:{case}")
+    # The answer-agreement case has a deterministic component that no model vote
+    # can outvote.  Where both solutions expose the same machine-readable answer
+    # the server compares them itself, and a conflict fails the case whatever the
+    # roles said.  The check is refuse-only: agreement, and an unreadable pair,
+    # both leave the case exactly as the two-role rule already decided it, so it
+    # cannot introduce a false accept of its own.
+    if (
+        CASE_AGREEMENT in required_cases
+        and solution_a is not None
+        and solution_b is not None
+    ):
+        agreement = compare_answers(solution_a, solution_b)
+        if agreement.disagrees:
+            combined[CASE_AGREEMENT] = "FAIL"
+            # A verdict that has been replaced must not leave its reason behind:
+            # `reasons` is what decides acceptance, so a stale CASE_UNCERTAIN
+            # would contradict the deterministic failure just recorded.
+            reasons[:] = [
+                reason for reason in reasons if CASE_AGREEMENT not in reason
+            ]
+            reasons.append(
+                f"HYBRID_DETERMINISTIC_ANSWER_DISAGREEMENT:{CASE_AGREEMENT}"
+            )
     # The ambiguity case is governed by the dedicated specification pass and by a
     # human review card, and the two have deliberately **different** authority:
     #
@@ -658,6 +691,7 @@ def method_identity(
     payload = {
         "policy_revision": POLICY_REVISION,
         "case_mapping_version": CASE_MAPPING_VERSION,
+        "combination_version": COMBINATION_VERSION,
         "model_alias": model_alias,
         "provider": provider,
         "protocol": protocol,

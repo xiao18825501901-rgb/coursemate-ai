@@ -431,6 +431,11 @@ class HybridQualityService:
             witness_verdicts=witness_verdicts,
             completeness=completeness,
             qualification_active=qualification_id is not None,
+            # The two solutions go to the combination rule as well as to the
+            # reviewers: the server compares their machine-readable answers
+            # itself rather than leaving that one comparison to a vote.
+            solution_a=inputs.solution_a,
+            solution_b=inputs.solution_b,
         )
         if specification is None:
             reasons.append("HYBRID_SPECIFICATION_PASS_MISSING")

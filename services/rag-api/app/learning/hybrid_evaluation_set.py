@@ -27,6 +27,7 @@ import re
 from dataclasses import dataclass, replace
 from typing import Any, Final
 
+from app.learning.answer_agreement import read_number
 from app.learning.deepseek_reviewer import ReviewerInputs
 from app.learning.hybrid_review import (
     CASE_AGREEMENT,
@@ -207,6 +208,13 @@ def missing_condition(row_inputs: ReviewerInputs) -> ReviewerInputs | None:
     )
 
 
+def _render_number(value: Any) -> str:
+    """Render a contradiction the way an author would have written the answer."""
+    if value == value.to_integral_value():
+        return str(int(value))
+    return format(value.normalize(), "f")
+
+
 def _contradiction(value: Any) -> Any:
     """Derive a concrete, materially different result from a correct one."""
     if isinstance(value, bool):
@@ -214,6 +222,13 @@ def _contradiction(value: Any) -> Any:
     if isinstance(value, (int, float)):
         return value + 1
     if isinstance(value, str):
+        # A number rendered as text is still a number, and the contradiction of
+        # it has to stay in that same channel: "43" against an author's "42" is a
+        # disagreement a machine can see, while a sentence about rejecting the
+        # other solution is only a claim about the pair.
+        number = read_number(value)
+        if number is not None:
+            return _render_number(number + 1)
         # A prose answer cannot be negated mechanically, so the mutation states
         # the rejection explicitly instead of wrapping the original text in a
         # hedge -- a wrapper reads like the same answer and a reviewer that
@@ -233,6 +248,13 @@ def disagreeing_solution(row_inputs: ReviewerInputs) -> ReviewerInputs | None:
     concrete result.  Replacing only a summary sentence while its steps still
     show the original answer leaves a reviewer genuinely able to report
     agreement, so the steps are rewritten too and no agreeing content remains.
+
+    Rewriting the prose is not sufficient on its own, and the measurement said
+    so: an MCQ whose second solution still selected the author's option is not a
+    negative at all in the channel the answer is stored in.  The contradicted
+    answer is therefore written into that channel as well -- a different option
+    index for an MCQ, an explicit `answer` otherwise -- so the defect is present
+    in the fact the case is about and not only in the sentences around it.
     """
     solution_b = dict(row_inputs.solution_b)
     author_answer = row_inputs.solution_a.get("candidate_answer")
@@ -278,6 +300,30 @@ def disagreeing_solution(row_inputs: ReviewerInputs) -> ReviewerInputs | None:
     elif solution_b.get("raw"):
         solution_b["raw"] = contradiction_text
         changed = True
+
+    # The disagreement has to reach the channel the answer is actually stored in.
+    # Rewriting only the prose around the result produced a negative whose two
+    # solutions still selected the same option: the 2026-09-30 run recorded four
+    # such rows that both reviewer roles accepted, correctly, because in the
+    # machine-readable channel the two solutions did agree.  A negative label is
+    # only decidable by construction when the injected defect is really present,
+    # so an MCQ's second solution now selects a different option and every other
+    # kind declares the contradicted answer explicitly.
+    selected = row_inputs.solution_a.get("correct_option_index")
+    option_count = len(row_inputs.options)
+    if (
+        isinstance(selected, int)
+        and not isinstance(selected, bool)
+        and option_count > 1
+    ):
+        solution_b["correct_option_index"] = (selected + 1) % option_count
+        changed = True
+    else:
+        solution_b["answer"] = contradicted
+        if "candidate_answer" in solution_b:
+            solution_b["candidate_answer"] = contradicted
+        changed = True
+
     if not changed:
         return None
     return replace(
@@ -315,10 +361,7 @@ def unsupported_rule(row_inputs: ReviewerInputs) -> ReviewerInputs | None:
         return None
     solution_a = dict(row_inputs.solution_a)
     analysis = solution_a.get("rule_violation_analysis")
-    if isinstance(analysis, dict):
-        mutated = dict(analysis)
-    else:
-        mutated = {}
+    mutated = dict(analysis) if isinstance(analysis, dict) else {}
     mutated["rule_quote"] = (
         "A statement is a violation whenever it is different from the reference."
     )
