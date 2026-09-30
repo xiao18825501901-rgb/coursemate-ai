@@ -506,10 +506,25 @@ class DeepSeekStrongReviewer:
                 "A strong semantic review did not reach a complete terminal.",
                 provider_run=failure.run,
             ) from failure
-        findings = JudgeFindings.model_validate(output)
         # The durable record must exist before the content is used.  The caller
         # persists the returned receipt; nothing here retries a paid call.
         record = StrongReviewRun.model_validate(run)
+        try:
+            findings = JudgeFindings.model_validate(output)
+        except ValueError as error:
+            # A response that does not satisfy the findings schema must become the
+            # same typed failure as a transport problem, with its provider run
+            # attached.  Left unhandled it propagates as a bare ValidationError, which
+            # the durable worker turns into ASSESSMENT_WORKER_FAILED with nothing
+            # recorded about the cause -- the least attributable of the review
+            # failures, and one that cost a live campus preparation whole attempts.
+            # The paid call is not retried here; this only makes the failure readable.
+            raise StrongReviewError(
+                "HYBRID_REVIEW_UNPARSEABLE",
+                "The strong review response did not satisfy its schema: "
+                f"{type(error).__name__}: {str(error)[:300]}",
+                provider_run=record,
+            ) from error
         response_text = json.dumps(
             findings.model_dump(mode="json"), ensure_ascii=False, sort_keys=True
         )
