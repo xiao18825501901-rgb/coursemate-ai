@@ -171,6 +171,54 @@ def _timeout_kind(error: BaseException) -> str | None:
     return None
 
 
+def repair_stray_quotes(candidate: str) -> str | None:
+    """Escape quote characters that were meant to sit inside a string value.
+
+    A model writing prose inside a JSON string sometimes emits a bare quote --
+    quoting another solution's step numbering, say -- which ends the string early and
+    makes the whole document unparseable.  A live review was lost exactly that way,
+    and because the response was otherwise complete and well terminated, the parse
+    failure surfaced as a schema rejection and read like a content problem.
+
+    Only a quote that cannot be structural is escaped: one not followed by the
+    punctuation that ends a key or a value.  The repaired text is returned only when
+    it actually parses, so a guess is never passed on, and the caller still validates
+    whatever comes back against its schema.  Backslash escapes already present are
+    copied through untouched.
+    """
+    out: list[str] = []
+    in_string = False
+    index = 0
+    length = len(candidate)
+    while index < length:
+        char = candidate[index]
+        if in_string and char == "\\":
+            out.append(candidate[index : index + 2])
+            index += 2
+            continue
+        if char == '"':
+            if not in_string:
+                in_string = True
+                out.append(char)
+            else:
+                rest = candidate[index + 1 :].lstrip()
+                if rest[:1] in {":", ",", "}", "]", ""}:
+                    in_string = False
+                    out.append(char)
+                else:
+                    out.append('\\"')
+            index += 1
+            continue
+        out.append(char)
+        index += 1
+    repaired = "".join(out)
+    try:
+        json.loads(repaired)
+    except ValueError:
+        return None
+    return repaired
+
+
 def extract_json_object(text: str) -> str | None:
     """The one JSON object a response body contains, if it contains one.
 
@@ -181,7 +229,11 @@ def extract_json_object(text: str) -> str | None:
     """
     stripped = text.strip()
     if stripped.startswith("{") and stripped.endswith("}"):
-        return None  # already a bare object; the schema rejection is about content
+        # A bare object is normally left to the caller's schema check.  One that does
+        # not parse at all is different: it never reaches the schema, so the failure
+        # is reported as a content rejection when it is a syntax one.  Repaired only
+        # when the repair demonstrably parses.
+        return repair_stray_quotes(stripped)
     start = stripped.find("{")
     end = stripped.rfind("}")
     if start == -1 or end <= start:
@@ -192,7 +244,7 @@ def extract_json_object(text: str) -> str | None:
     try:
         json.loads(candidate)
     except ValueError:
-        return None
+        return repair_stray_quotes(candidate)
     return candidate
 
 
