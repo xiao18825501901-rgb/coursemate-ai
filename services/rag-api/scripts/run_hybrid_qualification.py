@@ -431,12 +431,27 @@ def main() -> int:
         private_course_id=str(workspace["private_course_id"]),
     )
     def resolve_node(node_id: str):
-        """The objective and its frozen evidence pack for one node."""
+        """The objective and its frozen evidence pack for one node.
+
+        The node is also checked for the one thing that can stop every item it
+        would produce: an objective whose text cannot form a valid blueprint.  A
+        bounded evaluation lost twelve of seventy item slots to three such nodes,
+        each reporting the same blueprint validation error for each item kind, so
+        the check happens once per node instead of once per item.
+        """
         with database.connect() as connection:
             node_objective = resolve_objective(connection, node_id=node_id)
-        return node_objective, build_evidence_pack(
-            database, objective=node_objective, access=access
+        evidence = build_evidence_pack(database, objective=node_objective, access=access)
+        _blueprint(
+            objective=node_objective,
+            evidence=evidence,
+            course_id=str(workspace["course_id"]),
+            node_id=node_id,
+            spec_hash=node_objective.spec_content_hash,
+            kind=selected_kinds[0],
+            index=0,
         )
+        return node_objective, evidence
 
     provider = LearningProvider(
         settings.model_copy(update={"database_path": target.path})

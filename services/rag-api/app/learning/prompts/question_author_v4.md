@@ -54,6 +54,31 @@ private object and not in the public question text does not exist.
   `required_conventions`. If no profile covers this item, return null: an unqualified shape is not
   a failure, but claiming a profile you do not satisfy is, and the server checks.
 
+Return every key the schema requires. A bounded evaluation lost eleven of seventy
+item slots to the same omission -- the model returned a complete, otherwise usable
+response without `candidate_answer` -- and a missing required key rejects the whole
+response. The complete top-level shape is:
+
+```json
+{
+  "schema_version": "question-author-output.v4",
+  "question_text": "<the public question, exactly as the learner sees it>",
+  "options": [],
+  "candidate_answer": "<the answer; required for every question type>",
+  "correct_option_index": null,
+  "distractor_rationales": [],
+  "rule_violation_analysis": null,
+  "solution_steps": [ { "ordinal": 1, "operation": "...", "result": "...",
+                        "explanation": "...", "source_refs": ["<evidence id>"] } ],
+  "source_refs": ["<evidence id>"],
+  "task_contract": { }
+}
+```
+
+`candidate_answer`, `question_text`, `solution_steps` and `source_refs` are required
+for every question type. `options` and `distractor_rationales` are required only for
+`MCQ_SINGLE`, and must be empty and null respectively for every other type.
+
 Return `task_contract` with **exactly these key names**. A first live run returned
 `fact` instead of `statement`, and the whole item was refused for it:
 

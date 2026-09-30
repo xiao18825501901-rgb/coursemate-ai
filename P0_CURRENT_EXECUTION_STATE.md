@@ -432,6 +432,71 @@ objective text cannot form a valid blueprint ended the whole seventy-item run, a
 the blueprint was built outside the per-item guard.  A node that cannot produce an
 item is now a recorded skip.
 
+## The fresh evaluation: 24 topics, and what it actually measures (2026-09-30)
+
+`fresh-eval-20260929T233229Z.json`.  24 different topics of the SQL course, three
+item kinds each, one item per (topic, kind) -- 72 planned item slots, 42 independent
+negative families, 144 dataset rows and 140 outcomes.  Every family is a different
+topic rather than a sibling of three, so the independence claim means something.
+
+```
+false_accept                    0 / 99 negatives, on every case
+release_precision               1.0
+release_recall (release mode)   0.463   (pre-registered floor 0.5)
+release_recall (overall)        0.759
+negative_abstain                33
+positive true_accept            19   of 41 positive rows
+positive false_reject           3
+independent negative families   42
+zero-false-accept 95% bound     6.9%   (one-sided, 99 negatives)
+certificates per positive row   22 COMPLETE, 16 INCOMPLETE, 3 NOT_SUPPORTED
+harness decision                DRAFT, coverage_sufficient False
+```
+
+Per case, every case again has zero false accepts: ambiguity 0/33, agreement 0/42,
+mcq 0/15, rule 0/9.
+
+### What actually limits it, and it is not the gate
+
+**30 of 72 item slots produced no item at all** -- a 42 % authoring failure rate.
+That is now the binding constraint, and it is measured rather than inferred:
+
+| count | cause |
+|---|---|
+| 12 | three nodes whose `objective_text` cannot form a valid blueprint ("must name an observable action"), once per item kind |
+| 11 | the model returned a complete response with no `candidate_answer` -- a required field, so the whole response was rejected |
+| 4 | the rule-violation question was not bound to an exact course rule |
+| 1 | a rule analysis returned under a non-rule policy |
+| 1 | `facts.0.statement: string_too_long` |
+| 1 | the independent solver produced no usable result |
+
+On the certificate side, the failing checks on positive rows are led by
+`role_present:CLAIM_TO_CRITIQUE` (7), `convention_stated:DATA_COMPLETENESS` (4),
+`role_present:GIVEN` (4) and `registered_profile` (3) -- that is, items whose author
+either named no profile or declared the wrong one.
+
+Three conclusions, in order of importance:
+
+1. **The gate is safe on a fresh, wider set.**  99 negatives, no case, no run
+   produced a false accept, and the one-sided upper bound on that observation is
+   6.9 %.  This is the strongest safety evidence the project has produced.
+2. **The gate is not what is blocking publication.**  More than half the positives
+   cannot even reach the certificate because the author never produced a usable
+   item or produced a contract naming the wrong profile.
+3. **The next work is authoring robustness and node selection, not gate loosening.**
+   Loosening the gate would raise recall by releasing items that currently have no
+   positive evidence, which is the direction the measurements say not to move.
+
+### Fixed immediately from that measurement
+
+* A node whose objective cannot form a valid blueprint is now skipped once, at
+  selection, instead of failing every item kind -- twelve slots recovered.
+* The author prompt carries the complete required top-level shape, `candidate_answer`
+  named explicitly: a missing required key rejects a whole paid response.
+* A single fact statement may now run to 2 000 characters rather than 800, because a
+  statement that carries a schema or a worked condition legitimately runs long and
+  exceeding the bound cost a whole paid call.
+
 ## What the next round has to do first
 
 1. Take the trusted backup and prove a restore, and only then let anything write.

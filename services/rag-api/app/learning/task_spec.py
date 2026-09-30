@@ -103,6 +103,13 @@ ShortText = Annotated[
 ProjectionText = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=8_000)
 ]
+# A single fact is one statement the learner sees.  The bound is generous because a
+# statement that carries a full schema or a worked condition legitimately runs long,
+# and a model that exceeds a bound loses the entire paid authoring call: one measured
+# run lost a call to "facts.0.statement: string_too_long".
+FactStatement = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)
+]
 Hex64 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 
 ROLE_PREMISE: Final[frozenset[str]] = frozenset({"GIVEN", "EXERCISE_ASSUMPTION", "SOURCE_RULE"})
@@ -123,7 +130,7 @@ class TaskFact(Contract):
     fact_id: Identifier
     role: TaskRole
     origin: FactOrigin
-    statement: ShortText
+    statement: FactStatement
     source_span_id: Identifier | None = None
 
     @model_validator(mode="after")
