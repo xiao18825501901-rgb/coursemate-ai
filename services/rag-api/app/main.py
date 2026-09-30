@@ -33,6 +33,7 @@ from app.learning.deepseek_reviewer import DeepSeekStrongReviewer
 from app.learning.hybrid_quality import HybridQualityService
 from app.learning.openjev_observer import OpenJevLocalObserver
 from app.learning.orchestrator import LearningOrchestrator
+from app.learning.provider import LearningProvider
 from app.rag.answers import (
     AnswerProvider,
     DeepSeekAnswerProvider,
