@@ -9,7 +9,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.cm_update.auth import current_user
 from app.course_access import require_course_access
 from app.errors import ApiError
-from app.visual.service import FrozenVisualInput, VisualQuotaExceeded, VisualService
+from app.visual.service import (
+    FrozenVisualInput,
+    VisualAssistanceNotEnabled,
+    VisualQuotaExceeded,
+    VisualService,
+)
 from app.visual.store import IdempotencyConflict, VisualStateConflict
 
 User = Annotated[dict, Depends(current_user)]
@@ -27,6 +32,24 @@ class CreateVisualRequest(StrictRequest):
 
 class RetryVisualRequest(StrictRequest):
     request_id: str = Field(min_length=8, max_length=200)
+
+
+class VisualAssistancePreferenceRequest(StrictRequest):
+    request_id: str = Field(min_length=8, max_length=200)
+    enabled: bool
+    consent_version: Literal["visual-assistance-v1"] = "visual-assistance-v1"
+
+
+def _project_preference(value: dict[str, object], service: VisualService) -> dict[str, object]:
+    enabled = bool(value["enabled"])
+    return {
+        "enabled": enabled,
+        "image_enabled": enabled,
+        "video_enabled": enabled and service.settings.visual_video_enabled,
+        "consent_version": value["consent_version"],
+        "enabled_at": value["enabled_at"],
+        "updated_at": value["updated_at"],
+    }
 
 
 def _authorize_course(request: Request, course_id: str, user_id: str):
@@ -103,6 +126,13 @@ def _evidence(message: dict) -> tuple[dict[str, str], ...]:
 
 def _project(service: VisualService, job: dict[str, object], *, user_id: str) -> dict[str, object]:
     assets = service.store.assets_for_job(str(job["id"]), user_id=user_id)
+    projected_status = job["status"]
+    if (
+        projected_status == "RENDERING"
+        and job.get("renderer_wait_started_at")
+        and not job.get("renderer_ready_at")
+    ):
+        projected_status = "WAITING_FOR_RENDERER"
     return {
         "id": job["id"],
         "parent_job_id": job["parent_job_id"],
@@ -111,7 +141,7 @@ def _project(service: VisualService, job: dict[str, object], *, user_id: str) ->
         "pair_id": job["pair_id"],
         "message_id": job["message_id"],
         "action": job["action"],
-        "status": job["status"],
+        "status": projected_status,
         "renderer": job["renderer"],
         "cache_hit": bool(job["cache_hit"]),
         "retry_count": job["retry_count"],
@@ -119,6 +149,9 @@ def _project(service: VisualService, job: dict[str, object], *, user_id: str) ->
         "error_code": job["error_code"],
         "created_at": job["created_at"],
         "updated_at": job["updated_at"],
+        "renderer_wait_started_at": job.get("renderer_wait_started_at"),
+        "renderer_ready_at": job.get("renderer_ready_at"),
+        "renderer_wait_seconds": job.get("renderer_wait_seconds"),
         "assets": [
             {
                 "id": asset["id"],
@@ -138,6 +171,33 @@ def _project(service: VisualService, job: dict[str, object], *, user_id: str) ->
 
 def visual_router(service: VisualService) -> APIRouter:
     router = APIRouter(prefix="/api/ui/v1")
+
+    @router.get("/courses/{course_id}/visual-assistance")
+    def get_visual_assistance(course_id: str, user: User, request: Request):
+        _authorize_course(request, course_id, user["id"])
+        return _project_preference(
+            service.store.get_assistance_preference(user["id"], course_id), service
+        )
+
+    @router.put("/courses/{course_id}/visual-assistance")
+    def put_visual_assistance(
+        course_id: str,
+        data: VisualAssistancePreferenceRequest,
+        user: User,
+        request: Request,
+    ):
+        _authorize_course(request, course_id, user["id"])
+        try:
+            preference, _ = service.store.set_assistance_preference(
+                user["id"],
+                course_id,
+                enabled=data.enabled,
+                consent_version=data.consent_version,
+                request_id=data.request_id,
+            )
+        except IdempotencyConflict:
+            raise HTTPException(409, "请求编号已用于不同的视觉辅助设置") from None
+        return _project_preference(preference, service)
 
     @router.post("/courses/{course_id}/messages/{message_id}/visuals", status_code=202)
     def create_visual(
@@ -181,6 +241,8 @@ def visual_router(service: VisualService) -> APIRouter:
             raise HTTPException(409, "请求编号已用于不同的可视化") from None
         except VisualQuotaExceeded as error:
             raise HTTPException(429, "当前可视化额度或并发已满，请稍后再试") from error
+        except VisualAssistanceNotEnabled:
+            raise HTTPException(409, "请先开启图片/视频辅助") from None
         except RuntimeError as error:
             if str(error) in {"AUTO_VISUAL_DISABLED", "VISUAL_ENGINE_DISABLED"}:
                 raise HTTPException(409, "当前未启用自动可视化") from None

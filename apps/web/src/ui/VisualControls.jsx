@@ -12,6 +12,8 @@ export class VisualControls extends React.Component {
     componentDidUpdate(previous) {
         if (previous.message.id !== this.props.message.id || previous.pairId !== this.props.pairId || previous.courseId !== this.props.courseId) {
             this.stopAll(); this.setState({ jobs: [], error: '' }, () => this.load());
+        } else if (!previous.assistanceEnabled && this.props.assistanceEnabled) {
+            this.load();
         }
     }
     componentWillUnmount() { this.unmounted = true; this.stopAll(); }
@@ -23,15 +25,29 @@ export class VisualControls extends React.Component {
         try {
             const result = await listMessageVisuals(this.props.courseId, this.props.message.id);
             if (this.unmounted || revision !== this.revision) return;
-            this.setState({ jobs: result.items || [], error: '' });
+            const jobs = result.items || [];
+            this.setState({ jobs, error: '' });
             for (const job of result.items || []) if (!TERMINAL.has(job.status)) this.poll(job.id, revision);
+            if (this.props.autoEnabled && this.props.assistanceEnabled && jobs.length === 0) {
+                const autoKey = `visual-auto-${this.props.message.id}`.slice(0, 200);
+                if (this.autoStartedFor !== autoKey) {
+                    this.autoStartedFor = autoKey;
+                    await this.create('auto', autoKey);
+                }
+            }
         } catch (error) { if (!this.unmounted && revision === this.revision) this.setState({ error: error.message }); }
     }
-    async create(action) {
+    async create(action, requestId = null) {
         if (this.state.busy) return;
+        if (['visual', 'animate'].includes(action) && !this.props.assistanceEnabled) {
+            this.props.requestAssistance?.(() => this.create(action, requestId));
+            return;
+        }
         this.setState({ busy: true, error: '' });
         try {
-            const job = await createVisual(this.props.courseId, this.props.message.id, this.props.pairId, action);
+            const job = requestId
+                ? await createVisual(this.props.courseId, this.props.message.id, this.props.pairId, action, requestId)
+                : await createVisual(this.props.courseId, this.props.message.id, this.props.pairId, action);
             this.replace(job); this.poll(job.id, this.revision);
         } catch (error) { this.setState({ error: error.message }); this.props.toast?.(error.message); }
         finally { if (!this.unmounted) this.setState({ busy: false }); }
@@ -66,7 +82,7 @@ export class VisualControls extends React.Component {
         return <div className="visual-controls">
             <div className="visual-actions" aria-label="视觉学习操作">
                 <button type="button" disabled={this.state.busy} onClick={() => this.create('diagram')}>显示图解</button>
-                <button type="button" disabled={this.state.busy} onClick={() => this.create('visual')}>生成视觉</button>
+                <button type="button" disabled={this.state.busy} onClick={() => this.create('visual')}>生成图片</button>
                 <button type="button" disabled={this.state.busy} onClick={() => this.create('animate')}>动画展示</button>
             </div>
             {this.state.error && <p className="visual-error">{this.state.error}</p>}

@@ -130,9 +130,8 @@ class Settings(BaseSettings):
     ui_task_agent_url: str = ""
     ui_task_agent_timeout_seconds: float = Field(default=60.0, ge=1.0, le=300.0)
     ui_web_dir: Path = Field(default=Path("../../apps/web/dist"))
-    # Visual Learning Engine Phase A is entirely opt-in and local/mock by
-    # default. A later phase may add a real provider, but selecting one here
-    # cannot silently create a network path.
+    # The visual engine remains off and local/mock by default. Selecting the
+    # real provider is explicit and requires both endpoint and protected token.
     visual_engine_enabled: bool = False
     visual_provider: Literal["mock", "aliyun_eas"] = "mock"
     visual_auto_enabled: bool = False
@@ -150,6 +149,15 @@ class Settings(BaseSettings):
     visual_max_duration_seconds: float = Field(default=15.0, ge=0.5, le=120.0)
     visual_max_retries: int = Field(default=1, ge=0, le=5)
     visual_mock_complete_after_polls: int = Field(default=2, ge=1, le=20)
+    visual_eas_endpoint: str = Field(
+        default="", validation_alias=AliasChoices("COMFYUI_EAS_ENDPOINT")
+    )
+    visual_eas_token: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("COMFYUI_EAS_TOKEN")
+    )
+    visual_provider_request_timeout_seconds: float = Field(default=420.0, ge=1.0, le=900.0)
+    visual_image_render_deadline_seconds: float = Field(default=900.0, ge=10.0, le=1800.0)
+    visual_renderer_poll_max_seconds: float = Field(default=15.0, ge=0.1, le=60.0)
     # Canvas credentials are stored under an authenticated-encryption key that lives here and
     # nowhere else: not in the database, not in the repository, not in a log. Without it the
     # integration reports itself unconfigured instead of storing a token in the clear.
@@ -260,11 +268,33 @@ class Settings(BaseSettings):
             raise ValueError("aliyun_oss storage requires the V3 storage metadata schema")
         if self.visual_engine_enabled and not self.v3_enabled:
             raise ValueError("visual engine requires the V3 schema")
-        if self.visual_engine_enabled and self.visual_provider != "mock":
-            raise ValueError(
-                "Phase A visual engine supports only the local mock provider; "
-                "aliyun_eas is a fail-closed future seam"
+        if self.visual_engine_enabled and self.visual_provider == "aliyun_eas":
+            if not self.visual_eas_endpoint.strip() or not self.visual_eas_token:
+                raise ValueError(
+                    "COMFYUI_EAS_ENDPOINT and COMFYUI_EAS_TOKEN are required for aliyun_eas"
+                )
+            endpoint = urlsplit(self.visual_eas_endpoint)
+            hostname = (endpoint.hostname or "").lower()
+            official_http_gateway = (
+                endpoint.scheme == "http"
+                and hostname.endswith(".pai-eas.aliyuncs.com")
+                and hostname.count(".") >= 5
             )
+            if (
+                endpoint.scheme not in {"http", "https"}
+                or not hostname
+                or (endpoint.scheme == "http" and not official_http_gateway)
+                or endpoint.username is not None
+                or endpoint.password is not None
+                or endpoint.port is not None
+                or endpoint.path not in {"", "/"}
+                or endpoint.query
+                or endpoint.fragment
+            ):
+                raise ValueError(
+                    "COMFYUI_EAS_ENDPOINT must be an HTTPS origin or an exact official "
+                    "PAI-EAS shared-gateway HTTP origin"
+                )
         if self.jev_provider == "openjev":
             missing: list[str] = []
             if not self.openjev_endpoint.strip():

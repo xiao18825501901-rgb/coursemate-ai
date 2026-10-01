@@ -224,9 +224,11 @@ def test_ui_reports_integrated_config_without_leaking_secrets(client: TestClient
         "campus_access_mode",
         "student_verification_required_for_campus",
         "verification_effective_at",
-        "reasoning_policy",
-        "visual_engine_enabled",
-    }
+            "reasoning_policy",
+            "visual_engine_enabled",
+            "visual_auto_enabled",
+            "visual_video_enabled",
+        }
     assert body["campus_access_mode"] == "open_to_registered"
     assert body["student_verification_required_for_campus"] is False
     assert body["verification_effective_at"] is None

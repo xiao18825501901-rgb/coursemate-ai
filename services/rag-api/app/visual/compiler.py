@@ -24,6 +24,8 @@ class CompiledVisual(BaseModel):
     frames: int | None = None
     duration_seconds: float | None = None
     seed: int = 0
+    steps: int = Field(default=20, ge=1, le=100)
+    cfg: float = Field(default=8.0, ge=0.0, le=30.0)
     overlays: list[Overlay] = Field(default_factory=list)
     deterministic_source: str = ""
 

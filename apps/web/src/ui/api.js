@@ -98,7 +98,9 @@ export const cancelExplanation = (id) => send(`/explanations/${id}/cancel`, {});
 // Visual Learning Engine. Status reads are GET-only and can never enqueue work.
 export const listMessageVisuals = (courseId, messageId) => request(`/courses/${encodeURIComponent(courseId)}/messages/${encodeURIComponent(messageId)}/visuals`);
 export const listPairVisuals = (courseId, pairId) => request(`/courses/${encodeURIComponent(courseId)}/pairs/${encodeURIComponent(pairId)}/visuals`);
-export const createVisual = (courseId, messageId, pairId, action) => send(`/courses/${encodeURIComponent(courseId)}/messages/${encodeURIComponent(messageId)}/visuals`, { request_id: key(), pair_id: pairId, action });
+export const createVisual = (courseId, messageId, pairId, action, requestId = null) => send(`/courses/${encodeURIComponent(courseId)}/messages/${encodeURIComponent(messageId)}/visuals`, { request_id: requestId || key(), pair_id: pairId, action });
+export const getVisualAssistance = (courseId) => request(`/courses/${encodeURIComponent(courseId)}/visual-assistance`);
+export const setVisualAssistance = (courseId, enabled) => send(`/courses/${encodeURIComponent(courseId)}/visual-assistance`, { request_id: key(), enabled, consent_version: 'visual-assistance-v1' }, 'PUT');
 export const getVisualJob = (jobId) => request(`/visual-jobs/${encodeURIComponent(jobId)}`);
 export const cancelVisualJob = (jobId) => send(`/visual-jobs/${encodeURIComponent(jobId)}/cancel`, {});
 export const retryVisualJob = (jobId) => send(`/visual-jobs/${encodeURIComponent(jobId)}/retry`, { request_id: key() });

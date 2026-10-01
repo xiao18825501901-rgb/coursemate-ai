@@ -22,7 +22,8 @@ const paths = {
     shareCourse: 'M5 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4M19 4a2 2 0 1 0 0 4 2 2 0 0 0 0-4M19 16a2 2 0 1 0 0 4 2 2 0 0 0 0-4M6 8h3l4 5M9 13l4 5h3M7 6v3M17 6v3M17 18v-3M7 18v-3',
     sun: 'M12 3v2M12 19v2M5.64 5.64l1.42 1.42M16.94 16.94l1.42 1.42M3 12h2M19 12h2M5.64 18.36l1.42-1.42M16.94 7.06l1.42-1.42M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
     moon: 'M20.7 15.2A8.5 8.5 0 0 1 8.8 3.3 8.5 8.5 0 1 0 20.7 15.2z',
-    gauge: 'M4 16a8 8 0 1 1 16 0M12 12l3-3M5 18h14'
+    gauge: 'M4 16a8 8 0 1 1 16 0M12 12l3-3M5 18h14',
+    image: 'M3 4h18v16H3zM7 15l3-3 3 3 2-2 4 4M8 9h.01'
 };
 export function Icon({ name, ...props }) { return <svg className="ico" viewBox="0 0 24 24" aria-hidden="true" {...props}><path d={paths[name] || paths.book}/></svg>; }
 export function IconButton({ name, title, onClick, ...props }) { return <button type="button" className="icon-btn" title={title} aria-label={title} onClick={onClick} {...props}><Icon name={name}/></button>; }

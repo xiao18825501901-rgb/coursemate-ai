@@ -1,0 +1,23 @@
+{
+  "min": 0,
+  "max": 1,
+  "behavior": {
+    "onZero": {
+      "interceptTraffic": true,
+      "scaleDownGracePeriodSeconds": 300,
+      "scaleUpActivationReplicas": 1
+    },
+    "scaleDown": {
+      "stabilizationWindowSeconds": 300
+    },
+    "scaleUp": {
+      "stabilizationWindowSeconds": 0
+    }
+  },
+  "scaleStrategies": [
+    {
+      "metricName": "qps",
+      "threshold": 1
+    }
+  ]
+}

@@ -7,10 +7,17 @@ import pytest
 from app.config import Settings
 from app.db import Database
 from app.storage.backends import LocalStorageBackend
+from app.visual.api import _project
 from app.visual.planner import MockVisualPlannerProvider
+from app.visual.providers.aliyun_eas import ProviderRendererUnavailable
 from app.visual.providers.base import ProviderResult
 from app.visual.providers.mock_comfy import MockComfyProvider
-from app.visual.service import FrozenVisualInput, VisualQuotaExceeded, VisualService
+from app.visual.service import (
+    FrozenVisualInput,
+    VisualAssistanceNotEnabled,
+    VisualQuotaExceeded,
+    VisualService,
+)
 from app.visual.store import VisualJobStore, VisualStateConflict
 from app.visual.workflows import WorkflowRegistry
 
@@ -44,6 +51,13 @@ def make_service(
         storage=LocalStorageBackend(settings.upload_dir / "objects"),
         workflows=WorkflowRegistry.default_mock(),
         settings=settings,
+    )
+    service.store.set_assistance_preference(
+        "user-1",
+        "course-1",
+        enabled=True,
+        consent_version="visual-assistance-v1",
+        request_id="test-preference-enable",
     )
     return service, provider
 
@@ -108,6 +122,49 @@ def test_deterministic_diagram_never_invokes_provider(tmp_path: Path) -> None:
     asset = service.store.assets_for_job(str(completed["id"]), user_id="user-1")[0]
     assert asset["mime_type"] == "image/svg+xml"
     assert asset["semantic_validation"] == "PASS"
+
+
+def test_disabled_assistance_blocks_generative_provider_but_not_diagram(tmp_path: Path) -> None:
+    service, provider = make_service(tmp_path)
+    service.store.set_assistance_preference(
+        "user-1",
+        "course-1",
+        enabled=False,
+        consent_version="visual-assistance-v1",
+        request_id="test-preference-disable",
+    )
+    generative, _ = service.create_job(request())
+    blocked = service.run_once("worker-1")
+    assert blocked is not None and blocked["id"] == generative["id"]
+    assert blocked["status"] == "FAILED"
+    assert blocked["error_code"] == "VISUAL_ASSISTANCE_NOT_ENABLED"
+    assert provider.submit_count == 0
+
+    diagram_value = request(request_id="request-diagram-off", question="Show the CPU pipeline")
+    diagram_value = FrozenVisualInput(**{**diagram_value.__dict__, "action": "diagram"})
+    service.create_job(diagram_value)
+    assert service.run_once("worker-1")["status"] == "COMPLETED"
+    assert provider.submit_count == 0
+
+
+def test_auto_request_is_rejected_before_job_or_planner_when_assistance_is_off(
+    tmp_path: Path,
+) -> None:
+    service, provider = make_service(tmp_path, visual_auto_enabled=True)
+    service.store.set_assistance_preference(
+        "user-1",
+        "course-1",
+        enabled=False,
+        consent_version="visual-assistance-v1",
+        request_id="test-preference-auto-off",
+    )
+    value = request(request_id="request-auto-off")
+    value = FrozenVisualInput(**{**value.__dict__, "action": "auto"})
+    with pytest.raises(VisualAssistanceNotEnabled, match="VISUAL_ASSISTANCE_NOT_ENABLED"):
+        service.create_job(value)
+    assert provider.submit_count == 0
+    with service.store.database.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM visual_jobs").fetchone()[0] == 0
 
 
 def test_invalid_provider_output_fails_without_publishing_asset(tmp_path: Path) -> None:
@@ -222,12 +279,110 @@ def test_stale_rendering_lease_resumes_same_provider_job_without_resubmit(
     assert provider.submit_count == 1
 
     monkeypatch.setattr(provider, "get_status", real_get_status)
-    recovered = service.store.claim_next("worker-2", now_epoch=111, lease_seconds=10)
+    recovered = service.store.claim_next(
+        "worker-2",
+        now_epoch=float(interrupted_job["lease_expires_at"]) + 1,
+        lease_seconds=10,
+    )
     assert recovered is not None
     completed = service.process_claimed(recovered, worker_id="worker-2")
     assert completed["status"] == "COMPLETED"
     assert provider.submit_count == 1
 
+
+def test_provider_submission_is_reserved_before_network_and_renderer_wait_is_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, provider = make_service(
+        tmp_path,
+        visual_worker_lease_seconds=5,
+        visual_provider_request_timeout_seconds=20,
+        visual_image_render_deadline_seconds=30,
+    )
+    job, _ = service.create_job(request())
+    real_submit = provider.submit
+
+    def inspect_reservation(compiled, *, idempotency_key):
+        waiting = service.store.get(str(job["id"]))
+        assert waiting is not None
+        assert waiting["provider_job_id"] == provider.job_id_for(idempotency_key)
+        assert waiting["renderer_wait_started_at"]
+        assert waiting["renderer_ready_at"] is None
+        assert float(waiting["lease_expires_at"]) > 20
+        return real_submit(compiled, idempotency_key=idempotency_key)
+
+    monkeypatch.setattr(provider, "submit", inspect_reservation)
+    completed = service.run_once("worker-1")
+    assert completed is not None and completed["status"] == "COMPLETED"
+    assert completed["renderer_ready_at"]
+    assert float(completed["renderer_wait_seconds"]) >= 0
+    assert provider.submit_count == 1
+
+
+def test_safe_gateway_rejection_retries_same_reserved_prompt_with_bounded_backoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, provider = make_service(tmp_path)
+    job, _ = service.create_job(request())
+    real_submit = provider.submit
+    calls: list[str] = []
+
+    def transient_once(compiled, *, idempotency_key):
+        calls.append(provider.job_id_for(idempotency_key))
+        if len(calls) == 1:
+            raise ProviderRendererUnavailable(
+                "EAS_HTTP_503", status_code=503, safe_to_retry=True
+            )
+        return real_submit(compiled, idempotency_key=idempotency_key)
+
+    monkeypatch.setattr(provider, "submit", transient_once)
+    monkeypatch.setattr("app.visual.service.time.sleep", lambda _seconds: None)
+    completed = service.run_once("worker-1")
+    assert completed is not None and completed["status"] == "COMPLETED"
+    assert calls == [provider.job_id_for(str(job["id"]))] * 2
+    assert provider.submit_count == 1
+
+
+def test_completed_prompt_retries_safe_view_rejection_without_resubmitting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, provider = make_service(tmp_path)
+    service.create_job(request())
+    real_result = provider.get_result
+    result_calls = 0
+
+    def transient_result(provider_job_id):
+        nonlocal result_calls
+        result_calls += 1
+        if result_calls == 1:
+            raise ProviderRendererUnavailable(
+                "EAS_HTTP_503", status_code=503, safe_to_retry=True
+            )
+        return real_result(provider_job_id)
+
+    monkeypatch.setattr(provider, "get_result", transient_result)
+    monkeypatch.setattr("app.visual.service.time.sleep", lambda _seconds: None)
+    completed = service.run_once("worker-1")
+    assert completed is not None and completed["status"] == "COMPLETED"
+    assert result_calls == 2
+    assert provider.submit_count == 1
+
+
+def test_renderer_wait_projects_nonterminal_waiting_state(tmp_path: Path) -> None:
+    service, provider = make_service(tmp_path)
+    job, _ = service.create_job(request())
+    service.store.transition(str(job["id"]), "PLANNING", expected={"QUEUED"})
+    service.store.transition(str(job["id"]), "RENDERING", expected={"PLANNING"})
+    waiting = service.store.patch(
+        str(job["id"]),
+        {
+            "provider_job_id": provider.job_id_for(str(job["id"])),
+            "renderer_wait_started_at": "2026-10-01T00:00:00+00:00",
+        },
+    )
+    projected = _project(service, waiting, user_id="user-1")
+    assert projected["status"] == "WAITING_FOR_RENDERER"
+    assert projected["renderer_ready_at"] is None
 
 def test_restart_after_asset_link_reuses_same_immutable_asset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -249,7 +404,13 @@ def test_restart_after_asset_link_reuses_same_immutable_asset(
     assert len(service.store.assets_for_job(str(job["id"]), user_id="user-1")) == 1
 
     monkeypatch.setattr(service.store, "transition", real_transition)
-    recovered = service.store.claim_next("worker-2", now_epoch=111, lease_seconds=10)
+    interrupted_job = service.store.get(str(job["id"]))
+    assert interrupted_job is not None
+    recovered = service.store.claim_next(
+        "worker-2",
+        now_epoch=float(interrupted_job["lease_expires_at"]) + 1,
+        lease_seconds=10,
+    )
     assert recovered is not None
     completed = service.process_claimed(recovered, worker_id="worker-2")
     assert completed["status"] == "COMPLETED"

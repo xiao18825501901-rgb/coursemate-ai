@@ -190,19 +190,34 @@ def create_app(
     application.state.database = database
     if resolved_settings.visual_engine_enabled:
         from app.visual.planner import MockVisualPlannerProvider
+        from app.visual.providers.aliyun_eas import AlibabaEASComfyProvider
         from app.visual.providers.mock_comfy import MockComfyProvider
         from app.visual.service import VisualService
+        from app.visual.spec import Renderer
         from app.visual.store import VisualJobStore
         from app.visual.workflows import WorkflowRegistry
 
+        workflow_registry = WorkflowRegistry.default_mock()
+        if resolved_settings.visual_provider == "aliyun_eas":
+            provider = AlibabaEASComfyProvider(
+                endpoint=resolved_settings.visual_eas_endpoint,
+                token=resolved_settings.visual_eas_token.get_secret_value()
+                if resolved_settings.visual_eas_token
+                else None,
+                workflow=workflow_registry.select(Renderer.COMFY_IMAGE, "aliyun_eas"),
+                timeout_seconds=resolved_settings.visual_provider_request_timeout_seconds,
+                max_output_bytes=resolved_settings.visual_max_output_bytes,
+            )
+        else:
+            provider = MockComfyProvider(
+                complete_after_polls=resolved_settings.visual_mock_complete_after_polls
+            )
         application.state.visual_service = VisualService(
             store=VisualJobStore(database),
             planner=MockVisualPlannerProvider(),
-            provider=MockComfyProvider(
-                complete_after_polls=resolved_settings.visual_mock_complete_after_polls
-            ),
+            provider=provider,
             storage=ingestion_service.storage_backend,
-            workflows=WorkflowRegistry.default_mock(),
+            workflows=workflow_registry,
             settings=resolved_settings,
         )
     # One shared semantic-decision layer for the whole app. TypeSafe/Jev is not

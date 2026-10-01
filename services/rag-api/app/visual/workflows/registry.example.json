@@ -2,6 +2,29 @@
   "registry_version": "1",
   "workflows": [
     {
+      "workflow_id": "coursejesus-comfy-image-v1",
+      "version": "1",
+      "renderer_type": "COMFY_IMAGE",
+      "provider": "aliyun_eas",
+      "enabled": true,
+      "allowed_inputs": ["positive_prompt", "negative_prompt", "seed", "width", "height", "steps", "cfg"],
+      "outputs": ["image"],
+      "model_version": "Anything-v5.0-PRT-RE.safetensors",
+      "workflow_file": "coursejesus-image-canary-v1.json",
+      "workflow_sha256": "16a6bfee90224a8d066da956dc923f7c8e5d8d353f2b73e4ecfa8236ad51b960",
+      "checkpoint": "Anything-v5.0-PRT-RE.safetensors",
+      "output_node_id": "9",
+      "input_bindings": {
+        "positive_prompt": {"node_id": "6", "input": "text"},
+        "negative_prompt": {"node_id": "7", "input": "text"},
+        "seed": {"node_id": "3", "input": "seed"},
+        "steps": {"node_id": "3", "input": "steps"},
+        "cfg": {"node_id": "3", "input": "cfg"},
+        "width": {"node_id": "5", "input": "width"},
+        "height": {"node_id": "5", "input": "height"}
+      }
+    },
+    {
       "workflow_id": "mock-image-v1",
       "version": "1",
       "renderer_type": "COMFY_IMAGE",

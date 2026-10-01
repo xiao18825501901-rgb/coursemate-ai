@@ -62,14 +62,84 @@ def test_visual_migration_is_current_and_replay_safe(tmp_path: Path) -> None:
     database = database_at(tmp_path)
     database.initialize()
     with database.connect() as connection:
-        assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 67
+        assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 69
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(visual_jobs)").fetchall()
+        }
+        assert {
+            "renderer_wait_started_at",
+            "renderer_ready_at",
+            "renderer_wait_seconds",
+        } <= columns
         tables = {
             row[0]
             for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'visual_%'"
             )
         }
-    assert {"visual_jobs", "visual_assets", "visual_cache_entries", "visual_job_events"} <= tables
+    assert {
+        "visual_jobs",
+        "visual_assets",
+        "visual_cache_entries",
+        "visual_job_events",
+        "visual_assistance_preferences",
+    } <= tables
+
+
+def test_visual_assistance_defaults_off_and_is_idempotently_persisted(tmp_path: Path) -> None:
+    store = VisualJobStore(database_at(tmp_path))
+    default = store.get_assistance_preference("user-1", "course-1")
+    assert default["enabled"] is False
+    assert default["consent_version"] == "visual-assistance-v1"
+
+    enabled, created = store.set_assistance_preference(
+        "user-1",
+        "course-1",
+        enabled=True,
+        consent_version="visual-assistance-v1",
+        request_id="preference-request-1",
+    )
+    replay, replay_created = store.set_assistance_preference(
+        "user-1",
+        "course-1",
+        enabled=True,
+        consent_version="visual-assistance-v1",
+        request_id="preference-request-1",
+    )
+    assert created is True
+    assert replay_created is False
+    assert enabled == replay
+    assert enabled["enabled"] is True
+    assert enabled["enabled_at"]
+
+    with pytest.raises(IdempotencyConflict):
+        store.set_assistance_preference(
+            "user-1",
+            "course-1",
+            enabled=False,
+            consent_version="visual-assistance-v1",
+            request_id="preference-request-1",
+        )
+
+
+def test_visual_assistance_is_scoped_to_user_and_course(tmp_path: Path) -> None:
+    database = database_at(tmp_path)
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO courses(id,name,owner_user_id,course_type,visibility) "
+            "VALUES('course-2','Other','user-1','user','private')"
+        )
+    store = VisualJobStore(database)
+    store.set_assistance_preference(
+        "user-1",
+        "course-1",
+        enabled=True,
+        consent_version="visual-assistance-v1",
+        request_id="preference-request-2",
+    )
+    assert store.get_assistance_preference("user-1", "course-1")["enabled"] is True
+    assert store.get_assistance_preference("user-1", "course-2")["enabled"] is False
+    assert store.get_assistance_preference("user-2", "course-1")["enabled"] is False
 
 
 def test_create_is_idempotent_but_rejects_changed_payload(tmp_path: Path) -> None:

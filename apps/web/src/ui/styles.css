@@ -32,3 +32,5 @@
 .reference-solution .reference-verification{margin:6px 0 0;font-size:12px;line-height:1.5;color:#8a6236}
 .reference-solution .reference-verification::before{content:"· ";font-weight:700}
 .reference-solution .reference-verification.negative{color:#8f1f45}
+.visual-assistance-toggle{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:6px;padding:5px 8px;color:var(--muted);font-size:10px;white-space:nowrap}.visual-assistance-toggle.enabled{border-color:#8bb9a2;background:#eef8f2;color:#26724b}.visual-assistance-toggle .ico{width:14px;height:14px}.visual-assistance-short{display:none}.visual-assistance-consent>p{line-height:1.85;color:var(--ink)}.visual-assistance-consent .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:24px}
+@media(max-width:800px){.visual-assistance-full{display:none}.visual-assistance-short{display:inline}.workspace-toolbar{gap:5px}.workspace-toolbar>.muted.small{max-width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}

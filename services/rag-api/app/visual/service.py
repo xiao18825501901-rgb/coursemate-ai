@@ -12,7 +12,11 @@ from app.config import Settings
 from app.storage.backends import StorageBackend
 from app.visual.compiler import CompiledVisual, compile_visual_spec
 from app.visual.planner import VisualPlannerProvider
-from app.visual.providers.base import ProviderState, VisualRenderer
+from app.visual.providers.base import (
+    ProviderState,
+    RendererTemporarilyUnavailable,
+    VisualRenderer,
+)
 from app.visual.spec import Renderer, VisualSpec, validate_source_grounding
 from app.visual.store import (
     TERMINAL,
@@ -35,6 +39,10 @@ DETERMINISTIC_FALLBACKS = {
 
 
 class VisualQuotaExceeded(RuntimeError):
+    pass
+
+
+class VisualAssistanceNotEnabled(RuntimeError):
     pass
 
 
@@ -92,6 +100,10 @@ class VisualService:
             raise RuntimeError("VISUAL_ENGINE_DISABLED")
         if value.action == "auto" and not self.settings.visual_auto_enabled:
             raise RuntimeError("AUTO_VISUAL_DISABLED")
+        if value.action == "auto" and not self.store.get_assistance_preference(
+            value.user_id, value.course_id
+        )["enabled"]:
+            raise VisualAssistanceNotEnabled("VISUAL_ASSISTANCE_NOT_ENABLED")
         existing = self.store.get_by_request(value.user_id, value.request_id)
         frozen = asdict(value)
         frozen["evidence"] = list(value.evidence)
@@ -386,11 +398,15 @@ class VisualService:
             if spec.renderer is Renderer.COMFY_VIDEO and not self.settings.visual_video_enabled:
                 raise RuntimeError("VIDEO_DISABLED")
             if spec.renderer in {Renderer.COMFY_IMAGE, Renderer.COMFY_VIDEO}:
+                if not self.store.get_assistance_preference(
+                    str(current["user_id"]), str(current["course_id"])
+                )["enabled"]:
+                    raise VisualAssistanceNotEnabled("VISUAL_ASSISTANCE_NOT_ENABLED")
                 if current["status"] == "PLANNING":
                     current = self.store.transition(job_id, "RENDERING", expected={"PLANNING"})
                 elif current["status"] not in {"RENDERING", "VALIDATING"}:
                     raise RuntimeError("PROVIDER_UNKNOWN")
-                result = self._render_provider(job_id, compiled)
+                result = self._render_provider(job_id, compiled, worker_id=worker_id)
                 current = self.store.get(job_id) or current
                 if current["status"] == "CANCELLED" or current["cancel_requested"]:
                     return current
@@ -564,7 +580,7 @@ class VisualService:
             language=spec.language,
         )
 
-    def _render_provider(self, job_id: str, compiled: CompiledVisual):
+    def _render_provider(self, job_id: str, compiled: CompiledVisual, *, worker_id: str):
         current = self.store.get(job_id)
         if current is None:
             raise KeyError(job_id)
@@ -572,25 +588,131 @@ class VisualService:
         if provider_job_id:
             submitted_id = str(provider_job_id)
         else:
-            submitted = self.provider.submit(
-                compiled.model_dump(mode="json"), idempotency_key=job_id
+            submitted_id = self.provider.job_id_for(job_id)
+            wait_started_at = _now()
+            self.store.patch(
+                job_id,
+                {
+                    "provider_job_id": submitted_id,
+                    "renderer_wait_started_at": wait_started_at,
+                },
             )
-            submitted_id = submitted.id
-            self.store.patch(job_id, {"provider_job_id": submitted_id})
-        for _ in range(25):
+            # A zero-replica shared gateway can legitimately hold /prompt for
+            # minutes. Reserve the deterministic provider id and a lease that
+            # spans the cold-start boundary before making any network call.
+            wait_started = time.monotonic()
+            submission_deadline = (
+                wait_started + self.settings.visual_image_render_deadline_seconds
+            )
+            if not self.store.renew_lease(
+                job_id,
+                worker_id,
+                expires_at=time.time()
+                + self.settings.visual_image_render_deadline_seconds
+                + self.settings.visual_provider_request_timeout_seconds
+                + self.settings.visual_worker_lease_seconds,
+            ):
+                raise RuntimeError("PROVIDER_UNKNOWN")
+            delay = self.settings.visual_worker_poll_seconds
+            while True:
+                try:
+                    submitted = self.provider.submit(
+                        compiled.model_dump(mode="json"), idempotency_key=job_id
+                    )
+                except RendererTemporarilyUnavailable as error:
+                    if not error.safe_to_retry or time.monotonic() >= submission_deadline:
+                        raise RuntimeError("PROVIDER_TIMEOUT") from error
+                    if not self.store.renew_lease(
+                        job_id,
+                        worker_id,
+                        expires_at=time.time()
+                        + self.settings.visual_provider_request_timeout_seconds
+                        + self.settings.visual_worker_lease_seconds,
+                    ):
+                        raise RuntimeError("PROVIDER_UNKNOWN") from error
+                    time.sleep(delay)
+                    delay = min(delay * 2, self.settings.visual_renderer_poll_max_seconds)
+                    continue
+                if submitted.id != submitted_id:
+                    raise RuntimeError("PROVIDER_UNKNOWN")
+                wait_seconds = max(0.0, time.monotonic() - wait_started)
+                self.store.patch(
+                    job_id,
+                    {
+                        "renderer_ready_at": _now(),
+                        "renderer_wait_seconds": wait_seconds,
+                    },
+                )
+                break
+        deadline = time.monotonic() + self.settings.visual_image_render_deadline_seconds
+        delay = self.settings.visual_worker_poll_seconds
+        while time.monotonic() < deadline:
             current = self.store.get(job_id)
             if current is None or current["status"] == "CANCELLED" or current["cancel_requested"]:
                 self.provider.cancel(submitted_id)
                 raise RuntimeError("CANCELLED")
-            status = self.provider.get_status(submitted_id)
+            try:
+                status = self.provider.get_status(submitted_id)
+            except RendererTemporarilyUnavailable as error:
+                if not error.safe_to_retry:
+                    raise
+                status = None
+            if status is None:
+                if not self.store.renew_lease(
+                    job_id,
+                    worker_id,
+                    expires_at=time.time() + self.settings.visual_worker_lease_seconds,
+                ):
+                    raise RuntimeError("PROVIDER_UNKNOWN")
+                if self.provider.name != "mock":
+                    time.sleep(delay)
+                    delay = min(delay * 2, self.settings.visual_renderer_poll_max_seconds)
+                continue
+            current = self.store.get(job_id)
+            if current is not None and not current.get("renderer_ready_at"):
+                started = str(current.get("renderer_wait_started_at") or "")
+                elapsed = 0.0
+                if started:
+                    with suppress(ValueError):
+                        elapsed = max(
+                            0.0,
+                            (datetime.now(UTC) - datetime.fromisoformat(started)).total_seconds(),
+                        )
+                self.store.patch(
+                    job_id,
+                    {"renderer_ready_at": _now(), "renderer_wait_seconds": elapsed},
+                )
             if status.state is ProviderState.COMPLETED:
-                return self.provider.get_result(submitted_id)
+                try:
+                    return self.provider.get_result(submitted_id)
+                except RendererTemporarilyUnavailable as error:
+                    if not error.safe_to_retry:
+                        raise
+                    if not self.store.renew_lease(
+                        job_id,
+                        worker_id,
+                        expires_at=time.time() + self.settings.visual_worker_lease_seconds,
+                    ):
+                        raise RuntimeError("PROVIDER_UNKNOWN") from error
+                    if self.provider.name != "mock":
+                        time.sleep(delay)
+                        delay = min(delay * 2, self.settings.visual_renderer_poll_max_seconds)
+                    continue
             if status.state is ProviderState.FAILED:
                 raise RuntimeError(status.error_code or "PROVIDER_FAILED")
             if status.state is ProviderState.CANCELLED:
                 raise RuntimeError("PROVIDER_CANCELLED")
             if status.state is ProviderState.UNKNOWN:
                 raise RuntimeError("PROVIDER_UNKNOWN")
+            if not self.store.renew_lease(
+                job_id,
+                worker_id,
+                expires_at=time.time() + self.settings.visual_worker_lease_seconds,
+            ):
+                raise RuntimeError("PROVIDER_UNKNOWN")
+            if self.provider.name != "mock":
+                time.sleep(delay)
+                delay = min(delay * 2, self.settings.visual_renderer_poll_max_seconds)
         raise RuntimeError("PROVIDER_TIMEOUT")
 
     @staticmethod
@@ -676,6 +798,7 @@ class VisualService:
             "PROVIDER_UNKNOWN",
             "PROVIDER_TIMEOUT",
             "CANCELLED",
+            "VISUAL_ASSISTANCE_NOT_ENABLED",
         }
         if value in allowed or value.startswith("MOCK_"):
             return value

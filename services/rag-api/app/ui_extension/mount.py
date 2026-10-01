@@ -131,6 +131,8 @@ def _ui_settings(settings: Settings) -> object:
     )
     ui.api_base = MOUNT_PATH + "/api/ui/v1"
     ui.visual_engine_enabled = settings.visual_engine_enabled
+    ui.visual_auto_enabled = settings.visual_auto_enabled
+    ui.visual_video_enabled = settings.visual_video_enabled
     ui.web_dir = settings.ui_web_dir
     # A non-existent web_dir is intentional: the host does not serve the
     # offline-verified bundle, and the production gate still rejects it if present.

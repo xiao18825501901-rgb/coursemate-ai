@@ -66,6 +66,8 @@ V3_MIGRATIONS = (
     # a recorded failure there would block the legitimate retry of that input.
     "066_hybrid_provider_failure_ledger.sql",
     "067_visual_learning_engine.sql",
+    "068_visual_assistance_preferences.sql",
+    "069_visual_renderer_cold_start_receipts.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -125,9 +127,12 @@ V3_REPLAY_SUPERSEDED_BY = {
     # SQLite cannot express these ALTERs idempotently, so its own ledger row is
     # the restart-safe replay guard.
     "064_durable_assessment_preparation.sql": 64,
+    # Migration 069 adds renderer cold-start receipt columns. Its own ledger
+    # row is the restart-safe guard for SQLite's non-idempotent ADD COLUMN.
+    "069_visual_renderer_cold_start_receipts.sql": 69,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 67
+LATEST_V3_SCHEMA_VERSION = 69
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (

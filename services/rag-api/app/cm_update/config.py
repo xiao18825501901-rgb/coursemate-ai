@@ -68,6 +68,8 @@ class Settings:
     verification_effective_at: str = field(default_factory=lambda: os.getenv(
         'CMUI_VERIFICATION_EFFECTIVE_AT', '').strip())
     visual_engine_enabled: bool = False
+    visual_auto_enabled: bool = False
+    visual_video_enabled: bool = False
 
     def validate(self) -> None:
         if self.environment not in {'development','test','production'}: raise ValueError('Unknown environment')

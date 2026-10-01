@@ -163,6 +163,106 @@ class VisualJobStore:
                 ).fetchone()
             )
 
+    def get_assistance_preference(self, user_id: str, course_id: str) -> dict[str, object]:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM visual_assistance_preferences WHERE user_id=? AND course_id=?",
+                (user_id, course_id),
+            ).fetchone()
+        if row is None:
+            return {
+                "user_id": user_id,
+                "course_id": course_id,
+                "enabled": False,
+                "consent_version": "visual-assistance-v1",
+                "enabled_at": None,
+                "updated_at": None,
+            }
+        value = dict(row)
+        value["enabled"] = bool(value["enabled"])
+        return value
+
+    def set_assistance_preference(
+        self,
+        user_id: str,
+        course_id: str,
+        *,
+        enabled: bool,
+        consent_version: str,
+        request_id: str,
+    ) -> tuple[dict[str, object], bool]:
+        request_hash = hashlib.sha256(
+            json.dumps(
+                {
+                    "user_id": user_id,
+                    "course_id": course_id,
+                    "enabled": enabled,
+                    "consent_version": consent_version,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        timestamp = _now()
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = connection.execute(
+                "SELECT * FROM visual_assistance_preferences WHERE user_id=? AND course_id=?",
+                (user_id, course_id),
+            ).fetchone()
+            if current is not None and current["last_request_id"] == request_id:
+                if current["last_request_hash"] != request_hash:
+                    raise IdempotencyConflict(
+                        "request_id was already bound to another preference payload"
+                    )
+                result = dict(current)
+                result["enabled"] = bool(result["enabled"])
+                return result, False
+            enabled_at = timestamp if enabled else (current["enabled_at"] if current else None)
+            if current is None:
+                connection.execute(
+                    "INSERT INTO visual_assistance_preferences("
+                    "user_id,course_id,enabled,consent_version,enabled_at,last_request_id,"
+                    "last_request_hash,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                    (
+                        user_id,
+                        course_id,
+                        int(enabled),
+                        consent_version,
+                        enabled_at,
+                        request_id,
+                        request_hash,
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+                created = True
+            else:
+                connection.execute(
+                    "UPDATE visual_assistance_preferences SET enabled=?,consent_version=?,"
+                    "enabled_at=?,last_request_id=?,last_request_hash=?,updated_at=? "
+                    "WHERE user_id=? AND course_id=?",
+                    (
+                        int(enabled),
+                        consent_version,
+                        enabled_at,
+                        request_id,
+                        request_hash,
+                        timestamp,
+                        user_id,
+                        course_id,
+                    ),
+                )
+                created = False
+            result = dict(
+                connection.execute(
+                    "SELECT * FROM visual_assistance_preferences WHERE user_id=? AND course_id=?",
+                    (user_id, course_id),
+                ).fetchone()
+            )
+            result["enabled"] = bool(result["enabled"])
+            return result, created
+
     def daily_completed_counts(self, user_id: str, day_prefix: str) -> tuple[int, int, float]:
         with self.database.connect() as connection:
             image_count = int(
@@ -328,6 +428,9 @@ class VisualJobStore:
             "gpu_seconds",
             "cache_hit",
             "output_bytes",
+            "renderer_wait_started_at",
+            "renderer_ready_at",
+            "renderer_wait_seconds",
         }
         if set(fields) - allowed:
             raise ValueError("Visual job patch contains unsupported fields")

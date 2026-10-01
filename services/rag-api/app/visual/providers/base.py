@@ -5,6 +5,15 @@ from enum import StrEnum
 from typing import Protocol
 
 
+class RendererTemporarilyUnavailable(RuntimeError):
+    """The gateway proved that a request was rejected before provider execution."""
+
+    def __init__(self, code: str, *, status_code: int, safe_to_retry: bool) -> None:
+        super().__init__(code)
+        self.status_code = status_code
+        self.safe_to_retry = safe_to_retry
+
+
 class ProviderState(StrEnum):
     RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
@@ -40,6 +49,7 @@ class ProviderResult:
 class VisualRenderer(Protocol):
     name: str
 
+    def job_id_for(self, idempotency_key: str) -> str: ...
     def submit(self, compiled: dict[str, object], *, idempotency_key: str) -> ProviderJob: ...
     def get_status(self, provider_job_id: str) -> ProviderStatus: ...
     def get_result(self, provider_job_id: str) -> ProviderResult: ...

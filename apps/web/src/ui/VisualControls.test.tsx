@@ -33,6 +33,28 @@ describe('Visual Learning controls', () => {
     expect(screen.queryByText(/workflow|checkpoint|KSampler/i)).not.toBeInTheDocument();
   });
 
+  it('opens consent instead of submitting an image job while assistance is off', async () => {
+    const requestAssistance = vi.fn();
+    render(<VisualControls enabled assistanceEnabled={false} requestAssistance={requestAssistance} courseId="course-1" pairId="pair-1" message={{ id: 'message-1' } as any}/>);
+    await waitFor(() => expect(api.listMessageVisuals).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: '生成图片' }));
+    expect(requestAssistance).toHaveBeenCalledTimes(1);
+    expect(api.createVisual).not.toHaveBeenCalled();
+  });
+
+  it('never starts an automatic job while assistance is off', async () => {
+    render(<VisualControls enabled autoEnabled assistanceEnabled={false} courseId="course-1" pairId="pair-1" message={{ id: 'message-auto-off' } as any}/>);
+    await waitFor(() => expect(api.listMessageVisuals).toHaveBeenCalled());
+    expect(api.createVisual).not.toHaveBeenCalled();
+  });
+
+  it('starts one idempotent automatic job after text when assistance is enabled', async () => {
+    api.createVisual.mockResolvedValue({ id: 'job-auto', status: 'COMPLETED', assets: [] });
+    render(<VisualControls enabled autoEnabled assistanceEnabled courseId="course-1" pairId="pair-1" message={{ id: 'message-auto-on' } as any}/>);
+    await waitFor(() => expect(api.createVisual).toHaveBeenCalledWith('course-1', 'message-auto-on', 'pair-1', 'auto', 'visual-auto-message-auto-on'));
+    expect(api.createVisual).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the text usable while exposing safe retry and deterministic fallback', () => {
     const onRetry = vi.fn();
     const onFallback = vi.fn();
@@ -46,6 +68,7 @@ describe('Visual Learning controls', () => {
 
   it.each([
     ['QUEUED', '等待生成'],
+    ['WAITING_FOR_RENDERER', '正在唤醒图片生成服务'],
     ['PLANNING', '正在规划'],
     ['RENDERING', '正在生成'],
     ['VALIDATING', '正在校验'],
@@ -57,7 +80,7 @@ describe('Visual Learning controls', () => {
     expect(screen.getByText(label)).toBeInTheDocument();
     const region = screen.getByText(label).closest('section');
     expect(region).toHaveAttribute('aria-live', 'polite');
-    expect(region).toHaveAttribute('aria-busy', ['QUEUED', 'PLANNING', 'RENDERING', 'VALIDATING', 'RETRYING'].includes(status) ? 'true' : 'false');
+    expect(region).toHaveAttribute('aria-busy', ['QUEUED', 'PLANNING', 'WAITING_FOR_RENDERER', 'RENDERING', 'VALIDATING', 'RETRYING'].includes(status) ? 'true' : 'false');
     unmount();
   });
 

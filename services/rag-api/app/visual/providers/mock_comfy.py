@@ -38,8 +38,11 @@ class MockComfyProvider:
             raise ValueError("Unknown MockComfy mode")
         self.modes[idempotency_key] = mode
 
+    def job_id_for(self, idempotency_key: str) -> str:
+        return "mock-" + hashlib.sha256(idempotency_key.encode()).hexdigest()[:24]
+
     def submit(self, compiled: dict[str, object], *, idempotency_key: str) -> ProviderJob:
-        provider_id = "mock-" + hashlib.sha256(idempotency_key.encode()).hexdigest()[:24]
+        provider_id = self.job_id_for(idempotency_key)
         if provider_id not in self.jobs:
             self.jobs[provider_id] = _MockJob(
                 provider_id, self.modes.get(idempotency_key, "success")

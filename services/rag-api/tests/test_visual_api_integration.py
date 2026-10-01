@@ -149,6 +149,31 @@ def test_authenticated_visual_job_to_asset_and_cross_user_denial(client: TestCli
     assert client.get(UI + asset["content_url"], headers=auth("Bearer token-b")).status_code == 404
 
 
+def test_visual_assistance_defaults_off_persists_and_is_user_scoped(client: TestClient) -> None:
+    seed_answer(client)
+    initial = client.get(
+        f"{UI}/courses/visual-course/visual-assistance", headers=auth("Bearer token-a")
+    )
+    assert initial.status_code == 200
+    assert initial.json()["enabled"] is False
+
+    enabled = client.put(
+        f"{UI}/courses/visual-course/visual-assistance",
+        headers=auth("Bearer token-a"),
+        json={"request_id": "preference-api-0001", "enabled": True},
+    )
+    assert enabled.status_code == 200, enabled.text
+    assert enabled.json()["enabled"] is True
+    assert client.get(
+        f"{UI}/courses/visual-course/visual-assistance", headers=auth("Bearer token-a")
+    ).json()["enabled"] is True
+    other_user = client.get(
+        f"{UI}/courses/visual-course/visual-assistance", headers=auth("Bearer token-b")
+    )
+    assert other_user.status_code == 200
+    assert other_user.json()["enabled"] is False
+
+
 def test_browser_cannot_select_workflow_provider_or_model(client: TestClient) -> None:
     pair_id, message_id = seed_answer(client)
     response = client.post(
@@ -168,8 +193,31 @@ def test_browser_cannot_select_workflow_provider_or_model(client: TestClient) ->
         assert connection.execute("SELECT COUNT(*) FROM visual_jobs").fetchone()[0] == 0
 
 
+def test_crafted_generative_request_cannot_bypass_server_preference_gate(
+    client: TestClient,
+) -> None:
+    pair_id, message_id = seed_answer(client, "Explain a gravitational lens")
+    created = client.post(
+        f"{UI}/courses/visual-course/messages/{message_id}/visuals",
+        headers=auth("Bearer token-a"),
+        json={"request_id": "visual-request-gate-1", "pair_id": pair_id, "action": "visual"},
+    )
+    assert created.status_code == 202, created.text
+    blocked = client.app.state.visual_service.run_once("test-worker")
+    assert blocked is not None
+    assert blocked["status"] == "FAILED"
+    assert blocked["error_code"] == "VISUAL_ASSISTANCE_NOT_ENABLED"
+    assert client.app.state.visual_service.provider.submit_count == 0
+
+
 def test_failed_visual_exposes_and_runs_a_deterministic_fallback(client: TestClient) -> None:
     pair_id, message_id = seed_answer(client, "Explain a gravitational lens")
+    enabled = client.put(
+        f"{UI}/courses/visual-course/visual-assistance",
+        headers=auth("Bearer token-a"),
+        json={"request_id": "preference-api-0002", "enabled": True},
+    )
+    assert enabled.status_code == 200, enabled.text
     created = client.post(
         f"{UI}/courses/visual-course/messages/{message_id}/visuals",
         headers=auth("Bearer token-a"),
