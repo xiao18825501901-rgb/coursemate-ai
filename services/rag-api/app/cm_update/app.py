@@ -1189,6 +1189,11 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         practice={'hint_count':0,'latest_hint':None,'latest_attempt':None}
         evidence_card=None
         if domain is not None and row.get('question_revision_id'):
+            if not row.get('learning_assignment_id'):
+                await exercise_exposure(
+                    row,user,request,'STEM','PROBLEM_PANE',
+                    'stem:'+row['id'],
+                )
             if revealed:
                 await exercise_exposure(
                     row,user,request,'SOLUTION','HISTORY',
@@ -2729,6 +2734,11 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         practice={'hint_count':0,'latest_hint':None,'latest_attempt':None}
         evidence_card=None
         if domain is not None and row.get('question_revision_id'):
+            if not row.get('learning_assignment_id'):
+                await exercise_exposure(
+                    row,user,request,'STEM','PROBLEM_PANE',
+                    'stem:'+row['id'],
+                )
             if revealed:
                 await exercise_exposure(
                     row,user,request,'SOLUTION','PROBLEM_PANE',

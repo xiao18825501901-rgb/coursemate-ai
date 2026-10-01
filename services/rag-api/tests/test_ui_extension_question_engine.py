@@ -464,10 +464,12 @@ def test_mounted_do_one_reuses_an_unexposed_ready_revision_without_model_calls(
 
     ui_database = test_client.app.state.ui_extension_app.state.db
     exercise = ui_database.one(
-        "SELECT question_revision_id FROM cmui_exercises WHERE run=?",
+        "SELECT id,question_revision_id FROM cmui_exercises WHERE run=?",
         (started.json()["id"],),
     )
     assert exercise["question_revision_id"] == seeded["question_revision_id"]
+    displayed = test_client.get(f"{UI}/exercises/{exercise['id']}", headers=auth())
+    assert displayed.status_code == 200, displayed.text
     usage = json.loads(
         ui_database.one("SELECT usage FROM cmui_runs WHERE id=?", (started.json()["id"],))["usage"]
     )
@@ -476,6 +478,18 @@ def test_mounted_do_one_reuses_an_unexposed_ready_revision_without_model_calls(
         "NOT_CALLED_READY_REUSE",
     }
     with database.connect() as connection:
+        exposure = connection.execute(
+            "SELECT kind,channel,question_revision_id FROM learning_loop_exposures "
+            "WHERE owner_user_id=? AND question_revision_id=?",
+            (SUBJECT, seeded["question_revision_id"]),
+        ).fetchall()
+        assert [dict(row) for row in exposure] == [
+            {
+                "kind": "STEM",
+                "channel": "PROBLEM_PANE",
+                "question_revision_id": seeded["question_revision_id"],
+            }
+        ]
         assert connection.execute(
             "SELECT COUNT(*) FROM learning_operations WHERE workspace_id=? AND id=?",
             (workspace["id"], started.json()["id"]),
