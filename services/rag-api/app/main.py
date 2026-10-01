@@ -98,7 +98,9 @@ def hybrid_reviewer_from_settings(
         LearningProvider(settings),
         model_alias=settings.v3_model,
         provider_label=(
-            "DEEPSEEK_API" if settings.v3_model == "deepseek-flash" else "ALIBABA_MODEL_STUDIO_COMPATIBLE"
+            "DEEPSEEK_API"
+            if settings.v3_model == "deepseek-flash"
+            else "ALIBABA_MODEL_STUDIO_COMPATIBLE"
         ),
         protocol="responses",
         max_output_tokens=settings.hybrid_review_max_output_tokens,
@@ -189,7 +191,7 @@ def create_app(
     database.storage_range_resolver = ingestion_service.read_stored_range
     application.state.database = database
     if resolved_settings.visual_engine_enabled:
-        from app.visual.planner import MockVisualPlannerProvider
+        from app.visual.planner import GroundedPolicyVisualPlannerProvider
         from app.visual.providers.aliyun_eas import AlibabaEASComfyProvider
         from app.visual.providers.mock_comfy import MockComfyProvider
         from app.visual.service import VisualService
@@ -214,7 +216,7 @@ def create_app(
             )
         application.state.visual_service = VisualService(
             store=VisualJobStore(database),
-            planner=MockVisualPlannerProvider(),
+            planner=GroundedPolicyVisualPlannerProvider(),
             provider=provider,
             storage=ingestion_service.storage_backend,
             workflows=workflow_registry,

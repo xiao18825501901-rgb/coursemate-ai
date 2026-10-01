@@ -163,6 +163,37 @@ def test_compiler_keeps_exact_text_out_of_generative_prompt() -> None:
     assert [overlay.text for overlay in compiled.overlays] == ["SYN", "ACK", "x = 1"]
 
 
+def test_conceptual_image_prompt_contains_question_and_grounded_claim() -> None:
+    planner = MockVisualPlannerProvider()
+    spec = planner.plan(
+        question="Explain gravitational lensing as a conceptual natural scene.",
+        answer=(
+            "A massive foreground object curves spacetime and bends light from a distant source."
+        ),
+        evidence=[
+            {
+                "source_id": "source-1",
+                "source_version": "v1",
+                "locator": "p.4",
+                "supported_claim": (
+                    "A massive foreground object bends light paths from a distant galaxy, "
+                    "so the observer may see luminous arcs or an Einstein ring."
+                ),
+            }
+        ],
+        action="visual",
+        language="en",
+    )
+    compiled = compile_visual_spec(spec)
+    prompt = compiled.positive_prompt.lower()
+    assert spec.renderer is Renderer.COMFY_IMAGE
+    assert "gravitational lensing" in prompt
+    assert "massive foreground object" in prompt
+    assert "einstein ring" in prompt
+    assert "show the supported concept" not in prompt
+    assert "conceptual scene" not in prompt
+
+
 def test_svg_compiler_renders_validated_nodes_edges_and_edge_labels() -> None:
     spec = VisualSpec.model_validate(valid_spec())
     compiled = compile_visual_spec(spec)

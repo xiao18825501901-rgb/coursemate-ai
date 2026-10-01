@@ -44,8 +44,15 @@ def _contains(text: str, *patterns: str) -> bool:
     return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
 
 
-class MockVisualPlannerProvider:
-    """Deterministic no-network planner used by Phase A and its 40-case gate."""
+def _prompt_fragment(value: object, *, limit: int = 800) -> str:
+    """Normalize untrusted data into a bounded renderer prompt fragment."""
+
+    normalized = " ".join(str(value or "").split())
+    return normalized[:limit].rstrip()
+
+
+class GroundedPolicyVisualPlannerProvider:
+    """Deterministic, source-grounded production router with no provider cost."""
 
     def __init__(self) -> None:
         self.prompt = load_runtime_prompt()
@@ -125,6 +132,17 @@ class MockVisualPlannerProvider:
             visual_type, renderer, includes = "ANIMATION", "MANIM", ["ordered states"]
         should_generate = renderer != "NONE"
         natural = renderer in {"COMFY_IMAGE", "COMFY_VIDEO"}
+        if natural:
+            subject = _prompt_fragment(question, limit=700)
+            supported = [
+                _prompt_fragment(item.get("supported_claim"))
+                for item in evidence[:16]
+                if _prompt_fragment(item.get("supported_claim"))
+            ]
+            if not supported:
+                answer_fact = _prompt_fragment(answer.split("\n", 1)[0])
+                supported = [answer_fact] if answer_fact else []
+            includes = list(dict.fromkeys(supported))[:4]
         labels = [] if natural else includes
         nodes = [
             {"id": f"n{index + 1}", "label": value}
@@ -165,14 +183,27 @@ class MockVisualPlannerProvider:
                 "pedagogical_reason": "A visual is useful."
                 if should_generate
                 else "The answer is clearer as text.",
-                "visual_goal": "Show the supported concept." if should_generate else "",
+                "visual_goal": (
+                    f"Create a clear educational conceptual illustration of: {subject}"
+                    if natural
+                    else ("Show the supported concept." if should_generate else "")
+                ),
                 "visual_type": visual_type,
                 "renderer": renderer,
                 "importance": "MEDIUM",
                 "timing": "ON_DEMAND",
                 "source_grounding": grounding,
                 "must_include": includes,
-                "must_not_include": ["unsupported facts"],
+                "must_not_include": (
+                    [
+                        "unrelated fantasy elements",
+                        "watermark",
+                        "unreadable text",
+                        "unsupported facts",
+                    ]
+                    if natural
+                    else ["unsupported facts"]
+                ),
                 "exact_labels": labels,
                 "equations": [],
                 "code_elements": [],
@@ -193,3 +224,7 @@ class MockVisualPlannerProvider:
                 "animation_steps": animation_steps,
             }
         )
+
+
+class MockVisualPlannerProvider(GroundedPolicyVisualPlannerProvider):
+    """Backward-compatible Phase A test seam for the production policy router."""
