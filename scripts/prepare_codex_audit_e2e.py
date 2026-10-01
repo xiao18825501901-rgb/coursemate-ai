@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 # Playwright itself inherits the desktop environment. Service children must not.
 if __name__ == "__main__" and len(sys.argv) > 3 and sys.argv[1] == "--serve":
@@ -32,6 +33,7 @@ from app.config import Settings
 from app.db import Database
 from app.jev.gateway import FakeTransport
 from app.jev.models import JevAnswer, JevResult
+from app.learning.models import AutoKnowledgeMapDraft, AutoKnowledgeSpecSetDraft
 from app.main import create_app
 from app.models import CourseCreate
 from app.rag.embeddings import DeterministicEmbeddingProvider
@@ -52,6 +54,8 @@ def settings_at(target: Path) -> Settings:
         _env_file=None, database_path=target / "rag.sqlite3", upload_dir=target / "uploads",
         app_env="test", rag_provider_mode="deterministic", auth_test_user_id=VERIFIED,
         v3_enabled=True, ui_extension_enabled=True, admin_user_ids="",
+        auto_knowledge_map_enabled=True, auto_knowledge_map_allow_billable=True,
+        auto_knowledge_map_legacy_backfill_enabled=False, auto_knowledge_map_poll_seconds=1,
         web_origin="http://127.0.0.1:5373", ui_task_agent_url="http://127.0.0.1:8201",
         ui_web_dir=target / "web-dist",
     )
@@ -136,6 +140,72 @@ class AuditVerifier:
         return self.primary.authenticate(request)
 
 
+class AuditKnowledgeMapGenerator:
+    """Credential-free browser fixture behind the production map coordinator."""
+
+    def generate(
+        self,
+        *,
+        job_id: str,
+        workspace_id: str,
+        target_kind: str,
+        base_tree_version_id: str | None,
+        course: dict[str, Any],
+        evidence: list[dict[str, Any]],
+        heartbeat=None,
+    ) -> tuple[AutoKnowledgeMapDraft, AutoKnowledgeSpecSetDraft, int]:
+        del job_id, workspace_id, target_kind, base_tree_version_id
+        if heartbeat:
+            heartbeat()
+        evidence_ids = [str(item["id"]) for item in evidence]
+        if not evidence_ids:
+            raise ValueError("Browser map fixture requires frozen source evidence")
+        map_draft = AutoKnowledgeMapDraft.model_validate(
+            {
+                "title": f"{course['name']} synthetic Map50",
+                "modules": [
+                    {
+                        "key": "foundations",
+                        "title": "Foundations",
+                        "description": "Source-grounded course foundations",
+                        "major": "OTHER",
+                    }
+                ],
+                "nodes": [
+                    {
+                        "key": "core-concept",
+                        "parent_key": "foundations",
+                        "title": "Core concept",
+                        "description": "A bounded concept grounded in the uploaded source",
+                        "major": "OTHER",
+                        "prerequisite_keys": [],
+                        "evidence_ids": evidence_ids,
+                    }
+                ],
+            }
+        )
+        spec_draft = AutoKnowledgeSpecSetDraft.model_validate(
+            {
+                "specs": [
+                    {
+                        "node_key": "core-concept",
+                        "change_reason": "Synthetic browser fixture from frozen evidence",
+                        "items": [
+                            {
+                                "item_id": "explain",
+                                "requirement": "REQUIRED",
+                                "objective": "Explain the source-grounded core concept",
+                                "acceptance": "Explain it accurately and apply it once",
+                                "evidence_ids": evidence_ids,
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+        return map_draft, spec_draft, 0
+
+
 def create_test_app():
     if os.environ.get("APP_ENV") != "test" or os.environ.get("CMUI_AUTO_VERIFY_NEW_USERS") != "false":
         raise RuntimeError("Audit factory requires explicit test mode and auto-verification disabled")
@@ -144,6 +214,7 @@ def create_test_app():
     if not (target / "fixture.json").is_file():
         raise RuntimeError("Synthetic seed receipt missing")
     application = create_app(settings=settings, auth_verifier=AuditVerifier())
+    application.state.auto_knowledge_map.generator = AuditKnowledgeMapGenerator()
 
     # The real Question Engine will not publish when semantic review is absent:
     # its deterministic hard gates can pass, but ambiguity and independent-answer

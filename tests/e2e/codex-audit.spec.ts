@@ -148,6 +148,50 @@ test("Question Engine practice journey persists feedback and keeps answers priva
   await page.screenshot({path:info.outputPath("practice-reveal-repractice.png"),fullPage:true});
 });
 
+test("new private upload automatically reaches a bounded knowledge tree across refresh and relogin",async({page,request,browser},info)=>{
+  const course=await post(request,"/courses",{name:"Map50 private browser course"});
+  await page.goto(`/app#/course/${course.id}/files`);
+  await expect(page.getByRole("heading",{name:"文件",exact:true})).toBeVisible();
+  await page.locator('input[type="file"]').setInputFiles({
+    name:"map50-private-notes.md",mimeType:"text/markdown",
+    buffer:Buffer.from("# Evidence-bound systems\n\nA bounded knowledge map groups source-grounded concepts and preserves owner isolation."),
+  });
+  await expect(page.getByLabel("文件上传队列")).toContainText("已完成 1/1");
+  await expect(page.getByText("map50-private-notes.md",{exact:true})).toBeVisible();
+
+  await expect.poll(async()=>{
+    const response=await request.get(API+`/courses/${course.id}/knowledge-build-status`,{headers:auth});
+    expect(response.ok(),await response.text()).toBeTruthy();
+    return (await response.json()).status;
+  },{timeout:12_000}).toBe("READY");
+  const treeResponse=await request.get(API+`/courses/${course.id}/knowledge`,{headers:auth});
+  expect(treeResponse.ok(),await treeResponse.text()).toBeTruthy();
+  const tree=await treeResponse.json();
+  expect(tree.length).toBeGreaterThan(0);
+  expect(tree.length).toBeLessThanOrEqual(50);
+  expect((await request.get(API+`/courses/${course.id}/knowledge`,{headers:unverified})).status()).toBe(404);
+
+  await page.goto(`/app#/course/${course.id}/learn`);
+  await expect(page.locator("button.knowledge-strip")).toContainText(`${tree.length} 个节点`);
+  await page.locator("button.knowledge-strip").click();
+  await expect(page.locator(".tree-expanded")).toContainText("Core concept");
+  await page.reload();
+  await expect(page.locator("button.knowledge-strip")).toContainText(`${tree.length} 个节点`);
+
+  const relogin=await browser.newPage();
+  await relogin.route("**/*",route=>{
+    const url=new URL(route.request().url());
+    if(!["127.0.0.1","localhost"].includes(url.hostname)) return route.abort("blockedbyclient");
+    return route.continue();
+  });
+  await relogin.goto(`http://127.0.0.1:5373/app#/course/${course.id}/learn`);
+  await expect(relogin.locator("button.knowledge-strip")).toContainText(`${tree.length} 个节点`);
+  await relogin.locator("button.knowledge-strip").click();
+  await expect(relogin.locator(".tree-expanded")).toContainText("Core concept");
+  await relogin.screenshot({path:info.outputPath("private-map50-relogin.png"),fullPage:true});
+  await relogin.close();
+});
+
 test("empty assessment pool generates and freezes five complementary Question Engine slots",async({page},info)=>{
   await page.goto("/app#/course/cs3481/learn");
   await expect(page.locator("button.knowledge-strip")).toBeVisible();
