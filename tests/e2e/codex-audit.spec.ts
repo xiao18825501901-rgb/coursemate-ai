@@ -74,13 +74,20 @@ test("Question Engine practice journey persists feedback and keeps answers priva
   await page.reload();await expect(page.getByLabel("知识学习输入")).toBeVisible();
   expect((await restored).ok()).toBeTruthy();
   await expect(page.locator(".pane-teach .chat-message-new.assistant")).not.toHaveCount(0);
+  let exerciseCreates=0;
+  page.on("request",request=>{
+    if(request.method()==="POST"&&request.url().endsWith("/courses/cs3481/exercises")) exerciseCreates+=1;
+  });
   const pending=page.waitForResponse(r=>r.request().method()==="POST"&&r.url().endsWith("/courses/cs3481/exercises"));
   await page.getByRole("button",{name:"做一题",exact:true}).click();
   const response=await pending;
   expect(response.ok(),await response.text()).toBeTruthy();
   expect(response.request().postDataJSON().pair_id).toBe(pairA.pair_id);
-  const run=await response.json();await terminal(request,run.id);
+  const run=await response.json();
+  await page.reload();
+  await terminal(request,run.id);
   await expect(page.locator(".pane-problem")).toContainText("[FAKE TEST FIXTURE] Apply the bounded course rule");
+  expect(exerciseCreates).toBe(1);
   await expect(page.getByRole("button",{name:"显示答案",exact:true}).last()).toBeVisible();
   const saved=await request.get(API+"/pairs/"+pairA.pair_id,{headers:auth});
   const history=await saved.json();
