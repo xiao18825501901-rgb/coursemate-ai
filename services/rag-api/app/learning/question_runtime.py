@@ -34,8 +34,8 @@ from app.learning.assessment_question_slots import (
 )
 from app.learning.blind_solve import BlindSolveError, BlindSolveReceipt, run_blind_solve
 from app.learning.hybrid_quality import HybridReviewUnavailable
-from app.learning.models import Contract, Identifier, Text
 from app.learning.learning_loop import LearningLoopError, LearningLoopService
+from app.learning.models import Contract, Identifier, Text
 from app.learning.practice_feedback import (
     PracticeInteractionError,
     generate_practice_feedback,
@@ -470,6 +470,191 @@ class QuestionEngineRuntime:
             "rubric": rubric,
             "reference_solution": {"answer": answer, "steps": steps},
         }
+
+    @staticmethod
+    def _prototype_id_for_blueprint(
+        blueprint: dict[str, Any],
+    ) -> Literal["worked_application", "concept_short_answer", "rule_violation_analysis"]:
+        for prototype in _PROTOTYPES.values():
+            if (
+                blueprint.get("generation_policy_version")
+                == prototype.generation_policy_version
+                and blueprint.get("bloom_target") == prototype.bloom_target
+                and blueprint.get("question_type") == prototype.question_type
+                and blueprint.get("expected_answer_form") == prototype.expected_answer_form
+                and int(blueprint.get("target_difficulty") or 0)
+                == prototype.target_difficulty
+            ):
+                return prototype.prototype_id
+        raise QuestionEngineRuntimeError(
+            "READY_QUESTION_BLUEPRINT_UNSUPPORTED",
+            "The compatible READY question uses an unsupported practice blueprint.",
+        )
+
+    @staticmethod
+    def _stored_steps(steps: list[dict[str, Any]], answer: str) -> list[ExerciseAnswerStep]:
+        projected: list[ExerciseAnswerStep] = []
+        for item in steps:
+            ordinal = int(item["ordinal"])
+            body = f"{item['result']}\n\n{item['explanation']}".strip()
+            if ordinal == len(steps) and answer.casefold() not in body.casefold():
+                body = f"{body}\n\n结论：{answer}"
+            projected.append(
+                ExerciseAnswerStep(
+                    step_id=str(item.get("step_id") or f"step_{ordinal}"),
+                    ordinal=ordinal,
+                    title=str(item["operation"]),
+                    text=body,
+                    source_refs=[str(value) for value in item["source_refs"]],
+                )
+            )
+        return projected
+
+    def _unused_ready_projection(
+        self,
+        *,
+        owner_user_id: str,
+        workspace_id: str,
+        course_id: str,
+        objective: TeachingObjective,
+        evidence: QuestionEvidencePack,
+    ) -> dict[str, Any] | None:
+        """Project one compatible, unexposed READY revision without a provider call."""
+
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT question.id,question.question_type,question.prompt_text,"
+                "question.options_json,provenance.blueprint_id,"
+                "provenance.question_revision_hash,provenance.blueprint_json,"
+                "reference.steps_json,reference.answer_json,reference.source_refs_json "
+                "FROM question_engine_provenance AS provenance "
+                "JOIN assessment_question_revisions AS question "
+                "ON question.id=provenance.question_revision_id "
+                "JOIN assessment_reference_solutions AS reference "
+                "ON reference.question_revision_id=question.id "
+                "WHERE provenance.workspace_id=? AND provenance.node_id=? "
+                "AND provenance.spec_version=? AND provenance.objective_id=? "
+                "AND provenance.evidence_pack_hash=? "
+                "AND provenance.publication_status='READY' "
+                "AND question.course_id=? AND question.owner_user_id=? "
+                "AND question.validation_status='VALIDATED' "
+                "AND question.verification_method='AI_REVIEWED' "
+                "AND NOT EXISTS("
+                " SELECT 1 FROM learning_loop_exposures AS exposure "
+                " WHERE exposure.owner_user_id=? AND exposure.workspace_id=? "
+                " AND exposure.family_id=question.family_id"
+                ") AND NOT EXISTS("
+                " SELECT 1 FROM assessment_exposure_events AS exposure "
+                " WHERE exposure.workspace_id=? AND exposure.family_id=question.family_id"
+                ") ORDER BY question.created_at,question.id,"
+                "reference.solution_revision DESC LIMIT 1",
+                (
+                    workspace_id,
+                    objective.node_id,
+                    objective.spec_version,
+                    objective.item_id,
+                    evidence.identity(),
+                    course_id,
+                    owner_user_id,
+                    owner_user_id,
+                    workspace_id,
+                    workspace_id,
+                ),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            blueprint = json.loads(str(row["blueprint_json"]))
+            options = json.loads(str(row["options_json"]))
+            raw_steps = json.loads(str(row["steps_json"]))
+            answer = json.loads(str(row["answer_json"]))
+            source_refs = json.loads(str(row["source_refs_json"]))
+            if (
+                not isinstance(blueprint, dict)
+                or not isinstance(options, list)
+                or not isinstance(raw_steps, list)
+                or not raw_steps
+                or not isinstance(answer, str)
+                or not isinstance(source_refs, list)
+                or not source_refs
+            ):
+                raise ValueError("invalid READY projection")
+            generated = GeneratedExercise(
+                question_revision_id=str(row["id"]),
+                blueprint_id=str(row["blueprint_id"]),
+                status="READY",
+                verification_status="AI_REVIEWED",
+                generation_version=GENERATION_VERSION,
+                prototype_id=self._prototype_id_for_blueprint(blueprint),
+                public=PublicExerciseProjection(
+                    schema_version="exercise.v2",
+                    blueprint_id=str(row["blueprint_id"]),
+                    question_revision=str(row["question_revision_hash"]),
+                    question_type=str(row["question_type"]),
+                    marks=int(blueprint["marks"]),
+                    question_text=str(row["prompt_text"]),
+                    options=[str(value) for value in options],
+                    source_refs=[str(value) for value in source_refs],
+                    answer_policy=str(blueprint["answer_policy"]),
+                ),
+                private=PrivateExerciseProjection(
+                    answer=answer,
+                    steps=self._stored_steps(raw_steps, answer),
+                ),
+                references=self._references(evidence),
+                usage=[
+                    {"role": "QUESTION_READY_POOL", "status": "REUSED"},
+                    {"role": "QUESTION_AUTHOR", "status": "NOT_CALLED_READY_REUSE"},
+                    {"role": "QUESTION_BLIND_SOLVER", "status": "NOT_CALLED_READY_REUSE"},
+                ],
+            )
+        except (KeyError, TypeError, ValueError, ValidationError) as error:
+            raise QuestionEngineRuntimeError(
+                "READY_QUESTION_PROJECTION_INVALID",
+                "The compatible READY question could not be projected safely.",
+            ) from error
+        return generated.model_dump(mode="json")
+
+    def reuse_ready_or_generate(
+        self,
+        *,
+        owner_user_id: str,
+        workspace_id: str,
+        course_id: str,
+        private_course_id: str,
+        node_id: str,
+        operation_id: str,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> dict[str, Any]:
+        """Prefer the compatible READY pool; generate only when that pool is empty."""
+
+        objective, evidence, _blueprint = self._preflight_generate_one_inputs(
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            course_id=course_id,
+            private_course_id=private_course_id,
+            node_id=node_id,
+            operation_id=operation_id,
+            should_cancel=should_cancel,
+        )
+        ready = self._unused_ready_projection(
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            course_id=course_id,
+            objective=objective,
+            evidence=evidence,
+        )
+        if ready is not None:
+            return ready
+        return self.generate_one(
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            course_id=course_id,
+            private_course_id=private_course_id,
+            node_id=node_id,
+            operation_id=operation_id,
+            should_cancel=should_cancel,
+        )
 
     def _claim_practice_operation(
         self,

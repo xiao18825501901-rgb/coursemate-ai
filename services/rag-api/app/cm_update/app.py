@@ -2625,13 +2625,6 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             receipt=db.one('SELECT payload_hash FROM cmui_run_inputs WHERE run=?',(old['id'],))
             if not receipt or receipt['payload_hash']!=digest: raise HTTPException(409,'重复请求 ID 的内容不同')
             return {'id':old['id'],'status':old['status'],'reused':True}
-        model_rate(user)
-        if domain is not None:
-            if cfg.provider_mode!='test' and not cfg.allow_billable:
-                raise HTTPException(402,'尚未授权模型调用费用')
-        else:
-            if cfg.provider_mode=='disabled' and provider is None: raise HTTPException(503,'模型尚未配置')
-            if cfg.provider_mode in {'qwen','deepseek'} and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
         if data.pair_id:
             pair=db.one('SELECT * FROM cmui_pairs WHERE id=? AND owner=? AND course=?',(data.pair_id,user['id'],cid))
             if pair is None: raise HTTPException(404,'双栏会话不存在')
@@ -2640,6 +2633,27 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             if len(candidates)>1: raise HTTPException(409,'请指定当前双栏会话')
             pair=candidates[0] if candidates else None
         if pair is None: raise HTTPException(409,'请先在该课程建立对话')
+        def active_replay(conversation_id):
+            if not conversation_id: return None
+            active=db.one(
+                "SELECT * FROM cmui_runs WHERE owner=? AND conversation=? "
+                "AND status IN ('queued','planning','generating') ORDER BY created_at DESC LIMIT 1",
+                (user['id'],conversation_id),
+            )
+            if not active: return None
+            receipt=db.one('SELECT payload_hash FROM cmui_run_inputs WHERE run=?',(active['id'],))
+            if receipt and receipt['payload_hash']==digest:
+                return {'id':active['id'],'status':active['status'],'reused':True}
+            raise HTTPException(409,'当前对话已有另一项生成任务')
+        replay=active_replay(pair['problem_conversation'])
+        if replay: return replay
+        model_rate(user)
+        if domain is not None:
+            if cfg.provider_mode!='test' and not cfg.allow_billable:
+                raise HTTPException(402,'尚未授权模型调用费用')
+        else:
+            if cfg.provider_mode=='disabled' and provider is None: raise HTTPException(503,'模型尚未配置')
+            if cfg.provider_mode in {'qwen','deepseek'} and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
         knowledge=(await remote('knowledge.tree',user,{'course':cid},request)) if domain else db.all("SELECT n.*,COALESCE(l.progress,'NOT_STARTED') progress FROM cmui_nodes n LEFT JOIN cmui_learning l ON l.node=n.id AND l.owner=? WHERE n.course=? ORDER BY n.position",(user['id'],cid))
         if data.node and not any(n.get('id')==data.node for n in flatten_nodes(knowledge)):
             raise HTTPException(404,'知识点不存在')
@@ -2674,10 +2688,15 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             conv_id=social._lane_conversation(db,pair['id'],user['id'],cid,'problem',{'title':pair['title']})
             db.execute('UPDATE cmui_pairs SET problem_conversation=? WHERE id=?',(conv_id,pair['id']))
             pair=db.one('SELECT * FROM cmui_pairs WHERE id=?',(pair['id'],))
-        with db.connect(True) as c:
-            c.execute('INSERT INTO cmui_runs(id,owner,conversation,request_id,status,user_text,teaching_mode,reasoning_strength,budget_baseline_usd,budget_estimate_usd,application_budget_usd,usage,lease_worker,lease_heartbeat,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                (rid,user['id'],conv_id,data.request_id,'queued','做一题','normal',strength,str(budget.baseline_usd) if budget and budget.baseline_usd is not None else None,str(budget.estimated_usd) if budget and budget.estimated_usd is not None else None,str(budget.application_usd_cap) if budget and budget.application_usd_cap is not None else None,json.dumps([estimate.audit()]) if estimate else '[]',worker_id,str(time.time()),now(),now()))
-            c.execute('INSERT INTO cmui_run_inputs VALUES (?,?,?)',(rid,digest,'[]'))
+        try:
+            with db.connect(True) as c:
+                c.execute('INSERT INTO cmui_runs(id,owner,conversation,request_id,status,user_text,teaching_mode,reasoning_strength,budget_baseline_usd,budget_estimate_usd,application_budget_usd,usage,lease_worker,lease_heartbeat,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    (rid,user['id'],conv_id,data.request_id,'queued','做一题','normal',strength,str(budget.baseline_usd) if budget and budget.baseline_usd is not None else None,str(budget.estimated_usd) if budget and budget.estimated_usd is not None else None,str(budget.application_usd_cap) if budget and budget.application_usd_cap is not None else None,json.dumps([estimate.audit()]) if estimate else '[]',worker_id,str(time.time()),now(),now()))
+                c.execute('INSERT INTO cmui_run_inputs VALUES (?,?,?)',(rid,digest,'[]'))
+        except sqlite3.IntegrityError:
+            replay=active_replay(conv_id)
+            if replay: return replay
+            raise
         event(rid,'status',{'status':'queued','label':'正在思考中'})
         task=asyncio.create_task(generate_exercise_run(
             rid,user,course_data,pair,node,node_title,sources,

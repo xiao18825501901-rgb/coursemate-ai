@@ -199,6 +199,139 @@ def test_generate_one_routes_author_and_blind_solver_through_metered_operation(
     assert len(calls) == 2
 
 
+def test_ready_question_is_reused_without_a_second_model_operation(tmp_path: Path) -> None:
+    database, config = database_with_objective(tmp_path)
+    provider = LearningProvider(config)
+    calls: list[tuple[str, str, str]] = []
+
+    def metered_generate(
+        workspace_id: str,
+        operation_id: str,
+        schema: type[Any],
+        **kwargs: Any,
+    ) -> tuple[Any, dict[str, Any]]:
+        calls.append((workspace_id, operation_id, str(kwargs["role"])))
+        return provider.generate(schema, **kwargs)
+
+    semantic_decisions = decisions(database)
+    semantic_decisions.gateway.modes["exercise.prototype.v1"] = "off"
+    runtime = QuestionEngineRuntime(
+        database=database,
+        provider=provider,
+        semantic_decisions=semantic_decisions,
+        metered_generate=metered_generate,
+    )
+    seeded = runtime.generate_one(
+        owner_user_id=OWNER,
+        workspace_id=WORKSPACE,
+        course_id=COURSE,
+        private_course_id=PRIVATE_COURSE,
+        node_id=NODE,
+        operation_id="seed-ready-question-0001",
+    )
+
+    reused = runtime.reuse_ready_or_generate(
+        owner_user_id=OWNER,
+        workspace_id=WORKSPACE,
+        course_id=COURSE,
+        private_course_id=PRIVATE_COURSE,
+        node_id=NODE,
+        operation_id="deliver-ready-question-0001",
+    )
+
+    assert reused["question_revision_id"] == seeded["question_revision_id"]
+    assert reused["public"] == seeded["public"]
+    assert reused["private"] == seeded["private"]
+    assert reused["references"] == seeded["references"]
+    assert reused["usage"] == [
+        {"role": "QUESTION_READY_POOL", "status": "REUSED"},
+        {"role": "QUESTION_AUTHOR", "status": "NOT_CALLED_READY_REUSE"},
+        {"role": "QUESTION_BLIND_SOLVER", "status": "NOT_CALLED_READY_REUSE"},
+    ]
+    assert calls == [
+        (WORKSPACE, "seed-ready-question-0001", "QUESTION_AUTHOR"),
+        (WORKSPACE, "seed-ready-question-0001", "QUESTION_BLIND_SOLVER"),
+    ]
+    with database.connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM learning_operations WHERE workspace_id=? AND id=?",
+            (WORKSPACE, "deliver-ready-question-0001"),
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM learning_model_call_reservations "
+            "WHERE workspace_id=? AND operation_id=?",
+            (WORKSPACE, "deliver-ready-question-0001"),
+        ).fetchone()[0] == 0
+
+
+def test_exposed_ready_family_falls_back_to_one_new_generation(tmp_path: Path) -> None:
+    database, config = database_with_objective(tmp_path)
+    provider = LearningProvider(config)
+    calls: list[tuple[str, str]] = []
+
+    def metered_generate(
+        _workspace_id: str,
+        operation_id: str,
+        schema: type[Any],
+        **kwargs: Any,
+    ) -> tuple[Any, dict[str, Any]]:
+        calls.append((operation_id, str(kwargs["role"])))
+        return provider.generate(schema, **kwargs)
+
+    semantic_decisions = decisions(database)
+    semantic_decisions.gateway.modes["exercise.prototype.v1"] = "off"
+    runtime = QuestionEngineRuntime(
+        database=database,
+        provider=provider,
+        semantic_decisions=semantic_decisions,
+        metered_generate=metered_generate,
+    )
+    seeded = runtime.generate_one(
+        owner_user_id=OWNER,
+        workspace_id=WORKSPACE,
+        course_id=COURSE,
+        private_course_id=PRIVATE_COURSE,
+        node_id=NODE,
+        operation_id="seed-exposed-question-0001",
+    )
+    with database.connect() as connection:
+        question = connection.execute(
+            "SELECT family_id,content_hash FROM assessment_question_revisions WHERE id=?",
+            (seeded["question_revision_id"],),
+        ).fetchone()
+        connection.execute(
+            "INSERT INTO learning_loop_exposures("
+            "id,owner_user_id,workspace_id,question_revision_id,family_id,"
+            "question_content_hash,kind,channel,assignment_id,ordering,receipt) "
+            "VALUES('exposure-ready-pool',?,?,?,?,?,'STEM','PROBLEM_PANE',NULL,"
+            "'SERVER_ORDERED','ready-pool-exposure')",
+            (
+                OWNER,
+                WORKSPACE,
+                seeded["question_revision_id"],
+                question["family_id"],
+                question["content_hash"],
+            ),
+        )
+
+    replenished = runtime.reuse_ready_or_generate(
+        owner_user_id=OWNER,
+        workspace_id=WORKSPACE,
+        course_id=COURSE,
+        private_course_id=PRIVATE_COURSE,
+        node_id=NODE,
+        operation_id="replenish-exposed-question-0001",
+    )
+
+    assert replenished["question_revision_id"] != seeded["question_revision_id"]
+    assert calls == [
+        ("seed-exposed-question-0001", "QUESTION_AUTHOR"),
+        ("seed-exposed-question-0001", "QUESTION_BLIND_SOLVER"),
+        ("replenish-exposed-question-0001", "QUESTION_AUTHOR"),
+        ("replenish-exposed-question-0001", "QUESTION_BLIND_SOLVER"),
+    ]
+
+
 def test_invalid_blueprint_fails_static_preflight_before_parent_or_provider(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

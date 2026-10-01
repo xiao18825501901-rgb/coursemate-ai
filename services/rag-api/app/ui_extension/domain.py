@@ -1715,7 +1715,7 @@ class V3DomainAdapter:
                 )
         node_id = str(selected_node["id"])
         try:
-            generated = self.question_engine.generate_one(
+            generated = self.question_engine.reuse_ready_or_generate(
                 owner_user_id=subject,
                 workspace_id=str(workspace["id"]),
                 course_id=course_id,

@@ -416,6 +416,122 @@ def test_mounted_do_one_question_uses_ready_revision_and_keeps_answer_private(
     assert len({item["family_id"] for item in families}) == 2
 
 
+def test_mounted_do_one_reuses_an_unexposed_ready_revision_without_model_calls(
+    client: tuple[TestClient, ForbiddenLegacyExerciseProvider],
+) -> None:
+    test_client, legacy = client
+    created = test_client.post(
+        f"{UI}/courses",
+        headers=auth(),
+        json={"name": "READY pool course", "description": "offline fixture"},
+    )
+    assert created.status_code == 201, created.text
+    course_id = created.json()["id"]
+    node_id = seed_objective(test_client, course_id)
+    pair = test_client.post(
+        f"{UI}/pairs", headers=auth(), json={"course": course_id}
+    ).json()
+    database = test_client.app.state.database
+    with database.connect() as connection:
+        workspace = connection.execute(
+            "SELECT id,private_course_id FROM learning_workspaces "
+            "WHERE course_id=? AND owner_user_id=?",
+            (course_id, SUBJECT),
+        ).fetchone()
+    engine = test_client.app.state.ui_extension_adapter.question_engine
+    seeded = engine.generate_one(
+        owner_user_id=SUBJECT,
+        workspace_id=workspace["id"],
+        course_id=course_id,
+        private_course_id=workspace["private_course_id"],
+        node_id=node_id,
+        operation_id="seed-mounted-ready-pool-0001",
+    )
+
+    started = test_client.post(
+        f"{UI}/courses/{course_id}/exercises",
+        headers=auth(),
+        json={
+            "pair_id": pair["id"],
+            "node": node_id,
+            "request_id": "reuse-mounted-ready-pool-0001",
+        },
+    )
+    assert started.status_code == 202, started.text
+    run = wait_terminal(test_client, started.json()["id"])
+    assert run["status"] == "completed", run
+    assert legacy.exercise_calls == 0
+
+    ui_database = test_client.app.state.ui_extension_app.state.db
+    exercise = ui_database.one(
+        "SELECT question_revision_id FROM cmui_exercises WHERE run=?",
+        (started.json()["id"],),
+    )
+    assert exercise["question_revision_id"] == seeded["question_revision_id"]
+    usage = json.loads(
+        ui_database.one("SELECT usage FROM cmui_runs WHERE id=?", (started.json()["id"],))["usage"]
+    )
+    assert {item.get("status") for item in usage} >= {
+        "REUSED",
+        "NOT_CALLED_READY_REUSE",
+    }
+    with database.connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM learning_operations WHERE workspace_id=? AND id=?",
+            (workspace["id"], started.json()["id"]),
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM learning_model_call_reservations "
+            "WHERE workspace_id=? AND operation_id=?",
+            (workspace["id"], started.json()["id"]),
+        ).fetchone()[0] == 0
+
+
+def test_mounted_do_one_double_submit_returns_the_same_active_run(
+    client: tuple[TestClient, ForbiddenLegacyExerciseProvider],
+) -> None:
+    test_client, legacy = client
+    created = test_client.post(
+        f"{UI}/courses",
+        headers=auth(),
+        json={"name": "Double submit course", "description": "offline fixture"},
+    )
+    assert created.status_code == 201, created.text
+    course_id = created.json()["id"]
+    node_id = seed_objective(test_client, course_id)
+    pair = test_client.post(
+        f"{UI}/pairs", headers=auth(), json={"course": course_id}
+    ).json()
+    payload = {"pair_id": pair["id"], "node": node_id}
+
+    first = test_client.post(
+        f"{UI}/courses/{course_id}/exercises",
+        headers=auth(),
+        json={**payload, "request_id": "double-submit-request-0001"},
+    )
+    assert first.status_code == 202, first.text
+    second = test_client.post(
+        f"{UI}/courses/{course_id}/exercises",
+        headers=auth(),
+        json={**payload, "request_id": "double-submit-request-0002"},
+    )
+
+    assert second.status_code == 202, second.text
+    assert second.json() == {
+        "id": first.json()["id"],
+        "status": second.json()["status"],
+        "reused": True,
+    }
+    conflict = test_client.post(
+        f"{UI}/courses/{course_id}/exercises",
+        headers=auth(),
+        json={"pair_id": pair["id"], "request_id": "double-submit-conflict-0001"},
+    )
+    assert conflict.status_code == 409
+    assert wait_terminal(test_client, first.json()["id"])["status"] == "completed"
+    assert legacy.exercise_calls == 0
+
+
 def test_unbound_pair_selects_an_owner_scoped_atomic_node_with_active_spec(
     client: tuple[TestClient, ForbiddenLegacyExerciseProvider],
 ) -> None:
