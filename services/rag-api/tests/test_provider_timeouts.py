@@ -104,7 +104,13 @@ def test_a_json_object_wrapped_in_prose_is_extracted() -> None:
     """
     from app.learning.provider import extract_json_object
 
-    assert extract_json_object('{"a": 1}') is None  # bare: the content is the issue
+    # The later stray-quote recovery contract returns valid bare JSON byte-for-byte
+    # and repairs only syntax that can be made demonstrably parseable.  The caller
+    # still validates either result against the exact same response schema.
+    assert extract_json_object('{"a": 1}') == '{"a": 1}'
+    assert extract_json_object('{"answer": "use "step 2" now"}') == (
+        '{"answer": "use \\"step 2\\" now"}'
+    )
     assert extract_json_object("no object here") is None
     assert extract_json_object('before {"a": 1} after') == '{"a": 1}'
     assert extract_json_object('```json\n{"a": 2}\n```') == '{"a": 2}'
