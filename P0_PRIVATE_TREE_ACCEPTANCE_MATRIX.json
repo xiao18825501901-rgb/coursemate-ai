@@ -1,0 +1,18 @@
+{
+  "schema": "coursejesus.p0.private_tree.acceptance.v1",
+  "generated_at": "2026-10-02T00:20:00+08:00",
+  "release_candidate_base": "d854b0ed8a159ff2580622497dc28ec3ec8926f7",
+  "checks": [
+    {"id": "new_private_course_create", "status": "LOCAL_PASS", "evidence": "Chrome private Map50 journey"},
+    {"id": "upload_document_ready", "status": "LOCAL_PASS", "evidence": "real upload/index API with deterministic local parser"},
+    {"id": "prompt_event_reconcile", "status": "LOCAL_PASS", "evidence": "auto-map unit suite"},
+    {"id": "active_tree_at_most_50", "status": "LOCAL_PASS", "evidence": "unit validator and Chrome node-count assertion"},
+    {"id": "atomic_activation", "status": "LOCAL_PASS", "evidence": "existing auto-map integration suite"},
+    {"id": "refresh_and_relogin", "status": "LOCAL_PASS", "evidence": "Chrome new-page relogin journey"},
+    {"id": "second_user_404", "status": "LOCAL_PASS", "evidence": "Chrome request using second synthetic identity"},
+    {"id": "legacy_13_remain_paused", "status": "PREDEPLOY_PASS", "evidence": "production read-only inventory: 13 active over-limit, legacy backfill false"},
+    {"id": "production_real_provider", "status": "PENDING_PRODUCTION", "evidence": null},
+    {"id": "production_normal_clerk", "status": "PENDING_PRODUCTION", "evidence": null}
+  ]
+}
+

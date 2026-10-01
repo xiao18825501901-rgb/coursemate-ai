@@ -1,0 +1,17 @@
+{
+  "schema": "coursejesus.p0.do_one.acceptance.v1",
+  "generated_at": "2026-10-02T00:20:00+08:00",
+  "release_candidate_base": "d854b0ed8a159ff2580622497dc28ec3ec8926f7",
+  "checks": [
+    {"id": "ready_reuse_zero_model", "status": "LOCAL_PASS", "evidence": "question runtime and mounted integration tests"},
+    {"id": "empty_pool_generates_one", "status": "LOCAL_PASS", "evidence": "mounted Question Engine integration test"},
+    {"id": "double_click_idempotent", "status": "LOCAL_PASS", "evidence": "mounted double-submit regression"},
+    {"id": "refresh_same_run", "status": "LOCAL_PASS", "evidence": "Chrome immediate-refresh journey, one POST"},
+    {"id": "reveal_answer_detail_revision_binding", "status": "LOCAL_PASS", "evidence": "mounted and Chrome practice journey"},
+    {"id": "pair_history_restore", "status": "LOCAL_PASS", "evidence": "mounted and Chrome practice journey"},
+    {"id": "private_scope_and_second_user", "status": "LOCAL_PASS", "evidence": "authorization and mounted integration regressions"},
+    {"id": "campus_production_clerk", "status": "PENDING_PRODUCTION", "evidence": null},
+    {"id": "private_production_clerk", "status": "PENDING_PRODUCTION", "evidence": null}
+  ]
+}
+
