@@ -11,3 +11,7 @@
 # checked-out form LF regardless of core.autocrlf.
 *.sh text eol=lf
 *.py text eol=lf
+
+# Workflow files are integrity-checked byte-for-byte against their registered
+# SHA-256 values. Keep the committed bytes unchanged on every platform.
+services/rag-api/app/visual/workflows/*.json -text
