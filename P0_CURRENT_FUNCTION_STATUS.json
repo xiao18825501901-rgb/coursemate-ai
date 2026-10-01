@@ -1,0 +1,1302 @@
+{
+  "schema": "coursejesus.p0-current-function-status.v1",
+  "generated_at": "2026-10-01T15:13:37.348376+00:00",
+  "query_contract": {
+    "mode": "sqlite mode=ro plus PRAGMA query_only=ON",
+    "rag_total_changes": 0,
+    "ui_total_changes": 0,
+    "content_excluded": [
+      "question text",
+      "answers and solutions",
+      "document names and paths",
+      "provider responses",
+      "secrets"
+    ]
+  },
+  "production": {
+    "release": "d854b0e",
+    "rag_schema_count": 66,
+    "rag_schema_max": 66,
+    "flags": {
+      "AUTO_KNOWLEDGE_MAP_ENABLED": "true",
+      "AUTO_KNOWLEDGE_MAP_ALLOW_BILLABLE": "true",
+      "AUTO_KNOWLEDGE_MAP_LEGACY_BACKFILL_ENABLED": "false",
+      "V3_ENABLED": "true",
+      "CMUI_PROVIDER_MODE": "deepseek",
+      "CMUI_ALLOW_BILLABLE": "true",
+      "CMUI_CAMPUS_ACCESS_MODE": "open_to_registered"
+    }
+  },
+  "assessment_configuration_summary": {
+    "actual_configuration_count": 15,
+    "ready_count": 11,
+    "not_ready_count": 4
+  },
+  "qualifications": [
+    {
+      "id": "hybrid-qual-live-v1",
+      "status": "SCOPED_QUALITY_ACCEPTED",
+      "active": true,
+      "expires_at": "2026-11-14T02:51:28.192850Z",
+      "languages": [
+        "en"
+      ],
+      "domains": [
+        "WORKSPACE_PRIVATE"
+      ],
+      "cases": [
+        "question.ambiguity.v1",
+        "question.answer_agreement.v1",
+        "question.mcq_distractor_quality.v1"
+      ],
+      "roles": [
+        "evidence_audit",
+        "adversarial_audit"
+      ]
+    },
+    {
+      "id": "hybrid-qual-official-v1",
+      "status": "SCOPED_QUALITY_ACCEPTED",
+      "active": true,
+      "expires_at": "2026-11-14T06:03:32.710529Z",
+      "languages": [
+        "en"
+      ],
+      "domains": [
+        "OFFICIAL"
+      ],
+      "cases": [
+        "question.ambiguity.v1",
+        "question.answer_agreement.v1",
+        "question.mcq_distractor_quality.v1"
+      ],
+      "roles": [
+        "evidence_audit",
+        "adversarial_audit"
+      ]
+    }
+  ],
+  "configurations": [
+    {
+      "configuration_id": "assessment-config-3b9b9c9b1caed30edeac62809d5087fd",
+      "course_id": "ge2324",
+      "owner": "user_3JphgNV3ryPniNdcI21dBmqfURD",
+      "course_scope": "campus",
+      "configuration_status": "FROZEN",
+      "preparation_status": "READY",
+      "required_slots": 5,
+      "completed_slots": 5,
+      "compatible_question_families": [
+        "assessment_family_62f259e3a3da36957f7d35d0",
+        "assessment_family_75283b176ede0cefc16de1bd",
+        "assessment_family_a435d5a8ae147c7264780648",
+        "assessment_family_a506b48844dedb867dc1e000",
+        "assessment_family_b2c1853a947bb803260cb3de"
+      ],
+      "qualification": [
+        {
+          "id": "hybrid-qual-live-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        },
+        {
+          "id": "hybrid-qual-official-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        }
+      ],
+      "question_inventory": [
+        {
+          "validation_status": "VALIDATED",
+          "publication_status": "READY",
+          "count": 5
+        }
+      ],
+      "last_failure": null,
+      "do_one_eligibility": "READY_POOL_AVAILABLE",
+      "assessment_eligibility": "READY"
+    },
+    {
+      "configuration_id": "assessment-config-0039b2ca26630d4920f43a315ffc9205",
+      "course_id": "ge2324",
+      "owner": "user_3JpjXdbY9xeUIeonrWjvpC2RFP0",
+      "course_scope": "campus",
+      "configuration_status": "FROZEN",
+      "preparation_status": "READY",
+      "required_slots": 5,
+      "completed_slots": 5,
+      "compatible_question_families": [
+        "assessment_family_08f3f12cb16107eb05fcf11a",
+        "assessment_family_35229850c418191780d11e3b",
+        "assessment_family_ae88e372f5455cd086c34e41",
+        "assessment_family_b8070d794c5bb919c3b01e34",
+        "assessment_family_c707231d2d0e9bfe0eb0d2e4"
+      ],
+      "qualification": [
+        {
+          "id": "hybrid-qual-live-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        },
+        {
+          "id": "hybrid-qual-official-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        }
+      ],
+      "question_inventory": [
+        {
+          "validation_status": "NEEDS_REVIEW",
+          "publication_status": "NEEDS_REVIEW",
+          "count": 3
+        },
+        {
+          "validation_status": "VALIDATED",
+          "publication_status": "READY",
+          "count": 7
+        }
+      ],
+      "last_failure": null,
+      "do_one_eligibility": "READY_POOL_AVAILABLE",
+      "assessment_eligibility": "READY"
+    },
+    {
+      "configuration_id": "assessment-config-38ee3a5447e66dbc898e2fe9bb76cae3",
+      "course_id": "ge2324",
+      "owner": "user_3Jpk25vUpbBeozbUN52BRYpLAdM",
+      "course_scope": "campus",
+      "configuration_status": "FROZEN",
+      "preparation_status": "READY",
+      "required_slots": 5,
+      "completed_slots": 5,
+      "compatible_question_families": [
+        "assessment_family_87fddb471d34d4ae08b63ebb",
+        "assessment_family_9faf2c8d4f59285d55d4b8ae",
+        "assessment_family_c29437538302bf2d2190116a",
+        "assessment_family_d114ea8f01281b14e46ddcc3",
+        "assessment_family_f2ef9334aebb3e8e567d5b23"
+      ],
+      "qualification": [
+        {
+          "id": "hybrid-qual-live-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        },
+        {
+          "id": "hybrid-qual-official-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        }
+      ],
+      "question_inventory": [
+        {
+          "validation_status": "NEEDS_REVIEW",
+          "publication_status": "NEEDS_REVIEW",
+          "count": 3
+        },
+        {
+          "validation_status": "VALIDATED",
+          "publication_status": "READY",
+          "count": 7
+        }
+      ],
+      "last_failure": null,
+      "do_one_eligibility": "READY_POOL_AVAILABLE",
+      "assessment_eligibility": "READY"
+    },
+    {
+      "configuration_id": "assessment-config-6bfd74f1460515613b3d6133d355e191",
+      "course_id": "ge2324",
+      "owner": "user_3JputDCvqSuCnx9cHqfoJhLeK95",
+      "course_scope": "campus",
+      "configuration_status": "FROZEN",
+      "preparation_status": "READY",
+      "required_slots": 5,
+      "completed_slots": 5,
+      "compatible_question_families": [
+        "assessment_family_1fa7428eaa795283cd810525",
+        "assessment_family_25a39d8cba0acf95fdaabaa4",
+        "assessment_family_54431b2f6674624ec55821d8",
+        "assessment_family_a5bbbc949303ed2682845e00",
+        "assessment_family_c5c2e37dc452cf6a7d62585b"
+      ],
+      "qualification": [
+        {
+          "id": "hybrid-qual-live-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        },
+        {
+          "id": "hybrid-qual-official-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        }
+      ],
+      "question_inventory": [
+        {
+          "validation_status": "VALIDATED",
+          "publication_status": "READY",
+          "count": 5
+        }
+      ],
+      "last_failure": null,
+      "do_one_eligibility": "READY_POOL_AVAILABLE",
+      "assessment_eligibility": "READY"
+    },
+    {
+      "configuration_id": "assessment-config-75e8c456203bfd222bb82f680c79ae89",
+      "course_id": "ge2324",
+      "owner": "user_3JpvT84fn0ez0moV5FOke2R4nsb",
+      "course_scope": "campus",
+      "configuration_status": "FROZEN",
+      "preparation_status": "READY",
+      "required_slots": 5,
+      "completed_slots": 5,
+      "compatible_question_families": [
+        "assessment_family_0ffe1786d8b6a63089dc2cfe",
+        "assessment_family_218f917de1412ebdc68751ce",
+        "assessment_family_98a2185ce5ee22da22514d60",
+        "assessment_family_aa9c107a08889bba25a273cd",
+        "assessment_family_c5222e6ad23670437582e738"
+      ],
+      "qualification": [
+        {
+          "id": "hybrid-qual-live-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        },
+        {
+          "id": "hybrid-qual-official-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        }
+      ],
+      "question_inventory": [
+        {
+          "validation_status": "NEEDS_REVIEW",
+          "publication_status": "NEEDS_REVIEW",
+          "count": 1
+        },
+        {
+          "validation_status": "VALIDATED",
+          "publication_status": "READY",
+          "count": 7
+        }
+      ],
+      "last_failure": null,
+      "do_one_eligibility": "READY_POOL_AVAILABLE",
+      "assessment_eligibility": "READY"
+    },
+    {
+      "configuration_id": "assessment-config-2d585ed34b5857b16333dc00084c9412",
+      "course_id": "ge2324",
+      "owner": "user_3JpvorQoX4LHnCQLqZEfByd4HCv",
+      "course_scope": "campus",
+      "configuration_status": "FROZEN",
+      "preparation_status": "READY",
+      "required_slots": 5,
+      "completed_slots": 5,
+      "compatible_question_families": [
+        "assessment_family_19c000c7a119a33fadf00c48",
+        "assessment_family_687b8cb2b1bdc96b6fe7125b",
+        "assessment_family_6b04ea4b9053d77f629073d8",
+        "assessment_family_9854d39384f568f2c8954cb4",
+        "assessment_family_9cef9ee14e04324f124e6ec0"
+      ],
+      "qualification": [
+        {
+          "id": "hybrid-qual-live-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        },
+        {
+          "id": "hybrid-qual-official-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        }
+      ],
+      "question_inventory": [
+        {
+          "validation_status": "NEEDS_REVIEW",
+          "publication_status": "NEEDS_REVIEW",
+          "count": 1
+        },
+        {
+          "validation_status": "VALIDATED",
+          "publication_status": "READY",
+          "count": 5
+        }
+      ],
+      "last_failure": null,
+      "do_one_eligibility": "READY_POOL_AVAILABLE",
+      "assessment_eligibility": "READY"
+    },
+    {
+      "configuration_id": "assessment-config-f8f050052b2b13e432b9ee7ff6022623",
+      "course_id": "course-de7b49de77d547cbaaee20acc8fa9648",
+      "owner": "user_3IzNGuLPsoiB5dOv2bw8BuTPCCa",
+      "course_scope": "private",
+      "configuration_status": "FROZEN",
+      "preparation_status": "READY",
+      "required_slots": 5,
+      "completed_slots": 5,
+      "compatible_question_families": [
+        "assessment_family_172dd8ed747e1dd5bc2564a6",
+        "assessment_family_2bb628ccd5f5d7293dd3178c",
+        "assessment_family_5145428d1da39dd9ade3913b",
+        "assessment_family_5e4bd427b6f74c2105e6c53b",
+        "assessment_family_7d64bfcdb4c4a5a4810995cb"
+      ],
+      "qualification": [
+        {
+          "id": "hybrid-qual-live-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        },
+        {
+          "id": "hybrid-qual-official-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        }
+      ],
+      "question_inventory": [
+        {
+          "validation_status": "NEEDS_REVIEW",
+          "publication_status": "NEEDS_REVIEW",
+          "count": 5
+        },
+        {
+          "validation_status": "VALIDATED",
+          "publication_status": "READY",
+          "count": 5
+        }
+      ],
+      "last_failure": null,
+      "do_one_eligibility": "READY_POOL_AVAILABLE",
+      "assessment_eligibility": "READY"
+    },
+    {
+      "configuration_id": "assessment-config-939f1fc8a27a403c8be2e5fac884ce4c",
+      "course_id": "ge2324",
+      "owner": "user_3IzNGuLPsoiB5dOv2bw8BuTPCCa",
+      "course_scope": "campus",
+      "configuration_status": "FROZEN",
+      "preparation_status": "READY",
+      "required_slots": 5,
+      "completed_slots": 5,
+      "compatible_question_families": [
+        "assessment_family_47f465fa52492ce4ebda4f2b",
+        "assessment_family_67c4bed87ad5551f4d230fca",
+        "assessment_family_94c3be0e71169e02ae505de6",
+        "assessment_family_bedaaa01cae78eab260be2cb",
+        "assessment_family_cc932e9de25aad569a87862a"
+      ],
+      "qualification": [
+        {
+          "id": "hybrid-qual-live-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        },
+        {
+          "id": "hybrid-qual-official-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        }
+      ],
+      "question_inventory": [
+        {
+          "validation_status": "NEEDS_REVIEW",
+          "publication_status": "NEEDS_REVIEW",
+          "count": 6
+        },
+        {
+          "validation_status": "VALIDATED",
+          "publication_status": "READY",
+          "count": 14
+        }
+      ],
+      "last_failure": null,
+      "do_one_eligibility": "READY_POOL_AVAILABLE",
+      "assessment_eligibility": "READY"
+    },
+    {
+      "configuration_id": "assessment-config-04f00c714b2de09e43f6982d4c9ecfc1",
+      "course_id": "ge2324",
+      "owner": "user_3IzNGuLPsoiB5dOv2bw8BuTPCCa",
+      "course_scope": "campus",
+      "configuration_status": "FROZEN",
+      "preparation_status": "READY",
+      "required_slots": 5,
+      "completed_slots": 5,
+      "compatible_question_families": [
+        "assessment_family_27d45b75b11b587180b8ac89",
+        "assessment_family_3af413339a8e2304edbeda73",
+        "assessment_family_5cdd5bd76a90ec5c61ad482e",
+        "assessment_family_7995f2ea4e5f75e09ffa8c54",
+        "assessment_family_7fdb620b448313a9b7b00b77"
+      ],
+      "qualification": [
+        {
+          "id": "hybrid-qual-live-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        },
+        {
+          "id": "hybrid-qual-official-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        }
+      ],
+      "question_inventory": [
+        {
+          "validation_status": "NEEDS_REVIEW",
+          "publication_status": "NEEDS_REVIEW",
+          "count": 6
+        },
+        {
+          "validation_status": "VALIDATED",
+          "publication_status": "READY",
+          "count": 14
+        }
+      ],
+      "last_failure": null,
+      "do_one_eligibility": "READY_POOL_AVAILABLE",
+      "assessment_eligibility": "READY"
+    },
+    {
+      "configuration_id": "assessment-config-e03ca35d08d8d24d811f9064ceabc4fa",
+      "course_id": "ge2324",
+      "owner": "user_3IzNGuLPsoiB5dOv2bw8BuTPCCa",
+      "course_scope": "campus",
+      "configuration_status": "FROZEN",
+      "preparation_status": "BLOCKED",
+      "required_slots": 5,
+      "completed_slots": 0,
+      "compatible_question_families": [],
+      "qualification": [
+        {
+          "id": "hybrid-qual-live-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        },
+        {
+          "id": "hybrid-qual-official-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        }
+      ],
+      "question_inventory": [
+        {
+          "validation_status": "NEEDS_REVIEW",
+          "publication_status": "NEEDS_REVIEW",
+          "count": 6
+        },
+        {
+          "validation_status": "VALIDATED",
+          "publication_status": "READY",
+          "count": 14
+        }
+      ],
+      "last_failure": {
+        "error_code": "ASSESSMENT_WORKER_FAILED",
+        "error_summary": "测评准备在第 1 题受阻；已保留 0/5 题。",
+        "diagnostic_id": "assessment-diagnostic-2150d17cc83442ee995378bf08c0f40b",
+        "updated_at": "2026-09-30T06:50:41.686Z"
+      },
+      "do_one_eligibility": "READY_POOL_AVAILABLE",
+      "assessment_eligibility": "NOT_READY"
+    },
+    {
+      "configuration_id": "assessment-config-9636c4a89a8fe13fed9a2418df6591ad",
+      "course_id": "course-de7b49de77d547cbaaee20acc8fa9648",
+      "owner": "user_3IzNGuLPsoiB5dOv2bw8BuTPCCa",
+      "course_scope": "private",
+      "configuration_status": "FROZEN",
+      "preparation_status": "BLOCKED",
+      "required_slots": 5,
+      "completed_slots": 0,
+      "compatible_question_families": [],
+      "qualification": [
+        {
+          "id": "hybrid-qual-live-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        },
+        {
+          "id": "hybrid-qual-official-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        }
+      ],
+      "question_inventory": [
+        {
+          "validation_status": "NEEDS_REVIEW",
+          "publication_status": "NEEDS_REVIEW",
+          "count": 5
+        },
+        {
+          "validation_status": "VALIDATED",
+          "publication_status": "READY",
+          "count": 5
+        }
+      ],
+      "last_failure": {
+        "error_code": "QUESTION_ENGINE_FAILED",
+        "error_summary": "测评准备在第 1 题受阻；已保留 0/5 题。",
+        "diagnostic_id": "assessment-diagnostic-2d4820b23b324f3da0cc9fe54d409471",
+        "updated_at": "2026-09-30T06:50:42.129Z"
+      },
+      "do_one_eligibility": "READY_POOL_AVAILABLE",
+      "assessment_eligibility": "NOT_READY"
+    },
+    {
+      "configuration_id": "assessment-config-d0263bb7af40fee9c6d42ce17cafd1f5",
+      "course_id": "ge2324",
+      "owner": "user_3Hp79gr1eQg1XCGIxKJ1HZHZrio",
+      "course_scope": "campus",
+      "configuration_status": "FROZEN",
+      "preparation_status": "READY",
+      "required_slots": 5,
+      "completed_slots": 5,
+      "compatible_question_families": [
+        "assessment_family_4b5b15d52ca0c593103321a0",
+        "assessment_family_7b02190f3aeb1b9aff2656c3",
+        "assessment_family_7c8fcd6baf050d1993858330",
+        "assessment_family_814e9ba6cbd2d1d900899c02",
+        "assessment_family_b31a2f3afd193a52077edc55"
+      ],
+      "qualification": [
+        {
+          "id": "hybrid-qual-live-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        },
+        {
+          "id": "hybrid-qual-official-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        }
+      ],
+      "question_inventory": [
+        {
+          "validation_status": "VALIDATED",
+          "publication_status": "READY",
+          "count": 10
+        }
+      ],
+      "last_failure": null,
+      "do_one_eligibility": "READY_POOL_AVAILABLE",
+      "assessment_eligibility": "READY"
+    },
+    {
+      "configuration_id": "assessment-config-3ac93fc4b0c8e1ce5df493e567bf5533",
+      "course_id": "ge2324",
+      "owner": "user_3IzNGuLPsoiB5dOv2bw8BuTPCCa",
+      "course_scope": "campus",
+      "configuration_status": "FROZEN",
+      "preparation_status": null,
+      "required_slots": 5,
+      "completed_slots": 0,
+      "compatible_question_families": [],
+      "qualification": [
+        {
+          "id": "hybrid-qual-live-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        },
+        {
+          "id": "hybrid-qual-official-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        }
+      ],
+      "question_inventory": [
+        {
+          "validation_status": "NEEDS_REVIEW",
+          "publication_status": "NEEDS_REVIEW",
+          "count": 6
+        },
+        {
+          "validation_status": "VALIDATED",
+          "publication_status": "READY",
+          "count": 14
+        }
+      ],
+      "last_failure": null,
+      "do_one_eligibility": "READY_POOL_AVAILABLE",
+      "assessment_eligibility": "NOT_READY"
+    },
+    {
+      "configuration_id": "assessment-config-1cbd1abff3e4e45bbbe3e7e33f3bf356",
+      "course_id": "ge2324",
+      "owner": "user_3IzNGuLPsoiB5dOv2bw8BuTPCCa",
+      "course_scope": "campus",
+      "configuration_status": "FROZEN",
+      "preparation_status": null,
+      "required_slots": 5,
+      "completed_slots": 0,
+      "compatible_question_families": [],
+      "qualification": [
+        {
+          "id": "hybrid-qual-live-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        },
+        {
+          "id": "hybrid-qual-official-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        }
+      ],
+      "question_inventory": [
+        {
+          "validation_status": "NEEDS_REVIEW",
+          "publication_status": "NEEDS_REVIEW",
+          "count": 6
+        },
+        {
+          "validation_status": "VALIDATED",
+          "publication_status": "READY",
+          "count": 14
+        }
+      ],
+      "last_failure": null,
+      "do_one_eligibility": "READY_POOL_AVAILABLE",
+      "assessment_eligibility": "NOT_READY"
+    },
+    {
+      "configuration_id": "assessment-config-06fe71898f7833e2bd5106a3294e42bf",
+      "course_id": "cs3481",
+      "owner": "user_3IzNGuLPsoiB5dOv2bw8BuTPCCa",
+      "course_scope": "campus",
+      "configuration_status": "FROZEN",
+      "preparation_status": "READY",
+      "required_slots": 5,
+      "completed_slots": 5,
+      "compatible_question_families": [
+        "assessment_family_14a9cdb65ebcdb5ab8315593",
+        "assessment_family_7fa4bcc46634d1f913ad1bda",
+        "assessment_family_a272e9bf68a1cf2f6d29e0bc",
+        "assessment_family_aaa9970b4a2af0ff0515824e",
+        "assessment_family_bc40ac71bfb5e31ce75c2f81"
+      ],
+      "qualification": [
+        {
+          "id": "hybrid-qual-live-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        },
+        {
+          "id": "hybrid-qual-official-v1",
+          "status": "SCOPED_QUALITY_ACCEPTED",
+          "active": true
+        }
+      ],
+      "question_inventory": [
+        {
+          "validation_status": "NEEDS_REVIEW",
+          "publication_status": "NEEDS_REVIEW",
+          "count": 2
+        },
+        {
+          "validation_status": "VALIDATED",
+          "publication_status": "READY",
+          "count": 5
+        }
+      ],
+      "last_failure": null,
+      "do_one_eligibility": "READY_POOL_AVAILABLE",
+      "assessment_eligibility": "READY"
+    }
+  ],
+  "tree_summary": {
+    "tree_count": 22,
+    "active_tree_count": 17,
+    "map50_compliant_count": 8,
+    "over_limit_count": 14,
+    "active_over_limit_count": 13,
+    "over_limit_tree_ids": [
+      "auto-tree-dda18ac9f5110a239cd2f0019365",
+      "auto-tree-26497012b94d295ca6050b5f919c",
+      "auto-tree-e3b8698c37ba2f5e9e4d20c34370",
+      "auto-tree-6d67d2e2e128c9f731b42e6738aa",
+      "auto-tree-a1b408b2ce58e4d8a916b84570a3",
+      "auto-tree-21ccaa2ff8ff5f1c7de3ac292189",
+      "auto-tree-bcad1c15dd18986678c654f3fd85",
+      "auto-tree-f5b577bab2cd150f329a8ab9636c",
+      "auto-tree-f9817cddcca3f73d7ffd9a5491ac",
+      "auto-tree-a2cc3075a90c932b5f9323b1e519",
+      "auto-tree-e08429418b7e1aecf79b910c3319",
+      "auto-tree-88ef8c987dad628348f9a7bd19f6",
+      "auto-tree-28a00c3017791d6bdfeb66115ca7",
+      "auto-tree-0ef2c5ed430dd8405598634129e6"
+    ],
+    "legacy_backfill_paused": true,
+    "target_status_counts": {
+      "BLOCKED": 11,
+      "EXISTING_ACTIVE": 2,
+      "FAILED": 4,
+      "READY": 3,
+      "READY_WITH_EXCEPTIONS": 11,
+      "WAITING_SOURCE": 50
+    },
+    "job_status_counts": {
+      "FAILED": 14,
+      "READY": 4,
+      "READY_WITH_EXCEPTIONS": 12,
+      "SUPERSEDED": 14
+    }
+  },
+  "trees": [
+    {
+      "course_id": "cs3481",
+      "tree_id": "official-tree-6ce740031afe46d587fc0fa82995e0da",
+      "tree_revision": 1,
+      "status": "DRAFT",
+      "node_count": 22,
+      "generator": "legacy_or_manual",
+      "source_scope": "OFFICIAL",
+      "owner": null,
+      "active": false,
+      "generation_class": "map50",
+      "map50_compliant": true,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "ge2324",
+      "tree_id": "official-tree-4d977cf25abe4227afa4ac49036108be",
+      "tree_revision": 1,
+      "status": "DRAFT",
+      "node_count": 20,
+      "generator": "legacy_or_manual",
+      "source_scope": "OFFICIAL",
+      "owner": null,
+      "active": false,
+      "generation_class": "map50",
+      "map50_compliant": true,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "cs3481",
+      "tree_id": "official-tree-2dd68963e9234fe78c374359df06799c",
+      "tree_revision": 2,
+      "status": "DRAFT",
+      "node_count": 22,
+      "generator": "legacy_or_manual",
+      "source_scope": "OFFICIAL",
+      "owner": null,
+      "active": false,
+      "generation_class": "map50",
+      "map50_compliant": true,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "ge2324",
+      "tree_id": "official-tree-1f51bc4f5d6e4014a1ea960c80665952",
+      "tree_revision": 2,
+      "status": "DRAFT",
+      "node_count": 20,
+      "generator": "legacy_or_manual",
+      "source_scope": "OFFICIAL",
+      "owner": null,
+      "active": false,
+      "generation_class": "map50",
+      "map50_compliant": true,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "cs3481",
+      "tree_id": "official-tree-15fd76815c754d148064e5e8872ad35c",
+      "tree_revision": 3,
+      "status": "PUBLISHED",
+      "node_count": 22,
+      "generator": "legacy_or_manual",
+      "source_scope": "OFFICIAL",
+      "owner": null,
+      "active": true,
+      "generation_class": "map50",
+      "map50_compliant": true,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "ge2324",
+      "tree_id": "official-tree-168ad777b4a549debd6614d75c77a09d",
+      "tree_revision": 3,
+      "status": "PUBLISHED",
+      "node_count": 21,
+      "generator": "legacy_or_manual",
+      "source_scope": "OFFICIAL",
+      "owner": null,
+      "active": true,
+      "generation_class": "map50",
+      "map50_compliant": true,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "course-x-260917173133",
+      "tree_id": "auto-tree-fc54900174dee337f269a8df4141",
+      "tree_revision": 1,
+      "status": "ACTIVE",
+      "node_count": 49,
+      "generator": "AUTO_KNOWLEDGE_MAP_V4_BOUNDED_SEGMENT_IDS",
+      "source_scope": "PRIVATE",
+      "owner": "user_3Hp79gr1eQg1XCGIxKJ1HZHZrio",
+      "active": true,
+      "generation_class": "map50",
+      "map50_compliant": true,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "course-de7b49de77d547cbaaee20acc8fa9648",
+      "tree_id": "auto-tree-dda18ac9f5110a239cd2f0019365",
+      "tree_revision": 1,
+      "status": "ACTIVE",
+      "node_count": 310,
+      "generator": "AUTO_KNOWLEDGE_MAP_V4_BOUNDED_SEGMENT_IDS",
+      "source_scope": "PRIVATE",
+      "owner": "user_3IzNGuLPsoiB5dOv2bw8BuTPCCa",
+      "active": true,
+      "generation_class": "legacy_over_limit",
+      "map50_compliant": false,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "course-341856170fa543f194d0b9c5f44766e7",
+      "tree_id": "auto-tree-26497012b94d295ca6050b5f919c",
+      "tree_revision": 1,
+      "status": "ACTIVE",
+      "node_count": 536,
+      "generator": "AUTO_KNOWLEDGE_MAP_V4_BOUNDED_SEGMENT_IDS",
+      "source_scope": "PRIVATE",
+      "owner": "user_3HpaaWSCJJ09UR3oMMsOxgq0rwQ",
+      "active": true,
+      "generation_class": "legacy_over_limit",
+      "map50_compliant": false,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "course-753b410b319f46498905d57fa90ab079",
+      "tree_id": "auto-tree-e3b8698c37ba2f5e9e4d20c34370",
+      "tree_revision": 1,
+      "status": "ACTIVE",
+      "node_count": 979,
+      "generator": "AUTO_KNOWLEDGE_MAP_V4_BOUNDED_SEGMENT_IDS",
+      "source_scope": "PRIVATE",
+      "owner": "user_3IzNGuLPsoiB5dOv2bw8BuTPCCa",
+      "active": true,
+      "generation_class": "legacy_over_limit",
+      "map50_compliant": false,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "campus-https-canvas-cityu-edu-hk-70578-70e4246363",
+      "tree_id": "auto-tree-6d67d2e2e128c9f731b42e6738aa",
+      "tree_revision": 1,
+      "status": "DRAFT",
+      "node_count": 192,
+      "generator": "AUTO_KNOWLEDGE_MAP_V4_BOUNDED_SEGMENT_IDS",
+      "source_scope": "AUTO_COURSE",
+      "owner": null,
+      "active": true,
+      "generation_class": "legacy_over_limit",
+      "map50_compliant": false,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "campus-https-canvas-cityu-edu-hk-70579-64c77c77c4",
+      "tree_id": "auto-tree-a1b408b2ce58e4d8a916b84570a3",
+      "tree_revision": 1,
+      "status": "DRAFT",
+      "node_count": 404,
+      "generator": "AUTO_KNOWLEDGE_MAP_V4_BOUNDED_SEGMENT_IDS",
+      "source_scope": "AUTO_COURSE",
+      "owner": null,
+      "active": true,
+      "generation_class": "legacy_over_limit",
+      "map50_compliant": false,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "campus-https-cityu-dg-instructure-com-216-5ef875b8",
+      "tree_id": "auto-tree-21ccaa2ff8ff5f1c7de3ac292189",
+      "tree_revision": 1,
+      "status": "DRAFT",
+      "node_count": 935,
+      "generator": "AUTO_KNOWLEDGE_MAP_V4_BOUNDED_SEGMENT_IDS",
+      "source_scope": "AUTO_COURSE",
+      "owner": null,
+      "active": true,
+      "generation_class": "legacy_over_limit",
+      "map50_compliant": false,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "campus-https-cityu-dg-instructure-com-240-e605add5",
+      "tree_id": "auto-tree-bcad1c15dd18986678c654f3fd85",
+      "tree_revision": 1,
+      "status": "DRAFT",
+      "node_count": 739,
+      "generator": "AUTO_KNOWLEDGE_MAP_V4_BOUNDED_SEGMENT_IDS",
+      "source_scope": "AUTO_COURSE",
+      "owner": null,
+      "active": true,
+      "generation_class": "legacy_over_limit",
+      "map50_compliant": false,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "campus-https-canvas-cityu-edu-hk-70574-7b862d1b11",
+      "tree_id": "auto-tree-f5b577bab2cd150f329a8ab9636c",
+      "tree_revision": 1,
+      "status": "DRAFT",
+      "node_count": 106,
+      "generator": "AUTO_KNOWLEDGE_MAP_V4_BOUNDED_SEGMENT_IDS",
+      "source_scope": "AUTO_COURSE",
+      "owner": null,
+      "active": false,
+      "generation_class": "legacy_over_limit",
+      "map50_compliant": false,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "campus-https-cityu-dg-instructure-com-233-1be7045d",
+      "tree_id": "auto-tree-f9817cddcca3f73d7ffd9a5491ac",
+      "tree_revision": 1,
+      "status": "DRAFT",
+      "node_count": 1515,
+      "generator": "AUTO_KNOWLEDGE_MAP_V4_BOUNDED_SEGMENT_IDS",
+      "source_scope": "AUTO_COURSE",
+      "owner": null,
+      "active": true,
+      "generation_class": "legacy_over_limit",
+      "map50_compliant": false,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "campus-https-cityu-dg-instructure-com-268-0e8126e3",
+      "tree_id": "auto-tree-a2cc3075a90c932b5f9323b1e519",
+      "tree_revision": 1,
+      "status": "DRAFT",
+      "node_count": 423,
+      "generator": "AUTO_KNOWLEDGE_MAP_V4_BOUNDED_SEGMENT_IDS",
+      "source_scope": "AUTO_COURSE",
+      "owner": null,
+      "active": true,
+      "generation_class": "legacy_over_limit",
+      "map50_compliant": false,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "campus-https-cityu-dg-instructure-com-308-a30f366a",
+      "tree_id": "auto-tree-e08429418b7e1aecf79b910c3319",
+      "tree_revision": 1,
+      "status": "DRAFT",
+      "node_count": 988,
+      "generator": "AUTO_KNOWLEDGE_MAP_V4_BOUNDED_SEGMENT_IDS",
+      "source_scope": "AUTO_COURSE",
+      "owner": null,
+      "active": true,
+      "generation_class": "legacy_over_limit",
+      "map50_compliant": false,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "campus-https-cityu-dg-instructure-com-317-27457493",
+      "tree_id": "auto-tree-88ef8c987dad628348f9a7bd19f6",
+      "tree_revision": 1,
+      "status": "DRAFT",
+      "node_count": 1171,
+      "generator": "AUTO_KNOWLEDGE_MAP_V4_BOUNDED_SEGMENT_IDS",
+      "source_scope": "AUTO_COURSE",
+      "owner": null,
+      "active": true,
+      "generation_class": "legacy_over_limit",
+      "map50_compliant": false,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "campus-https-cityu-dg-instructure-com-358-37f07bfd",
+      "tree_id": "auto-tree-28a00c3017791d6bdfeb66115ca7",
+      "tree_revision": 1,
+      "status": "DRAFT",
+      "node_count": 400,
+      "generator": "AUTO_KNOWLEDGE_MAP_V4_BOUNDED_SEGMENT_IDS",
+      "source_scope": "AUTO_COURSE",
+      "owner": null,
+      "active": true,
+      "generation_class": "legacy_over_limit",
+      "map50_compliant": false,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "campus-https-cityu-dg-instructure-com-367-dfd758dc",
+      "tree_id": "auto-tree-0ef2c5ed430dd8405598634129e6",
+      "tree_revision": 1,
+      "status": "DRAFT",
+      "node_count": 729,
+      "generator": "AUTO_KNOWLEDGE_MAP_V4_BOUNDED_SEGMENT_IDS",
+      "source_scope": "AUTO_COURSE",
+      "owner": null,
+      "active": true,
+      "generation_class": "legacy_over_limit",
+      "map50_compliant": false,
+      "corpus_fingerprint_present": true
+    },
+    {
+      "course_id": "campus-https-canvas-cityu-edu-hk-70574-7b862d1b11",
+      "tree_id": "auto-tree-a7073e3b7b8826b79d97410dfd2f",
+      "tree_revision": 2,
+      "status": "DRAFT",
+      "node_count": 40,
+      "generator": "AUTO_KNOWLEDGE_MAP_V6_STRICT_COMPACT_OUTLINE",
+      "source_scope": "AUTO_COURSE",
+      "owner": null,
+      "active": true,
+      "generation_class": "map50",
+      "map50_compliant": true,
+      "corpus_fingerprint_present": true
+    }
+  ],
+  "recent_do_one": [
+    {
+      "exercise_id": "exercise_38dce56d64f44b849481f8d1563c26a5",
+      "course_id": "course-de7b49de77d547cbaaee20acc8fa9648",
+      "owner": "user_3IzNGuLPsoiB5dOv2bw8BuTPCCa",
+      "pair_id": "pair_20b23aeba19d4c7bb61c97562036d4eb",
+      "run_id": "run_cc8e97e5d1d742e5aec11f253c14fb96",
+      "run_status": "completed",
+      "question_revision_id": null,
+      "generation_version": "V1",
+      "revealed": true,
+      "created_at": "2026-09-28T11:29:43.352+00:00"
+    },
+    {
+      "exercise_id": "exercise_91880d9bb49b4315bf6944e757b1c6ef",
+      "course_id": "ge2324",
+      "owner": "user_3IzNGuLPsoiB5dOv2bw8BuTPCCa",
+      "pair_id": "pair_d24bf3d24e514d568c23a17803173b52",
+      "run_id": "run_98331f772d3b415ab195aaf41df2bc69",
+      "run_status": "completed",
+      "question_revision_id": "qe_fa8fca2124354d189ec04e11be332395",
+      "generation_version": "exercise.v2+question-engine.v1",
+      "revealed": false,
+      "created_at": "2026-09-28T11:26:58.395+00:00"
+    },
+    {
+      "exercise_id": "exercise_3cae2ec7e4864e93a01246868597089b",
+      "course_id": "ge2324",
+      "owner": "user_3IzNGuLPsoiB5dOv2bw8BuTPCCa",
+      "pair_id": "pair_d24bf3d24e514d568c23a17803173b52",
+      "run_id": "run_410ad3c5ca8542dcaa9d0130facfc779",
+      "run_status": "completed",
+      "question_revision_id": "qe_7aba5a1e69d345d9a44885a577a58152",
+      "generation_version": "exercise.v2+question-engine.v1",
+      "revealed": false,
+      "created_at": "2026-09-28T11:25:01.421+00:00"
+    },
+    {
+      "exercise_id": "exercise_2c495c5f96a5473394da5cbdc0341a78",
+      "course_id": "ge2324",
+      "owner": "user_3IzNGuLPsoiB5dOv2bw8BuTPCCa",
+      "pair_id": "pair_d24bf3d24e514d568c23a17803173b52",
+      "run_id": "run_1be85531ac1f46c79a911d5661cd797a",
+      "run_status": "completed",
+      "question_revision_id": "qe_a0152ca816f34449819d2c8f85610798",
+      "generation_version": "exercise.v2+question-engine.v1",
+      "revealed": true,
+      "created_at": "2026-09-28T11:00:25.303+00:00"
+    },
+    {
+      "exercise_id": "exercise_5c572bb6102346ff9588b1f07554407f",
+      "course_id": "ge2324",
+      "owner": "user_3IzNGuLPsoiB5dOv2bw8BuTPCCa",
+      "pair_id": "pair_d24bf3d24e514d568c23a17803173b52",
+      "run_id": "run_0ec6d2c29f63482e84756b97af1e8e17",
+      "run_status": "completed",
+      "question_revision_id": "qe_a23aa68e17b64c2ba059a22e477b4a25",
+      "generation_version": "exercise.v2+question-engine.v1",
+      "revealed": true,
+      "created_at": "2026-09-28T08:12:30.918+00:00"
+    },
+    {
+      "exercise_id": "exercise_376c3bd3868d4dcdbdf3d8acc02c0401",
+      "course_id": "cs3481",
+      "owner": "user_3Jot1uuWmnDsYFFfBtF6a5WloVH",
+      "pair_id": "pair_a6761db2188d42ceb02fc7cf3d9b232f",
+      "run_id": "run_b14ca689476c4345870d91469b7e3555",
+      "run_status": "completed",
+      "question_revision_id": "qe_90c4e45b15a341b6882b0777c5dce940",
+      "generation_version": "exercise.v2+question-engine.v1",
+      "revealed": true,
+      "created_at": "2026-09-25T12:40:47.615+00:00"
+    },
+    {
+      "exercise_id": "exercise_7de595554768428c9dd3ec4ad4e120ab",
+      "course_id": "cs3481",
+      "owner": "user_3Hp79gr1eQg1XCGIxKJ1HZHZrio",
+      "pair_id": "pair_9b54d1abe1564628a3d101a9eba95c8a",
+      "run_id": "run_f6020b5caae445d1b06cec4470fae6cb",
+      "run_status": "completed",
+      "question_revision_id": "qe_edc85a5af3a6431baf3a5f2440367dff",
+      "generation_version": "exercise.v2+question-engine.v1",
+      "revealed": true,
+      "created_at": "2026-09-25T12:05:40.952+00:00"
+    },
+    {
+      "exercise_id": "exercise_5e18dde552ed444db56d0927b34a361d",
+      "course_id": "ge2324",
+      "owner": "user_3Hp79gr1eQg1XCGIxKJ1HZHZrio",
+      "pair_id": "pair_f47c601157044581b4aa6dddb14c9134",
+      "run_id": "run_a81f2cbe143a4b2aa24e38f46bf11362",
+      "run_status": "completed",
+      "question_revision_id": null,
+      "generation_version": "exercise.v2",
+      "revealed": true,
+      "created_at": "2026-09-20T20:04:37.646+00:00"
+    },
+    {
+      "exercise_id": "exercise_d472f61ef31a43d7879860d608cef55b",
+      "course_id": "ge2324",
+      "owner": "user_3Hp79gr1eQg1XCGIxKJ1HZHZrio",
+      "pair_id": "pair_80d0a138da594733b1c56360ab4916f3",
+      "run_id": "run_0e56601b9e4a46f9882619ac3864058e",
+      "run_status": "completed",
+      "question_revision_id": null,
+      "generation_version": "exercise.v2",
+      "revealed": true,
+      "created_at": "2026-09-20T18:57:41.365+00:00"
+    },
+    {
+      "exercise_id": "exercise_07e53e4f71144662bae669602eeeaacb",
+      "course_id": "ge2324",
+      "owner": "user_3Hp79gr1eQg1XCGIxKJ1HZHZrio",
+      "pair_id": "pair_8d511fc2bfb14578a4667ea08ccd22c7",
+      "run_id": "run_03e437586d0c466cbac19e832146074d",
+      "run_status": "completed",
+      "question_revision_id": null,
+      "generation_version": "exercise.v2",
+      "revealed": true,
+      "created_at": "2026-09-20T10:03:33.894+00:00"
+    },
+    {
+      "exercise_id": "exercise_a61708206729427dbb69ae1e007dbb32",
+      "course_id": "ge2324",
+      "owner": "user_3Hp79gr1eQg1XCGIxKJ1HZHZrio",
+      "pair_id": "pair_8d511fc2bfb14578a4667ea08ccd22c7",
+      "run_id": "run_2b07f47fb8b1439f9d91c3fde5dcf220",
+      "run_status": "completed",
+      "question_revision_id": null,
+      "generation_version": "exercise.v2",
+      "revealed": true,
+      "created_at": "2026-09-20T09:47:16.176+00:00"
+    },
+    {
+      "exercise_id": "exercise_5ad5c5d917474acd8c35a24f618a32b4",
+      "course_id": "ge2324",
+      "owner": "user_3Hp79gr1eQg1XCGIxKJ1HZHZrio",
+      "pair_id": "pair_c29f7de26c2544db8c61ba56bf42846f",
+      "run_id": "run_dad0f7cae0464d1bae08a6ad703d0b19",
+      "run_status": "completed",
+      "question_revision_id": null,
+      "generation_version": "exercise.v2",
+      "revealed": true,
+      "created_at": "2026-09-20T09:45:02.806+00:00"
+    },
+    {
+      "exercise_id": "exercise_0376f9c002fb47c282a5a4abdb67f742",
+      "course_id": "cs3481",
+      "owner": "user_3JaK76HkZ0mnOMTeJmCu7wMq6RU",
+      "pair_id": "pair_326f09fa32d8406fae0a6937b0dfbafa",
+      "run_id": "run_b3150819c0a047fd8c92eceac36aa8f2",
+      "run_status": "completed",
+      "question_revision_id": null,
+      "generation_version": "V1",
+      "revealed": true,
+      "created_at": "2026-09-20T08:39:57.632+00:00"
+    },
+    {
+      "exercise_id": "exercise_67defd59f055476a90bab8d130fc7063",
+      "course_id": "cs3481",
+      "owner": "user_3JaIvvc3opfwU4rZX6RGVmdQade",
+      "pair_id": "pair_89160e30e4f64757960a64fe0b1369c1",
+      "run_id": "run_726327d9a90644029f354c62e24b519a",
+      "run_status": "completed",
+      "question_revision_id": null,
+      "generation_version": "V1",
+      "revealed": true,
+      "created_at": "2026-09-20T08:31:58.388+00:00"
+    },
+    {
+      "exercise_id": "exercise_777c802292c6418c989fc5b2210d0720",
+      "course_id": "ge2324",
+      "owner": "user_3JaIvvc3opfwU4rZX6RGVmdQade",
+      "pair_id": "pair_59a6d30bda9d453b8b6ba8a106fe18aa",
+      "run_id": "run_1304ad8d2b854280aa78551ccc308625",
+      "run_status": "completed",
+      "question_revision_id": null,
+      "generation_version": "exercise.v2",
+      "revealed": true,
+      "created_at": "2026-09-20T08:31:33.769+00:00"
+    },
+    {
+      "exercise_id": "exercise_159ab703574243d6aecbe49525927d62",
+      "course_id": "cs3481",
+      "owner": "user_3JaIvvc3opfwU4rZX6RGVmdQade",
+      "pair_id": "pair_a1bb0e0202404f758e48d03a0095f8ee",
+      "run_id": "run_e42686b0be2d4e54ae7a014f60ecea9c",
+      "run_status": "completed",
+      "question_revision_id": null,
+      "generation_version": "exercise.v2",
+      "revealed": true,
+      "created_at": "2026-09-20T08:30:24.442+00:00"
+    },
+    {
+      "exercise_id": "exercise_17aa50311ccd4e97bed83c4307edd031",
+      "course_id": "cs3481",
+      "owner": "user_3JaI16Km97GHyiWqaDB0xazbndP",
+      "pair_id": "pair_cdd82b8e7313405d9f1108f1a589605f",
+      "run_id": "run_c0632b566f454852a9227807b589629f",
+      "run_status": "completed",
+      "question_revision_id": null,
+      "generation_version": "exercise.v2",
+      "revealed": true,
+      "created_at": "2026-09-20T08:22:50.307+00:00"
+    },
+    {
+      "exercise_id": "exercise_23647454bf784f9aa7d26c863681816a",
+      "course_id": "cs3481",
+      "owner": "user_3JYyXiyHtr6rGWecWDmzzAYmkPZ",
+      "pair_id": "pair_0cdb562662f945b185c74a924052db3b",
+      "run_id": "run_367068c4cdd444feaa9c55d67d8127c4",
+      "run_status": "completed",
+      "question_revision_id": null,
+      "generation_version": "V1",
+      "revealed": true,
+      "created_at": "2026-09-19T21:54:01.694+00:00"
+    },
+    {
+      "exercise_id": "exercise_21e2db20469147c387e11839aa18188b",
+      "course_id": "cs3481",
+      "owner": "user_3JYyXiyHtr6rGWecWDmzzAYmkPZ",
+      "pair_id": "pair_0cdb562662f945b185c74a924052db3b",
+      "run_id": "run_0af7563bb01b41b7b0552e1ba5771a3d",
+      "run_status": "completed",
+      "question_revision_id": null,
+      "generation_version": "V1",
+      "revealed": true,
+      "created_at": "2026-09-19T21:49:59.554+00:00"
+    },
+    {
+      "exercise_id": "exercise_89070007ba834681bf57111f9a33b8d7",
+      "course_id": "cs3481",
+      "owner": "user_3JYyXiyHtr6rGWecWDmzzAYmkPZ",
+      "pair_id": "pair_0cdb562662f945b185c74a924052db3b",
+      "run_id": "run_1308d03e07e1445395684b5fe12346a0",
+      "run_status": "completed",
+      "question_revision_id": null,
+      "generation_version": "V1",
+      "revealed": true,
+      "created_at": "2026-09-19T21:41:58.204+00:00"
+    }
+  ]
+}
