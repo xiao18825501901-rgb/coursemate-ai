@@ -830,8 +830,13 @@ def test_explicit_multi_file_batch_waits_for_seal_then_builds_once(
     )
     assert sealed["status"] == repeated["status"] == "SEALED"
 
-    assert service.reconcile(force=True)["QUEUED"] == 1
+    released = service.reconcile()
+    assert released["QUEUED"] == 1
+    assert released["EVENTS_CONSUMED"] == 1
     assert service.run_once("after-seal")["status"] == "READY"
+    visible = service.status("private-course", "owner-a")
+    assert visible["status"] == "READY"
+    assert visible["pending_source_events"] == 0
     assert generator.calls == 1
     assert generator.evidence_ids == ["batch-chunk-one", "batch-chunk-two"]
     with database.connect() as connection:

@@ -281,6 +281,15 @@ def create_app(
                         await asyncio.to_thread(service.reconcile_background)
                         first_pass = False
                         last_reconcile = now
+                    else:
+                        # New uploads and completed import batches must not wait
+                        # for the legacy inventory sweep interval. This pass is
+                        # event-only and never recovers historical failed jobs.
+                        await asyncio.to_thread(
+                            service.reconcile,
+                            full=False,
+                            recover_safe_failures=False,
+                        )
                     while await asyncio.to_thread(service.run_once, worker_id) is not None:
                         pass
                 except asyncio.CancelledError:

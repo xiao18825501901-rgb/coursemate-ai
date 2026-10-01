@@ -3644,7 +3644,8 @@ class AutoKnowledgeMapService:
                     connection, target_key
                 )
             due = connection.execute(
-                "SELECT id FROM auto_knowledge_source_events WHERE status='PENDING' "
+                "SELECT id,source_course_id,event_kind FROM auto_knowledge_source_events "
+                "WHERE status='PENDING' "
                 + ("" if force else "AND not_before<=? ")
                 + scope_clause
                 + "ORDER BY id",
@@ -3654,6 +3655,11 @@ class AutoKnowledgeMapService:
                     else (() if force else (stamp(),))
                 ),
             ).fetchall()
+            release_event_by_course = {
+                str(row["source_course_id"]): int(row["id"])
+                for row in due
+                if row["event_kind"] == "RECONCILIATION"
+            }
             # Full reconciliation is the legacy/backfill path and never re-reads
             # D:\\Canvas or an external source. Normal source events keep their
             # quiet window; polling early must not start a build.
@@ -3689,13 +3695,20 @@ class AutoKnowledgeMapService:
                         counts["IMPORT_OPEN"] += 1
                         continue
                     if not force:
-                        future_event = connection.execute(
-                            f"SELECT 1 FROM auto_knowledge_source_events "
+                        future_events = connection.execute(
+                            f"SELECT id,source_course_id FROM auto_knowledge_source_events "
                             f"WHERE status='PENDING' AND not_before>? "
-                            f"AND source_course_id IN ({placeholders}) LIMIT 1",
+                            f"AND source_course_id IN ({placeholders}) ORDER BY id",
                             (stamp(), *source_courses),
-                        ).fetchone()
-                        if future_event is not None:
+                        ).fetchall()
+                        # A sealed upload batch is an explicit release fence for
+                        # document events created before that seal. A later event
+                        # must still observe its own quiet window.
+                        if any(
+                            int(event["id"])
+                            > release_event_by_course.get(str(event["source_course_id"]), -1)
+                            for event in future_events
+                        ):
                             counts["QUIET_WINDOW"] += 1
                             continue
                     counts[self._ensure_target(connection, target)] += 1
@@ -4932,8 +4945,13 @@ class AutoKnowledgeMapService:
             event_placeholders = ",".join("?" for _ in source_courses)
             pending_events = int(
                 connection.execute(
-                    f"SELECT COUNT(*) FROM auto_knowledge_source_events WHERE status='PENDING' "
-                    f"AND source_course_id IN ({event_placeholders})",
+                    f"SELECT COUNT(*) FROM auto_knowledge_source_events AS event "
+                    f"WHERE event.status='PENDING' "
+                    f"AND event.source_course_id IN ({event_placeholders}) "
+                    "AND NOT EXISTS(SELECT 1 FROM auto_knowledge_source_events AS release "
+                    "WHERE release.source_course_id=event.source_course_id "
+                    "AND release.event_kind='RECONCILIATION' AND release.status='CONSUMED' "
+                    "AND release.id>event.id)",
                     source_courses,
                 ).fetchone()[0]
             )
