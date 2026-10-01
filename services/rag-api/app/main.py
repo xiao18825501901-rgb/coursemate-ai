@@ -188,6 +188,23 @@ def create_app(
     database.storage_object_probe = ingestion_service.has_stored_object
     database.storage_range_resolver = ingestion_service.read_stored_range
     application.state.database = database
+    if resolved_settings.visual_engine_enabled:
+        from app.visual.planner import MockVisualPlannerProvider
+        from app.visual.providers.mock_comfy import MockComfyProvider
+        from app.visual.service import VisualService
+        from app.visual.store import VisualJobStore
+        from app.visual.workflows import WorkflowRegistry
+
+        application.state.visual_service = VisualService(
+            store=VisualJobStore(database),
+            planner=MockVisualPlannerProvider(),
+            provider=MockComfyProvider(
+                complete_after_polls=resolved_settings.visual_mock_complete_after_polls
+            ),
+            storage=ingestion_service.storage_backend,
+            workflows=WorkflowRegistry.default_mock(),
+            settings=resolved_settings,
+        )
     # One shared semantic-decision layer for the whole app. TypeSafe/Jev is not
     # constructed here and is not an automatic fallback. Unconfigured deployments
     # stay local/off; a configured deployment can call only the pinned private
@@ -276,10 +293,23 @@ def create_app(
         @asynccontextmanager
         async def application_lifespan(_application: FastAPI):
             task = None
+            visual_task = None
             assessment_task = asyncio.create_task(
                 configured_assessment_worker(), name="configured-assessment-worker"
             )
             application.state.configured_assessment_task = assessment_task
+            if resolved_settings.visual_engine_enabled:
+                from app.visual.worker import visual_worker_loop
+
+                visual_task = asyncio.create_task(
+                    visual_worker_loop(
+                        application.state.visual_service,
+                        worker_id=f"visual-{id(application)}",
+                        poll_seconds=resolved_settings.visual_worker_poll_seconds,
+                    ),
+                    name="visual-learning-worker",
+                )
+                application.state.visual_worker_task = visual_task
             if resolved_settings.auto_knowledge_map_enabled:
                 if resolved_settings.auto_knowledge_map_allow_billable:
                     task = asyncio.create_task(
@@ -298,6 +328,10 @@ def create_app(
                     task.cancel()
                     with suppress(asyncio.CancelledError):
                         await task
+                if visual_task is not None:
+                    visual_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await visual_task
                 assessment_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await assessment_task

@@ -65,6 +65,7 @@ V3_MIGRATIONS = (
     # because hybrid_review_calls is keyed on (revision, role, input_hash) and
     # a recorded failure there would block the legitimate retry of that input.
     "066_hybrid_provider_failure_ledger.sql",
+    "067_visual_learning_engine.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -126,7 +127,7 @@ V3_REPLAY_SUPERSEDED_BY = {
     "064_durable_assessment_preparation.sql": 64,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 66
+LATEST_V3_SCHEMA_VERSION = 67
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (

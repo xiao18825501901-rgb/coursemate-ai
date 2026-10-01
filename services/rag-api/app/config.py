@@ -130,6 +130,26 @@ class Settings(BaseSettings):
     ui_task_agent_url: str = ""
     ui_task_agent_timeout_seconds: float = Field(default=60.0, ge=1.0, le=300.0)
     ui_web_dir: Path = Field(default=Path("../../apps/web/dist"))
+    # Visual Learning Engine Phase A is entirely opt-in and local/mock by
+    # default. A later phase may add a real provider, but selecting one here
+    # cannot silently create a network path.
+    visual_engine_enabled: bool = False
+    visual_provider: Literal["mock", "aliyun_eas"] = "mock"
+    visual_auto_enabled: bool = False
+    visual_video_enabled: bool = False
+    visual_worker_poll_seconds: float = Field(default=1.0, ge=0.05, le=60.0)
+    visual_worker_lease_seconds: float = Field(default=30.0, ge=5.0, le=600.0)
+    visual_max_concurrent_jobs_per_user: int = Field(default=2, ge=1, le=20)
+    visual_max_concurrent_jobs_global: int = Field(default=4, ge=1, le=100)
+    visual_max_images_per_user_day: int = Field(default=20, ge=1, le=1_000)
+    visual_max_video_jobs_per_user_day: int = Field(default=2, ge=0, le=100)
+    visual_max_gpu_seconds_per_user_day: float = Field(default=0.0, ge=0.0, le=86_400.0)
+    visual_max_output_bytes: int = Field(default=10 * 1024 * 1024, ge=1_024, le=100 * 1024 * 1024)
+    visual_max_width: int = Field(default=2048, ge=256, le=8192)
+    visual_max_height: int = Field(default=2048, ge=256, le=8192)
+    visual_max_duration_seconds: float = Field(default=15.0, ge=0.5, le=120.0)
+    visual_max_retries: int = Field(default=1, ge=0, le=5)
+    visual_mock_complete_after_polls: int = Field(default=2, ge=1, le=20)
     # Canvas credentials are stored under an authenticated-encryption key that lives here and
     # nowhere else: not in the database, not in the repository, not in a log. Without it the
     # integration reports itself unconfigured instead of storing a token in the clear.
@@ -238,6 +258,13 @@ class Settings(BaseSettings):
             )
         if self.storage_backend == "aliyun_oss" and not self.v3_enabled:
             raise ValueError("aliyun_oss storage requires the V3 storage metadata schema")
+        if self.visual_engine_enabled and not self.v3_enabled:
+            raise ValueError("visual engine requires the V3 schema")
+        if self.visual_engine_enabled and self.visual_provider != "mock":
+            raise ValueError(
+                "Phase A visual engine supports only the local mock provider; "
+                "aliyun_eas is a fail-closed future seam"
+            )
         if self.jev_provider == "openjev":
             missing: list[str] = []
             if not self.openjev_endpoint.strip():

@@ -95,6 +95,14 @@ export const createExplanation = (exerciseId, stepId) => send(`/exercises/${exer
 export const getExplanation = (id) => request('/explanations/' + id);
 export const postExplanationMessage = (id, text) => send(`/explanations/${id}/messages`, { text, request_id: key() });
 export const cancelExplanation = (id) => send(`/explanations/${id}/cancel`, {});
+// Visual Learning Engine. Status reads are GET-only and can never enqueue work.
+export const listMessageVisuals = (courseId, messageId) => request(`/courses/${encodeURIComponent(courseId)}/messages/${encodeURIComponent(messageId)}/visuals`);
+export const listPairVisuals = (courseId, pairId) => request(`/courses/${encodeURIComponent(courseId)}/pairs/${encodeURIComponent(pairId)}/visuals`);
+export const createVisual = (courseId, messageId, pairId, action) => send(`/courses/${encodeURIComponent(courseId)}/messages/${encodeURIComponent(messageId)}/visuals`, { request_id: key(), pair_id: pairId, action });
+export const getVisualJob = (jobId) => request(`/visual-jobs/${encodeURIComponent(jobId)}`);
+export const cancelVisualJob = (jobId) => send(`/visual-jobs/${encodeURIComponent(jobId)}/cancel`, {});
+export const retryVisualJob = (jobId) => send(`/visual-jobs/${encodeURIComponent(jobId)}/retry`, { request_id: key() });
+export const fallbackVisualJob = (jobId) => send(`/visual-jobs/${encodeURIComponent(jobId)}/fallback`, { request_id: key() });
 // Student verification.
 export const getVerification = () => request('/me/verification');
 export const redeemVerification = (code) => send('/me/verification/redeem', { code, request_id: key() });

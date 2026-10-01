@@ -215,6 +215,12 @@
    mouse, touch and keyboard interaction; labelled ticks make all values
    discoverable without relying on colour alone. */
 .pane-footer, .chat-composer { overflow: visible; }
+:root[data-theme='dark'] .visual-job,
+:root[data-theme='dark'] .visual-placeholder,
+:root[data-theme='dark'] .visual-actions button,
+:root[data-theme='dark'] .visual-job-head button,
+:root[data-theme='dark'] .visual-asset-card figcaption button { background:#222a30;color:#d9e1e6;border-color:#46515a; }
+:root[data-theme='dark'] .visual-asset-card img { background:#f7f8f9;border-color:#46515a; }
 
 @media (max-width: 620px) {
   .theme-toggle span { display: none; }

@@ -67,6 +67,7 @@ class Settings:
         'CMUI_CAMPUS_ACCESS_MODE', 'open_to_registered').lower())
     verification_effective_at: str = field(default_factory=lambda: os.getenv(
         'CMUI_VERIFICATION_EFFECTIVE_AT', '').strip())
+    visual_engine_enabled: bool = False
 
     def validate(self) -> None:
         if self.environment not in {'development','test','production'}: raise ValueError('Unknown environment')

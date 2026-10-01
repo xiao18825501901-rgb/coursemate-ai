@@ -626,7 +626,8 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             'campus_access_mode':cfg.campus_access_mode,
             'student_verification_required_for_campus':cfg.campus_access_mode!='open_to_registered',
             'verification_effective_at':cfg.verification_effective_at or None,
-            'reasoning_policy':{'strength':FORCED_REASONING_STRENGTH,'application_usd_cap':None}}
+            'reasoning_policy':{'strength':FORCED_REASONING_STRENGTH,'application_usd_cap':None},
+            'visual_engine_enabled':bool(cfg.visual_engine_enabled)}
 
     @r.post('/dev/login')
     async def dev_login(request:Request,response:Response):

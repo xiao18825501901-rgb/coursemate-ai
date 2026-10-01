@@ -130,6 +130,7 @@ def _ui_settings(settings: Settings) -> object:
         os.getenv("CMUI_ANSWER_TOKENS", str(max(settings.v3_max_output_tokens, 6500)))
     )
     ui.api_base = MOUNT_PATH + "/api/ui/v1"
+    ui.visual_engine_enabled = settings.visual_engine_enabled
     ui.web_dir = settings.ui_web_dir
     # A non-existent web_dir is intentional: the host does not serve the
     # offline-verified bundle, and the production gate still rejects it if present.
@@ -190,6 +191,10 @@ def mount_ui_extension(
     )
     _allow_browser_credentials(host_app, mount_path, ui_settings.allowed_origins)
     _prepend_legacy_history(ui, adapter)
+    if settings.visual_engine_enabled:
+        from app.visual.api import install_visual_routes
+
+        install_visual_routes(ui, host_app, host_app.state.visual_service)
     # Exposed for tests and operational diagnostics; the adapter holds no secrets.
     host_app.state.ui_extension_adapter = adapter
     host_app.state.ui_extension_app = ui

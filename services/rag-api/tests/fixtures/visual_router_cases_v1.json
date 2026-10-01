@@ -1,0 +1,558 @@
+{
+  "version": "v1",
+  "cases": [
+    {
+      "id": "acid",
+      "question": "What does ACID stand for?",
+      "should_visualize": false,
+      "expected_visual_type": "NONE",
+      "expected_renderer_family": "NONE",
+      "must_include": [],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "bplus",
+      "question": "Explain how a B+ Tree range scan works.",
+      "should_visualize": true,
+      "expected_visual_type": "DIAGRAM",
+      "expected_renderer_family": "GRAPHVIZ",
+      "must_include": [
+        "leaf-level links",
+        "range direction"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "rbtree",
+      "question": "Show why red-black tree rotations preserve structure.",
+      "should_visualize": true,
+      "expected_visual_type": "ANIMATION",
+      "expected_renderer_family": "MANIM",
+      "must_include": [
+        "nodes",
+        "rotation direction"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "er",
+      "question": "Explain this ER relationship and cardinality.",
+      "should_visualize": true,
+      "expected_visual_type": "DIAGRAM",
+      "expected_renderer_family": "MERMAID",
+      "must_include": [
+        "entities",
+        "cardinality"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "sqlplan",
+      "question": "Explain a SQL join execution plan.",
+      "should_visualize": true,
+      "expected_visual_type": "DIAGRAM",
+      "expected_renderer_family": "GRAPHVIZ",
+      "must_include": [
+        "operators",
+        "data flow"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "cpu-pipe",
+      "question": "Explain a five-stage CPU pipeline hazard.",
+      "should_visualize": true,
+      "expected_visual_type": "DIAGRAM",
+      "expected_renderer_family": "SVG",
+      "must_include": [
+        "pipeline stages",
+        "hazard"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "topology",
+      "question": "Explain this network topology.",
+      "should_visualize": true,
+      "expected_visual_type": "DIAGRAM",
+      "expected_renderer_family": "GRAPHVIZ",
+      "must_include": [
+        "nodes",
+        "links"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "dijkstra",
+      "question": "Walk through Dijkstra on this graph.",
+      "should_visualize": true,
+      "expected_visual_type": "ANIMATION",
+      "expected_renderer_family": "MANIM",
+      "must_include": [
+        "frontier",
+        "distance updates"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "bfs",
+      "question": "Compare BFS and DFS traversal order.",
+      "should_visualize": true,
+      "expected_visual_type": "ANIMATION",
+      "expected_renderer_family": "MANIM",
+      "must_include": [
+        "visit order"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "fsm",
+      "question": "Explain this finite state machine.",
+      "should_visualize": true,
+      "expected_visual_type": "DIAGRAM",
+      "expected_renderer_family": "GRAPHVIZ",
+      "must_include": [
+        "states",
+        "transitions"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "matrix",
+      "question": "Why are T @ R @ S and S @ R @ T different?",
+      "should_visualize": true,
+      "expected_visual_type": "ANIMATION",
+      "expected_renderer_family": "MANIM",
+      "must_include": [
+        "same initial object",
+        "intermediate states",
+        "axes"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "matrix-def",
+      "question": "What is a homogeneous coordinate?",
+      "should_visualize": false,
+      "expected_visual_type": "NONE",
+      "expected_renderer_family": "NONE",
+      "must_include": [],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "tcp",
+      "question": "Explain the TCP three-way handshake.",
+      "should_visualize": true,
+      "expected_visual_type": "DIAGRAM",
+      "expected_renderer_family": "SVG",
+      "must_include": [
+        "SYN",
+        "SYN-ACK",
+        "ACK"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "cache",
+      "question": "Explain CPU cache hierarchy.",
+      "should_visualize": true,
+      "expected_visual_type": "DIAGRAM",
+      "expected_renderer_family": "SVG",
+      "must_include": [
+        "L1",
+        "L2",
+        "L3",
+        "memory"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "linked",
+      "question": "Show insertion into a singly linked list.",
+      "should_visualize": true,
+      "expected_visual_type": "ANIMATION",
+      "expected_renderer_family": "MANIM",
+      "must_include": [
+        "pointers",
+        "before",
+        "after"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "sort",
+      "question": "Animate insertion sort on five numbers.",
+      "should_visualize": true,
+      "expected_visual_type": "ANIMATION",
+      "expected_renderer_family": "MANIM",
+      "must_include": [
+        "current key",
+        "sorted prefix"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "logic",
+      "question": "Explain a half adder.",
+      "should_visualize": true,
+      "expected_visual_type": "DIAGRAM",
+      "expected_renderer_family": "SVG",
+      "must_include": [
+        "XOR",
+        "AND"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "uml",
+      "question": "Show class relationships.",
+      "should_visualize": true,
+      "expected_visual_type": "DIAGRAM",
+      "expected_renderer_family": "MERMAID",
+      "must_include": [
+        "classes",
+        "relationships"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "nn",
+      "question": "Explain a feed-forward neural network architecture.",
+      "should_visualize": true,
+      "expected_visual_type": "DIAGRAM",
+      "expected_renderer_family": "SVG",
+      "must_include": [
+        "input",
+        "hidden",
+        "output"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "backprop",
+      "question": "What does backpropagation mean?",
+      "should_visualize": true,
+      "expected_visual_type": "DIAGRAM",
+      "expected_renderer_family": "SVG",
+      "must_include": [
+        "forward",
+        "gradient flow"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "dbscan",
+      "question": "Explain core, border and noise points in DBSCAN.",
+      "should_visualize": true,
+      "expected_visual_type": "DIAGRAM",
+      "expected_renderer_family": "SVG",
+      "must_include": [
+        "core",
+        "border",
+        "noise",
+        "epsilon neighborhood"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "kmeans",
+      "question": "What is the K-means objective function?",
+      "should_visualize": false,
+      "expected_visual_type": "NONE",
+      "expected_renderer_family": "NONE",
+      "must_include": [],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "lens",
+      "question": "Visualize gravitational lensing intuition.",
+      "should_visualize": true,
+      "expected_visual_type": "IMAGE",
+      "expected_renderer_family": "COMFY_IMAGE",
+      "must_include": [
+        "foreground mass",
+        "bent light",
+        "background source"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": false,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "wave",
+      "question": "Show wave propagation and phase.",
+      "should_visualize": true,
+      "expected_visual_type": "ANIMATION",
+      "expected_renderer_family": "MANIM",
+      "must_include": [
+        "wave",
+        "direction",
+        "phase"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "projectile",
+      "question": "Visualize projectile motion.",
+      "should_visualize": true,
+      "expected_visual_type": "ANIMATION",
+      "expected_renderer_family": "MANIM",
+      "must_include": [
+        "trajectory",
+        "velocity"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "gear",
+      "question": "Show how two gears transfer motion.",
+      "should_visualize": true,
+      "expected_visual_type": "VIDEO",
+      "expected_renderer_family": "COMFY_VIDEO",
+      "must_include": [
+        "two meshed gears",
+        "opposite rotation"
+      ],
+      "should_not_use_video": false,
+      "exactness_required": false,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "cell",
+      "question": "Visualize a conceptual cell membrane transport scene.",
+      "should_visualize": true,
+      "expected_visual_type": "IMAGE",
+      "expected_renderer_family": "COMFY_IMAGE",
+      "must_include": [
+        "membrane",
+        "transported particles"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": false,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "enzyme",
+      "question": "Visualize enzyme-substrate binding conceptually.",
+      "should_visualize": true,
+      "expected_visual_type": "IMAGE",
+      "expected_renderer_family": "COMFY_IMAGE",
+      "must_include": [
+        "enzyme",
+        "substrate",
+        "binding"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": false,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "relativity",
+      "question": "Give intuition for spacetime curvature.",
+      "should_visualize": true,
+      "expected_visual_type": "IMAGE",
+      "expected_renderer_family": "COMFY_IMAGE",
+      "must_include": [
+        "mass",
+        "curved spacetime analogy"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": false,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "formula",
+      "question": "Derive the quadratic formula step by step.",
+      "should_visualize": true,
+      "expected_visual_type": "ANIMATION",
+      "expected_renderer_family": "MANIM",
+      "must_include": [
+        "exact equations"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "eigen",
+      "question": "What is an eigenvalue?",
+      "should_visualize": true,
+      "expected_visual_type": "DIAGRAM",
+      "expected_renderer_family": "SVG",
+      "must_include": [
+        "vector",
+        "transformed vector"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "integral",
+      "question": "What is the definition of a definite integral?",
+      "should_visualize": false,
+      "expected_visual_type": "NONE",
+      "expected_renderer_family": "NONE",
+      "must_include": [],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "binary",
+      "question": "Explain binary search on a sorted array.",
+      "should_visualize": true,
+      "expected_visual_type": "ANIMATION",
+      "expected_renderer_family": "MANIM",
+      "must_include": [
+        "low",
+        "mid",
+        "high"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "hash",
+      "question": "What is a hash collision?",
+      "should_visualize": true,
+      "expected_visual_type": "DIAGRAM",
+      "expected_renderer_family": "SVG",
+      "must_include": [
+        "two keys",
+        "same bucket"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "os-deadlock",
+      "question": "Explain the four Coffman conditions.",
+      "should_visualize": true,
+      "expected_visual_type": "DIAGRAM",
+      "expected_renderer_family": "SVG",
+      "must_include": [
+        "four conditions"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "scheduler",
+      "question": "Animate round-robin scheduling.",
+      "should_visualize": true,
+      "expected_visual_type": "ANIMATION",
+      "expected_renderer_family": "MANIM",
+      "must_include": [
+        "queue",
+        "time quantum"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "tls",
+      "question": "Explain a simplified TLS handshake.",
+      "should_visualize": true,
+      "expected_visual_type": "DIAGRAM",
+      "expected_renderer_family": "SVG",
+      "must_include": [
+        "ordered messages"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "acid-vs-base",
+      "question": "Compare ACID and BASE at a high level.",
+      "should_visualize": true,
+      "expected_visual_type": "DIAGRAM",
+      "expected_renderer_family": "SVG",
+      "must_include": [
+        "ACID",
+        "BASE"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "simple-sql",
+      "question": "What does SELECT DISTINCT do?",
+      "should_visualize": false,
+      "expected_visual_type": "NONE",
+      "expected_renderer_family": "NONE",
+      "must_include": [],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    },
+    {
+      "id": "motion-bio",
+      "question": "Animate a conceptual blood-flow direction through the heart.",
+      "should_visualize": true,
+      "expected_visual_type": "ANIMATION",
+      "expected_renderer_family": "MANIM",
+      "must_include": [
+        "chambers",
+        "flow direction"
+      ],
+      "should_not_use_video": true,
+      "exactness_required": true,
+      "note": "Synthetic routing/evaluation fixture; not a course-source truth label."
+    }
+  ]
+}

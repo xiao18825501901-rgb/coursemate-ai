@@ -1,0 +1,25 @@
+{
+  "registry_version": "1",
+  "workflows": [
+    {
+      "workflow_id": "mock-image-v1",
+      "version": "1",
+      "renderer_type": "COMFY_IMAGE",
+      "provider": "mock",
+      "enabled": true,
+      "allowed_inputs": ["positive_prompt", "negative_prompt", "seed", "width", "height"],
+      "outputs": ["image"],
+      "model_version": "mock-fixture-v1"
+    },
+    {
+      "workflow_id": "mock-video-v1",
+      "version": "1",
+      "renderer_type": "COMFY_VIDEO",
+      "provider": "mock",
+      "enabled": true,
+      "allowed_inputs": ["positive_prompt", "negative_prompt", "seed", "width", "height", "duration_seconds"],
+      "outputs": ["video"],
+      "model_version": "mock-fixture-v1"
+    }
+  ]
+}
