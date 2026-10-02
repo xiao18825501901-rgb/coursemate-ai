@@ -25,14 +25,16 @@ from test_question_persistence import (
     pipeline,
 )
 
+import app.learning.question_runtime as question_runtime_module
 from app.errors import ApiError
 from app.jev.catalog import load_catalog
 from app.jev.gateway import FakeTransport, JevGateway
 from app.jev.models import JevAnswer, JevResult
 from app.jev.receipt_store import SqlReceiptStore
 from app.jev.service import SemanticDecisionService
+from app.learning.blind_solve import BlindSolveError
 from app.learning.provider import LearningProvider, ProviderCallFailure
-from app.learning.question_author import RULE_VIOLATION_POLICY_VERSION
+from app.learning.question_author import RULE_VIOLATION_POLICY_VERSION, AuthorGenerationError
 from app.learning.question_runtime import (
     QuestionEngineRuntime,
     QuestionEngineRuntimeError,
@@ -197,6 +199,82 @@ def test_generate_one_routes_author_and_blind_solver_through_metered_operation(
         )
     assert replayed.value.code == "QUESTION_OPERATION_REPLAY"
     assert len(calls) == 2
+
+
+def test_generate_one_retries_one_known_author_schema_rejection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, config = database_with_objective(tmp_path)
+    runtime = QuestionEngineRuntime(
+        database=database,
+        provider=LearningProvider(config),
+        semantic_decisions=decisions(database),
+    )
+    original = question_runtime_module.author_question
+    calls = 0
+
+    def flaky_author(*args: Any, **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise AuthorGenerationError(
+                "AUTHOR_PROVIDER_FAILED",
+                "synthetic known schema rejection",
+                provider_run={"error_class": "SCHEMA_INVALID"},
+            )
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(question_runtime_module, "author_question", flaky_author)
+
+    result = runtime.generate_one(
+        owner_user_id=OWNER,
+        workspace_id=WORKSPACE,
+        course_id=COURSE,
+        private_course_id=PRIVATE_COURSE,
+        node_id=NODE,
+        operation_id="author-schema-retry-0001",
+    )
+
+    assert result["status"] == "READY"
+    assert calls == 2
+
+
+def test_generate_one_retries_one_known_blind_solver_schema_rejection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, config = database_with_objective(tmp_path)
+    runtime = QuestionEngineRuntime(
+        database=database,
+        provider=LearningProvider(config),
+        semantic_decisions=decisions(database),
+    )
+    original = question_runtime_module.run_blind_solve
+    calls = 0
+
+    def flaky_blind_solver(*args: Any, **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise BlindSolveError(
+                "BLIND_SOLVER_PROVIDER_FAILED",
+                "synthetic known schema rejection",
+                provider_run={"error_class": "SCHEMA_INVALID"},
+            )
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(question_runtime_module, "run_blind_solve", flaky_blind_solver)
+
+    result = runtime.generate_one(
+        owner_user_id=OWNER,
+        workspace_id=WORKSPACE,
+        course_id=COURSE,
+        private_course_id=PRIVATE_COURSE,
+        node_id=NODE,
+        operation_id="blind-schema-retry-0001",
+    )
+
+    assert result["status"] == "READY"
+    assert calls == 2
 
 
 def test_ready_question_is_reused_without_a_second_model_operation(tmp_path: Path) -> None:

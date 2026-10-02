@@ -1808,10 +1808,10 @@ class QuestionEngineRuntime:
             # it is a commission the author routinely gets right on a second sample:
             # roughly two in five campus items were lost to a missing role, which is
             # the dominant reason that course cannot reach the qualification's recall
-            # floor.  Nothing else is retried here.  AUTHOR_OUTPUT_INVALID rarely
-            # improves on a resample and retrying it would double the cost of every
-            # such failure; a provider failure must not be resent at all, because the
-            # deployment's unknown-request guard exists to stop exactly that.
+            # floor.  A provider response that was received and explicitly rejected
+            # as SCHEMA_INVALID is also safe to resample once: its outcome is known,
+            # unlike an unknown transport request, and production proved that both
+            # the author and blind solver can return this recoverable refusal.
             # Both contract refusals are retried.  AUTHOR_CONTRACT_INVALID means the
             # contract did not satisfy its own schema and AUTHOR_CONTRACT_INCOMPLETE
             # means it declared a profile whose required roles it did not supply;
@@ -1819,7 +1819,14 @@ class QuestionEngineRuntime:
             # commissions a resample routinely fixes.  Production hit the first of
             # them on a live SQL preparation six attempts in, which is what showed
             # the distinction was too narrow.
-            if error.code not in {"AUTHOR_CONTRACT_INCOMPLETE", "AUTHOR_CONTRACT_INVALID"}:
+            provider_schema_rejected = bool(
+                error.provider_run
+                and error.provider_run.get("error_class") == "SCHEMA_INVALID"
+            )
+            if (
+                error.code not in {"AUTHOR_CONTRACT_INCOMPLETE", "AUTHOR_CONTRACT_INVALID"}
+                and not provider_schema_rejected
+            ):
                 raise
             candidate = author_question(
                 provider,
@@ -1827,11 +1834,27 @@ class QuestionEngineRuntime:
                 evidence=evidence,
             )
         self._check_cancelled(should_cancel)
-        blind = run_blind_solve(
-            provider,
-            candidate=candidate,
-            evidence=evidence,
-        )
+        try:
+            blind = run_blind_solve(
+                provider,
+                candidate=candidate,
+                evidence=evidence,
+            )
+        except BlindSolveError as error:
+            # Retry only a completed, known-bad schema response.  Transport-unknown,
+            # blocked and semantic failures remain terminal to avoid duplicate spend
+            # or weakening the independent-solve gate.
+            provider_schema_rejected = bool(
+                error.provider_run
+                and error.provider_run.get("error_class") == "SCHEMA_INVALID"
+            )
+            if not provider_schema_rejected:
+                raise
+            blind = run_blind_solve(
+                provider,
+                candidate=candidate,
+                evidence=evidence,
+            )
         self._check_cancelled(should_cancel)
         scope = (
             self.semantic_decisions.scope(
