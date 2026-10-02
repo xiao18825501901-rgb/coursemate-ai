@@ -425,8 +425,21 @@ class LearningOrchestrator:
                     ).fetchone()
                     return self._configured_preparation_view(db, blocked)
 
-            attempt = int(existing["attempt"]) + 1 if existing is not None else 1
-            model_operation_id = f"assessment-prep-{configuration_id[-20:]}-{attempt}"
+            if existing is None:
+                attempt = 1
+                model_operation_id = f"assessment-prep-{configuration_id[-20:]}-{attempt}"
+            else:
+                # `attempt` is the bounded automatic retry counter.  A person
+                # explicitly continuing a settled BLOCKED preparation starts a
+                # fresh bounded window; carrying the exhausted counter forward
+                # would queue work that the worker can never claim.  Keep a new
+                # operation identity so completed reservations from the previous
+                # window remain immutable and cannot be resent accidentally.
+                attempt = 0
+                resume_epoch = hashlib.sha256(request.operation_id.encode()).hexdigest()[:12]
+                model_operation_id = (
+                    f"assessment-prep-{configuration_id[-20:]}-resume-{resume_epoch}"
+                )
             # Model-reservation triggers require a known operation.  The HTTP
             # operation only queues work and completes immediately; this stable
             # background identity owns every later reservation without keeping
@@ -436,6 +449,7 @@ class LearningOrchestrator:
                     {
                         "kind": "assessment.configured_preparation.worker",
                         "configuration_id": configuration_id,
+                        "operation_id": model_operation_id,
                         "attempt": attempt,
                     }
                 ).encode()

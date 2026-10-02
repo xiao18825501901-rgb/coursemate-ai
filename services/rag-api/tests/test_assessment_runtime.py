@@ -349,6 +349,60 @@ def test_empty_pool_without_qualified_semantic_reviewer_fails_closed(
         assert preparation["diagnostic_id"].startswith("assessment-diagnostic-")
 
 
+def test_manual_configured_preparation_resume_starts_a_fresh_bounded_retry_window(
+    tmp_path: Path,
+) -> None:
+    """A user retry must remain claimable after automatic retries are exhausted."""
+
+    _, config = database_with_objective(tmp_path)
+    app = create_app(
+        settings=config.model_copy(update={"auth_test_user_id": QUESTION_OWNER})
+    )
+    with TestClient(app, headers={"Authorization": "Bearer test-session-token"}) as client:
+        setup = client.get(
+            f"/api/learning/workspaces/{QUESTION_WORKSPACE}/assessments/setup/{QUESTION_NODE}"
+        ).json()
+        queued = client.post(
+            f"/api/learning/workspaces/{QUESTION_WORKSPACE}/assessments",
+            json={
+                "operation_id": "retry-window-initial",
+                "revision": current_revision(client, QUESTION_WORKSPACE),
+                "node_id": QUESTION_NODE,
+                "slots": setup["default_slots"],
+            },
+        ).json()
+        configuration_id = queued["configuration_id"]
+        with client.app.state.database.connect() as connection:
+            connection.execute(
+                "UPDATE assessment_configuration_preparations SET "
+                "status='BLOCKED',attempt=24,current_stage='BLOCKED',"
+                "error_code='QUESTION_NOT_READY',lease_owner=NULL,lease_expires_at=NULL "
+                "WHERE configuration_id=?",
+                (configuration_id,),
+            )
+
+        resumed = client.post(
+            f"/api/learning/workspaces/{QUESTION_WORKSPACE}/assessments",
+            json={
+                "operation_id": "retry-window-manual-resume",
+                "revision": current_revision(client, QUESTION_WORKSPACE),
+                "node_id": QUESTION_NODE,
+                "configuration_id": configuration_id,
+                "slots": [],
+            },
+        )
+        assert resumed.status_code == 200, resumed.text
+        assert resumed.json()["status"] == "PREPARING"
+        with client.app.state.database.connect() as connection:
+            preparation = connection.execute(
+                "SELECT attempt,operation_id FROM assessment_configuration_preparations "
+                "WHERE configuration_id=?",
+                (configuration_id,),
+            ).fetchone()
+        assert int(preparation["attempt"]) < 24
+        assert "retry-window-manual-resume" not in preparation["operation_id"]
+
+
 @pytest.mark.parametrize("question_count", [5, 6, 8, 10, 12])
 def test_configurable_assessment_freezes_exact_slots_without_setup_leak(
     tmp_path: Path,
