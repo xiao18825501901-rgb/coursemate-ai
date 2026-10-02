@@ -199,6 +199,7 @@ def test_a_bare_topic_is_not_an_objective() -> None:
         "Learners can write a parameterized SELECT query",
         "Given the schema and rows, write the query and explain its output",
         "For each execution plan, evaluate the join order",
+        "Correct the misconception that an isolated vertex is not part of the vertex set",
         "列出多表连接后需要去重的输出字段",
         "描述 NULL 对外连接筛选条件的影响",
         "根据给定表结构，写出查询并解释结果",

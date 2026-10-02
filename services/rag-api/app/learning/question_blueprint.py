@@ -70,7 +70,7 @@ Hex64 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 OBSERVABLE_ACTION_WORDS: Final[frozenset[str]] = frozenset(
     {
         "analyze", "apply", "assess", "build", "calculate", "choose", "classify",
-        "compare", "compute", "construct", "contrast", "convert", "create", "define",
+        "compare", "compute", "construct", "contrast", "convert", "correct", "create", "define",
         "demonstrate", "derive", "describe", "design", "determine", "differentiate",
         "distinguish", "enumerate", "evaluate", "explain", "express", "find", "identify",
         "implement", "interpret", "justify", "list", "name", "predict", "prove", "recall",
