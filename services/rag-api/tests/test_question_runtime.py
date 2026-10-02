@@ -342,6 +342,33 @@ def test_ready_question_is_reused_without_a_second_model_operation(tmp_path: Pat
         ).fetchone()[0] == 0
 
 
+def test_compatible_assessment_ready_blueprint_projects_as_practice() -> None:
+    compatible = {
+        "blueprint_id": "assessment_compatible_short_answer",
+        "generation_policy_version": "assessment-generation.v1",
+        "bloom_target": "UNDERSTAND",
+        "target_difficulty": 2,
+        "question_type": "SHORT_TEXT",
+        "expected_answer_form": "SHORT_ANSWER",
+    }
+    assert (
+        QuestionEngineRuntime._prototype_id_for_blueprint(compatible)
+        == "concept_short_answer"
+    )
+
+    unsupported = {
+        **compatible,
+        "blueprint_id": "assessment_unsupported_mcq",
+        "bloom_target": "REMEMBER",
+        "target_difficulty": 1,
+        "question_type": "MCQ_SINGLE",
+        "expected_answer_form": "SINGLE_CHOICE",
+    }
+    with pytest.raises(QuestionEngineRuntimeError) as refusal:
+        QuestionEngineRuntime._prototype_id_for_blueprint(unsupported)
+    assert refusal.value.code == "READY_QUESTION_BLUEPRINT_UNSUPPORTED"
+
+
 def test_exposed_ready_family_falls_back_to_one_new_generation(tmp_path: Path) -> None:
     database, config = database_with_objective(tmp_path)
     provider = LearningProvider(config)

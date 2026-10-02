@@ -486,6 +486,23 @@ class QuestionEngineRuntime:
                 == prototype.target_difficulty
             ):
                 return prototype.prototype_id
+        # A configured assessment question can also be a safe practice item: it
+        # has the same READY, rubric, hidden-answer and evidence guarantees, but
+        # its generation-policy label belongs to the assessment pipeline.  Map
+        # only an explicitly assessment-authored blueprint whose observable
+        # shape exactly matches a supported practice renderer.  Unsupported
+        # shapes (for example the assessment MCQ slot) remain ineligible.
+        if str(blueprint.get("blueprint_id") or "").startswith("assessment_"):
+            for prototype in _PROTOTYPES.values():
+                if (
+                    blueprint.get("bloom_target") == prototype.bloom_target
+                    and blueprint.get("question_type") == prototype.question_type
+                    and blueprint.get("expected_answer_form")
+                    == prototype.expected_answer_form
+                    and int(blueprint.get("target_difficulty") or 0)
+                    == prototype.target_difficulty
+                ):
+                    return prototype.prototype_id
         raise QuestionEngineRuntimeError(
             "READY_QUESTION_BLUEPRINT_UNSUPPORTED",
             "The compatible READY question uses an unsupported practice blueprint.",
@@ -522,7 +539,7 @@ class QuestionEngineRuntime:
         """Project one compatible, unexposed READY revision without a provider call."""
 
         with self.database.connect() as connection:
-            row = connection.execute(
+            rows = connection.execute(
                 "SELECT question.id,question.question_type,question.prompt_text,"
                 "question.options_json,provenance.blueprint_id,"
                 "provenance.question_revision_hash,provenance.blueprint_json,"
@@ -547,7 +564,7 @@ class QuestionEngineRuntime:
                 " SELECT 1 FROM assessment_exposure_events AS exposure "
                 " WHERE exposure.workspace_id=? AND exposure.family_id=question.family_id"
                 ") ORDER BY question.created_at,question.id,"
-                "reference.solution_revision DESC LIMIT 1",
+                "reference.solution_revision DESC LIMIT 50",
                 (
                     workspace_id,
                     objective.node_id,
@@ -560,8 +577,28 @@ class QuestionEngineRuntime:
                     workspace_id,
                     workspace_id,
                 ),
-            ).fetchone()
-        if row is None:
+            ).fetchall()
+        if not rows:
+            return None
+        row: sqlite3.Row | None = None
+        prototype_id: str | None = None
+        for candidate in rows:
+            try:
+                candidate_blueprint = json.loads(str(candidate["blueprint_json"]))
+                candidate_prototype = self._prototype_id_for_blueprint(candidate_blueprint)
+            except QuestionEngineRuntimeError as error:
+                if error.code == "READY_QUESTION_BLUEPRINT_UNSUPPORTED":
+                    continue
+                raise
+            except (TypeError, ValueError) as error:
+                raise QuestionEngineRuntimeError(
+                    "READY_QUESTION_PROJECTION_INVALID",
+                    "The compatible READY question could not be projected safely.",
+                ) from error
+            row = candidate
+            prototype_id = candidate_prototype
+            break
+        if row is None or prototype_id is None:
             return None
         try:
             blueprint = json.loads(str(row["blueprint_json"]))
@@ -585,7 +622,7 @@ class QuestionEngineRuntime:
                 status="READY",
                 verification_status="AI_REVIEWED",
                 generation_version=GENERATION_VERSION,
-                prototype_id=self._prototype_id_for_blueprint(blueprint),
+                prototype_id=prototype_id,
                 public=PublicExerciseProjection(
                     schema_version="exercise.v2",
                     blueprint_id=str(row["blueprint_id"]),
