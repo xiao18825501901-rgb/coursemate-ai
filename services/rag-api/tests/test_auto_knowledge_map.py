@@ -1170,6 +1170,29 @@ def test_background_reconcile_still_consumes_due_new_source_events_during_freeze
     )
     with database.connect() as connection:
         connection.execute(
+            "INSERT INTO courses(id,name,owner_user_id,course_type,visibility,publication_status) "
+            "VALUES('private-course-b','Private course B','owner-b','user','private','private')"
+        )
+        connection.execute(
+            "INSERT INTO courses(id,name,owner_user_id,course_type,visibility,publication_status) "
+            "VALUES('private-corpus-b','Private corpus B','owner-b','user','private','private')"
+        )
+        connection.execute(
+            "INSERT INTO learning_workspaces(id,owner_user_id,course_id,private_course_id) "
+            "VALUES('workspace-b','owner-b','private-course-b','private-corpus-b')"
+        )
+    ready_document(
+        database,
+        document_id="legacy-unrelated-doc",
+        chunk_id="legacy-unrelated-chunk",
+        content="Unrelated inventory must stay frozen without its own source event.",
+        course_id="private-corpus-b",
+    )
+    with database.connect() as connection:
+        connection.execute(
+            "DELETE FROM auto_knowledge_source_events WHERE source_course_id='private-corpus-b'"
+        )
+        connection.execute(
             "UPDATE auto_knowledge_source_events SET not_before='2000-01-01T00:00:00Z'"
         )
 
@@ -1178,6 +1201,11 @@ def test_background_reconcile_still_consumes_due_new_source_events_during_freeze
 
     assert result["QUEUED"] == 1
     assert result["EVENTS_CONSUMED"] == 1
+    with database.connect() as connection:
+        jobs = connection.execute(
+            "SELECT target_key FROM auto_knowledge_jobs ORDER BY target_key"
+        ).fetchall()
+    assert [row["target_key"] for row in jobs] == ["PRIVATE:workspace-a"]
 
 
 def test_ready_on_insert_is_captured_for_trusted_importers(tmp_path: Path) -> None:

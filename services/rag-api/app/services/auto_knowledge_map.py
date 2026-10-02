@@ -3664,7 +3664,19 @@ class AutoKnowledgeMapService:
             # D:\\Canvas or an external source. Normal source events keep their
             # quiet window; polling early must not start a build.
             if force or full or due:
-                for target in targets:
+                eligible_targets = targets
+                if not force and not full:
+                    due_source_course_ids = {
+                        str(event["source_course_id"]) for event in due
+                    }
+                    eligible_targets = [
+                        target
+                        for target in targets
+                        if due_source_course_ids.intersection(
+                            self._source_course_ids(connection, target)
+                        )
+                    ]
+                for target in eligible_targets:
                     source_courses = self._source_course_ids(connection, target)
                     placeholders = ",".join("?" for _ in source_courses)
                     open_batch = connection.execute(
