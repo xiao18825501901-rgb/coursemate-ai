@@ -45,7 +45,10 @@ def join_course(database: Database, course_id: str, owner: str, limit: int) -> d
         if row is None:
             if (
                 db.execute(
-                    "SELECT COUNT(*) FROM learning_workspaces WHERE owner_user_id=?", (owner,)
+                    "SELECT COUNT(*) FROM learning_workspaces WHERE owner_user_id=? "
+                    "AND NOT (id GLOB 'akm-workspace-*' "
+                    "AND private_course_id GLOB 'akm-corpus-*')",
+                    (owner,),
                 ).fetchone()[0]
                 >= limit
             ):
