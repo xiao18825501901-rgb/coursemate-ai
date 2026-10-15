@@ -268,3 +268,64 @@ def test_older_ui_release_refuses_newer_schema_database(
     older = UiDatabase(ui_dir / "ui.sqlite3")
     with pytest.raises(ValueError, match="Newer UI database schema detected; do not downgrade"):
         older.initialize()
+
+
+def test_legacy_release_accepts_only_known_additive_schema_16_without_downgrade(
+    tmp_path: Path,
+) -> None:
+    from app.cm_update.db import Database as UiDatabase
+
+    path = tmp_path / "ui" / "ui.sqlite3"
+    legacy = UiDatabase(path)
+    legacy.initialize()
+    with legacy.connect(True) as connection:
+        connection.execute(
+            "ALTER TABLE cmui_runs ADD COLUMN error_detail TEXT "
+            "CHECK(error_detail IS NULL OR json_valid(error_detail))"
+        )
+        connection.executescript(
+            """
+            CREATE TABLE cmui_teaching_envelopes (
+             run TEXT PRIMARY KEY REFERENCES cmui_runs(id) ON DELETE CASCADE,
+             contract_version TEXT NOT NULL, envelope_json TEXT NOT NULL,
+             provider_audit TEXT NOT NULL DEFAULT '[]',
+             lease_worker TEXT NOT NULL, created_at TEXT NOT NULL
+            );
+            CREATE TRIGGER cmui_teaching_envelope_immutable
+            BEFORE UPDATE ON cmui_teaching_envelopes BEGIN
+             SELECT RAISE(ABORT,'TEACHING_ENVELOPE_IMMUTABLE');
+            END;
+            CREATE TABLE cmui_teaching_candidates (
+             run TEXT PRIMARY KEY REFERENCES cmui_runs(id) ON DELETE CASCADE,
+             contract_version TEXT NOT NULL, candidate_json TEXT NOT NULL,
+             lease_worker TEXT NOT NULL, created_at TEXT NOT NULL
+            );
+            CREATE TRIGGER cmui_teaching_candidate_immutable
+            BEFORE UPDATE ON cmui_teaching_candidates BEGIN
+             SELECT RAISE(ABORT,'TEACHING_CANDIDATE_IMMUTABLE');
+            END;
+            UPDATE cmui_meta SET value='16' WHERE key='schema_version';
+            """
+        )
+
+    UiDatabase(path).initialize()
+    assert UiDatabase(path).one(
+        "SELECT value FROM cmui_meta WHERE key='schema_version'"
+    )["value"] == "16"
+
+
+def test_legacy_release_rejects_incomplete_or_unknown_future_ui_schema(
+    tmp_path: Path,
+) -> None:
+    from app.cm_update.db import Database as UiDatabase
+
+    path = tmp_path / "ui" / "ui.sqlite3"
+    legacy = UiDatabase(path)
+    legacy.initialize()
+    legacy.execute("UPDATE cmui_meta SET value='16' WHERE key='schema_version'")
+    with pytest.raises(ValueError, match="Newer UI database schema detected"):
+        UiDatabase(path).initialize()
+
+    legacy.execute("UPDATE cmui_meta SET value='17' WHERE key='schema_version'")
+    with pytest.raises(ValueError, match="Newer UI database schema detected"):
+        UiDatabase(path).initialize()

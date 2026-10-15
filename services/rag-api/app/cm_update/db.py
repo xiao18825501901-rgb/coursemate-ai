@@ -22,6 +22,45 @@ def uid(prefix: str = '') -> str:
 # into the UI database.
 SCHEMA_VERSION = 15
 
+# Schema 16 was introduced after this release and is deliberately additive:
+# one nullable private error-detail column plus two private immutable journals.
+# A legacy recovery may open that exact shape without rewriting its marker.
+# Every other future schema still fails closed.
+KNOWN_ADDITIVE_FUTURE_SCHEMA = 16
+
+
+def _is_known_additive_future_schema(connection, version: int) -> bool:
+    if version != KNOWN_ADDITIVE_FUTURE_SCHEMA:
+        return False
+    run_columns = {row[1] for row in connection.execute("PRAGMA table_info(cmui_runs)")}
+    if "error_detail" not in run_columns:
+        return False
+    required_tables = {
+        "cmui_teaching_envelopes": {
+            "run", "contract_version", "envelope_json", "provider_audit",
+            "lease_worker", "created_at",
+        },
+        "cmui_teaching_candidates": {
+            "run", "contract_version", "candidate_json", "lease_worker", "created_at",
+        },
+    }
+    for table, expected_columns in required_tables.items():
+        actual = {
+            row[1] for row in connection.execute(f"PRAGMA table_info({table})")
+        }
+        if not expected_columns.issubset(actual):
+            return False
+    triggers = {
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger'"
+        )
+    }
+    return {
+        "cmui_teaching_envelope_immutable",
+        "cmui_teaching_candidate_immutable",
+    }.issubset(triggers)
+
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS cmui_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS cmui_users (
@@ -309,12 +348,17 @@ class Database:
     def initialize(self, verification_secret: str | None = None):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as c:
+            preserved_future_version = None
             tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if tables.intersection({'courses','chunks','tasks','schema_migrations'}):
                 raise ValueError(f'Refusing to initialize UI database over an existing {BRAND.name} domain database')
             if 'cmui_meta' in tables:
                 current=c.execute("SELECT value FROM cmui_meta WHERE key='schema_version'").fetchone()
-                if current and int(current[0])>SCHEMA_VERSION: raise ValueError('Newer UI database schema detected; do not downgrade')
+                if current and int(current[0]) > SCHEMA_VERSION:
+                    candidate_version = int(current[0])
+                    if not _is_known_additive_future_schema(c, candidate_version):
+                        raise ValueError('Newer UI database schema detected; do not downgrade')
+                    preserved_future_version = candidate_version
             c.execute('PRAGMA journal_mode=WAL')
             c.executescript(SCHEMA)
             # Schema 3 amendment: run leases for cross-process ownership. Older
@@ -384,7 +428,8 @@ class Database:
                           "CHECK(problem_strength IN ('medium','high','max'))")
             self._migrate_verification_secrets(c, verification_secret)
             self._migrate_verification_methods(c)
-            c.execute("INSERT INTO cmui_meta VALUES ('schema_version',?) ON CONFLICT(key) DO UPDATE SET value=?",(str(SCHEMA_VERSION),str(SCHEMA_VERSION)))
+            effective_version = preserved_future_version or SCHEMA_VERSION
+            c.execute("INSERT INTO cmui_meta VALUES ('schema_version',?) ON CONFLICT(key) DO UPDATE SET value=?",(str(effective_version),str(effective_version)))
             self._migrate_pairs(c)
 
     def _migrate_verification_secrets(self, c, secret):
