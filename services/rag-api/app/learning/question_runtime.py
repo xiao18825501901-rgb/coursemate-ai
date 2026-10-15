@@ -386,6 +386,68 @@ class QuestionEngineRuntime:
                 (status, workspace_id, operation_id),
             )
 
+    def reconcile_terminal_ui_operation(
+        self,
+        *,
+        owner_user_id: str,
+        operation_id: str,
+        ui_status: str,
+    ) -> dict[str, Any]:
+        """Settle only the matching abandoned Question Engine parent.
+
+        October UI data can contain a terminal shell run while the same durable
+        Question Engine operation remains ``RUNNING`` after an unexpected Python
+        exception.  The exact owner/id/kind join prevents a broad unlock.  Any
+        unresolved model reservation is preserved as ``UNKNOWN``; it is never
+        replayed or rewritten as a known failure.
+        """
+
+        terminal_ui_status = ui_status.strip().lower()
+        if terminal_ui_status not in {"failed", "cancelled"}:
+            return {"reconciled": False, "status": None}
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            operation = connection.execute(
+                "SELECT operation.workspace_id FROM learning_operations AS operation "
+                "JOIN learning_workspaces AS workspace ON workspace.id=operation.workspace_id "
+                "WHERE operation.id=? AND operation.kind='QUESTION_GENERATION' "
+                "AND operation.status='RUNNING' AND workspace.owner_user_id=?",
+                (operation_id, owner_user_id),
+            ).fetchone()
+            if operation is None:
+                return {"reconciled": False, "status": None}
+            workspace_id = str(operation["workspace_id"])
+            reservation_states = sorted(
+                {
+                    str(row["status"])
+                    for row in connection.execute(
+                        "SELECT status FROM learning_model_call_reservations "
+                        "WHERE workspace_id=? AND operation_id=?",
+                        (workspace_id, operation_id),
+                    ).fetchall()
+                }
+            )
+            status = (
+                "UNKNOWN"
+                if set(reservation_states) & {"RESERVED", "UNKNOWN"}
+                else "FAILED"
+            )
+            result = json.dumps(
+                {
+                    "reconciled_from_terminal_ui": terminal_ui_status,
+                    "reservation_states": reservation_states,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            updated = connection.execute(
+                "UPDATE learning_operations SET status=?,result_json=? "
+                "WHERE workspace_id=? AND id=? AND kind='QUESTION_GENERATION' "
+                "AND status='RUNNING'",
+                (status, result, workspace_id, operation_id),
+            ).rowcount
+            return {"reconciled": updated == 1, "status": status if updated else None}
+
     def _recent_exposures(self, workspace_id: str, node_id: str) -> list[str]:
         with self.database.connect() as connection:
             return [
@@ -2620,6 +2682,17 @@ class QuestionEngineRuntime:
                     operation_id=operation_id,
                 )
             raise QuestionEngineRuntimeError(error.code, error.message) from error
+        except Exception as error:
+            if operation_claimed:
+                self._fail_generation_operation(
+                    workspace_id=workspace_id,
+                    operation_id=operation_id,
+                )
+            raise QuestionEngineRuntimeError(
+                "QUESTION_ENGINE_FAILED",
+                "The exercise failed after its operation was claimed; its exact request "
+                "state was preserved and will not be replayed automatically.",
+            ) from error
 
         usage = [
             _public_run(candidate.provider_run),

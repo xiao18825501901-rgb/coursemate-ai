@@ -438,6 +438,26 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                     (row['run'], str(error)[:500], now(), now()),
                 )
 
+    async def reconcile_terminal_question_runs():
+        """Reconcile exact UI-terminal Question Engine parents without replay."""
+        if domain is None:
+            return
+        rows = db.all(
+            "SELECT id,owner,status FROM cmui_runs "
+            "WHERE status IN ('failed','cancelled') ORDER BY created_at"
+        )
+        for row in rows:
+            try:
+                await domain.call(
+                    'knowledge.exercise.reconcile_terminal', row['owner'],
+                    {'operation_id': row['id'], 'ui_status': row['status']}, ''
+                )
+            except Exception:
+                # A read/compatibility failure must not prevent the UI service from
+                # starting. The still-RUNNING parent remains fail-closed and is
+                # visible to the release audit for manual diagnosis.
+                continue
+
     @asynccontextmanager
     async def lifespan(app):
         # Only runs with provably dead owners are reclaimed. A sibling process
@@ -445,6 +465,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         # must never kill the first worker's in-flight run (its model cost has
         # already been spent, so killing it would waste money AND lose the answer).
         reclaim_orphaned_runs()
+        await reconcile_terminal_question_runs()
         await recover_delivery_submissions()
         # One-time grandfathered student verification for pre-existing users.
         if not db.one("SELECT value FROM cmui_meta WHERE key='verification_grandfather_boundary'"):
@@ -2532,6 +2553,15 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 db.execute("UPDATE cmui_runs SET status='failed',error='QUESTION_ENGINE_FAILED',usage=?,updated_at=? WHERE id=? AND status NOT IN ('completed','cancelled')",(json.dumps(usages,ensure_ascii=False),now(),run_id))
                 event(run_id,'error',{'code':'QUESTION_ENGINE_FAILED','message':'题目未通过当前证据与验证门槛；不会展示未验证题目。'})
             finally:
+                state=db.one('SELECT status FROM cmui_runs WHERE id=?',(run_id,))
+                if state and state['status'] in ('failed','cancelled'):
+                    try:
+                        await domain.call(
+                            'knowledge.exercise.reconcile_terminal',user['id'],
+                            {'operation_id':run_id,'ui_status':state['status']},''
+                        )
+                    except Exception:
+                        pass
                 jobs.pop(run_id,None)
             return
 

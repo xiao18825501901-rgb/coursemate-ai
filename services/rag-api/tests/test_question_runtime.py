@@ -201,6 +201,89 @@ def test_generate_one_routes_author_and_blind_solver_through_metered_operation(
     assert len(calls) == 2
 
 
+def test_unexpected_error_after_claim_settles_exact_operation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, config = database_with_objective(tmp_path)
+    runtime = QuestionEngineRuntime(
+        database=database,
+        provider=LearningProvider(config),
+        semantic_decisions=decisions(database),
+        metered_generate=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("provider should not be reached")
+        ),
+    )
+    monkeypatch.setattr(
+        runtime, "_execute_pipeline", lambda **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("synthetic unexpected failure")
+        )
+    )
+
+    with pytest.raises(QuestionEngineRuntimeError) as raised:
+        runtime.generate_one(
+            owner_user_id=OWNER,
+            workspace_id=WORKSPACE,
+            course_id=COURSE,
+            private_course_id=PRIVATE_COURSE,
+            node_id=NODE,
+            operation_id="unexpected-runtime-failure-0001",
+        )
+
+    assert raised.value.code == "QUESTION_ENGINE_FAILED"
+    with database.connect() as connection:
+        status = connection.execute(
+            "SELECT status FROM learning_operations WHERE workspace_id=? AND id=?",
+            (WORKSPACE, "unexpected-runtime-failure-0001"),
+        ).fetchone()["status"]
+    assert status == "FAILED"
+
+
+def test_terminal_ui_reconciliation_preserves_unknown_and_owner_boundary(
+    tmp_path: Path,
+) -> None:
+    database, config = database_with_objective(tmp_path)
+    runtime = QuestionEngineRuntime(
+        database=database,
+        provider=LearningProvider(config),
+        semantic_decisions=decisions(database),
+    )
+    operation_id = "terminal-ui-reconcile-0001"
+    runtime._claim_generation_operation(
+        workspace_id=WORKSPACE,
+        operation_id=operation_id,
+        request_hash="request-hash",
+    )
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO learning_model_call_reservations("
+            "id,workspace_id,operation_id,owner_user_id,course_id,role,"
+            "reserved_output_tokens,status,quota_scope) "
+            "VALUES('reservation-1',?,?,?,?,?,1000,'RESERVED','INTERACTIVE')",
+            (WORKSPACE, operation_id, OWNER, COURSE, "QUESTION_AUTHOR"),
+        )
+
+    wrong_owner = runtime.reconcile_terminal_ui_operation(
+        owner_user_id="different-owner",
+        operation_id=operation_id,
+        ui_status="failed",
+    )
+    reconciled = runtime.reconcile_terminal_ui_operation(
+        owner_user_id=OWNER,
+        operation_id=operation_id,
+        ui_status="failed",
+    )
+
+    assert wrong_owner == {"reconciled": False, "status": None}
+    assert reconciled == {"reconciled": True, "status": "UNKNOWN"}
+    with database.connect() as connection:
+        row = connection.execute(
+            "SELECT status,result_json FROM learning_operations WHERE id=?",
+            (operation_id,),
+        ).fetchone()
+    assert row["status"] == "UNKNOWN"
+    assert json.loads(row["result_json"])["reservation_states"] == ["RESERVED"]
+
+
 def test_generate_one_retries_one_known_author_schema_rejection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

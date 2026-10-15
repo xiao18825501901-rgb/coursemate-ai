@@ -1741,6 +1741,17 @@ class V3DomainAdapter:
             status = 503 if error.code in unavailable else 409
             raise ApiError(status, error.code, str(error)) from error
 
+    def _reconcile_terminal_exercise(
+        self, subject: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        if self.question_engine is None:
+            return {"reconciled": False, "status": None}
+        return self.question_engine.reconcile_terminal_ui_operation(
+            owner_user_id=subject,
+            operation_id=str(payload.get("operation_id") or ""),
+            ui_status=str(payload.get("ui_status") or ""),
+        )
+
     def _practice_scope(self, subject: str, payload: dict[str, Any]) -> tuple[str, sqlite3.Row]:
         if self.question_engine is None:
             raise ApiError(503, "QUESTION_ENGINE_DISABLED", "The Question Engine is disabled.")
@@ -2482,6 +2493,7 @@ class V3DomainAdapter:
             "knowledge.build_status",
             "knowledge.assessment",
             "knowledge.exercise.generate",
+            "knowledge.exercise.reconcile_terminal",
             "knowledge.exercise.hint",
             "knowledge.exercise.attempt",
             "knowledge.exercise.attempt.evaluate",
@@ -2589,6 +2601,10 @@ class V3DomainAdapter:
             return self._knowledge_assessment(subject, payload)
         if operation == "knowledge.exercise.generate":
             return await asyncio.to_thread(self._generate_exercise, subject, payload)
+        if operation == "knowledge.exercise.reconcile_terminal":
+            return await asyncio.to_thread(
+                self._reconcile_terminal_exercise, subject, payload
+            )
         if operation == "knowledge.exercise.hint":
             return await asyncio.to_thread(self._practice_hint, subject, payload)
         if operation == "knowledge.exercise.attempt":
