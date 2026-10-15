@@ -1757,7 +1757,7 @@ class AssessmentService:
                 "blueprint_item_id": question["id"],
                 "question_type": question["question_type"],
                 "prompt": question["prompt_text"],
-                "student_answer": question["student_answer"],
+                "student_answer": AssessmentService._grader_student_answer(question),
                 "reference_answer": question["answer_key"],
                 "rubric": [
                     {
@@ -1781,11 +1781,50 @@ class AssessmentService:
         }
 
     @staticmethod
+    def _grader_student_answer(question: dict[str, Any]) -> str:
+        """Translate the September UI's MCQ index at the trusted host boundary.
+
+        The browser stores zero-based radio values.  A semantic grader must see
+        which option the learner selected, not the opaque string ``"0"``.  This
+        conversion is independent of the answer key and therefore cannot turn an
+        incorrect selection into a correct one.
+        """
+        submitted = str(question["student_answer"]).strip()
+        options = question.get("options")
+        if (
+            question.get("question_type") == "MCQ_SINGLE"
+            and submitted.isdigit()
+            and isinstance(options, list)
+        ):
+            selected_index = int(submitted)
+            if 0 <= selected_index < len(options):
+                label = chr(ord("A") + selected_index)
+                return f"Selected option {label}: {options[selected_index]}"
+        return submitted
+
+    @staticmethod
     def _deterministic_correct(question: dict[str, Any]) -> bool:
         submitted = str(question["student_answer"]).strip()
         answer = question["answer_key"]
         if question["question_type"] == "MCQ_SINGLE":
-            return submitted == str(answer.get("correct_option", "")).strip()
+            expected = str(answer.get("correct_option", "")).strip()
+            if submitted == expected:
+                return True
+            # The September UI submits the zero-based radio value while live
+            # author output may use the conventional A-D answer label. Accept
+            # that one representation boundary only; numeric answer keys retain
+            # their existing exact-match contract.
+            options = question.get("options")
+            if (
+                len(expected) == 1
+                and "A" <= expected.upper() <= "Z"
+                and submitted.isdigit()
+                and isinstance(options, list)
+            ):
+                selected_index = int(submitted)
+                expected_index = ord(expected.upper()) - ord("A")
+                return selected_index < len(options) and selected_index == expected_index
+            return False
         if question["question_type"] == "NUMERIC":
             try:
                 expected = float(answer["value"])

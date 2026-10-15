@@ -19,6 +19,7 @@ from test_learning_workspace import client_at
 from app.db import LATEST_V3_SCHEMA_VERSION
 from app.jev.gateway import FakeTransport
 from app.jev.models import JevAnswer, JevResult
+from app.learning.assessments import AssessmentService
 from app.main import create_app
 
 
@@ -1279,6 +1280,64 @@ def seed_assessment_pool_answers_only(prefix: str = "") -> dict[str, str]:
         prefix + "aq_external_numeric": "9",
         prefix + "aq_official_second": "0",
     }
+
+
+def test_mcq_deterministic_check_accepts_frontend_zero_based_index_for_letter_key() -> None:
+    question = {
+        "student_answer": "0",
+        "question_type": "MCQ_SINGLE",
+        "answer_key": {"correct_option": "A"},
+        "options": ["right", "wrong", "also wrong"],
+    }
+
+    assert AssessmentService._deterministic_correct(question) is True
+    question["student_answer"] = "1"
+    assert AssessmentService._deterministic_correct(question) is False
+
+
+def test_mcq_deterministic_check_preserves_existing_numeric_key_contract() -> None:
+    question = {
+        "student_answer": "1",
+        "question_type": "MCQ_SINGLE",
+        "answer_key": {"correct_option": "1"},
+        "options": ["wrong", "right"],
+    }
+
+    assert AssessmentService._deterministic_correct(question) is True
+    question["student_answer"] = "A"
+    assert AssessmentService._deterministic_correct(question) is False
+
+
+def test_mcq_grader_context_expands_frontend_index_to_selected_option() -> None:
+    prepared = {
+        "session": {"id": "session-1"},
+        "questions": [
+            {
+                "id": "item-1",
+                "question_type": "MCQ_SINGLE",
+                "prompt_text": "Pick the definition.",
+                "student_answer": "0",
+                "options": ["the correct definition", "a distractor"],
+                "answer_key": {"correct_option": "A"},
+                "verification_method": "AI_REVIEWED",
+                "rubric": [
+                    {
+                        "criterion_id": "criterion-1",
+                        "dimension": "CONCEPT",
+                        "max_fraction": 100,
+                        "description": "Select the correct definition.",
+                    }
+                ],
+            }
+        ],
+    }
+
+    context = AssessmentService.grader_context(prepared)
+
+    assert context is not None
+    assert context["questions"][0]["student_answer"] == (
+        "Selected option A: the correct definition"
+    )
 
 
 def test_composite_assessment_aggregates_only_unique_independent_atomic_results(
