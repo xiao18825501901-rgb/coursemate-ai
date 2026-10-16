@@ -29,6 +29,11 @@ Repair the existing UI/API/Question Engine path without adding another engine. P
 compatible READY revision; generate only when reuse is impossible and an existing paid-call slot is
 both applicable and available.
 
+Engineering checkpoint: the integrated endpoint now checks the authorized READY pool before the
+billable-call and model-rate gates. A READY hit is projected through the existing Question Engine and
+records no model reservation; a miss still fails with HTTP 402 when billing is disabled. The real
+Clerk browser journey and production release gate remain open.
+
 Exit gate: click, question, answer, score, answer reveal, explanation, history, and Pair restoration
 all pass with one real Clerk student.
 

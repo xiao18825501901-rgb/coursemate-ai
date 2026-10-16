@@ -501,6 +501,119 @@ def test_mounted_do_one_reuses_an_unexposed_ready_revision_without_model_calls(
         ).fetchone()[0] == 0
 
 
+def test_mounted_do_one_ready_reuse_does_not_require_billable_authorization(
+    client: tuple[TestClient, ForbiddenLegacyExerciseProvider],
+) -> None:
+    """A READY pool hit is a database reuse, not a paid model operation."""
+
+    test_client, legacy = client
+    created = test_client.post(
+        f"{UI}/courses",
+        headers=auth(),
+        json={"name": "No-billing READY course", "description": "offline fixture"},
+    )
+    assert created.status_code == 201, created.text
+    course_id = created.json()["id"]
+    node_id = seed_objective(test_client, course_id)
+    pair = test_client.post(
+        f"{UI}/pairs", headers=auth(), json={"course": course_id}
+    ).json()
+    database = test_client.app.state.database
+    with database.connect() as connection:
+        workspace = connection.execute(
+            "SELECT id,private_course_id FROM learning_workspaces "
+            "WHERE course_id=? AND owner_user_id=?",
+            (course_id, SUBJECT),
+        ).fetchone()
+    engine = test_client.app.state.ui_extension_adapter.question_engine
+    seeded = engine.generate_one(
+        owner_user_id=SUBJECT,
+        workspace_id=workspace["id"],
+        course_id=course_id,
+        private_course_id=workspace["private_course_id"],
+        node_id=node_id,
+        operation_id="seed-no-billing-ready-pool-0001",
+    )
+
+    ui = test_client.app.state.ui_extension_app
+    ui.state.cfg.provider_mode = "deepseek"
+    ui.state.cfg.allow_billable = False
+    started = test_client.post(
+        f"{UI}/courses/{course_id}/exercises",
+        headers=auth(),
+        json={
+            "pair_id": pair["id"],
+            "node": node_id,
+            "request_id": "reuse-no-billing-ready-pool-0001",
+        },
+    )
+
+    assert started.status_code == 202, started.text
+    run = wait_terminal(test_client, started.json()["id"])
+    assert run["status"] == "completed", run
+    assert legacy.exercise_calls == 0
+    exercise = ui.state.db.one(
+        "SELECT question_revision_id FROM cmui_exercises WHERE run=?",
+        (started.json()["id"],),
+    )
+    assert exercise["question_revision_id"] == seeded["question_revision_id"]
+    assert ui.state.db.one(
+        "SELECT COUNT(*) AS n FROM cmui_limits "
+        "WHERE owner=? AND bucket='model-runs'",
+        (SUBJECT,),
+    )["n"] == 0
+    with database.connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM learning_model_call_reservations "
+            "WHERE workspace_id=? AND operation_id=?",
+            (workspace["id"], started.json()["id"]),
+        ).fetchone()[0] == 0
+
+
+def test_mounted_do_one_cold_generation_still_requires_billable_authorization(
+    client: tuple[TestClient, ForbiddenLegacyExerciseProvider],
+) -> None:
+    """A READY miss must not turn the reuse exception into a paid request."""
+
+    test_client, legacy = client
+    created = test_client.post(
+        f"{UI}/courses",
+        headers=auth(),
+        json={"name": "No-billing cold course", "description": "offline fixture"},
+    )
+    assert created.status_code == 201, created.text
+    course_id = created.json()["id"]
+    node_id = seed_objective(test_client, course_id)
+    pair = test_client.post(
+        f"{UI}/pairs", headers=auth(), json={"course": course_id}
+    ).json()
+    ui = test_client.app.state.ui_extension_app
+    ui.state.cfg.provider_mode = "deepseek"
+    ui.state.cfg.allow_billable = False
+
+    started = test_client.post(
+        f"{UI}/courses/{course_id}/exercises",
+        headers=auth(),
+        json={
+            "pair_id": pair["id"],
+            "node": node_id,
+            "request_id": "cold-no-billing-question-0001",
+        },
+    )
+
+    assert started.status_code == 402, started.text
+    assert legacy.exercise_calls == 0
+    assert ui.state.db.one(
+        "SELECT COUNT(*) AS n FROM cmui_limits "
+        "WHERE owner=? AND bucket='model-runs'",
+        (SUBJECT,),
+    )["n"] == 0
+    with test_client.app.state.database.connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM learning_model_call_reservations"
+        ).fetchone()[0] == 0
+
+
 def test_mounted_do_one_double_submit_returns_the_same_active_run(
     client: tuple[TestClient, ForbiddenLegacyExerciseProvider],
 ) -> None:

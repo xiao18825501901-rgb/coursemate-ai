@@ -1715,7 +1715,13 @@ class V3DomainAdapter:
                 )
         node_id = str(selected_node["id"])
         try:
-            generated = self.question_engine.reuse_ready_or_generate(
+            ready_only = bool(payload.get("_ready_only"))
+            operation = (
+                self.question_engine.reuse_ready
+                if ready_only
+                else self.question_engine.reuse_ready_or_generate
+            )
+            generated = operation(
                 owner_user_id=subject,
                 workspace_id=str(workspace["id"]),
                 course_id=course_id,
@@ -1724,6 +1730,8 @@ class V3DomainAdapter:
                 operation_id=operation_id,
                 should_cancel=cancel_check,
             )
+            if generated is None:
+                return None
             generated["target_node_id"] = node_id
             generated["target_node_title"] = str(selected_node["title"])
             return generated
@@ -2493,6 +2501,7 @@ class V3DomainAdapter:
             "knowledge.build_status",
             "knowledge.assessment",
             "knowledge.exercise.generate",
+            "knowledge.exercise.reuse_ready",
             "knowledge.exercise.reconcile_terminal",
             "knowledge.exercise.hint",
             "knowledge.exercise.attempt",
@@ -2601,6 +2610,10 @@ class V3DomainAdapter:
             return self._knowledge_assessment(subject, payload)
         if operation == "knowledge.exercise.generate":
             return await asyncio.to_thread(self._generate_exercise, subject, payload)
+        if operation == "knowledge.exercise.reuse_ready":
+            return await asyncio.to_thread(
+                self._generate_exercise, subject, {**payload, "_ready_only": True}
+            )
         if operation == "knowledge.exercise.reconcile_terminal":
             return await asyncio.to_thread(
                 self._reconcile_terminal_exercise, subject, payload

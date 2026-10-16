@@ -727,6 +727,40 @@ class QuestionEngineRuntime:
     ) -> dict[str, Any]:
         """Prefer the compatible READY pool; generate only when that pool is empty."""
 
+        ready = self.reuse_ready(
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            course_id=course_id,
+            private_course_id=private_course_id,
+            node_id=node_id,
+            operation_id=operation_id,
+            should_cancel=should_cancel,
+        )
+        if ready is not None:
+            return ready
+        return self.generate_one(
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            course_id=course_id,
+            private_course_id=private_course_id,
+            node_id=node_id,
+            operation_id=operation_id,
+            should_cancel=should_cancel,
+        )
+
+    def reuse_ready(
+        self,
+        *,
+        owner_user_id: str,
+        workspace_id: str,
+        course_id: str,
+        private_course_id: str,
+        node_id: str,
+        operation_id: str,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> dict[str, Any] | None:
+        """Return a compatible unexposed READY item without authoring a new one."""
+
         objective, evidence, _blueprint = self._preflight_generate_one_inputs(
             owner_user_id=owner_user_id,
             workspace_id=workspace_id,
@@ -743,17 +777,7 @@ class QuestionEngineRuntime:
             objective=objective,
             evidence=evidence,
         )
-        if ready is not None:
-            return ready
-        return self.generate_one(
-            owner_user_id=owner_user_id,
-            workspace_id=workspace_id,
-            course_id=course_id,
-            private_course_id=private_course_id,
-            node_id=node_id,
-            operation_id=operation_id,
-            should_cancel=should_cancel,
-        )
+        return ready
 
     def _claim_practice_operation(
         self,

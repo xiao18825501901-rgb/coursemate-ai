@@ -2421,7 +2421,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
 
     async def generate_exercise_run(
         run_id,user,course_data,pair,node,node_title,sources,estimate_audit=None,
-        cycle_id=None,purpose=None,
+        cycle_id=None,purpose=None,prefetched_ready=None,
     ):
         if domain is not None:
             usages=[estimate_audit] if estimate_audit else []
@@ -2430,20 +2430,22 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 db.execute("UPDATE cmui_runs SET status='generating',updated_at=? WHERE id=?",
                            (now(),run_id))
                 event(run_id,'status',{'status':'generating','label':'正在按课程证据准备题目'})
-                raw=await domain.call(
-                    'knowledge.exercise.generate',
-                    user['id'],
-                    {
-                        'course':course_data['id'],
-                        'node':(node or {}).get('id') if isinstance(node,dict) else node,
-                        'operation_id':run_id,
-                        '_cancel_check':lambda: (
-                            (state:=db.one('SELECT status FROM cmui_runs WHERE id=?',(run_id,)))
-                            is None or state['status'] in TERMINAL
-                        ),
-                    },
-                    '',
-                )
+                raw=prefetched_ready
+                if raw is None:
+                    raw=await domain.call(
+                        'knowledge.exercise.generate',
+                        user['id'],
+                        {
+                            'course':course_data['id'],
+                            'node':(node or {}).get('id') if isinstance(node,dict) else node,
+                            'operation_id':run_id,
+                            '_cancel_check':lambda: (
+                                (state:=db.one('SELECT status FROM cmui_runs WHERE id=?',(run_id,)))
+                                is None or state['status'] in TERMINAL
+                            ),
+                        },
+                        '',
+                    )
                 generated=GeneratedExercise.model_validate(raw)
                 state=db.one('SELECT status FROM cmui_runs WHERE id=?',(run_id,))
                 if state and state['status'] in TERMINAL: raise asyncio.CancelledError()
@@ -2684,17 +2686,29 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             raise HTTPException(409,'当前对话已有另一项生成任务')
         replay=active_replay(pair['problem_conversation'])
         if replay: return replay
-        model_rate(user)
-        if domain is not None:
-            if cfg.provider_mode!='test' and not cfg.allow_billable:
-                raise HTTPException(402,'尚未授权模型调用费用')
-        else:
-            if cfg.provider_mode=='disabled' and provider is None: raise HTTPException(503,'模型尚未配置')
-            if cfg.provider_mode in {'qwen','deepseek'} and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
         knowledge=(await remote('knowledge.tree',user,{'course':cid},request)) if domain else db.all("SELECT n.*,COALESCE(l.progress,'NOT_STARTED') progress FROM cmui_nodes n LEFT JOIN cmui_learning l ON l.node=n.id AND l.owner=? WHERE n.course=? ORDER BY n.position",(user['id'],cid))
         if data.node and not any(n.get('id')==data.node for n in flatten_nodes(knowledge)):
             raise HTTPException(404,'知识点不存在')
         node=pick_exercise_node(pair,knowledge,data.node)
+        prefetched_ready=None
+        rid=uid('run_')
+        if domain is not None:
+            prefetched_ready=await domain.call(
+                'knowledge.exercise.reuse_ready',user['id'],{
+                    'course':cid,
+                    'node':(node or {}).get('id') if isinstance(node,dict) else node,
+                    'operation_id':rid,
+                },'',
+            )
+            if prefetched_ready is None:
+                if cfg.provider_mode!='test' and not cfg.allow_billable:
+                    raise HTTPException(402,'尚未授权模型调用费用') from None
+                model_rate(user)
+        else:
+            model_rate(user)
+        if domain is None:
+            if cfg.provider_mode=='disabled' and provider is None: raise HTTPException(503,'模型尚未配置')
+            if cfg.provider_mode in {'qwen','deepseek'} and not cfg.allow_billable: raise HTTPException(402,'尚未授权模型调用费用')
         # An unbound integrated Pair deliberately lets the owner-scoped domain
         # select an ATOMIC node that has an active Teaching Spec.  Do not
         # dereference the absent UI projection before the domain returns that
@@ -2709,7 +2723,9 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             node_title=('复习：' if node.get('review') else '')+node['title']
         sources=(await remote('context.retrieve',user,{'course':cid,'query':node_title or '课程知识点','history':[]},request)) if domain else context_for(db,user['id'],cid,node_title or '课程知识点',[])
         strength=problem_strength(user,cid)
-        if domain is not None:
+        if prefetched_ready is not None:
+            budget, estimate = None, None
+        elif domain is not None:
             budget, estimate = qwen_operation_budget(
                 'estimate_question_engine', strength=strength,
             )
@@ -2719,7 +2735,6 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
                 {k:user[k] for k in ['language','timezone','bio']}, sources,
                 strength=strength,
             )
-        rid=uid('run_')
         conv_id=pair['problem_conversation']
         if not conv_id:
             conv_id=social._lane_conversation(db,pair['id'],user['id'],cid,'problem',{'title':pair['title']})
@@ -2738,6 +2753,7 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         task=asyncio.create_task(generate_exercise_run(
             rid,user,course_data,pair,node,node_title,sources,
             estimate.audit() if estimate else None,data.cycle_id,data.purpose,
+            prefetched_ready,
         ))
         jobs[rid]=task
         return {'id':rid,'status':'queued'}
