@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0",
+  "recorded_at_utc": "2026-10-16T20:36:30Z",
+  "base_sha": "a789cc0d150784d8f35cb10e74f2426c17d48f02",
+  "change": {
+    "proxy-addr": {
+      "from": "2.0.7",
+      "to": "2.0.8",
+      "reason": "compatible security patch"
+    },
+    "source-map-js": {
+      "from": "1.2.1",
+      "to": "1.2.2",
+      "reason": "compatible security patch"
+    }
+  },
+  "post_change_audit": {
+    "critical": 0,
+    "high": 0,
+    "moderate": 0,
+    "low": 1,
+    "remaining": {
+      "package": "katex",
+      "installed": "0.16.22",
+      "fixed_version": "0.19.0",
+      "decision": "DEFER_BREAKING_MAJOR_UPGRADE",
+      "active_runtime_boundary": "The current renderer sets trust=false and bounded expansion/size; upgrade requires separate math-render compatibility testing."
+    }
+  },
+  "verification": {
+    "npm_ci": "PASS",
+    "web_tests": "34 files, 162 tests passed",
+    "agent_tests": "13 files, 100 tests passed",
+    "workspace_typecheck": "PASS",
+    "workspace_build": "PASS",
+    "web_secret_bundle_scan": "PASS"
+  },
+  "production_write_performed": false
+}
