@@ -1,6 +1,6 @@
 {
   "stage": "R2_DO_ONE",
-  "status": "ENGINEERING_VERIFIED_NOT_DEPLOYED",
+  "status": "CANDIDATE_VERIFIED_NOT_DEPLOYED",
   "base_commit": "4a9cc36901f60c1123467060f3630a34ef62cb92",
   "root_cause": "The integrated exercise endpoint applied the billable authorization and model-rate gates before checking the existing compatible READY pool.",
   "change": {
@@ -11,9 +11,21 @@
   "verification": {
     "question_engine_and_mounted_path": "30 passed",
     "adjacent_idempotency_access_cancellation_privacy_pair": "34 passed",
+    "full_backend_regression": "2330 passed, 11 skipped, 0 failed in 4091.84 seconds",
+    "full_backend_regression_warnings": 4,
     "new_paid_http_calls": 0,
     "unknown_replays": 0,
     "authenticated_clerk_production_acceptance": "NOT_RUN_LOGIN_REQUIRED"
+  },
+  "read_only_production_applicability": {
+    "observed_at": "2026-10-17",
+    "production_rag_working_directory": "/srv/coursemate/releases/r1-a4e4c15/services/rag-api",
+    "production_provider_mode": "deepseek",
+    "billable_generation_enabled": true,
+    "ready_provenance_rows": 121,
+    "ready_rows_unexposed_for_corresponding_owner_workspace": 104,
+    "publish_lock": "ABSENT",
+    "database_writes": 0
   },
   "release_state": "No production lock acquired and no production write performed."
 }

@@ -1645,7 +1645,9 @@ class V3DomainAdapter:
                 }
         raise ApiError(404, "NODE_NOT_FOUND", "The knowledge node was not found.")
 
-    def _generate_exercise(self, subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _generate_exercise(
+        self, subject: str, payload: dict[str, Any]
+    ) -> dict[str, Any] | None:
         """Run the owner-scoped Question Engine for the existing 做一题 worker.
 
         This operation is internal to the mounted server.  Its private projection
