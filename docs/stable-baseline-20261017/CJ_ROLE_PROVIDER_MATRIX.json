@@ -1,0 +1,168 @@
+{
+  "schema_version": "coursejesus.role-provider-matrix.v1",
+  "captured_at": "2026-10-17T03:45:00+08:00",
+  "candidate_commit": "f9fe751e747cdc5a3e0499ff1c4edc68e31cf995",
+  "production_baseline": {
+    "application_commit": "deb82cc518b2f48cd11329a7d316e9eadeea30ce",
+    "netlify_deploy_id": "6ad0d52476d6671ce3d8fe6c",
+    "rag_effective_provider_mode": "deepseek",
+    "agent_effective_provider_mode": "qwen",
+    "evidence": "DIRECTLY_OBSERVED"
+  },
+  "policy": {
+    "tree_provider": "deepseek",
+    "non_tree_general_llm_target": "qwen",
+    "migration_rule": "Migrate one real role at a time behind a reversible server-owned route. A legacy DeepSeek receipt must never be relabelled as Qwen.",
+    "student_ui_policy": "Do not expose provider, model, endpoint, prompt, reasoning or billing identity. Preserve all of them in restricted audit records.",
+    "unknown_policy": "UNKNOWN is immutable, reserved for reconciliation and never replayed with a new operation identity."
+  },
+  "roles": [
+    {
+      "role": "COURSE_MAP50",
+      "current_provider": "deepseek",
+      "current_model": "deepseek-flash",
+      "target_provider": "deepseek",
+      "target_model": "deepseek-flash",
+      "status": "KEEP_LEGACY_EXCEPTION",
+      "evidence": "DIRECTLY_OBSERVED",
+      "notes": "Private-course source parsing, semantic consolidation and <=50-node tree generation remain the sole DeepSeek exception."
+    },
+    {
+      "role": "TEACHING_NORMAL",
+      "current_provider": "deepseek",
+      "current_model": "deepseek-flash",
+      "target_provider": "qwen",
+      "target_model": "qwen3.8-max",
+      "status": "NOT_MIGRATED",
+      "evidence": "DIRECTLY_OBSERVED",
+      "notes": "R1 first improves the existing safe stream without changing the model; R5 owns the later scoped migration."
+    },
+    {
+      "role": "TEACHING_THINKING_PLAN",
+      "current_provider": "deepseek",
+      "current_model": "deepseek-flash",
+      "target_provider": "qwen",
+      "target_model": "qwen3.8-max",
+      "status": "NOT_MIGRATED",
+      "evidence": "DIRECTLY_OBSERVED",
+      "notes": "Plan is private and may not cross the student public-event boundary."
+    },
+    {
+      "role": "TEACHING_THINKING_WORK",
+      "current_provider": "deepseek",
+      "current_model": "deepseek-flash",
+      "target_provider": "qwen",
+      "target_model": "qwen3.8-max",
+      "status": "NOT_MIGRATED",
+      "evidence": "DIRECTLY_OBSERVED",
+      "notes": "Only display content and citations may be streamed publicly."
+    },
+    {
+      "role": "PROBLEM_SOLVING",
+      "current_provider": "deepseek",
+      "current_model": "deepseek-flash",
+      "target_provider": "qwen",
+      "target_model": "qwen3.8-max",
+      "status": "NOT_MIGRATED",
+      "evidence": "DIRECTLY_OBSERVED",
+      "notes": "This is the first proposed low-coupling Qwen migration role after stable streaming."
+    },
+    {
+      "role": "PRACTICE_AUTHOR",
+      "current_provider": "deepseek",
+      "current_model": "deepseek-flash",
+      "target_provider": "qwen",
+      "target_model": "qwen3.8-max",
+      "status": "BLOCKED_BY_PROVIDER_IDENTITY_CONTRACT",
+      "evidence": "TESTED_STATIC_CONTRACT",
+      "notes": "question_author.py currently accepts only a verified DeepSeek receipt or labelled fixture. Repair the provider identity contract without weakening question content validation."
+    },
+    {
+      "role": "QUESTION_BLIND_SOLVER",
+      "current_provider": "deepseek",
+      "current_model": "deepseek-flash",
+      "target_provider": "qwen",
+      "target_model": "qwen3.8-max",
+      "status": "BLOCKED_BY_PROVIDER_IDENTITY_CONTRACT",
+      "evidence": "TESTED_STATIC_CONTRACT",
+      "notes": "blind_solve.py has the same DeepSeek-or-labelled-fixture restriction."
+    },
+    {
+      "role": "QUESTION_REVIEW_VALIDATOR",
+      "current_provider": "deepseek",
+      "current_model": "deepseek-flash",
+      "target_provider": "qwen",
+      "target_model": "qwen3.8-max",
+      "status": "BLOCKED_BY_PROVIDER_IDENTITY_CONTRACT",
+      "evidence": "TESTED_STATIC_CONTRACT",
+      "notes": "The reviewer contract and qualification lineage require an explicit Qwen-compatible identity path."
+    },
+    {
+      "role": "ASSESSMENT_AUTHOR",
+      "current_provider": "deepseek",
+      "current_model": "deepseek-flash",
+      "target_provider": "qwen",
+      "target_model": "qwen3.8-max",
+      "status": "NOT_MIGRATED",
+      "evidence": "DIRECTLY_OBSERVED",
+      "notes": "Uses the existing Question Engine and server-owned source, point, operation, rubric and ledger identities."
+    },
+    {
+      "role": "GRADING_FEEDBACK_EXPLANATION",
+      "current_provider": "deepseek",
+      "current_model": "deepseek-flash",
+      "target_provider": "qwen",
+      "target_model": "qwen3.8-max",
+      "status": "NOT_MIGRATED",
+      "evidence": "DIRECTLY_OBSERVED",
+      "notes": "Deterministic grading authority remains server-side; an LLM may only supply the permitted semantic explanation."
+    },
+    {
+      "role": "COURSE_CLASSIFICATION_POINT_ORGANIZATION",
+      "current_provider": "deepseek",
+      "current_model": "deepseek-flash",
+      "target_provider": "qwen",
+      "target_model": "qwen3.8-max",
+      "status": "NOT_MIGRATED",
+      "evidence": "INFERRED_FROM_CURRENT_PROVIDER_MODE",
+      "notes": "Call-site enumeration and an isolated receipt are still required before migration."
+    },
+    {
+      "role": "TASK_AGENT_GENERAL",
+      "current_provider": "qwen",
+      "current_model": "qwen3.8-max",
+      "target_provider": "qwen",
+      "target_model": "qwen3.8-max",
+      "status": "CONFIGURED_NOT_END_TO_END_PROVEN",
+      "evidence": "DIRECTLY_OBSERVED_CONFIG",
+      "notes": "The Agent service is configured for Qwen, but current evidence does not prove that each student call site traverses it."
+    },
+    {
+      "role": "EMBEDDING_RETRIEVAL",
+      "current_provider": "non_generative",
+      "current_model": "unchanged",
+      "target_provider": "non_generative",
+      "target_model": "unchanged",
+      "status": "OUTSIDE_LLM_MIGRATION",
+      "evidence": "DIRECTLY_OBSERVED",
+      "notes": "Embedding and deterministic retrieval are not general LLM roles."
+    },
+    {
+      "role": "OPENJEV_AUXILIARY",
+      "current_provider": "openjev_selfhosted",
+      "current_model": "versioned_receipt",
+      "target_provider": "openjev_selfhosted",
+      "target_model": "versioned_receipt",
+      "status": "KEEP_BOUNDED_AUXILIARY",
+      "evidence": "REPORTED_BY_PREVIOUS_HANDOFF",
+      "notes": "It may provide a qualified signal but does not become a universal synchronous gate."
+    }
+  ],
+  "open_gates": [
+    "Enumerate all live call sites and bind each to one listed role.",
+    "Add an explicit Qwen receipt identity accepted by author, blind-solver and reviewer contracts without accepting arbitrary client labels.",
+    "Run authorized per-role capability and business-path evidence before switching any user scope.",
+    "Keep the DeepSeek route online as a truthful rollback until each Qwen role is accepted.",
+    "Remove model labels only from system UI; do not alter user content or restricted audit records."
+  ]
+}
