@@ -1,0 +1,45 @@
+{
+  "stage_id": "R1_SAFE_STREAMING",
+  "status": "DEPLOYED_PENDING_AUTHENTICATED_CLERK_ACCEPTANCE",
+  "candidate_sha": "a4e4c152731b18c7b2d9d27b12d5196c3c5a5df2",
+  "deployed_at_utc": "2026-10-16T21:08:46.743Z",
+  "backend": {
+    "release_directory": "/srv/coursemate/releases/r1-a4e4c15",
+    "rag_working_directory": "/srv/coursemate/releases/r1-a4e4c15/services/rag-api",
+    "rag_service": "active",
+    "agent_release_unchanged": "/srv/coursemate/releases/legacy-deb82cc518b2",
+    "rag_health": "PASS_LOOPBACK_AND_PUBLIC"
+  },
+  "frontend": {
+    "site_id": "166afb5a-4103-4236-9f13-4be34dc68cd2",
+    "deploy_id": "6ad2924de5ac21464a8d04ea",
+    "state": "ready",
+    "url": "https://coursejesus.com",
+    "build_info_release_sha": "a4e4c152731b18c7b2d9d27b12d5196c3c5a5df2",
+    "system_model_terms_static_check": "PASS"
+  },
+  "schema_before_after": {"rag": "81 -> 81", "ui": "16 -> 16", "agent": "3 -> 3"},
+  "pre_switch_backup": {
+    "path": "/srv/coursemate/backups/coursemate-v2-20261016T210436.288677Z",
+    "manifest_sha256": "048f7d12d7ccd05cf0c39973aa4c6744c2d18435ad79fa75678cc65439585f9e",
+    "sha256s_sha256": "3c0719bd1e99cdd39a054b5b2d0770b1e24f2ed9cd899f49ef192fbb0ee00acd",
+    "all_artifacts_verified": true,
+    "sqlite_quick_check": "ok",
+    "foreign_key_rows": 0
+  },
+  "post_switch": {
+    "monitor": "PASS",
+    "monitor_rag_latency_ms": 12,
+    "monitor_agent_latency_ms": 3,
+    "disk_free_bytes": 5639663616,
+    "database_quick_check": {"rag": "ok", "ui": "ok", "agent": "ok"},
+    "database_foreign_key_rows": {"rag": 0, "ui": 0, "agent": 0},
+    "signed_out_shell_and_clerk_dialog": "PASS",
+    "authenticated_student_paths": "NOT_RUN_AWAITING_USER_LOGIN"
+  },
+  "rollback": {
+    "backend": "remove only zzzzzzzzzzzzzzzzzzzzzz-coursejesus-r1-a4e4c15.conf, daemon-reload and restart coursemate-rag.service",
+    "frontend_deploy_id": "6ad0d52476d6671ce3d8fe6c",
+    "database_restore_required": false
+  }
+}
