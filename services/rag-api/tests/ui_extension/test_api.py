@@ -149,6 +149,14 @@ def test_stream_replay_after_cursor(client):
  c=convo(client);rid,r,sse,_=run(client,c['id']);ids=[int(x[4:]) for x in sse.splitlines() if x.startswith('id: ')]
  replay=client.get(P+f'/runs/{rid}/events?after={ids[-2]}').text;assert f'id: {ids[-1]}' in replay;assert f'id: {ids[0]}\n' not in replay
 
+def test_public_stream_records_safe_server_observation_times(client):
+ c=convo(client);_,_,sse,_=run(client,c['id'])
+ payloads=[json.loads(line[6:]) for line in sse.splitlines() if line.startswith('data: ')]
+ visible=[item for item in payloads if 'text' in item]
+ assert visible
+ assert all(item['server_observed_at'].endswith('+00:00') for item in visible)
+ assert all('generated_prompt' not in item and 'reasoning' not in item for item in payloads)
+
 def test_layout_strengths_persist_and_cross_pane_actions_are_retired(client):
  c=convo(client,'problem');rid,r,sse,_=run(client,c['id']);message=client.get(P+'/conversations/'+c['id']).json()['messages'][-1]
  payload={'problem_message':message['id'],'step':1,'question':'为什么先判断邻域？','node':'core'}

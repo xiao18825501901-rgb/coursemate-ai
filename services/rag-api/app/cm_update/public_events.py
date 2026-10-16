@@ -23,32 +23,36 @@ _SAFE_ERRORS = {
 def public_event(kind: str, value: object) -> dict | None:
     if not isinstance(value, dict):
         return None
+    observed_at = value.get('server_observed_at')
+    timing = {'server_observed_at': observed_at} if isinstance(observed_at, str) else {}
     if kind == 'prompt_ready':
         count = value.get('characters')
+        # Keep the plan boundary deliberately tiny. Timing belongs to visible
+        # content/status events, not to a private-plan-derived notification.
         return {'characters': count} if type(count) is int and count >= 0 else {}
     if kind == 'status':
         status = value.get('status')
         labels = {'queued': '正在思考中', 'planning': '正在思考中',
                   'generating': '正在输出中', 'completed': '已完成',
                   'failed': '生成失败', 'cancelled': '已停止'}
-        return {'status': status, 'label': labels[status]} if status in labels else None
+        return ({'status': status, 'label': labels[status]} | timing) if status in labels else None
     if kind == 'delta':
         text = value.get('text')
-        return {'text': text} if isinstance(text, str) else None
+        return ({'text': text} | timing) if isinstance(text, str) else None
     if kind == 'error':
         code = value.get('code')
         if code == 'CANCELLED':
-            return {'code': 'CANCELLED', 'message': '已停止'}
+            return {'code': 'CANCELLED', 'message': '已停止'} | timing
         if isinstance(code, str) and code in _SAFE_ERRORS:
-            return {'code': code, 'message': _SAFE_ERRORS[code]}
+            return {'code': code, 'message': _SAFE_ERRORS[code]} | timing
         return {'code': 'GENERATION_FAILED',
-                'message': '生成未完成；已保留诊断编号，请稍后从原运行恢复。'}
+                'message': '生成未完成；已保留诊断编号，请稍后从原运行恢复。'} | timing
     if kind == 'coverage':
         # Coverage details are read from the authorized delivery receipt. Never
         # replay arbitrary nested evaluator/debug payloads or exception text.
-        return {'updated': True}
+        return {'updated': True} | timing
     if kind == 'done':
-        return {k: value[k] for k in ('message_id', 'exercise_id', 'explanation_id',
-                                      'provider_mode')
-                if isinstance(value.get(k), str)}
+        return ({k: value[k] for k in ('message_id', 'exercise_id', 'explanation_id',
+                                       'provider_mode')
+                 if isinstance(value.get(k), str)} | timing)
     return None

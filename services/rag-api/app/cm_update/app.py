@@ -601,7 +601,9 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         return {k:v for k,v in row.items() if k not in {'storage_key','sha256','owner'}}
 
     def event(run_id,kind,data):
-        db.execute('INSERT INTO cmui_run_events(run,type,data) VALUES (?,?,?)',(run_id,kind,json.dumps(data,ensure_ascii=False)))
+        recorded = dict(data)
+        recorded.setdefault('server_observed_at', now())
+        db.execute('INSERT INTO cmui_run_events(run,type,data) VALUES (?,?,?)',(run_id,kind,json.dumps(recorded,ensure_ascii=False)))
 
     def pair_for_conversation(user, conversation_id):
         """The unified dual-pane session containing a conversation, if any."""
