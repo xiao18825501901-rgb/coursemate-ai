@@ -150,6 +150,42 @@ it('reconciles once when the stream is cut, without a second model call', async 
   expect(api.streamEvents).toHaveBeenCalledTimes(2);
 });
 
+it('marks the first committed visible text once without recording answer content', async () => {
+  const instance = page();
+  instance.state.conv.teach = 'conv-1';
+  instance.setLane('busy', 'teach', true);
+  instance.setLane('run', 'teach', 'run-1');
+  const originalMark = performance.mark;
+  const mark = vi.fn();
+  Object.defineProperty(performance, 'mark', { configurable: true, value: mark });
+  api.streamEvents.mockImplementation(async (_run: string, handle: Function) => {
+    handle('delta', { text: '第一段', server_observed_at: '2026-10-17T00:00:00+00:00' });
+    handle('delta', { text: '第二段', server_observed_at: '2026-10-17T00:00:01+00:00' });
+  });
+  api.request.mockImplementation(async (path: string) => {
+    if (path === '/conversations/conv-1')
+      return conversation([{ id: 'm2', role: 'assistant', content: '第一段第二段' }]);
+    if (path === '/runs/run-1')
+      return { status: 'completed', partial_text: '', coverage: null };
+    return {};
+  });
+
+  try {
+    await instance.watch('teach', 'run-1', 'conv-1', false);
+    expect(mark).toHaveBeenCalledTimes(1);
+    expect(mark).toHaveBeenCalledWith('coursejesus:first-visible-text', {
+      detail: {
+        lane: 'teach',
+        run_id: 'run-1',
+        server_observed_at: '2026-10-17T00:00:00+00:00',
+      },
+    });
+    expect(JSON.stringify(mark.mock.calls)).not.toContain('第一段');
+  } finally {
+    Object.defineProperty(performance, 'mark', { configurable: true, value: originalMark });
+  }
+});
+
 it('never overwrites the conversation the learner has moved to', async () => {
   const instance = page();
   instance.state.conv.teach = 'conv-2';

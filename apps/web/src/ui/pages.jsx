@@ -701,8 +701,16 @@ export class Learn extends React.Component {
             let seenDelta = false;
             await streamEvents(rid, (type, data) => { if (this.state.conv[lane] !== cid)
                 return; if (type === 'delta') {
+                const firstVisible = !seenDelta;
                 seenDelta = true;
-                this.setState(s => ({ partial: { ...s.partial, [lane]: s.partial[lane] + data.text } }));
+                this.setState(s => ({ partial: { ...s.partial, [lane]: s.partial[lane] + data.text } }), () => {
+                    if (!firstVisible || typeof globalThis.performance?.mark !== 'function') return;
+                    try {
+                        globalThis.performance.mark('coursejesus:first-visible-text', { detail: {
+                            lane, run_id: rid, server_observed_at: data.server_observed_at || null,
+                        } });
+                    } catch { /* Performance marks are diagnostics and never block the answer. */ }
+                });
                 this.setLane('status', lane, '正在输出中');
             }
             if (type === 'status')
