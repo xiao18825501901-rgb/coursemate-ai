@@ -85,6 +85,8 @@ class AssessmentService:
         connection: sqlite3.Connection,
         workspace: sqlite3.Row,
         node_id: str,
+        *,
+        spec_version: int | None = None,
     ) -> sqlite3.Row:
         row = connection.execute(
             "SELECT node.*,metadata.version AS spec_version "
@@ -103,8 +105,15 @@ class AssessmentService:
             "WHERE activation.course_id=node.course_id AND activation.status='ACTIVE' "
             "AND membership.node_id=node.id "
             "AND membership.teaching_spec_version=metadata.version))) "
+            "AND (? IS NULL OR metadata.version=?) "
             "ORDER BY metadata.version DESC LIMIT 1",
-            (node_id, workspace["course_id"], workspace["owner_user_id"]),
+            (
+                node_id,
+                workspace["course_id"],
+                workspace["owner_user_id"],
+                spec_version,
+                spec_version,
+            ),
         ).fetchone()
         if row is None:
             raise ApiError(
