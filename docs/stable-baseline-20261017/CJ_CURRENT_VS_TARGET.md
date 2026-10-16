@@ -51,4 +51,3 @@ than discarded, so the aggregate is descriptive evidence, not a performance SLA.
 No release is currently authorized or safe. The Hangzhou disk is 94% full, Singapore monitoring is
 failed, the dependency audit gate is red, and real-browser TTFRT plus isolated-data compatibility are
 not yet proven. These are concrete release conditions, not a request to redesign the product.
-

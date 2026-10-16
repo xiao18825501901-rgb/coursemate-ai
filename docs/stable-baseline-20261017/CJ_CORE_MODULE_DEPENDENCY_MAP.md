@@ -50,4 +50,3 @@ Netlify UI
 4. Exercise and assessment remain separate student workflows even though they share question assets.
 5. Treat the RAG/Agent effective-environment mismatch as a call-site audit input, not as permission to
    bulk-change environment files.
-
