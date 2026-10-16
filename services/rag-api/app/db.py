@@ -68,6 +68,20 @@ V3_MIGRATIONS = (
     "067_visual_learning_engine.sql",
     "068_visual_assistance_preferences.sql",
     "069_visual_renderer_cold_start_receipts.sql",
+    "070_assessment_start_intents.sql",
+    "071_assessment_operation_recovery_receipts.sql",
+    # 072 is a conditional ADD COLUMN pair; its ledger row below is the
+    # replay guard for SQLite's non-idempotent ALTER TABLE statements.
+    "072_assessment_preparation_retry_epochs.sql",
+    "073_generic_llm_call_ledger.sql",
+    "074_new_private_tree_origins.sql",
+    "075_learning_role_routes.sql",
+    "076_learning_transport_audit.sql",
+    "077_metered_strong_review_roles.sql",
+    "078_point_assessment_plans.sql",
+    "079_point_question_provenance.sql",
+    "080_visual_owner_review_immutability.sql",
+    "081_visual_runtime_drain.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -75,6 +89,8 @@ V3_MIGRATIONS = (
 # Keep historical SQL immutable and skip only a superseded rebuild after its
 # superseding version has committed its ledger row.
 V3_REPLAY_SUPERSEDED_BY = {
+    "078_point_assessment_plans.sql": 78,
+    "077_metered_strong_review_roles.sql": 77,
     # Migration 021's legacy evidence backfill is safe while 021 is first
     # applied (or deliberately restored after its ledger row is removed), but
     # must not replay on a schema-39 database. Migration 039 intentionally
@@ -130,9 +146,12 @@ V3_REPLAY_SUPERSEDED_BY = {
     # Migration 069 adds renderer cold-start receipt columns. Its own ledger
     # row is the restart-safe guard for SQLite's non-idempotent ADD COLUMN.
     "069_visual_renderer_cold_start_receipts.sql": 69,
+    # Migration 072 likewise adds two columns that cannot be made idempotent
+    # with CREATE TABLE IF NOT EXISTS, so its ledger row is the replay guard.
+    "072_assessment_preparation_retry_epochs.sql": 72,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 69
+LATEST_V3_SCHEMA_VERSION = 81
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (
@@ -588,6 +607,22 @@ class Database:
                         and superseding_version in applied_versions
                     ):
                         continue
+                    if version == 77:
+                        # Migration 044's guarded ALTER historically runs after
+                        # this loop. The role-ledger rebuild in 077 must also
+                        # see quota_scope when initializing a fresh database.
+                        reservation_columns = {
+                            row["name"]
+                            for row in connection.execute(
+                                "PRAGMA table_info(learning_model_call_reservations)"
+                            )
+                        }
+                        if "quota_scope" not in reservation_columns:
+                            connection.execute(
+                                "ALTER TABLE learning_model_call_reservations ADD COLUMN "
+                                "quota_scope TEXT NOT NULL DEFAULT 'INTERACTIVE' "
+                                "CHECK(quota_scope IN ('INTERACTIVE','BACKGROUND_AUTO_MAP'))"
+                            )
                     connection.executescript(
                         (Path(__file__).parent.parent / "migrations" / name).read_text(
                             encoding="utf-8"

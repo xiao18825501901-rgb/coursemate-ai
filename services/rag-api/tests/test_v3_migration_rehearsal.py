@@ -350,3 +350,9 @@ def test_rehearsal_preserves_legacy_fields_when_migration_adds_course_columns(
         "campus",
         1,
     )
+
+
+def test_stable_source_carries_the_accepted_production_schema_boundary() -> None:
+    """R3 code must build the same pre-existing schema boundary as production."""
+
+    assert LATEST_V3_SCHEMA_VERSION == 81
