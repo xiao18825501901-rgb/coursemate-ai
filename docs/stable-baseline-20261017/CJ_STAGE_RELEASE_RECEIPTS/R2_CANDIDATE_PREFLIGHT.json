@@ -1,0 +1,58 @@
+{
+  "stage_id": "R2_DO_ONE_READY_REUSE",
+  "observed_at_utc": "2026-10-16T22:40:39.939784Z",
+  "status": "CANDIDATE_READY_PENDING_R1_AUTHENTICATED_ACCEPTANCE_AND_RELEASE_WINDOW",
+  "candidate_sha": "98a33bc559f8f7ee0234d8c506596cfe1b1008e0",
+  "behavior_commit": "f8b44521a975090aedbe0fb78a61b6f6c589a88d",
+  "production_before": {
+    "rag_release": "/srv/coursemate/releases/r1-a4e4c15/services/rag-api",
+    "agent_release_unchanged": "/srv/coursemate/releases/legacy-deb82cc518b2",
+    "frontend_deploy_id": "6ad2924de5ac21464a8d04ea",
+    "schema": {"rag": 81, "ui": 16, "agent": 3},
+    "publish_lock_present": false
+  },
+  "candidate_scope": [
+    "query the existing owner-scoped Question Engine READY pool before paid generation admission",
+    "skip model-rate accounting and model budget estimation on a READY hit",
+    "retain HTTP 402 and zero model reservations on a READY miss when billing is disabled",
+    "preserve the existing question, answer isolation, grading, reveal, history and Pair paths"
+  ],
+  "verification": {
+    "full_backend": "2330 passed, 11 skipped, 0 failed",
+    "question_engine_and_mounted_path": "30 passed",
+    "adjacent_backend": "34 passed",
+    "web": "171 passed",
+    "agent": "100 passed",
+    "typecheck": "PASS",
+    "production_build": "PASS",
+    "bundle_secret_scan": "PASS",
+    "new_paid_http_calls": 0,
+    "unknown_replays": 0
+  },
+  "read_only_production_fit": {
+    "ready_provenance_rows": 121,
+    "ready_unexposed_owner_workspace_rows": 104,
+    "provider_mode": "deepseek",
+    "billable_generation_enabled": true
+  },
+  "production_preflight": {
+    "rag_service": "active",
+    "agent_service": "active",
+    "monitor_timer": "active",
+    "monitor_status": "ok",
+    "monitor_latency_ms": {"rag": 15, "agent": 2},
+    "disk_free_bytes": 5497991168,
+    "disk_used_percent": 95,
+    "verified_backup": "/srv/coursemate/backups/coursemate-v2-20261016T210436.288677Z"
+  },
+  "release_gates_open": [
+    "R1 authenticated Clerk student acceptance has not run because the visible browser session is signed out",
+    "R2 authenticated Do One production acceptance has not run",
+    "no R2 production lock has been acquired and no production write has occurred"
+  ],
+  "rollback_target": {
+    "backend": "/srv/coursemate/releases/r1-a4e4c15/services/rag-api",
+    "frontend_deploy_id": "6ad2924de5ac21464a8d04ea",
+    "database_restore_required": false
+  }
+}

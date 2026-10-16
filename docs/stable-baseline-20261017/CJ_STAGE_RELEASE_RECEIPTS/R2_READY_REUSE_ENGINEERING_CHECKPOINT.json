@@ -13,6 +13,11 @@
     "adjacent_idempotency_access_cancellation_privacy_pair": "34 passed",
     "full_backend_regression": "2330 passed, 11 skipped, 0 failed in 4091.84 seconds",
     "full_backend_regression_warnings": 4,
+    "workspace_typecheck": "PASS",
+    "web_tests": "171 passed",
+    "agent_tests": "100 passed",
+    "workspace_production_build": "PASS",
+    "bundle_secret_scan": "PASS",
     "new_paid_http_calls": 0,
     "unknown_replays": 0,
     "authenticated_clerk_production_acceptance": "NOT_RUN_LOGIN_REQUIRED"
