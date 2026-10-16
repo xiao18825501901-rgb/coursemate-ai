@@ -1,0 +1,73 @@
+{
+  "captured_at_utc": "2026-10-16T18:49:00Z",
+  "source": {
+    "branch": "feature/stable-baseline-upgrade-20261017",
+    "commit": "deb82cc518b2f48cd11329a7d316e9eadeea30ce",
+    "worktree_clean_at_capture": true
+  },
+  "production": {
+    "frontend": {
+      "site_id": "166afb5a-4103-4236-9f13-4be34dc68cd2",
+      "deploy_id": "6ad0d52476d6671ce3d8fe6c",
+      "state": "ready",
+      "published_at": "2026-10-15T13:29:09.906Z",
+      "title": "CourseJesus legacy recovery deb82cc518b2"
+    },
+    "hangzhou": {
+      "rag_release": "/srv/coursemate/releases/legacy-deb82cc518b2/services/rag-api",
+      "agent_release": "/srv/coursemate/releases/legacy-deb82cc518b2",
+      "rag_health_http": 200,
+      "agent_health_http": 200,
+      "publish_lock_present": false,
+      "disk_used_percent": 94,
+      "disk_free_gib_approx": 5.9
+    },
+    "singapore": {
+      "api_tunnel_active": true,
+      "monitor_service": "failed"
+    }
+  },
+  "data": {
+    "rag_schema_migration": 81,
+    "ui_schema_version": 16,
+    "agent_schema_migration": 3,
+    "current_database_replacement_allowed": false,
+    "unknown_replay_allowed": false
+  },
+  "effective_runtime_flags": {
+    "rag": {
+      "provider_mode": "deepseek",
+      "tree_model": "deepseek-flash",
+      "generic_llm_enabled": false,
+      "assessment_point_policy_enabled": false,
+      "visual_engine_enabled": false
+    },
+    "agent": {
+      "provider_mode": "qwen",
+      "generic_llm_enabled": true,
+      "assessment_point_policy_enabled": true
+    },
+    "status": "MISMATCH_REQUIRES_CALLSITE_TRACE"
+  },
+  "operational_evidence": {
+    "learning_operations": {
+      "completed": 4149,
+      "failed": 564,
+      "running_old": 6,
+      "unknown": 14
+    },
+    "model_reservations": {
+      "question_author_completed": 243,
+      "question_author_failed": 4,
+      "question_author_unknown": 5,
+      "teacher_completed": 4333,
+      "teacher_failed": 224,
+      "teacher_reserved_old": 2
+    }
+  },
+  "evidence_gaps": [
+    "selected deployed runtime files have not yet been byte-matched to the local commit",
+    "current real-browser first-useful-text timing has not yet been captured in this activity",
+    "seven student paths have not yet been acceptance-tested against an isolated data copy"
+  ]
+}
