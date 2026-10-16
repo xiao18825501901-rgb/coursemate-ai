@@ -6,10 +6,10 @@
 - [x] Create an independent worktree from the actual production-correlated source SHA.
 - [x] Confirm current Netlify deploy, backend service release directories, health, disks, locks, and
   database schema versions without changing production.
-- [ ] Prove byte-level identity for selected deployed runtime files.
+- [x] Prove byte-level identity for selected deployed runtime files.
 - [ ] Record representative current student-path timing without issuing an unapproved paid request.
-- [ ] Finish the seven-path dependency and provider-role maps.
-- [ ] Freeze `CJ_BASELINE_TRACE.json` and the compatibility report.
+- [x] Finish the seven-path dependency and provider-role maps.
+- [x] Freeze `CJ_BASELINE_TRACE.json` and the compatibility report.
 
 Exit gate: every target path has a source entry point, runtime owner, database authority, model role,
 known blocking work, and measurable baseline or an explicit evidence gap.

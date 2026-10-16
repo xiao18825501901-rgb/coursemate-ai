@@ -27,9 +27,11 @@ than discarded, so the aggregate is descriptive evidence, not a performance SLA.
 
 ## Gaps between current behavior and target
 
-1. The current UI event reader consumes SSE correctly, but the existing server path still persists
-   and publishes final/partial state through a mixed orchestration path. R1 must prove that only safe
-   student text is emitted early and that private planning/state candidates never cross the boundary.
+1. The current UI event reader consumes SSE correctly. Candidate `c8002c3` now timestamps the
+   server's safe public milestones and records one content-free browser Performance Mark only after
+   the first visible delta is committed. Private planning remains behind the existing projection
+   whitelist. A real authenticated production before/after sample is still required before claiming
+   an R1 latency improvement.
 2. Do One already has a separate exercise API, evaluation, reveal, explanation, and history path.
    Its cold author contract, however, explicitly permits only DeepSeek receipts or labelled fixtures.
    That is incompatible with the accepted general-role Qwen target and must be changed at the trusted
@@ -41,13 +43,16 @@ than discarded, so the aggregate is descriptive evidence, not a performance SLA.
    settings. This is a real split configuration, not proof that every general role is migrated.
 5. The active UI bundle exposes the configured model through a `model-label` element. That conflicts
    with the requirement to hide provider/model names in system UI.
-6. The dependency lock currently reports one critical and one high advisory. Reachability and the
-   smallest compatible fix must be resolved before any candidate is released.
+6. Candidate `bd82e58` updates `proxy-addr` and `source-map-js` within their compatible ranges.
+   The post-change audit has zero critical/high/moderate findings and one low KaTeX finding whose
+   fix is a breaking major upgrade; installation, 262 Node tests, typechecks and builds passed.
 7. Production has old RUNNING, RESERVED, and UNKNOWN records. They remain immutable evidence; stage
    logic must avoid turning them into a global lock for new, independently identified operations.
 
 ## Release boundary
 
-No release is currently authorized or safe. The Hangzhou disk is 94% full, Singapore monitoring is
-failed, the dependency audit gate is red, and real-browser TTFRT plus isolated-data compatibility are
-not yet proven. These are concrete release conditions, not a request to redesign the product.
+No production switch has occurred. The dependency audit and isolated-data startup gates are now
+closed. The remaining R1 release conditions are a fresh production preflight/backup, a conflict-free
+publish lock, restoration or explicit replacement of the failed Singapore monitor, and an
+authenticated real-browser TTFRT/functional acceptance. These are concrete release conditions, not
+a request to redesign the product.
