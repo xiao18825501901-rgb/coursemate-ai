@@ -1,0 +1,44 @@
+{
+  "schema_version": "coursejesus.i18n-model-ui-baseline.v1",
+  "captured_at": "2026-10-17T03:55:00+08:00",
+  "source_commit": "fc7ff1e",
+  "evidence": "DIRECTLY_OBSERVED_STATIC_SOURCE",
+  "i18n": {
+    "locale_resource_entrypoint": null,
+    "supported_ui_locales": [],
+    "current_state": "NOT_IMPLEMENTED_ON_ACTIVE_UI",
+    "findings": [
+      "The active ui/App.jsx and ui/pages.jsx surface contains hard-coded Chinese system copy.",
+      "Several legacy React pages contain hard-coded English or Chinese copy; there is no shared UI translation catalog.",
+      "User and course teaching-language preferences exist, but they are content preferences and are not a UI-locale switch.",
+      "No current control beside the theme control changes only system UI language while preserving Pair, run, draft, answer and course-language state."
+    ],
+    "required_boundary": "A UI locale may translate system chrome only. It must not translate user input, source material, teaching output, questions, answers, explanations or historical records, and switching must perform zero LLM calls."
+  },
+  "model_name_ui": {
+    "current_state": "FAIL",
+    "student_visible_findings": [
+      {
+        "file": "apps/web/src/ui/pages.jsx",
+        "surface": "assistant message byline",
+        "behavior": "renders config.model for assistant messages"
+      },
+      {
+        "file": "apps/web/src/ui/pages.jsx",
+        "surface": "learning workspace toolbar",
+        "behavior": "renders config.model in the model-label element"
+      },
+      {
+        "file": "apps/web/src/ui/App.jsx",
+        "surface": "development login notice",
+        "behavior": "contains provider/model-facing diagnostic copy; production auth does not use this branch, but the system-copy policy still needs an explicit environment boundary"
+      }
+    ],
+    "internal_audit_findings": [
+      "The feedback report transmits the configured model as restricted diagnostic metadata; that is allowed if it is not rendered as student system UI.",
+      "Backend config and immutable model receipts retain provider, model, revision, protocol, region and usage identities; these records must remain accurate."
+    ],
+    "required_boundary": "Remove provider/model brands from system chrome, messages, statuses, errors, toasts, tooltips, accessibility labels and student exports without rewriting user-authored or source content that legitimately discusses those names."
+  },
+  "release_gate": "FAIL_UNTIL_R6_IMPLEMENTED_AND_BROWSER_VERIFIED"
+}
