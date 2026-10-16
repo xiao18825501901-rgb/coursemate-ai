@@ -8,6 +8,7 @@ whereas a blueprint item is the frozen reference to a READY question revision.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Final, Literal
 
 from pydantic import Field
@@ -163,6 +164,35 @@ _ANSWER_FORM: Final = {
     "EXPLANATION": "WORKED_STEPS",
     "CODE": "CODE_BLOCK",
 }
+
+
+POINT_ASSESSMENT_POLICY_VERSION: Final = "cj.assessment.points.v1"
+
+
+def point_item_marks_basis_points(counts: Sequence[int]) -> tuple[tuple[int, ...], ...]:
+    """Split 10,000 basis points by verified point, then by its one or two items.
+
+    This arithmetic helper deliberately does not establish catalog authority or
+    alter the legacy five-question marks policy below.
+    """
+
+    if not counts:
+        raise ValueError("ASSESSMENT_POINTS_NOT_READY")
+    if any(type(count) is not int or count not in (1, 2) for count in counts):
+        raise ValueError("POINT_ITEM_COUNT_MUST_BE_ONE_OR_TWO")
+    if sum(counts) > 10_000:
+        raise ValueError("POINT_CATALOG_TOO_GRANULAR_FOR_SCORE_RESOLUTION")
+    share, remainder = divmod(10_000, len(counts))
+    groups: list[tuple[int, ...]] = []
+    for index, count in enumerate(counts):
+        point_total = share + int(index < remainder)
+        item_share, item_remainder = divmod(point_total, count)
+        if item_share == 0:
+            raise ValueError("SCORE_RESOLUTION_INSUFFICIENT")
+        groups.append(
+            tuple(item_share + int(item < item_remainder) for item in range(count))
+        )
+    return tuple(groups)
 
 
 def assessment_marks_basis_points(question_count: int) -> tuple[int, ...]:

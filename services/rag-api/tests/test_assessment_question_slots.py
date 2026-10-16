@@ -17,7 +17,11 @@ from test_question_persistence import (
 from test_question_runtime import decisions
 
 from app.errors import ApiError
-from app.learning.assessment_question_slots import default_assessment_question_slots
+from app.learning.assessment_question_slots import (
+    assessment_marks_basis_points,
+    default_assessment_question_slots,
+    point_item_marks_basis_points,
+)
 from app.learning.assessments import AssessmentService
 from app.learning.provider import LearningProvider, ProviderCallFailure
 from app.learning.question_runtime import (
@@ -36,6 +40,39 @@ def test_default_question_slots_are_five_complementary_unequal_targets() -> None
     assert len({slot.bloom_target for slot in slots}) == 5
     assert len({slot.question_type for slot in slots}) >= 3
     assert all(slot.empirical_difficulty is None for slot in slots)
+
+
+@pytest.mark.parametrize(
+    ("counts", "expected"),
+    [
+        ([1], ((10_000,),)),
+        ([2], ((5_000, 5_000),)),
+        ([1, 1], ((5_000,), (5_000,))),
+        ([2, 1], ((2_500, 2_500), (5_000,))),
+        ([2, 2], ((2_500, 2_500), (2_500, 2_500))),
+        ([1, 1, 1], ((3_334,), (3_333,), (3_333,))),
+    ],
+)
+def test_point_policy_allocates_by_point_then_by_item(
+    counts: list[int], expected: tuple[tuple[int, ...], ...]
+) -> None:
+    allocated = point_item_marks_basis_points(counts)
+
+    assert allocated == expected
+    assert sum(sum(group) for group in allocated) == 10_000
+
+
+@pytest.mark.parametrize("counts", [[], [0], [3], [True], [1, 3]])
+def test_point_policy_rejects_missing_or_more_than_two_items_per_point(
+    counts: list[int],
+) -> None:
+    with pytest.raises(ValueError):
+        point_item_marks_basis_points(counts)
+
+
+def test_point_policy_does_not_weaken_legacy_five_question_minimum() -> None:
+    with pytest.raises(ValueError, match="between 5 and 30"):
+        assessment_marks_basis_points(1)
 
 
 def test_integrated_runtime_refuses_unmetered_assessment_generation(tmp_path: Any) -> None:
