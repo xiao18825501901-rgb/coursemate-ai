@@ -41,8 +41,9 @@ than discarded, so the aggregate is descriptive evidence, not a performance SLA.
    that source-backed K is used.
 4. RAG runs with DeepSeek-oriented legacy settings while the Agent service carries Qwen/generic-role
    settings. This is a real split configuration, not proof that every general role is migrated.
-5. The active UI bundle exposes the configured model through a `model-label` element. That conflicts
-   with the requirement to hide provider/model names in system UI.
+5. Candidate `1d12521` replaces system-authored provider/model labels with provider-neutral learning
+   service labels. The backend configuration and audit receipts retain the real provider/model identity;
+   user-authored course content and discussion are not rewritten.
 6. Candidate `bd82e58` updates `proxy-addr` and `source-map-js` within their compatible ranges.
    The post-change audit has zero critical/high/moderate findings and one low KaTeX finding whose
    fix is a breaking major upgrade; installation, 262 Node tests, typechecks and builds passed.
@@ -51,8 +52,10 @@ than discarded, so the aggregate is descriptive evidence, not a performance SLA.
 
 ## Release boundary
 
-No production switch has occurred. The dependency audit and isolated-data startup gates are now
-closed. The remaining R1 release conditions are a fresh production preflight/backup, a conflict-free
-publish lock, restoration or explicit replacement of the failed Singapore monitor, and an
-authenticated real-browser TTFRT/functional acceptance. These are concrete release conditions, not
-a request to redesign the product.
+No production switch has occurred. The dependency audit and isolated-data startup gates are closed.
+The 2026-10-16 20:53 UTC preflight found both Hangzhou services active, no publish lock, a verified
+backup about 71 minutes old, and 6.0 GiB free. The old Singapore monitor still targets retired hosts
+and local storage, but the active Hangzhou monitor checks both current services, the real backup and
+disk every five minutes and returned PASS; it is the explicit replacement release monitor. The
+remaining R1 conditions are authenticated browser TTFRT/functional acceptance and the short locked
+production switch with rollback retained.

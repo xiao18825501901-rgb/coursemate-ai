@@ -56,6 +56,7 @@ fresh backup and rollback target.
    must be traced before any routing change.
 3. Old RUNNING, RESERVED, and UNKNOWN rows exist. They are evidence, not permission to clear or retry.
 4. The deployed release directory has no Git metadata, so file-level identity evidence is required.
-5. The Singapore monitor service is failed even though the API tunnel is active; release monitoring
-   must be restored or replaced before switching production.
+5. The Singapore legacy monitor still targets retired hosts and local storage. The current Hangzhou
+   monitor is the verified replacement: it checks both services, the authoritative backup and disk
+   every five minutes and returned PASS in the latest preflight.
 

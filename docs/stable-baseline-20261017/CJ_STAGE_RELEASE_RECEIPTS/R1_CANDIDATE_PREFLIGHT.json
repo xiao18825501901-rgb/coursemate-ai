@@ -1,0 +1,46 @@
+{
+  "stage_id": "R1_SAFE_STREAMING",
+  "observed_at_utc": "2026-10-16T20:53:28Z",
+  "status": "CANDIDATE_READY_PENDING_AUTHENTICATED_ACCEPTANCE_AND_DEPLOY",
+  "candidate_sha": "1d1252153ffaf4f7667240ed99583415f3d45a11",
+  "production_before": {
+    "backend_release": "/srv/coursemate/releases/legacy-deb82cc518b2",
+    "frontend_deploy_id": "6ad0d52476d6671ce3d8fe6c",
+    "schema": {"rag": 81, "ui": 16, "agent": 3},
+    "publish_lock_present": false
+  },
+  "candidate_changes": [
+    "server records content-free observation timestamps on already-public stream events",
+    "browser records the first committed visible-text milestone without answer content",
+    "system UI no longer renders configured provider or model names",
+    "two compatible Node dependency patches remove all high and moderate audit findings"
+  ],
+  "verification": {
+    "python_baseline": "2327 passed, 11 skipped",
+    "node_baseline": "262 passed",
+    "streaming_and_visibility_targeted": "15 passed",
+    "web_typecheck": "PASS",
+    "workspace_production_build": "PASS",
+    "bundle_secret_scan": "PASS",
+    "npm_audit": {"critical": 0, "high": 0, "moderate": 0, "low": 1}
+  },
+  "production_preflight": {
+    "hangzhou_disk_free_bytes": 6397050880,
+    "hangzhou_disk_used_percent": 94,
+    "hangzhou_rag_service": "active",
+    "hangzhou_agent_service": "active",
+    "hangzhou_monitor": "PASS",
+    "hangzhou_monitor_last_latency_ms": {"rag": 11, "agent": 2},
+    "latest_verified_backup_age_seconds": 4260,
+    "latest_verified_backup_bytes": 1781142887,
+    "singapore_tunnel": "active",
+    "singapore_legacy_monitor": "failed_obsolete_topology",
+    "monitor_replacement": "active Hangzhou monitor validates both loopback services, latest backup and disk every five minutes"
+  },
+  "not_yet_claimed": [
+    "no production switch has occurred",
+    "no authenticated browser TTFRT sample has been captured for this candidate",
+    "no production Clerk acceptance has run against this candidate"
+  ],
+  "rollback_ref": "deb82cc518b2f48cd11329a7d316e9eadeea30ce"
+}
