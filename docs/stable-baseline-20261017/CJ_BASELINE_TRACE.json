@@ -1,5 +1,6 @@
 {
   "captured_at_utc": "2026-10-16T18:49:00Z",
+  "last_verified_at_utc": "2026-10-16T18:58:40.868Z",
   "source": {
     "branch": "feature/stable-baseline-upgrade-20261017",
     "commit": "deb82cc518b2f48cd11329a7d316e9eadeea30ce",
@@ -11,7 +12,9 @@
       "deploy_id": "6ad0d52476d6671ce3d8fe6c",
       "state": "ready",
       "published_at": "2026-10-15T13:29:09.906Z",
-      "title": "CourseJesus legacy recovery deb82cc518b2"
+      "title": "CourseJesus legacy recovery deb82cc518b2",
+      "effective_ui_api_base": "https://rag.47-237-179-69.sslip.io/ui-extension/api/ui/v1",
+      "homepage_ttfb_seconds": [1.084398, 0.943363, 0.593145]
     },
     "hangzhou": {
       "rag_release": "/srv/coursemate/releases/legacy-deb82cc518b2/services/rag-api",
@@ -26,6 +29,21 @@
       "api_tunnel_active": true,
       "monitor_service": "failed"
     }
+  },
+  "runtime_identity": {
+    "backend_source_files_compared": 6,
+    "backend_source_files_exact_match": 6,
+    "agent_build_reproduced": true,
+    "agent_dist_sha256": "358f551fb6d729c7d4d403817d9f3b43ef43c1fc286247ee505c1f0f9aa30f01",
+    "agent_dist_exact_match": true
+  },
+  "public_api_path": {
+    "effective_origin": "https://rag.47-237-179-69.sslip.io",
+    "topology": "browser -> Singapore TLS/tunnel -> Hangzhou services",
+    "rag_health_ttfb_seconds": [1.006301, 0.344767, 0.327321],
+    "agent_health_ttfb_seconds": [0.579679, 0.276458, 0.255395],
+    "ui_config_ttfb_seconds": [0.353914, 0.351678, 0.349229],
+    "legacy_qqttai_hosts": "DNS resolves to Hangzhou but TLS connections reset; not used by the current UI build"
   },
   "data": {
     "rag_schema_migration": 81,
@@ -50,6 +68,11 @@
     "status": "MISMATCH_REQUIRES_CALLSITE_TRACE"
   },
   "operational_evidence": {
+    "stored_ui_run_latency_seconds_last_30_days": {
+      "do_one": {"count": 30, "average": 10.55, "minimum": 0.111, "maximum": 28.026},
+      "general": {"count": 109, "average": 79.472, "minimum": 0.0, "maximum": 643.589},
+      "interpretation": "database wall-clock duration, not first-useful-text latency"
+    },
     "learning_operations": {
       "completed": 4149,
       "failed": 564,
@@ -66,8 +89,12 @@
     }
   },
   "evidence_gaps": [
-    "selected deployed runtime files have not yet been byte-matched to the local commit",
     "current real-browser first-useful-text timing has not yet been captured in this activity",
     "seven student paths have not yet been acceptance-tested against an isolated data copy"
-  ]
+  ],
+  "dependency_security_baseline": {
+    "npm_ci_lockfile_install": "PASS",
+    "npm_audit": {"low": 1, "high": 1, "critical": 1},
+    "release_gate": "FAIL_UNTIL_REACHABILITY_REVIEW_AND_FIX"
+  }
 }
