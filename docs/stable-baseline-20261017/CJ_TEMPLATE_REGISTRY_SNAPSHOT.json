@@ -1,0 +1,27 @@
+{
+  "schema_version": "coursejesus.template-registry-snapshot.v1",
+  "captured_at": "2026-10-17T03:54:00+08:00",
+  "source_commit": "04d0560",
+  "active_new_request_version": "V2",
+  "historical_version_retained": "V1",
+  "template_count": 15,
+  "evidence": "DIRECTLY_OBSERVED_FROM_RUNTIME_REGISTRY",
+  "templates": [
+    {"id":"01","level":"graduate","professional":"商务资讯系统","file":"01_GRAD_BUSINESS_INFORMATION_SYSTEMS_V2.txt","body_sha256":"e3e5ef14a3b826739a7fac5c366797ef88960cfb419af88d7adeb4e68d89dbd2","file_sha256":"c5d4f776f51387e4ee19a2cf2dae8606f49960dbf15445db4bad9f222071a2c4"},
+    {"id":"02","level":"graduate","professional":"计算机科学","file":"02_GRAD_COMPUTER_SCIENCE_V2.txt","body_sha256":"5ae54fd72a203c50971b5b2d6b3810c4e306bf292d24fabc32f31844441451b6","file_sha256":"bda05802091f297302d0e35372f942acd3373ac79c223fa0bad20754d9abd2c1"},
+    {"id":"03","level":"graduate","professional":"数据科学","file":"03_GRAD_DATA_SCIENCE_V2.txt","body_sha256":"a64aa2cceb390f46dbb49c15d034f68bac564e51edfe64489c73b446471c36db","file_sha256":"0ec885e240e09a97844d426ab37d5a966b9d36b16f0a5593ede83284bbdc4b7b"},
+    {"id":"04","level":"graduate","professional":"电子资讯工程学","file":"04_GRAD_ELECTRONIC_INFORMATION_ENGINEERING_V2.txt","body_sha256":"ce5cff59e57cd14ed084408824e859c27cce788f9161292d3f44fc557349aed7","file_sha256":"b149501705218e12bce92ca0c6b47269c098b02f4608220f39f6a5379737c60b"},
+    {"id":"05","level":"graduate","professional":"工程管理学","file":"05_GRAD_ENGINEERING_MANAGEMENT_V2.txt","body_sha256":"a6a2ba33f4a60f7e40b95d498333acfc297291893856fb16aa3ea74fec183447","file_sha256":"13b10083b7404f5a1e623eff64b60daf58478969784aeec6a4e8a8f547debc82"},
+    {"id":"06","level":"graduate","professional":"材料工程及纳米科技","file":"06_GRAD_MATERIALS_ENGINEERING_NANOTECH_V2.txt","body_sha256":"e9be659246035d4f8d3633617df93076fb4db569c16876789c08f5930a298b25","file_sha256":"2c8f470ead317c0b96fe91a9e2ce6cf874113ee76fc75d2118d49189ae5232b2"},
+    {"id":"07","level":"graduate","professional":"生物医学工程","file":"07_GRAD_BIOMEDICAL_ENGINEERING_V2.txt","body_sha256":"0575828429d0d846f4da41469b5ae17f79565ce051a2ef25a734c4d061c44b49","file_sha256":"a3bae564621e5131a4c3c6655b9790e48b6909084e0e9beb8bed6bb010d98ef5"},
+    {"id":"08","level":"graduate","professional":"人工智能","file":"08_GRAD_ARTIFICIAL_INTELLIGENCE_V2.txt","body_sha256":"23da307661a3e85417b80d311047b26c2a903069c39c038b7fbc114251fa5357","file_sha256":"327b4454f697abd763d4259db08ba16341c7b5f6656f1c2528bfb55669a14acb"},
+    {"id":"09","level":"graduate","professional":"商业及数据分析","file":"09_GRAD_BUSINESS_DATA_ANALYTICS_V2.txt","body_sha256":"a4426a6f1c56316edbd27250a9279d49f26e3ae6b67f5a270c8ecde27bf43fec","file_sha256":"3a73e7ad4fad10a7f74cae1042887d05e6b0bb81d8c23c206947c0e4dd392253"},
+    {"id":"10","level":"graduate","professional":"创新创业","file":"10_GRAD_INNOVATION_ENTREPRENEURSHIP_V2.txt","body_sha256":"5ec53fcfa51d6bc9e7af4cb00071faaf5c7dccc5c2d9146854c7ef208bed99d8","file_sha256":"fe5aa610f390080bffc8eb241be5d001802302737b45b84c7341fbe35b96055b"},
+    {"id":"11","level":"undergraduate","professional":"计算机科学与技术","file":"11_UG_COMPUTER_SCIENCE_TECHNOLOGY_V2.txt","body_sha256":"d042fdaeaccdda2cefb8da25184e94061671a4b1108209eaaf1591c301d01d9b","file_sha256":"8de629f3560ebdcd97dcc3e1af303bb7e669e23e14febc84feb8647f2ec40573"},
+    {"id":"12","level":"undergraduate","professional":"智能制造","file":"12_UG_INTELLIGENT_MANUFACTURING_V2.txt","body_sha256":"ed052400001276f024787700f55c923b6a86cbf08f8ebe0a50dc72eecc4f1fab","file_sha256":"80e6fa4a7d54ec494fd0530162c785abff5b43e1665795a903e7d4aa687b73eb"},
+    {"id":"13","level":"undergraduate","professional":"材料","file":"13_UG_MATERIALS_V2.txt","body_sha256":"e348fdeab0dd9cdda56cccfcdc1f1bb4c5cfb4c6a292b3ad3d84e924c3cae5d2","file_sha256":"df56a39073d0abe65345f08cb7638f530ff56c56c3a777f169e9324966c3d17d"},
+    {"id":"14","level":"undergraduate","professional":"能源","file":"14_UG_ENERGY_V2.txt","body_sha256":"b408166424d60d4774eee0cfb6e37fba06195e69d19eab382d575c975f515471","file_sha256":"0f693e237e4be30ca8bb0f38b6e07282f98cc1190aee55c6281754bfc84d6375"},
+    {"id":"OTHER","level":"unknown","professional":"其他／跨学科／暂无法可靠归类","file":"15_OTHER_GENERAL_V2.txt","body_sha256":"49b8ce785fa087d8ba093acf416f81842f69e4c51aec7b8786939e5cbd14dff1","file_sha256":"651782fd957f787af4aa7942b71ae756895e018aba62b234fc0cb2eabb3eab4a"}
+  ],
+  "conclusion": "The existing active registry already contains 14 professional templates plus OTHER. R6 must preserve this registry and qualify/integrate semantic changes; it must not recreate a parallel registry."
+}
