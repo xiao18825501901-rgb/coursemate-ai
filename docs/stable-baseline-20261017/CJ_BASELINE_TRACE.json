@@ -1,6 +1,6 @@
 {
   "captured_at_utc": "2026-10-16T18:49:00Z",
-  "last_verified_at_utc": "2026-10-16T18:58:40.868Z",
+  "last_verified_at_utc": "2026-10-16T19:53:10Z",
   "source": {
     "branch": "feature/stable-baseline-upgrade-20261017",
     "commit": "deb82cc518b2f48cd11329a7d316e9eadeea30ce",
@@ -22,6 +22,14 @@
       "rag_health_http": 200,
       "agent_health_http": 200,
       "publish_lock_present": false,
+      "last_observed_rag_restart": {
+        "stopped_at": "2026-10-17T03:38:14+08:00",
+        "started_at": "2026-10-17T03:39:49+08:00",
+        "working_directory_after_restart": "/srv/coursemate/releases/legacy-deb82cc518b2/services/rag-api",
+        "journal_reason": "external orderly systemd stop/start; initiating actor not present in the service journal",
+        "status_after_restart": "HEALTHY",
+        "evidence": "DIRECTLY_OBSERVED"
+      },
       "disk_used_percent": 94,
       "disk_free_gib_approx": 5.9
     },
