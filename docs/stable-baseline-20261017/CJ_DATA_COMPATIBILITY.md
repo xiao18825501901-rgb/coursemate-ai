@@ -48,22 +48,31 @@ violations. The backup is a recovery point, not permission to overwrite newer pr
 
 ## Isolated-copy rehearsal
 
-Status: `IN_PROGRESS`.
+Status: `PASS`.
 
-An exact read-only copy of the verified RAG backup is being streamed to the independent project
-runtime with transport compression; this avoids creating another large temporary copy on the
-94%-full production disk. UI and Agent databases will follow. The rehearsal must prove, on local
-copies only:
+Exact read-only copies of the verified backup were transferred into the independent project runtime.
+The large RAG database used a compressed stream, avoiding another temporary file on the 94%-full
+production disk. The received identities are:
 
-1. source hashes match the backup manifest;
-2. all three databases pass integrity and foreign-key checks;
-3. the candidate starts without changing schema identity;
-4. representative legacy and post-October records remain readable;
-5. any candidate migration is additive, backup-first and idempotent;
-6. no historical question, answer, mark, score, Pair, UNKNOWN or billing reservation is rewritten.
+| Store | Bytes | SHA-256 |
+|---|---:|---|
+| RAG | 703,983,616 | `5c025597cffde51d5ffdbbb420363fdbec23d29ba346f250d14c62d65bb8c67b` |
+| UI | 19,152,896 | `597611f4da7ceea1a5c6feeb172c73481b9e118e7f977238ccbe20fd0864d5c6` |
+| Agent | 69,632 | `365d3786dfc52b554f71909f5f642ef65fcaef51ee2138564cdc47edf592335b` |
 
-The result remains `NOT_RUN` until the transfer completes; the report will be updated with exact
-hashes and command receipts rather than marking a partial copy as accepted.
+Each SHA-256 exactly matches the persistent backup manifest. Separate startup-rehearsal copies were
+then created; the sealed received copies were never opened for candidate initialisation. On the
+rehearsal copies:
+
+1. RAG initialisation completed, `is_ready=true`, and maximum migration remained 81;
+2. UI initialisation completed and the schema marker remained 16;
+3. Agent initialisation completed, `isReady=true`, and maximum migration remained 3;
+4. all three post-startup copies returned `integrity_check=ok` and zero foreign-key violations;
+5. the sealed received copies were re-hashed afterward and still matched all three manifest hashes.
+
+These checks prove startup/read compatibility and non-destructive initialisation. Representative
+student write-path tests remain stage-specific gates for Do One, assessment, RAG and history; this
+S0 result does not claim those later business acceptances.
 
 ## Release invariants
 
@@ -77,7 +86,7 @@ hashes and command receipts rather than marking a partial copy as accepted.
 
 ## Current conclusion
 
-`COMPATIBILITY = PROVISIONAL_PASS` for read compatibility because the exact production source is
-already operating against schemas 81/16/3 and the reviewed guards preserve newer additive state.
-`RELEASE_DATA_GATE = OPEN` is **not** asserted until the isolated hash, integrity and startup checks
-finish successfully.
+`COMPATIBILITY = PASS` for source identity, isolated startup, schema preservation, integrity and
+foreign-key safety. `RELEASE_DATA_GATE = PASS_FOR_STAGE_S0`. Every later release still needs its own
+backup-first migration rehearsal and the affected real business-path tests; this result is not a
+blanket approval for future migrations or production writes.
