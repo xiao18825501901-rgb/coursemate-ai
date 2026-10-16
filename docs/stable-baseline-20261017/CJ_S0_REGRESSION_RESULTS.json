@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0",
+  "recorded_at_utc": "2026-10-16T20:31:33.2936228Z",
+  "candidate_sha": "8e8dce01f2e941f1e80cbeba8014d92a828a43a7",
+  "stage": "S0_BASELINE",
+  "summary": {
+    "runtime_tests": "PASS",
+    "static_quality_baseline": "FAIL_EXISTING_DEBT",
+    "production_write_performed": false,
+    "paid_model_request_performed": false,
+    "unknown_request_replayed": false
+  },
+  "results": {
+    "python_pytest": {
+      "status": "PASS",
+      "passed": 2327,
+      "skipped": 11,
+      "warnings": 4,
+      "duration_seconds": 3758.62,
+      "notes": [
+        "Skipped cases require Windows symlink or permission mechanisms, an unavailable local read-only CourseMate corpus, or the optional typesafe-sdk dependency.",
+        "No test failures were observed."
+      ]
+    },
+    "web_vitest": {
+      "status": "PASS",
+      "files_passed": 34,
+      "tests_passed": 162
+    },
+    "agent_vitest": {
+      "status": "PASS",
+      "files_passed": 13,
+      "tests_passed": 100
+    },
+    "typescript_typecheck": {
+      "status": "PASS",
+      "workspaces": [
+        "@coursemate/web",
+        "@coursemate/agent-api"
+      ]
+    },
+    "agent_build": {
+      "status": "PASS"
+    },
+    "ruff": {
+      "status": "FAIL_EXISTING_DEBT",
+      "errors": 1901,
+      "scope": "app tests",
+      "decision": "Do not perform a release-window-wide automatic reformat. Limit later fixes to files changed by this upgrade and retain this baseline as debt evidence."
+    },
+    "mypy": {
+      "status": "FAIL_EXISTING_DEBT",
+      "errors": 1281,
+      "files_with_errors": 53,
+      "files_checked": 196,
+      "scope": "app",
+      "decision": "Do not suppress or mass-edit the existing strict-type baseline. Require changed-file tests and targeted typing review for upgrade patches."
+    }
+  },
+  "release_interpretation": {
+    "s0_runtime_regression_gate": "PASS",
+    "repository_wide_static_gate": "KNOWN_FAILING_BASELINE",
+    "claim_limit": "This receipt proves the isolated source baseline test outcomes only. It is not a production deployment or Clerk acceptance receipt."
+  }
+}
