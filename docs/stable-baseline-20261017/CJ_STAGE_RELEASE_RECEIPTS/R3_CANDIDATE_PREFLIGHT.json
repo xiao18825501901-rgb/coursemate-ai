@@ -1,0 +1,61 @@
+{
+  "stage_id": "R3_DYNAMIC_K_ASSESSMENT",
+  "status": "CANDIDATE_FROZEN_PENDING_PRODUCTION_SWITCH",
+  "candidate": {
+    "sha": "a8d08f1e7d2e397b02ec11f60669ef91ef7b8b76",
+    "artifact": "release-artifacts/coursejesus-r3-a8d08f1.tar.gz",
+    "artifact_sha256": "6473b9efb94471fce8c82724c0ad1e68154bb21673fb1ca8fada844d5c01601b",
+    "release_directory": "/srv/coursemate/releases/r3-a8d08f1"
+  },
+  "production_before_switch": {
+    "rag_release": "/srv/coursemate/releases/r2-1-a9a12ef/services/rag-api",
+    "rag_schema": 81,
+    "frontend_deploy_id": "6ad2924de5ac21464a8d04ea",
+    "assessment_point_policy_enabled": false,
+    "generic_llm_enabled": false,
+    "health": "PASS",
+    "integrity_check": "ok",
+    "foreign_key_rows": 0,
+    "release_lock": "ABSENT",
+    "recent_active_learning_operations": 0,
+    "recent_active_assessment_preparations": 0,
+    "recent_open_assessments": 0
+  },
+  "verification": {
+    "merged_assessment_and_do_one_suite": "88 passed",
+    "final_orchestrator_targeted_suite": "16 passed after one red patch-position regression was corrected",
+    "ruff_f_and_b": "PASS",
+    "web_tests": "174 passed on the unchanged R3 web tree",
+    "production_web_build": "PASS",
+    "web_bundle_secret_scan": "PASS",
+    "frontend_build_release_sha": "a8d08f1e7d2e397b02ec11f60669ef91ef7b8b76",
+    "frontend_manifest_sha256": "dc98f3044bd4b1d71eb0157c9898ddeaa5e9e463219e313a38f8e0b55606d23d",
+    "full_backend_regression": "2413 passed, 11 skipped, 1 stale schema assertion; the assertion was corrected and its full file passed 13 tests",
+    "unknown_replays": 0,
+    "new_model_http_calls": 0
+  },
+  "startup_rehearsal": {
+    "final_candidate_cwd": "/srv/coursemate/releases/r3-a8d08f1/services/rag-api",
+    "temporary_port": 28112,
+    "health": {"status": "ok", "service": "rag-api"},
+    "assessment_point_policy_enabled": true,
+    "generic_llm_enabled": false,
+    "fresh_schema_max": 84,
+    "integrity_check": "ok",
+    "foreign_key_rows": 0,
+    "temporary_database_removed_after_check": true
+  },
+  "migration_rehearsal": {
+    "source_schema": 81,
+    "target_schema": 84,
+    "source_copy_sha256": "5c025597cffde51d5ffdbbb420363fdbec23d29ba346f250d14c62d65bb8c67b",
+    "historical_content_hashes_match": true,
+    "integrity_check": "ok",
+    "foreign_key_rows": 0
+  },
+  "rollback": {
+    "code": "Remove only the R3 systemd drop-in and restart to return to R2.1.",
+    "database": "Schema 82-84 is additive and R2.1 already reads schema 81 forward-compatibly; preserve all new writes. Use the sealed pre-switch database only for disaster recovery, never as an ordinary code rollback.",
+    "frontend": "A failed Netlify deploy does not publish. If a published frontend is bad, fix forward from the prior source rather than restoring through the Netlify API."
+  }
+}
