@@ -428,6 +428,8 @@
   },
   "workspace": {
     "title": "Learning workspace",
+    "serviceConnected": "Learning service connected",
+    "serviceDisconnected": "Learning service not connected",
     "reportIssue": "Report an issue",
     "teaching": "Knowledge learning",
     "problem": "Problem solving",

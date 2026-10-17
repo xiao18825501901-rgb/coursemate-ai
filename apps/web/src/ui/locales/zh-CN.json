@@ -428,6 +428,8 @@
   },
   "workspace": {
     "title": "学习工作台",
+    "serviceConnected": "学习服务已连接",
+    "serviceDisconnected": "学习服务未连接",
     "reportIssue": "报告问题",
     "teaching": "知识学习",
     "problem": "题目应对",

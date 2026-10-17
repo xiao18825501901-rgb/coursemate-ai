@@ -36,6 +36,7 @@ test("learning workspace translates its primary controls without changing learni
   expect(screen.getByText("Course knowledge")).toBeVisible();
   expect(screen.getAllByText("Knowledge learning").length).toBeGreaterThanOrEqual(2);
   expect(screen.getAllByText("Problem solving").length).toBeGreaterThanOrEqual(2);
+  expect(screen.getByText("Learning service connected")).toBeVisible();
   expect(screen.getByRole("button", { name: "Try a question" })).toBeVisible();
   expect(screen.getByRole("button", { name: "Enable or disable lesson planning" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByText("Generating")).toBeVisible();
