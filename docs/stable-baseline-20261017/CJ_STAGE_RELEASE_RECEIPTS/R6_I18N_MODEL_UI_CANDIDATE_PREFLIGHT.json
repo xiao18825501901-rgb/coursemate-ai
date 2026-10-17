@@ -1,0 +1,90 @@
+{
+  "receipt_version": "coursejesus.r6.i18n-model-ui.candidate-preflight.v1",
+  "recorded_at_utc": "2026-10-17T16:08:00Z",
+  "status": "CANDIDATE_CODE_FROZEN_PENDING_BACKEND_FULL_REGRESSION_AND_PRODUCTION_DEPLOYMENT",
+  "candidate": {
+    "sha": "46d1bb328ce63d3002df2c583c23f1a089ed2621",
+    "scope": "frontend-only UI locale completion, safe public error envelopes, visual controls, learning and assessment workspaces",
+    "schema_migration": false,
+    "backend_change": false
+  },
+  "verification": {
+    "locale_catalog_key_parity": {
+      "result": "PASS",
+      "zh_cn_leaf_keys": 1010,
+      "en_leaf_keys": 1010,
+      "zh_only": 0,
+      "en_only": 0
+    },
+    "changed_boundary_targeted_tests": {
+      "result": "PASS",
+      "assessment_and_answer_visibility": "21 passed",
+      "learn_locale_and_answer_visibility": "7 passed",
+      "qa_history_flake_reproduction": "6 passed"
+    },
+    "frontend_full_suite": {
+      "result": "PASS_WITH_REPRODUCED_UNRELATED_FLAKE",
+      "aggregate": "226 passed, 1 failed across 53 files",
+      "failure": "QaPage conversation rename/delete timing assertion",
+      "candidate_files_in_failure_path_changed": false,
+      "single_file_reproduction": "PASS, 6 passed",
+      "note": "The isolated unchanged QaPage suite passed immediately. No product code was changed to hide the timing failure."
+    },
+    "typecheck": "PASS",
+    "production_build": "PASS",
+    "bundle_secret_scan": "PASS; 7 built files, no persistence, URL or logging leak",
+    "student_ui_provider_model_static_scan": "PASS; no DeepSeek or Qwen terms in non-test apps/web/src/ui files",
+    "backend_full_regression": "IN_PROGRESS_IN_ORIGINAL_SESSION; not restarted",
+    "unknown_replays": 0,
+    "new_model_http_calls": 0
+  },
+  "behavior_contract": {
+    "ui_languages": ["zh-CN", "en"],
+    "language_switch_preserves": [
+      "course content",
+      "student drafts",
+      "Pair identity",
+      "run identity",
+      "assessment session",
+      "question revision",
+      "student answer",
+      "teaching language",
+      "question language"
+    ],
+    "student_visible_provider_model_names": false,
+    "audit_provider_model_identity_changed": false,
+    "model_routing_changed": false
+  },
+  "production_before_switch": {
+    "checked_at_utc": "2026-10-17T16:07:32Z",
+    "backend_sha": "05946c2194f1ead7e5392b846a09abe94661a15b",
+    "backend_release_directory": "/srv/coursemate/releases/r5-05946c2",
+    "backend_pid": 300739,
+    "backend_health": "PASS",
+    "schema_version": 84,
+    "netlify_site_id": "166afb5a-4103-4236-9f13-4be34dc68cd2",
+    "netlify_site_name": "coursemate-ai-qqtt",
+    "netlify_current_deploy_id": "6ad362811442c797c05e1be2",
+    "netlify_current_deploy_state": "ready",
+    "release_lock": "ABSENT",
+    "established_backend_connections": 2,
+    "backend_journal_lines_last_10_minutes": 117,
+    "root_disk": "99G total, 90G used, 4.8G available, 95%",
+    "root_inode_use": "13%"
+  },
+  "deployment_gate": {
+    "state": "NOT_YET_AUTHORIZED_BY_THIS_RECEIPT",
+    "remaining": [
+      "backend full regression reaches a terminal result",
+      "reconfirm lock, production identity, traffic and disk immediately before publish",
+      "publish the frozen frontend build to the existing Netlify site",
+      "perform authenticated Clerk desktop and mobile acceptance",
+      "write production and rollback receipt"
+    ]
+  },
+  "rollback": {
+    "frontend": "If authenticated acceptance fails, republish the prior immutable Netlify deploy 6ad362811442c797c05e1be2 or fix forward without changing the backend or database.",
+    "backend": "No R6 backend or schema change is planned; keep R5 active.",
+    "data": "Do not restore or replace any production database for a frontend-only rollback."
+  }
+}
