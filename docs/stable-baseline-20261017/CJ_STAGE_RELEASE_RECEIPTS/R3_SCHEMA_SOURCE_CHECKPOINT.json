@@ -1,0 +1,48 @@
+{
+  "stage_id": "R3_DYNAMIC_K",
+  "status": "ENGINEERING_IN_PROGRESS_NOT_DEPLOYED",
+  "observed_at_utc": "2026-10-16T23:13:00Z",
+  "candidate_head": "428a36bd3b0044e31cbadf3fc69cb0f83118ea21",
+  "production": {
+    "ssh_target": "coursemate-prod-new",
+    "rag_service": "active",
+    "working_directory": "/srv/coursemate/releases/r1-a4e4c15/services/rag-api",
+    "database_path": "/srv/coursemate/data/releases/20260919T202006Z/rag.sqlite3",
+    "schema_max": 81,
+    "release_lock": "ABSENT",
+    "stale_alias_observation": {
+      "alias": "coursemate-prod-current",
+      "service_state": "inactive",
+      "working_directory": "/home/admin/coursemate-v3-releases/5ba6a3a/services/rag-api",
+      "decision": "not treated as the active production host"
+    }
+  },
+  "schema_81_source_parity": {
+    "source_migrations_restored": "070-081",
+    "migration_commit": "a36071f88dad5f4e6e1345b8530a08e0f10dd1d5",
+    "fresh_and_replay_rehearsal": "7 passed",
+    "legacy_assessment_backup_regression": "53 passed",
+    "production_schema_changed": false
+  },
+  "production_point_objects_read_only": {
+    "assessment_point_configuration_plans": 0,
+    "assessment_point_question_provenance": 0,
+    "assessment_point_question_targets": 0,
+    "interpretation": "No existing point-policy plan can be reused to establish a real K. This is not confirmed K=0."
+  },
+  "source_snapshot_slice": {
+    "commit": "428a36bd3b0044e31cbadf3fc69cb0f83118ea21",
+    "tests": "9 passed plus 42 adjacent assessment tests passed",
+    "behavior": "Freezes exact owner/workspace/course/node/Spec/REQUIRED-source identity in one read-only transaction; missing, revoked, changed or truncated evidence fails closed.",
+    "model_http_calls": 0,
+    "unknown_replays": 0
+  },
+  "point_scoring_slice": {
+    "commit": "76af53ede246f882f277a8abc240eda27f1be88e",
+    "tests": "18 passed",
+    "behavior": "Allocates 10000 basis points by verified point and then by one or two independently scored items without weakening legacy 5-30 policy."
+  },
+  "next_action": "Implement and test the minimal verified-catalog and frozen-plan adapter. Real semantic K still requires an authorized compiler/reviewer operation after offline contracts are complete.",
+  "production_release": "NOT_PERFORMED",
+  "authenticated_clerk_acceptance": "NOT_RUN_SIGNED_OUT"
+}
