@@ -35,8 +35,8 @@ const OWNER_MODE_WARNING = "这个 Token 会发送到 CourseJesus 服务器";
 /** What every other screen must keep saying. */
 const PUBLIC_REFUSAL = "公共学生入口不接收个人访问令牌";
 
-/** The data module that owns the wording, so the component renders it rather than paraphrasing it. */
-const WARNING_MODULE = path.join("src", "ui", "canvasImport.js");
+/** The locale catalog owns user-facing wording; the component must render the matching keys. */
+const ZH_LOCALE = path.join("src", "ui", "locales", "zh-CN.json");
 
 function sourceFiles(directory: string): string[] {
   const out: string[] = [];
@@ -81,17 +81,19 @@ describe("the one screen that may accept a Canvas credential", () => {
     expect(field).not.toMatch(/\bid=/);
     // The warning that the token does reach the server is rendered by the same component that
     // renders the field, and the field exists only in the owner-mode renderer.
-    expect(text).toContain("TASK_CREDENTIAL_WARNING");
-    expect(read(path.join(WEB_ROOT, WARNING_MODULE))).toContain(OWNER_MODE_WARNING);
+    const ownerBlock = text.slice(text.indexOf("renderTaskToken()"), text.indexOf("renderSelect()"));
+    expect(text).toContain("t('canvas.taskWarning')");
+    expect(ownerBlock).toContain("<TaskCredentialSteps t={this.t}/>");
+    expect(read(path.join(WEB_ROOT, ZH_LOCALE))).toContain(OWNER_MODE_WARNING);
     expect(text).toContain("canvas-task-token");
   });
 
   it("keeps the public screens saying that this site does not accept one", () => {
     const text = read(path.join(WEB_ROOT, OWNER_MODE_FILE));
-    expect(text).toContain(PUBLIC_REFUSAL);
     // The refusal belongs to the public connect screen, which is the one that asks for OAuth.
-    const connect = text.slice(text.indexOf("renderConnect()"));
-    expect(connect).toContain(PUBLIC_REFUSAL);
+    const connect = text.slice(text.indexOf("renderConnect()"), text.indexOf("renderBridge()"));
+    expect(connect).toContain("t('canvas.publicCredentialBoundary')");
+    expect(read(path.join(WEB_ROOT, ZH_LOCALE))).toContain(PUBLIC_REFUSAL);
   });
 
   it("reaches the task-credential routes from exactly one client module", () => {
