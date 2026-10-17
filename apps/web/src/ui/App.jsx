@@ -1,5 +1,4 @@
 import { BRAND } from "../brand";
-import { developmentServiceNotice } from './servicePresentation.js';
 import React from 'react';
 import { request, send, remove, setTokenGetter, key, getVerification } from './api.js';
 import { route, goto } from './utils.js';
@@ -134,6 +133,8 @@ export class App extends React.Component {
     modal = (title, body) => this.setState({ modal: { body, ...(title?.titleKey ?
         { titleKey: title.titleKey, titleParams: title.params || {} } : { title }) } });
     close = () => this.setState({ modal: null });
+    providerStatusKey = (mode) => mode === 'test' ? 'auth.testModel' : mode && mode !== 'none' && mode !== 'disabled'
+        ? 'auth.modelConfigured' : 'auth.modelDisconnected';
     courseTypeLabel = (c) => this.t(c.display_type === 'campus' ? 'courses.campus' : c.display_type === 'shared' ? 'courses.shared' : 'courses.private');
     courseTypeClass = (c) => c.display_type === 'campus' ? 'course-type-badge campus' : c.display_type === 'shared' ? 'course-type-badge shared' : 'course-type-badge private';
     isCampusUnverified = (c) => campusVerificationRequired(this.state.config, c, this.state.verification);
@@ -228,9 +229,9 @@ export class App extends React.Component {
         const { user, loading, config, route: r, modal, error, toast } = this.state;
         const modalTitle = modal?.titleKey ? this.t(modal.titleKey, modal.titleParams) : modal?.title;
         if (loading)
-            return <div className="login-page"><img className="brand-mark" src={BRAND.logoPath} alt={BRAND.logoAlt} width={32} height={32} decoding="async"/><p>正在连接 {BRAND.name}…</p></div>;
+            return <div className="login-page"><img className="brand-mark" src={BRAND.logoPath} alt={BRAND.logoAlt} width={32} height={32} decoding="async"/><p>{this.t('auth.connectingBrand', { brand: BRAND.name })}</p></div>;
         if (!user)
-            return <div className="login-page"><div className="login-card"><div className="login-brand"><img className="brand-mark" src={BRAND.logoPath} alt={BRAND.logoAlt} width={32} height={32} decoding="async"/>{BRAND.name}</div><p className="login-tagline">From Confusion to Revelation</p>{config?.auth_mode === 'development' ? <><div className="notice">本地联调模式 · 真实 SQLite 数据<br />{developmentServiceNotice(config.provider_mode)}<br />测试账号只在本机启用，生产环境会拒绝此登录方式。</div>{[['alice', '以秋同学登录'], ['bob', '以林同学登录'], ['admin', '以课程管理员登录']].map(([a, label]) => <button key={a} className="btn primary" onClick={() => this.login(a)}>{label}</button>)}</> : <button className="btn primary" onClick={() => window.CourseMateAuth?.signIn?.() || window.Clerk?.openSignIn()}>登录 / 注册</button>}{error && error !== '请登录' && !error.includes('请先选择') && <p className="error-text">{error}</p>}</div></div>;
+            return <div className="login-page"><div className="login-card"><div className="login-brand"><img className="brand-mark" src={BRAND.logoPath} alt={BRAND.logoAlt} width={32} height={32} decoding="async"/>{BRAND.name}</div><p className="login-tagline">{this.t('auth.slogan')}</p>{config?.auth_mode === 'development' ? <><div className="notice">{this.t('auth.localIntegration')}<br />{this.t(this.providerStatusKey(config.provider_mode))}<br />{this.t('auth.developmentAccounts')}</div>{[['alice', 'auth.signInQiu'], ['bob', 'auth.signInLin'], ['admin', 'auth.signInAdmin']].map(([a, label]) => <button key={a} className="btn primary" onClick={() => this.login(a)}>{this.t(label)}</button>)}</> : <button className="btn primary" onClick={() => window.CourseMateAuth?.signIn?.() || window.Clerk?.openSignIn()}>{this.t('auth.signIn')} / {this.t('auth.signUp')}</button>}{error && error !== '请登录' && !error.includes('请先选择') && <p className="error-text">{error}</p>}</div></div>;
         return <>{this.renderNav()}<div className="app" key={user.id}>{r.page === 'courses' ? this.renderCourses() : r.page === 'course' ? this.renderCourse() : r.page === 'calendar' ? <Calendar user={user} courses={this.state.courses} toast={this.toast} modal={this.modal} closeModal={this.close}/> : r.page === 'inbox' ? <Inbox onJoined={() => this.refresh()} user={user} config={config} toast={this.toast} modal={this.modal} closeModal={this.close} onRead={() => this.loadUnread()}/> : this.renderDashboard()}</div>{this.renderDrawer()}{modal && <div className="modal-layer" onClick={e => { if (e.target === e.currentTarget)
             this.close(); }}><section className="modal" role="dialog" aria-modal="true" aria-label={modalTitle}><header className="modal-header"><h2>{modalTitle}</h2><IconButton name="close" title={this.t('common.closeWindow')} onClick={this.close}/></header><div className="modal-body">{modal.body}</div></section></div>}{toast && <div className="toast" role="status">{toast}</div>}</>;
     }

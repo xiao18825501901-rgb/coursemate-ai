@@ -1,7 +1,23 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App.jsx";
 import { UiLocaleProvider } from "./UiLocale";
+
+beforeEach(() => {
+  localStorage.clear();
+  vi.restoreAllMocks();
+});
+
+test("signed-out shell uses the saved interface locale without exposing a provider name", () => {
+  localStorage.setItem("coursejesus:ui-locale:guest", "en");
+  vi.spyOn(App.prototype, "boot").mockImplementation(async function (this: any) {
+    this.setState({ loading: false, user: null,
+      config: { environment: "production", auth_mode: "clerk", provider_mode: "qwen" } });
+  });
+  render(<UiLocaleProvider><App /></UiLocaleProvider>);
+  expect(screen.getByRole("button", { name: "Sign in / Sign up" })).toBeVisible();
+  expect(screen.queryByText(/Qwen|DeepSeek/i)).not.toBeInTheDocument();
+});
 
 test("actual shell keeps its instance and course names while translating dashboard and navigation", () => {
   const boot = vi.spyOn(App.prototype, "boot").mockImplementation(async function (this: any) {
