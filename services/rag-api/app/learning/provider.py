@@ -1,5 +1,6 @@
 import base64
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -21,6 +22,8 @@ from app.evaluation.provider_safety import (
     validate_deepseek_base_url,
     validate_model_studio_base_url,
 )
+from app.learning.qwen_profile import qwen_quality_profile
+from app.learning.qwen_stream import NativeStreamFailure, collect_public_chat_stream
 from app.provider_client import ProviderTimeouts, build_openai_client, timeouts_for
 
 Output = TypeVar("Output", bound=BaseModel)
@@ -91,6 +94,7 @@ _LOCAL_ERROR_LAYERS: Final[dict[str, str]] = {
     "MODEL_OUTPUT_LIMIT_INVALID": FAILURE_LAYER_LOCAL_INPUT_VALIDATION,
     "MODEL_EMPTY_OUTPUT": FAILURE_LAYER_PROVIDER_EMPTY_OR_REFUSAL,
     "MODEL_INCOMPLETE": FAILURE_LAYER_PROVIDER_INCOMPLETE,
+    "MODEL_QUALITY_PROFILE_INVALID": FAILURE_LAYER_LOCAL_CONFIGURATION,
     "AUTO_LEDGER_WRITE_FAILED": FAILURE_LAYER_LOCAL_DURABILITY,
 }
 _SCHEMA_ERROR_CLASSES: Final[frozenset[str]] = frozenset({"SCHEMA_INVALID", "ValidationError"})
@@ -248,7 +252,12 @@ def extract_json_object(text: str) -> str | None:
     return candidate
 
 
-def schema_error_summary(error: Any, *, limit: int = 12) -> list[str]:
+def schema_error_summary(
+    error: Any,
+    *,
+    limit: int = 12,
+    schema: type[BaseModel] | None = None,
+) -> list[str]:
     """Bounded, value-free description of a pydantic schema rejection.
 
     Format is "field.path: error_kind", for example
@@ -256,11 +265,36 @@ def schema_error_summary(error: Any, *, limit: int = 12) -> list[str]:
     deliberately not included: it is model output derived from private course
     material, and the field is what a diagnosis needs.
     """
+    allowed_fields: set[str] = set()
+
+    def collect_fields(value: Any) -> None:
+        if isinstance(value, dict):
+            if isinstance(value.get("properties"), dict):
+                allowed_fields.update(value["properties"])
+            for nested in value.values():
+                collect_fields(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                collect_fields(nested)
+
+    if schema is not None:
+        collect_fields(schema.model_json_schema())
     entries: list[str] = []
     for item in getattr(error, "errors", lambda: [])():
-        location = ".".join(str(part) for part in item.get("loc", ())) or "<root>"
-        entries.append(f"{location}: {item.get('type', 'unknown')}")
-        if len(entries) >= limit:
+        parts = list(item.get("loc", ()))
+        location = ".".join(
+            "<extra_field>"
+            if item.get("type") == "extra_forbidden" and index == len(parts) - 1
+            else str(part)
+            if (type(part) is int and 0 <= part <= 1_000_000)
+            or (isinstance(part, str) and part in allowed_fields)
+            else "<field>"
+            for index, part in enumerate(parts)
+        )[:180] or "<root>"
+        kind = item.get("type", "unknown")
+        kind = kind if isinstance(kind, str) and re.fullmatch(r"[a-z_]{1,80}", kind) else "unknown"
+        entries.append(f"{location}: {kind}")
+        if len(entries) >= min(max(limit, 1), 12):
             break
     return entries
 
@@ -339,7 +373,7 @@ class LearningProvider:
     def cache_protocol(self) -> str:
         if self.settings.app_env == "test" and self.settings.rag_provider_mode == "deterministic":
             return "fixture"
-        return "responses"
+        return "responses" if self.is_deepseek else self.settings.v3_qwen_protocol
 
     @property
     def cache_region(self) -> str:
@@ -386,6 +420,7 @@ class LearningProvider:
         images: list[ProviderImage] | None = None,
         max_output_tokens: int | None = None,
         transport_event_sink: Callable[[dict[str, Any]], None] | None = None,
+        stream_checkpoint: Callable[[], None] | None = None,
     ) -> tuple[Output, dict[str, Any]]:
         settings = self.settings
         safe_images = images or []
@@ -450,6 +485,11 @@ class LearningProvider:
         contract_terminal_recorded = False
         raw_output_text: str | None = None
         rejection_summary: list[str] | None = None
+        native_reasoning_observed = False
+        native_quality: dict[str, Any] | None = None
+        response: Any
+        provider_status: str | None
+        stream_interrupted = False
         try:
             if any(
                 len(item.content) > settings.v3_problem_image_max_bytes
@@ -496,6 +536,8 @@ class LearningProvider:
                         ) from None
                 if len(serialized) > 60000:
                     raise ApiError(422, "CONTEXT_BUDGET", "The bounded unit context is too large.")
+                if not self.is_deepseek:
+                    native_quality = qwen_quality_profile(settings)
                 if self.client is None:
                     # The model timeout is the read budget, not the whole story: the
                     # connect, write and pool budgets are explicit too, and the
@@ -530,7 +572,7 @@ class LearningProvider:
                     "SEND_INTENT",
                     provider=run["provider"],
                     model=self.model,
-                    protocol="responses",
+                    protocol=self.cache_protocol,
                     role=role,
                     input_hash=run["input_hash"],
                     template_version=template_version,
@@ -559,6 +601,86 @@ class LearningProvider:
                             },
                         },
                     )
+                elif self.cache_protocol == "chat_completions":
+                    chat_content: Any = serialized
+                    if safe_images:
+                        chat_content = [{"type": "text", "text": serialized}]
+                        chat_content.extend(
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": "data:"
+                                    + item.media_type
+                                    + ";base64,"
+                                    + base64.b64encode(item.content).decode("ascii")
+                                },
+                            }
+                            for item in safe_images
+                        )
+                    chat_args: dict[str, Any] = {
+                        "model": self.model,
+                        "messages": [
+                            {"role": "system", "content": instructions},
+                            {"role": "user", "content": chat_content},
+                        ],
+                        "max_tokens": effective_max_output_tokens,
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": {
+                                "name": schema.__name__,
+                                "strict": True,
+                                "schema": schema.model_json_schema(),
+                            },
+                        },
+                    }
+                    if native_quality and native_quality["native_reasoning"]:
+                        stream = self.client.chat.completions.create(
+                            **chat_args,
+                            stream=True,
+                            stream_options={"include_usage": True},
+                            reasoning_effort="xhigh",
+                            extra_body={"enable_thinking": True},
+                        )
+
+                        def deadline() -> None:
+                            if (
+                                perf_counter() - started
+                                > run["timeouts"]["operationDeadlineSeconds"]
+                            ):
+                                raise TimeoutError(
+                                    "The bounded model operation deadline elapsed."
+                                )
+
+                        def checkpoint() -> None:
+                            if stream_checkpoint is not None:
+                                stream_checkpoint()
+                            deadline()
+
+                        try:
+                            response, native_reasoning_observed = collect_public_chat_stream(
+                                stream,
+                                checkpoint=checkpoint,
+                                wire_deadline=deadline,
+                            )
+                        except NativeStreamFailure as interrupted:
+                            stream_interrupted = True
+                            partial = interrupted.metadata
+                            run["provider_response_id"] = partial["provider_response_id"]
+                            if partial["usage_reported"]:
+                                run["input_tokens"] = partial["input_tokens"]
+                                run["output_tokens"] = partial["output_tokens"]
+                            emit(
+                                "RESPONSE_PARTIAL_RECEIPT",
+                                **partial,
+                                reasoning_effort_requested="xhigh",
+                            )
+                            raise interrupted.cause from None
+                    else:
+                        response = self.client.chat.completions.create(
+                            **chat_args,
+                            stream=False,
+                            extra_body={"enable_thinking": False},
+                        )
                 else:
                     response = self.client.responses.create(
                         model=self.model,
@@ -574,23 +696,67 @@ class LearningProvider:
                 response_received = True
                 run["provider_response_id"] = response.id
                 usage = response.usage
-                run["input_tokens"] = usage.input_tokens if usage else 0
-                run["output_tokens"] = usage.output_tokens if usage else 0
-                raw_output_text = response.output_text
+                if self.cache_protocol == "chat_completions":
+                    run["input_tokens"] = usage.prompt_tokens if usage else 0
+                    run["output_tokens"] = usage.completion_tokens if usage else 0
+                    choice = response.choices[0] if len(response.choices) == 1 else None
+                    provider_status = (
+                        "completed"
+                        if choice and choice.finish_reason == "stop"
+                        else "incomplete"
+                    )
+                    raw_output_text = choice.message.content if choice else None
+                else:
+                    run["input_tokens"] = usage.input_tokens if usage else 0
+                    run["output_tokens"] = usage.output_tokens if usage else 0
+                    provider_status = response.status
+                    raw_output_text = response.output_text
                 emit(
                     "RESPONSE_COMPLETE",
                     provider=run["provider"],
                     model=self.model,
-                    protocol="responses",
+                    protocol=self.cache_protocol,
                     role=role,
                     input_hash=run["input_hash"],
                     provider_response_id=response.id,
-                    provider_status=response.status,
+                    provider_status=provider_status,
                     input_tokens=run["input_tokens"],
                     output_tokens=run["output_tokens"],
                     output_text=raw_output_text,
+                    **(
+                        {
+                            "usage_reported": usage is not None,
+                            "returned_model": getattr(response, "model", None),
+                            "native_reasoning_observed": native_reasoning_observed,
+                            "reasoning_effort_requested": native_quality["reasoning_effort"],
+                        }
+                        if native_quality and native_quality["native_reasoning"]
+                        else {}
+                    ),
                 )
-                if response.status != "completed":
+                if not self.is_deepseek and self.cache_protocol == "chat_completions":
+                    failure_code = (
+                        "MODEL_IDENTITY_MISMATCH"
+                        if getattr(response, "model", None) != self.model
+                        else "MODEL_USAGE_MISSING"
+                        if usage is None
+                        else None
+                    )
+                    if failure_code is not None:
+                        emit(
+                            "CONTRACT_REJECTED",
+                            role=role,
+                            input_hash=run["input_hash"],
+                            provider_response_id=response.id,
+                            reason=failure_code,
+                        )
+                        contract_terminal_recorded = True
+                        raise ApiError(
+                            502,
+                            failure_code,
+                            "The service response identity or usage could not be verified.",
+                        )
+                if provider_status != "completed":
                     emit(
                         "CONTRACT_REJECTED",
                         role=role,
@@ -640,12 +806,12 @@ class LearningProvider:
                     # measured run lost a paid call to "<root>: json_invalid".
                     extracted = extract_json_object(raw_output_text)
                     if extracted is None:
-                        rejection_summary = schema_error_summary(schema_error)
+                        rejection_summary = schema_error_summary(schema_error, schema=schema)
                         raise
                     try:
                         output = schema.model_validate_json(extracted)
                     except ValidationError:
-                        rejection_summary = schema_error_summary(schema_error)
+                        rejection_summary = schema_error_summary(schema_error, schema=schema)
                         raise schema_error from None
                     emit(
                         "RESPONSE_EXTRACTED_JSON",
@@ -703,7 +869,7 @@ class LearningProvider:
             )
             terminal_status = (
                 "UNKNOWN"
-                if ledger_failed
+                if ledger_failed or stream_interrupted
                 else
                 "BLOCKED"
                 if isinstance(error, ApiError)
