@@ -641,9 +641,13 @@ def assessment_setup(
     node_id: str,
     request: Request,
     user: User,
+    content_language: str | None = None,
 ) -> dict[str, Any]:
     return cast(LearningOrchestrator, request.app.state.learning).assessment_setup(
-        workspace_id, user.user_id, node_id
+        workspace_id,
+        user.user_id,
+        node_id,
+        content_language=content_language,
     )
 
 

@@ -277,6 +277,8 @@ class LearningOrchestrator:
                     node,
                     request.slots,
                     requested_id=request.configuration_id,
+                    intent_id=request.client_intent_id,
+                    content_language=request.content_language,
                 )
                 configuration_id = str(configuration["id"])
                 try:
@@ -341,10 +343,14 @@ class LearningOrchestrator:
         workspace_id: str,
         owner: str,
         node_id: str,
+        *,
+        content_language: str | None = None,
     ) -> dict[str, Any]:
         workspace = workspace_for(self.db, workspace_id, owner)
         with self.db.connect() as db:
-            setup = self.assessments.setup(db, workspace, node_id)
+            setup = self.assessments.setup(
+                db, workspace, node_id, content_language=content_language
+            )
             active = db.execute(
                 "SELECT prep.* FROM assessment_configuration_preparations AS prep "
                 "JOIN assessment_configurations AS config ON config.id=prep.configuration_id "

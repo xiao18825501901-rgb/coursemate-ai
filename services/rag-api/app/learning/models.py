@@ -573,13 +573,16 @@ class PointSlotSelection(AssessmentSlotSelection):
 
 class AssessmentStartInput(OperationInput):
     node_id: Identifier
+    client_intent_id: Identifier | None = None
+    intent_action: Literal["CONFIGURE", "OPEN", "RETRY"] = "CONFIGURE"
     configuration_id: Identifier | None = None
-    slots: list[AssessmentSlotSelection] = Field(default_factory=list, min_length=0, max_length=30)
+    content_language: Literal["zh-CN", "en"] | None = None
+    slots: list[PointSlotSelection | AssessmentSlotSelection] = Field(
+        default_factory=list, min_length=0, max_length=10_000
+    )
 
     @model_validator(mode="after")
     def valid_configuration(self) -> "AssessmentStartInput":
-        if self.slots and len(self.slots) < 5:
-            raise ValueError("An Assessment configuration needs at least five slots")
         ids = [slot.slot_id for slot in self.slots]
         if len(ids) != len(set(ids)):
             raise ValueError("Assessment configuration slot ids must be unique")

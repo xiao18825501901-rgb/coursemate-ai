@@ -204,7 +204,7 @@ class AssessmentService:
         node = self._atomic_node(connection, workspace, node_id)
         contract = (
             self.point_store.setup(workspace, node, content_language)
-            if self.point_store is not None
+            if self.point_store is not None and content_language is not None
             else assessment_setup_contract()
         )
         contract.update(

@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.learning.assessment_point_catalog_models import CandidatePoint, VerifiedPoint
-from app.learning.models import PointSlotSelection
+from app.learning.models import AssessmentStartInput, PointSlotSelection
 
 
 def candidate(**changes: Any) -> dict[str, Any]:
@@ -80,3 +80,30 @@ def test_point_selection_keeps_second_item_purpose_separate_from_authority() -> 
     assert selection.primary_point_id == "point-shortest-path"
     assert selection.variation_purpose == "CONDITION_CHANGE"
     assert selection.independently_scored_parts == 1
+
+
+def test_dynamic_start_dto_carries_intent_language_and_one_point_item() -> None:
+    request = AssessmentStartInput.model_validate(
+        {
+            "operation_id": "operation-one",
+            "revision": 1,
+            "node_id": "node-one",
+            "client_intent_id": "intent-one",
+            "intent_action": "CONFIGURE",
+            "content_language": "en",
+            "slots": [
+                {
+                    "slot_id": "point-item-one",
+                    "primary_point_id": "point-shortest-path",
+                    "question_type": "SHORT_TEXT",
+                    "task_form": "definition",
+                    "independently_scored_parts": 1,
+                }
+            ],
+        }
+    )
+
+    assert request.client_intent_id == "intent-one"
+    assert request.content_language == "en"
+    assert len(request.slots) == 1
+    assert isinstance(request.slots[0], PointSlotSelection)
