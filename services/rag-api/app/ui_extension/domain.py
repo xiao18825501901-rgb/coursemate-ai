@@ -2602,7 +2602,10 @@ class V3DomainAdapter:
                 items = [item for item in items if item["folder"] == folder]
             return items
         if operation == "file.upload":
-            return self._file_upload(subject, payload)
+            # Parsing, embedding and indexing are synchronous and may take seconds.
+            # Keep them off the ASGI event loop so an upload cannot pause teaching,
+            # retrieval, practice or the existing-tree read path for every student.
+            return await asyncio.to_thread(self._file_upload, subject, payload)
         if operation == "file.batch.begin":
             return self._file_batch_begin(subject, payload)
         if operation == "file.batch.seal":
