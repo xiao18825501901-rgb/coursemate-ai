@@ -175,6 +175,9 @@ def test_enabled_graph_policy_completes_real_http_assessment_with_zero_model_cal
         assert configured.status_code == 200, configured.text
         configured_body = configured.json()
         configuration_id = configured_body["configuration_id"]
+        assert configured_body["policy_version"] == "cj.assessment.points.v1"
+        assert configured_body["content_language"] == "en"
+        assert configured_body["client_intent_id"] == "graph-http-intent"
 
         deadline = time.monotonic() + 5
         status = configured_body
@@ -231,6 +234,112 @@ def test_enabled_graph_policy_completes_real_http_assessment_with_zero_model_cal
         assert submitted.status_code == 200, submitted.text
         history = client.get(base + f"/assessments/{session['id']}")
 
+    assert submitted.json()["status"] == "GRADED"
+    assert submitted.json()["raw_score"] == 100
+    assert history.status_code == 200, history.text
+    assert history.json()["status"] == "GRADED"
+    assert history.json()["raw_score"] == 100
+    assert model_calls == 0
+
+
+def test_public_student_adapter_exposes_dynamic_point_setup_and_preserves_selection(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("CMUI_PROVIDER_MODE", "test")
+    app = create_app(
+        settings=Settings(
+            _env_file=None,
+            database_path=tmp_path / "rag.sqlite3",
+            upload_dir=tmp_path / "uploads",
+            app_env="test",
+            rag_provider_mode="deterministic",
+            v3_enabled=True,
+            ui_extension_enabled=True,
+            ui_web_dir=tmp_path / "no-web-build",
+            assessment_point_policy_enabled=True,
+        ),
+        auth_verifier=Identity(),
+    )
+    with TestClient(app) as client:
+        client.headers["Authorization"] = "Bearer a"
+        created = client.post(
+            "/api/courses",
+            json={"id": "cs3481", "name": "CS3481"},
+        )
+        assert created.status_code == 201, created.text
+        workspace, node, _source = graph_case(client)
+        public = "/ui-extension/api/ui/v1"
+        setup = client.get(
+            public + f"/courses/cs3481/knowledge/{node['id']}/assessment/setup",
+            params={"content_language": "en"},
+        )
+        assert setup.status_code == 200, setup.text
+        setup_body = setup.json()
+        started = client.post(
+            public + f"/courses/cs3481/knowledge/{node['id']}/assessment/session",
+            json={
+                "request_id": "public-graph-configure",
+                "client_intent_id": "public-graph-intent",
+                "intent_action": "CONFIGURE",
+                "content_language": "en",
+                "slots": setup_body["default_slots"],
+            },
+        )
+        assert started.status_code == 201, started.text
+        preparation = started.json()
+        configuration_id = preparation["configuration_id"]
+        deadline = time.monotonic() + 5
+        while preparation["status"] != "READY" and time.monotonic() < deadline:
+            time.sleep(0.05)
+            preparation_response = client.get(
+                public
+                + f"/courses/cs3481/knowledge/{node['id']}/assessment/prepare/status",
+                params={"configuration_id": configuration_id},
+            )
+            assert preparation_response.status_code == 200, preparation_response.text
+            preparation = preparation_response.json()
+        assert preparation["status"] == "READY", preparation
+        opened = client.post(
+            public + f"/courses/cs3481/knowledge/{node['id']}/assessment/session",
+            json={
+                "request_id": "public-graph-open",
+                "client_intent_id": "public-graph-intent",
+                "intent_action": "OPEN",
+                "configuration_id": configuration_id,
+                "content_language": "en",
+                "slots": [],
+            },
+        )
+        assert opened.status_code == 201, opened.text
+        session = opened.json()
+        question = session["questions"][0]
+        with client.app.state.database.connect() as db:
+            answer_row = db.execute(
+                "SELECT answer_json FROM assessment_question_revisions WHERE id=?",
+                (question["question_revision_id"],),
+            ).fetchone()
+            model_calls = db.execute("SELECT COUNT(*) FROM generic_llm_calls").fetchone()[0]
+        answer = json.loads(answer_row["answer_json"])["reference_answer"]
+        submitted = client.post(
+            public + f"/courses/cs3481/knowledge/assessment/{session['id']}/submit",
+            json={
+                "request_id": "public-graph-submit",
+                "answers": [
+                    {"blueprint_item_id": question["id"], "answer": answer}
+                ],
+            },
+        )
+        history = client.get(
+            public + f"/courses/cs3481/knowledge/assessment/{session['id']}"
+        )
+
+    assert setup_body["policy_version"] == "cj.assessment.points.v1"
+    assert setup_body["minimum_questions"] == 1
+    assert started.json()["client_intent_id"] == "public-graph-intent"
+    assert started.json()["content_language"] == "en"
+    assert session["status"] == "IN_PROGRESS"
+    assert "answer_key" not in question
+    assert submitted.status_code == 200, submitted.text
     assert submitted.json()["status"] == "GRADED"
     assert submitted.json()["raw_score"] == 100
     assert history.status_code == 200, history.text

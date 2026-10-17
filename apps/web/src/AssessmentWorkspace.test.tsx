@@ -53,6 +53,20 @@ const setup = {
   ],
 };
 
+const pointSetup = {
+  ...setup,
+  schema_version: 'assessment-setup.points.v1',
+  policy_version: 'cj.assessment.points.v1',
+  status: 'READY',
+  minimum_questions: 1,
+  maximum_questions: 2,
+  points: [{ point_id: 'point-degree', allowed_forms: ['SHORT_TEXT'] }],
+  default_slots: [{
+    slot_id: 'point-item-1', question_type: 'SHORT_TEXT', task_form: 'definition',
+    primary_point_id: 'point-degree', variation_purpose: null, independently_scored_parts: 1,
+  }],
+};
+
 describe('AssessmentWorkspace', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -264,5 +278,81 @@ describe('AssessmentWorkspace', () => {
     const payload = vi.mocked(startAssessment).mock.calls[0]![2] as { slots: unknown[] };
     expect(payload.slots).toHaveLength(6);
     expect(JSON.stringify(payload)).not.toMatch(/prompt|options|answer|question_revision/i);
+  });
+
+  it('preserves trusted point selection fields and adds only a legal second item', async () => {
+    vi.mocked(getAssessmentSetup).mockResolvedValue(pointSetup);
+    render(<AssessmentWorkspace course={{ id: 'cs3481', code: 'CS3481' }} node={{ id: 'n1', title: 'Graph degree' }} toast={vi.fn()} onExit={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '添加题目' }));
+    expect(screen.getAllByLabelText(/第 \d+ 题题型/)).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: '确认配置并开始测评' }));
+
+    await vi.waitFor(() => expect(startAssessment).toHaveBeenCalled());
+    const payload = vi.mocked(startAssessment).mock.calls[0]![2] as any;
+    expect(payload.content_language).toBe('zh-CN');
+    expect(payload.client_intent_id).toBeTruthy();
+    expect(payload.intent_action).toBe('CONFIGURE');
+    expect(payload.slots).toEqual([
+      expect.objectContaining({
+        primary_point_id: 'point-degree', variation_purpose: null,
+        independently_scored_parts: 1,
+      }),
+      expect.objectContaining({
+        primary_point_id: 'point-degree', variation_purpose: 'APPLICATION',
+        independently_scored_parts: 1,
+      }),
+    ]);
+  });
+
+  it('shows point preparation as unavailable instead of opening a zero-question paper', async () => {
+    vi.mocked(getAssessmentSetup).mockResolvedValue({
+      ...pointSetup,
+      status: 'ASSESSMENT_POINTS_NOT_READY',
+      minimum_questions: 0,
+      maximum_questions: 0,
+      points: [],
+      default_slots: [],
+    });
+    render(<AssessmentWorkspace course={{ id: 'cs3481', code: 'CS3481' }} node={{ id: 'n1', title: 'Graph degree' }} toast={vi.fn()} onExit={vi.fn()} />);
+
+    expect(await screen.findByText('当前课程来源尚未准备好可测考点。')).toBeVisible();
+    expect(screen.queryByRole('button', { name: '确认配置并开始测评' })).not.toBeInTheDocument();
+  });
+
+  it('reuses the server-frozen intent when resuming a dynamic preparation after reload', async () => {
+    vi.mocked(getAssessmentSetup).mockResolvedValue({
+      ...pointSetup,
+      active_preparation: {
+        preparation_job_id: 'prep-point-1',
+        configuration_id: 'config-point-1',
+        policy_version: 'cj.assessment.points.v1',
+        content_language: 'zh-CN',
+        client_intent_id: 'frozen-intent-1',
+        status: 'BLOCKED',
+        prepared_questions: 0,
+        question_count: 1,
+        slots: pointSetup.default_slots,
+        error_code: 'ASSESSMENT_POINT_METHOD_NOT_QUALIFIED',
+      },
+    });
+    const workspace: any = new AssessmentWorkspace({
+      course: { id: 'cs3481', code: 'CS3481' },
+      node: { id: 'n1', title: 'Graph degree' },
+      toast: vi.fn(),
+      onExit: vi.fn(),
+    });
+    workspace.setState = (value: any, callback?: () => void) => {
+      const patch = typeof value === 'function' ? value(workspace.state) : value;
+      workspace.state = { ...workspace.state, ...patch };
+      callback?.();
+    };
+
+    await workspace.loadSetup();
+    const payload = workspace.configurationPayload('OPEN', false);
+
+    expect(payload.client_intent_id).toBe('frozen-intent-1');
+    expect(payload.configuration_id).toBe('config-point-1');
+    expect(payload.slots).toEqual([]);
   });
 });

@@ -28,6 +28,7 @@ from app.learning.compiler import (
 from app.learning.course_policy import course_policy
 from app.learning.knowledge import KnowledgeService
 from app.learning.learning_loop import LearningLoopService
+from app.learning.model_operation_authority import preparation_model_claim
 from app.learning.models import (
     AssessmentAbandonInput,
     AssessmentAnswer,
@@ -62,7 +63,6 @@ from app.learning.question_runtime import (
     QuestionEngineRuntime,
     QuestionEngineRuntimeError,
 )
-from app.learning.model_operation_authority import preparation_model_claim
 from app.learning.workspaces import document_version_for, original_path, workspace_for
 from app.rag.retrieval import HybridRetriever
 from app.repositories.chunks import RetrievalAccess
@@ -586,6 +586,14 @@ class LearningOrchestrator:
         self, db: sqlite3.Connection, row: sqlite3.Row
     ) -> dict[str, Any]:
         configuration_id = str(row["configuration_id"])
+        configuration = db.execute(
+            "SELECT config.policy_version,config.language,"
+            "json_extract(plan.plan_json,'$.intent_id') AS client_intent_id "
+            "FROM assessment_configurations AS config "
+            "LEFT JOIN assessment_point_configuration_plans AS plan "
+            "ON plan.configuration_id=config.id WHERE config.id=?",
+            (configuration_id,),
+        ).fetchone()
         prepared = self._configured_prepared_count(db, configuration_id)
         total = int(row["total_slots"] or 0) or int(
             db.execute(
@@ -627,6 +635,9 @@ class LearningOrchestrator:
             "status": str(row["status"]),
             "preparation_job_id": str(row["id"]),
             "configuration_id": configuration_id,
+            "policy_version": configuration["policy_version"] if configuration else None,
+            "content_language": configuration["language"] if configuration else None,
+            "client_intent_id": configuration["client_intent_id"] if configuration else None,
             "question_count": total,
             "slots": selections,
             "slot_progress": slot_progress,

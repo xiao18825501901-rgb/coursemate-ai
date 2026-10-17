@@ -49,6 +49,8 @@ from app.jev.evidence_consistency import (
 from app.jev.reference_verification import verify_query_reference
 from app.jev.service import SemanticDecisionService
 from app.learning.coverage_review import CoverageReviewer, NullCoverageReviewer
+from app.learning.learning_loop import LearningLoopError
+from app.learning.learning_loop_reporting import current_observation
 from app.learning.models import (
     AssessmentAbandonInput,
     AssessmentAnswer,
@@ -59,12 +61,11 @@ from app.learning.models import (
     AssessmentSlotSelection,
     AssessmentStartInput,
     AssessmentSubmitInput,
+    PointSlotSelection,
 )
 from app.learning.orchestrator import LearningOrchestrator
 from app.learning.previews import IMAGE_MEDIA_TYPES
 from app.learning.problems import ProblemRepository
-from app.learning.learning_loop import LearningLoopError
-from app.learning.learning_loop_reporting import current_observation
 from app.learning.question_runtime import QuestionEngineRuntimeError
 from app.learning.retrieval_orchestrator import (
     ScopedCandidates,
@@ -2200,9 +2201,20 @@ class V3DomainAdapter:
         workspace = self._workspace_for_node(course_id, subject)
         revision = self._workspace_revision(workspace["id"])
         try:
-            slots = [AssessmentSlotSelection(**item) for item in (payload.get("slots") or [])]
+            slots = [
+                (
+                    PointSlotSelection(**item)
+                    if isinstance(item, dict) and "primary_point_id" in item
+                    else AssessmentSlotSelection(**item)
+                )
+                for item in (payload.get("slots") or [])
+            ]
         except (TypeError, ValidationError) as error:
-            raise ApiError(422, "ASSESSMENT_CONFIGURATION_INVALID", "The Assessment configuration is invalid.") from error
+            raise ApiError(
+                422,
+                "ASSESSMENT_CONFIGURATION_INVALID",
+                "The Assessment configuration is invalid.",
+            ) from error
         return self.learning.start_assessment(
             workspace["id"],
             subject,
@@ -2210,7 +2222,10 @@ class V3DomainAdapter:
                 operation_id=str(payload["request_id"]),
                 revision=revision,
                 node_id=node_id,
+                client_intent_id=payload.get("client_intent_id"),
+                intent_action=payload.get("intent_action", "CONFIGURE"),
                 configuration_id=payload.get("configuration_id"),
+                content_language=payload.get("content_language"),
                 slots=slots,
             ),
         )
@@ -2222,7 +2237,12 @@ class V3DomainAdapter:
         node_id = str(payload["node"])
         self._course_row(course_id, subject)
         workspace = self._workspace_for_node(course_id, subject)
-        return self.learning.assessment_setup(workspace["id"], subject, node_id)
+        return self.learning.assessment_setup(
+            workspace["id"],
+            subject,
+            node_id,
+            content_language=payload.get("content_language"),
+        )
 
     def _assessment_prepare_status(
         self, subject: str, payload: dict[str, Any]

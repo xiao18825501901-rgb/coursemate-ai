@@ -1165,6 +1165,22 @@ function assessmentMarks(questionCount) {
     return Array.from({ length: questionCount }, (_, index) => (base + (index < remainder ? 1 : 0)) / 100);
 }
 
+function configuredAssessmentMarks(slots, policyVersion) {
+    if (policyVersion !== 'cj.assessment.points.v1')
+        return assessmentMarks(slots.length);
+    const pointIds = [...new Set(slots.map(slot => slot.primary_point_id))];
+    const pointBase = Math.floor(10000 / pointIds.length), pointRemainder = 10000 % pointIds.length;
+    const shares = new Map(pointIds.map((pointId, index) => [pointId, pointBase + (index < pointRemainder ? 1 : 0)]));
+    const seen = new Map();
+    const counts = new Map(pointIds.map(pointId => [pointId, slots.filter(slot => slot.primary_point_id === pointId).length]));
+    return slots.map(slot => {
+        const count = counts.get(slot.primary_point_id), index = seen.get(slot.primary_point_id) || 0;
+        seen.set(slot.primary_point_id, index + 1);
+        const total = shares.get(slot.primary_point_id), base = Math.floor(total / count), remainder = total % count;
+        return (base + (index < remainder ? 1 : 0)) / 100;
+    });
+}
+
 function defaultTaskForm(questionType) {
     return { MCQ_SINGLE: 'concept', NUMERIC: 'calculation', SHORT_TEXT: 'definition', EXPLANATION: 'analysis', CODE: 'code' }[questionType] || 'analysis';
 }
@@ -1205,6 +1221,7 @@ function assessmentDraftFromAnswers(questions, answers) {
 }
 export class AssessmentWorkspace extends React.Component {
     state = { view: null, summary: null, setup: null, slots: [], configurationId: null, busy: false, error: '', preparing: null, answers: {}, attachments: [], windows: {}, explanations: {} };
+    assessmentIntentId = 'assessment-intent-' + key();
     winZ = 0;
     winCount = 0;
     componentDidMount() { this.loadSummary(); this.keyHandler = e => { if (e.key === 'Escape')
@@ -1226,6 +1243,8 @@ export class AssessmentWorkspace extends React.Component {
         const setup = await getAssessmentSetup(this.props.course.id, this.props.node.id);
         const active = setup.active_preparation;
         const slots = ((active?.slots?.length ? active.slots : setup.default_slots) || []).map(slot => ({ ...slot }));
+        if (active?.client_intent_id)
+            this.assessmentIntentId = active.client_intent_id;
         this.setState({ setup, slots, configurationId: active?.configuration_id || null, preparing: active || null, error: '' }, () => {
             if (active)
                 this.handlePreparationState(active);
@@ -1251,9 +1270,10 @@ export class AssessmentWorkspace extends React.Component {
     finally {
         this.setState({ busy: false });
     } }
-    configurationPayload() { return {
+    configurationPayload(intentAction = 'CONFIGURE', includeSlots = true) { const pointPolicy = this.state.setup?.policy_version === 'cj.assessment.points.v1'; const slots = includeSlots ? this.state.slots.map(slot => ({ slot_id: slot.slot_id, question_type: slot.question_type, task_form: slot.task_form, ...(pointPolicy ? { primary_point_id: slot.primary_point_id, variation_purpose: slot.variation_purpose ?? null, independently_scored_parts: 1 } : {}) })) : []; return {
         configuration_id: this.state.configurationId,
-        slots: this.state.slots.map(slot => ({ slot_id: slot.slot_id, question_type: slot.question_type, task_form: slot.task_form })),
+        slots,
+        ...(pointPolicy ? { client_intent_id: this.assessmentIntentId, intent_action: intentAction, content_language: this.state.setup?.content_language || 'zh-CN' } : {}),
     }; }
     async start() { if (!this.state.setup || this.state.slots.length < this.state.setup.minimum_questions)
         return; this.setState({ busy: true, error: '', preparing: null }); try {
@@ -1286,7 +1306,7 @@ export class AssessmentWorkspace extends React.Component {
     async handlePreparationState(preparation) { if (preparation.status === 'PREPARING')
         return this.schedulePreparationPoll(); if (preparation.status === 'READY' || (preparation.status === 'BLOCKED' && preparation.can_start_from_ready_pool)) {
         if (this.preparationTimer)
-            window.clearTimeout(this.preparationTimer); const started = await startAssessment(this.props.course.id, this.props.node.id, { configuration_id: preparation.configuration_id, slots: [] }); if (started.preparation_job_id) {
+            window.clearTimeout(this.preparationTimer); const started = await startAssessment(this.props.course.id, this.props.node.id, { ...this.configurationPayload('OPEN', false), configuration_id: preparation.configuration_id }); if (started.preparation_job_id) {
             this.setState({ preparing: started });
             if (started.status === 'PREPARING')
                 this.schedulePreparationPoll();
@@ -1377,11 +1397,17 @@ export class AssessmentWorkspace extends React.Component {
     changeSlot(index, questionType) { this.setState(state => ({ slots: state.slots.map((slot, current) => current === index ? { ...slot, question_type: questionType, task_form: defaultTaskForm(questionType) } : slot), configurationId: null })); }
     changeTaskForm(index, taskForm) { this.setState(state => ({ slots: state.slots.map((slot, current) => current === index ? { ...slot, task_form: taskForm } : slot), configurationId: null })); }
     addSlot() { const setup = this.state.setup; if (!setup || this.state.slots.length >= setup.maximum_questions)
-        return; this.setState(state => ({ slots: [...state.slots, { slot_id: 'slot-' + key(), question_type: 'EXPLANATION', task_form: 'analysis' }], configurationId: null })); }
-    removeSlot(index) { const minimum = this.state.setup?.minimum_questions || 5; if (this.state.slots.length <= minimum)
+        return; if (setup.policy_version === 'cj.assessment.points.v1') { const point = (setup.points || []).find(item => this.state.slots.filter(slot => slot.primary_point_id === item.point_id).length < 2); if (!point)
+            return; const first = this.state.slots.find(slot => slot.primary_point_id === point.point_id); const questionType = first?.question_type || point.allowed_forms?.[0]; this.setState(state => ({ slots: [...state.slots, { slot_id: 'point-item-' + key(), question_type: questionType, task_form: first?.task_form || defaultTaskForm(questionType), primary_point_id: point.point_id, variation_purpose: 'APPLICATION', independently_scored_parts: 1 }], configurationId: null })); return; }
+        this.setState(state => ({ slots: [...state.slots, { slot_id: 'slot-' + key(), question_type: 'EXPLANATION', task_form: 'analysis' }], configurationId: null })); }
+    canRemoveSlot(index) { const setup = this.state.setup, slots = this.state.slots; if (!setup || slots.length <= setup.minimum_questions)
+        return false; if (setup.policy_version !== 'cj.assessment.points.v1')
+        return true; const pointId = slots[index]?.primary_point_id; return slots.filter(slot => slot.primary_point_id === pointId).length > 1; }
+    removeSlot(index) { if (!this.canRemoveSlot(index))
         return; this.setState(state => ({ slots: state.slots.filter((_, current) => current !== index), configurationId: null })); }
     renderSetup() { const { setup, slots } = this.state; if (!setup)
-        return <div className="assessment-start"><p>正在加载测评配置…</p></div>; const marks = assessmentMarks(slots.length); return <div className="assessment-setup"><div className="assessment-setup-intro"><h2>配置本次测评</h2><p>{this.props.course.code} · {this.props.node.title}</p><p className="helper-note">只配置题数、题型和能力形式；确认前不会生成、预取或显示任何具体题目。最少 {setup.minimum_questions} 题，总分 100。</p></div><div className="assessment-slot-list">{slots.map((slot, index) => { const forms = validTaskForms(slot.question_type, setup.task_forms || []); return <div className="assessment-slot-row" key={slot.slot_id}><strong>第 {index + 1} 题</strong><label><span>题型</span><select aria-label={`第 ${index + 1} 题题型`} value={slot.question_type} onChange={event => this.changeSlot(index, event.target.value)}>{(setup.supported_types || []).map(type => <option key={type.id} value={type.id}>{type.label}</option>)}</select></label><label><span>能力形式</span><select aria-label={`第 ${index + 1} 题能力形式`} value={slot.task_form} onChange={event => this.changeTaskForm(index, event.target.value)}>{forms.map(form => <option key={form.id} value={form.id}>{form.label}</option>)}</select></label><span className="assessment-slot-marks">{marks[index].toFixed(2)} 分</span><button type="button" className="icon-btn" aria-label={`删除第 ${index + 1} 题`} disabled={slots.length <= setup.minimum_questions} onClick={() => this.removeSlot(index)}>−</button></div>; })}</div><div className="assessment-setup-actions"><button type="button" className="btn" disabled={slots.length >= setup.maximum_questions} onClick={() => this.addSlot()}>添加题目</button><span className="helper-note">共 {slots.length} 题 · 100.00 分</span><button type="button" className="btn primary" disabled={this.state.busy} onClick={() => this.start()}>{this.state.busy ? '正在冻结配置…' : '确认配置并开始测评'}</button></div></div>; }
+        return <div className="assessment-start"><p>正在加载测评配置…</p></div>; if (setup.policy_version === 'cj.assessment.points.v1' && setup.status !== 'READY')
+        return <div className="assessment-start"><p>当前课程来源尚未准备好可测考点。</p><p className="helper-note">系统不会把尚未完成审查误报为 0 个考点，也不会创建空试卷。</p></div>; const marks = configuredAssessmentMarks(slots, setup.policy_version); return <div className="assessment-setup"><div className="assessment-setup-intro"><h2>配置本次测评</h2><p>{this.props.course.code} · {this.props.node.title}</p><p className="helper-note">只配置题数、题型和能力形式；确认前不会生成、预取或显示任何具体题目。最少 {setup.minimum_questions} 题，总分 100。</p></div><div className="assessment-slot-list">{slots.map((slot, index) => { const point = (setup.points || []).find(item => item.point_id === slot.primary_point_id); const types = point ? (setup.supported_types || []).filter(type => point.allowed_forms.includes(type.id)) : (setup.supported_types || []); const forms = validTaskForms(slot.question_type, setup.task_forms || []); return <div className="assessment-slot-row" key={slot.slot_id}><strong>第 {index + 1} 题</strong><label><span>题型</span><select aria-label={`第 ${index + 1} 题题型`} value={slot.question_type} onChange={event => this.changeSlot(index, event.target.value)}>{types.map(type => <option key={type.id} value={type.id}>{type.label}</option>)}</select></label><label><span>能力形式</span><select aria-label={`第 ${index + 1} 题能力形式`} value={slot.task_form} onChange={event => this.changeTaskForm(index, event.target.value)}>{forms.map(form => <option key={form.id} value={form.id}>{form.label}</option>)}</select></label><span className="assessment-slot-marks">{marks[index].toFixed(2)} 分</span><button type="button" className="icon-btn" aria-label={`删除第 ${index + 1} 题`} disabled={!this.canRemoveSlot(index)} onClick={() => this.removeSlot(index)}>−</button></div>; })}</div><div className="assessment-setup-actions"><button type="button" className="btn" disabled={slots.length >= setup.maximum_questions} onClick={() => this.addSlot()}>添加题目</button><span className="helper-note">共 {slots.length} 题 · 100.00 分</span><button type="button" className="btn primary" disabled={this.state.busy} onClick={() => this.start()}>{this.state.busy ? '正在冻结配置…' : '确认配置并开始测评'}</button></div></div>; }
     renderQuestion(q, i, editable = false) { const value = this.state.answers[q.id] || ''; const prompt = assessmentPromptWithoutRepeatedOptions(q.prompt, q.options); return <article className="assessment-question" key={q.id}><header><strong>第 {i + 1} 题</strong><small>{ASSESSMENT_TYPE_LABEL[q.question_type] || q.question_type}{q.marks ? ' · ' + q.marks + ' 分' : ''}{q.verification_method === 'AI_REVIEWED' ? ' · AI参考自测' : ''}</small></header><p className="assessment-prompt">{prompt}</p>{q.options && q.options.length ? <div className="assessment-options">{q.options.map((option, j) => editable ? <label key={j} className={'assessment-option ' + (value === String(j) ? 'selected' : '')}><input type="radio" name={'assessment-' + q.id} value={j} checked={value === String(j)} aria-label={`第 ${i + 1} 题选项 ${j + 1}：${option}`} onChange={e => this.setState(s => ({ answers: { ...s.answers, [q.id]: e.target.value } }))}/><span>{option}</span></label> : <span key={j} className="assessment-option-readonly">{option}</span>)}</div> : null}{editable && (!q.options || !q.options.length) ? <textarea aria-label={`第 ${i + 1} 题答案`} value={value} maxLength="12000" placeholder="填写本题答案…" onChange={e => this.setState(s => ({ answers: { ...s.answers, [q.id]: e.target.value } }))}/> : null}</article>; }
     renderReview(q, i) { const review = q.review; if (!review)
         return null; const refNote = referenceVerificationNote(review.reference_verification); return <div className="assessment-review"><p className="helper-note">你的答案：{review.submitted_answer ?? '（未作答）'}</p><p className="helper-note">得分：{review.awarded_marks ?? '—'} / {q.marks}</p>{review.rubric?.length ? <ul className="assessment-rubric">{review.rubric.map(c => <li key={c.criterion_id}>{c.dimension}：{c.description}</li>)}</ul> : null}{review.feedback ? <p className="helper-note">{review.feedback}</p> : null}{review.reference_solution ? <div className="reference-solution"><strong>参考解（分步）</strong>{review.reference_solution.answer ? <p>{review.reference_solution.answer}</p> : null}{(review.reference_solution.steps || []).map(step => <div className="reference-step" key={step.step_id}><span>{step.ordinal}. {step.operation} → {step.result}</span><button className="step-explain-link" onClick={() => this.openStepExplanation(q, step)}>详解</button></div>)}{(review.reference_solution.source_refs || []).length ? <p className="muted">来源：{review.reference_solution.source_refs.join(', ')}</p> : null}{refNote ? <p className={`reference-verification ${refNote.kind}`} role="note">{refNote.note}</p> : null}</div> : null}</div>; }

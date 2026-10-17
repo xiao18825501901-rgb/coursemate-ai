@@ -1335,15 +1335,22 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         body=await request.json()
         return await remote('knowledge.assessment.start',user,{
             'course':cid,'node':node_id,'request_id':str(body.get('request_id','')),
+            'client_intent_id':body.get('client_intent_id'),
+            'intent_action':body.get('intent_action','CONFIGURE'),
             'configuration_id':body.get('configuration_id'),
+            'content_language':body.get('content_language'),
             'slots':body.get('slots') or [],
         },request)
 
     @r.get('/courses/{cid}/knowledge/{node_id}/assessment/setup')
-    async def assessment_setup(cid:str,node_id:str,user:User,request:Request):
+    async def assessment_setup(
+        cid:str,node_id:str,user:User,request:Request,content_language:str='zh-CN'
+    ):
         await course(user,cid,request)
         if not domain: raise HTTPException(501,'正式测评沿用 V3 评分引擎；本更新包不伪造 GPA。')
-        return await remote('knowledge.assessment.setup',user,{'course':cid,'node':node_id},request)
+        return await remote('knowledge.assessment.setup',user,{
+            'course':cid,'node':node_id,'content_language':content_language,
+        },request)
 
     @r.get('/courses/{cid}/knowledge/{node_id}/assessment/prepare/status')
     async def assessment_prepare_status(
