@@ -81,6 +81,8 @@
     "title": "Dashboard",
     "createCourse": "Create your own course",
     "importCanvas": "Import from Canvas",
+    "actionsGroup": "Course actions",
+    "viewAllCourses": "View all courses",
     "noPinnedCourses": "No courses added yet",
     "addFromAll": "Add courses from All courses",
     "lightTheme": "Light theme",

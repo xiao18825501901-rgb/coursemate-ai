@@ -81,6 +81,8 @@
     "title": "控制面板",
     "createCourse": "创建自己的课程",
     "importCanvas": "从 Canvas 导入",
+    "actionsGroup": "课程操作",
+    "viewAllCourses": "进入所有课程",
     "noPinnedCourses": "尚未添加课程",
     "addFromAll": "从所有课程添加到控制面板",
     "lightTheme": "浅色模式",

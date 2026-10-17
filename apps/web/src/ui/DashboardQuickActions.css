@@ -1,0 +1,65 @@
+.cj-dashboard-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
+  margin: 0 0 26px;
+}
+
+.cj-dashboard-action {
+  min-width: 0;
+  min-height: 78px;
+  padding: 13px 16px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: left;
+  transition: background-color .15s, border-color .15s, color .15s;
+}
+
+.cj-dashboard-action:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.cj-dashboard-action-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.cj-dashboard-action-icon .ico {
+  width: 22px;
+  height: 22px;
+}
+
+.cj-dashboard-action-label {
+  min-width: 0;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+  .cj-dashboard-actions {
+    gap: 8px;
+    margin-bottom: 22px;
+  }
+
+  .cj-dashboard-action {
+    min-height: 76px;
+    padding: 10px 7px;
+    gap: 6px;
+    font-size: 11px;
+  }
+
+  .cj-dashboard-action-icon .ico {
+    width: 19px;
+    height: 19px;
+  }
+}

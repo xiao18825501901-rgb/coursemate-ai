@@ -78,7 +78,7 @@ describe("minimal signed-out entry", () => {
 });
 
 describe("Canvas import actions", () => {
-  it("places an independent Canvas import card before the create card on the dashboard", () => {
+  it("places the three real actions in one equal dashboard group after the heading", () => {
     const app = appFor({
       user: { id: "user-1", name: "Student", handle: "student" },
       courses: [
@@ -86,21 +86,29 @@ describe("Canvas import actions", () => {
       ],
     });
     const view = render(app.renderDashboard());
+    const group = screen.getByRole("group", { name: "课程操作" });
+    const heading = view.container.querySelector(".dashboard-heading");
     const grid = view.container.querySelector(".dashboard-grid");
+    const buttons = within(group).getAllByRole("button");
 
-    expect(grid).not.toBeNull();
-    const buttons = within(grid as HTMLElement).getAllByRole("button");
-    const importIndex = buttons.findIndex((button) => button.textContent?.includes("从 Canvas 导入"));
-    const createIndex = buttons.findIndex((button) => button.textContent?.includes("创建自己的课程"));
-    expect(importIndex).toBeGreaterThanOrEqual(0);
-    expect(createIndex).toBeGreaterThan(importIndex);
-    expect(buttons[importIndex]).toHaveClass("add-course-card");
-    expect(buttons[createIndex]).toHaveClass("add-course-card");
-    expect(grid?.querySelector(".add-course-canvas-row")).not.toBeInTheDocument();
+    expect(heading?.nextElementSibling).toBe(group);
+    expect(buttons.map((button) => button.textContent?.trim())).toEqual([
+      "从 Canvas 导入",
+      "创建自己的课程",
+      "进入所有课程",
+    ]);
+    expect(buttons).toHaveLength(3);
+    expect(group).toHaveClass("cj-dashboard-actions");
+    expect(grid?.querySelector(".add-course-card")).not.toBeInTheDocument();
+    expect(view.container.querySelector(".dashboard-guide")).not.toBeInTheDocument();
 
-    fireEvent.click(buttons[importIndex]!);
+    fireEvent.click(buttons[0]!);
     expect(app.canvasImport).toHaveBeenCalledTimes(1);
     expect(app.createCourse).not.toHaveBeenCalled();
+    fireEvent.click(buttons[1]!);
+    expect(app.createCourse).toHaveBeenCalledTimes(1);
+    fireEvent.click(buttons[2]!);
+    expect(window.location.hash).toBe("#/courses");
   });
 
   it("renders Canvas import as the same primary button style as create course", () => {
