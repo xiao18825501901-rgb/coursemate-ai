@@ -1,0 +1,118 @@
+{
+  "receipt_version": "coursejesus.r5.model-role.production-acceptance.v1",
+  "recorded_at_utc": "2026-10-17T14:30:00Z",
+  "result": "PARTIAL_PASS_PRODUCTION_ACTIVE",
+  "release": {
+    "candidate_sha": "05946c2194f1ead7e5392b846a09abe94661a15b",
+    "backend_release_directory": "/srv/coursemate/releases/r5-05946c2",
+    "backend_unit": "coursemate-rag",
+    "backend_pid_at_acceptance": 300739,
+    "backend_port": 28000,
+    "frontend_changed": false,
+    "netlify_deploy_id": "6ad362811442c797c05e1be2",
+    "schema_version": 84,
+    "schema_migration": false
+  },
+  "artifact": {
+    "path": "release-artifacts/coursejesus-r5-05946c2.tar.gz",
+    "sha256": "afa3371421dc0c984c4febe8e561451cf21f1aa638f2bac21df8ce19eea07d39",
+    "remote_hash_verified": true
+  },
+  "routing": {
+    "generic_provider": "qwen",
+    "generic_model": "qwen3.8-max",
+    "private_tree_provider": "deepseek",
+    "private_tree_model": "deepseek-flash",
+    "embedding_and_retrieval_changed": false,
+    "server_owned_route": true,
+    "client_role_trusted": false,
+    "question_engine_identity_contract_relaxed": false,
+    "rollback_config_preserved": true
+  },
+  "verification": {
+    "provider_identity_tests": "PASS",
+    "generic_role_routing_tests": "7 passed",
+    "grounded_qa_and_rollback_suite": "61 passed, 1 warning",
+    "broader_related_suite_before_final_qa_patch": "119 passed, 2 failed; both failures were legacy injected-provider compatibility and were repaired by 12e0ff8111208847b834d7768948c92c2e4a941c",
+    "ruff_changed_files": "PASS",
+    "isolated_production_shaped_startup": "PASS",
+    "remote_temporary_port_startup": "PASS",
+    "production_health": "PASS",
+    "production_service_identity": "PASS",
+    "real_clerk_course_and_history_read": "PASS",
+    "real_clerk_problem_response": {
+      "result": "PASS",
+      "run_id": "run_5f72e7ade7054874920da9ca8737a19e",
+      "started_at_utc": "2026-10-17T13:50:46.893Z",
+      "completed_at_utc": "2026-10-17T13:50:52.933Z",
+      "input_tokens": 2487,
+      "output_tokens": 175,
+      "total_tokens": 2662,
+      "grounded_course_citation_visible": true,
+      "provider_name_visible_in_student_ui": false
+    },
+    "real_clerk_do_one_generation": {
+      "result": "FAILED_CLOSED_PRESERVED_UNKNOWN",
+      "run_id": "run_508ecdad5a894f1bab2d4dd1678cda61",
+      "author_status": "COMPLETED",
+      "author_input_tokens": 5149,
+      "author_output_tokens": 12624,
+      "blind_solver_status": "COMPLETED",
+      "blind_solver_input_tokens": 1174,
+      "blind_solver_output_tokens": 2018,
+      "ui_run_status": "failed",
+      "ui_error": "QUESTION_ENGINE_FAILED",
+      "student_message": "题目未通过当前证据与验证门槛；不会展示未验证题目。",
+      "terminal_at_utc": "2026-10-17T14:15:28.300Z",
+      "specification_audit": {
+        "role": "specification_audit",
+        "terminal_status": "UNKNOWN",
+        "error_class": "TimeoutError",
+        "failure_layer": "UNKNOWN",
+        "latency_ms": 370022,
+        "response_received": false,
+        "provider_response_id": "chatcmpl-d931b21e-3c12-9bb1-90ca-0796c8b68ebb",
+        "failure_receipt_id": "hybridfail-3bcfd7f196084c40b4bc26183b6e0491",
+        "replay_allowed": false
+      },
+      "replayed": false,
+      "cancelled": false,
+      "note": "The browser stream disconnected after reporting that state could not be read. The original server operation was preserved to its terminal. Author and blind solver completed, but the final specification audit timed out without a response and was recorded as UNKNOWN. No retry or replacement operation was issued; the unqualified question was not published."
+    },
+    "browser_console_errors_before_do_one": 0
+  },
+  "database": {
+    "integrity_check": "ok",
+    "foreign_key_violations": 0,
+    "schema_version": 84,
+    "historical_data_rewritten": false
+  },
+  "backup": {
+    "remote_gzip_path": "/srv/coursemate/releases/.r5-pre-05946c2-rag.sqlite3.gz",
+    "remote_raw_sha256": "96de5f6fbda4d6354eb70f18789fd70745bc2d9f9122983bde5bb25ef418c27b",
+    "remote_gzip_sha256": "44f7effa20e20a76724803f648d57735e27fac45c95bc45285c31e544bb05e43",
+    "off_host_gzip_path": "private-runtime/r5-release/r5-pre-05946c2-rag.sqlite3.gz",
+    "off_host_gzip_sha256": "44f7effa20e20a76724803f648d57735e27fac45c95bc45285c31e544bb05e43",
+    "off_host_size_bytes": 244991111,
+    "off_host_verification": "PASS",
+    "remote_removed": true
+  },
+  "rollback": {
+    "code_only": true,
+    "procedure": [
+      "Remove /etc/coursemate/releases/r5-05946c2.env.",
+      "Remove /etc/systemd/system/coursemate-rag.service.d/zzzzzzzzzzzzzzzzzzzzzzzzzzzz-coursejesus-r5-05946c2.conf.",
+      "Run systemctl daemon-reload and restart coursemate-rag.",
+      "Verify CWD and PYTHONPATH return to /srv/coursemate/releases/r4-accff2e/services/rag-api.",
+      "Do not replace or reverse-migrate the production database."
+    ],
+    "data_preservation": "Rollback changes only code and provider routing. Courses, sources, pairs, assessments, scores, histories, UNKNOWN rows and usage ledgers remain in place."
+  },
+  "release_lock": {
+    "path": "/run/lock/coursejesus-production-publish.lock",
+    "owner": "stable-baseline-r5",
+    "candidate": "05946c2194f1ead7e5392b846a09abe94661a15b",
+    "released": true,
+    "release_condition": "Satisfied: the real Do One operation reached an auditable terminal and the off-host backup hash matched. The preserved UNKNOWN was not replayed."
+  }
+}

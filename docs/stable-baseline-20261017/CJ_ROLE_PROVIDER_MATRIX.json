@@ -1,11 +1,11 @@
 {
   "schema_version": "coursejesus.role-provider-matrix.v1",
-  "captured_at": "2026-10-17T03:45:00+08:00",
-  "candidate_commit": "f9fe751e747cdc5a3e0499ff1c4edc68e31cf995",
+  "captured_at": "2026-10-17T14:00:00Z",
+  "candidate_commit": "05946c2194f1ead7e5392b846a09abe94661a15b",
   "production_baseline": {
-    "application_commit": "deb82cc518b2f48cd11329a7d316e9eadeea30ce",
-    "netlify_deploy_id": "6ad0d52476d6671ce3d8fe6c",
-    "rag_effective_provider_mode": "deepseek",
+    "application_commit": "05946c2194f1ead7e5392b846a09abe94661a15b",
+    "netlify_deploy_id": "6ad362811442c797c05e1be2",
+    "rag_effective_provider_mode": "qwen_with_deepseek_private_tree_exception",
     "agent_effective_provider_mode": "qwen",
     "evidence": "DIRECTLY_OBSERVED"
   },
@@ -19,8 +19,8 @@
   "roles": [
     {
       "role": "COURSE_MAP50",
-      "current_provider": "deepseek",
-      "current_model": "deepseek-flash",
+      "current_provider": "qwen",
+      "current_model": "qwen3.8-max",
       "target_provider": "deepseek",
       "target_model": "deepseek-flash",
       "status": "KEEP_LEGACY_EXCEPTION",
@@ -33,99 +33,99 @@
       "current_model": "deepseek-flash",
       "target_provider": "qwen",
       "target_model": "qwen3.8-max",
-      "status": "NOT_MIGRATED",
-      "evidence": "DIRECTLY_OBSERVED",
-      "notes": "R1 first improves the existing safe stream without changing the model; R5 owns the later scoped migration."
+      "status": "MIGRATED_PRODUCTION_CONFIGURED",
+      "evidence": "DIRECTLY_OBSERVED_RUNTIME_CONFIG_AND_ROUTE_TEST",
+      "notes": "Interactive teaching uses the qualified generic provider. The safe public stream boundary from R1 remains unchanged."
     },
     {
       "role": "TEACHING_THINKING_PLAN",
-      "current_provider": "deepseek",
-      "current_model": "deepseek-flash",
+      "current_provider": "qwen",
+      "current_model": "qwen3.8-max",
       "target_provider": "qwen",
       "target_model": "qwen3.8-max",
-      "status": "NOT_MIGRATED",
-      "evidence": "DIRECTLY_OBSERVED",
+      "status": "MIGRATED_PRODUCTION_CONFIGURED",
+      "evidence": "DIRECTLY_OBSERVED_RUNTIME_CONFIG_AND_ROUTE_TEST",
       "notes": "Plan is private and may not cross the student public-event boundary."
     },
     {
       "role": "TEACHING_THINKING_WORK",
-      "current_provider": "deepseek",
-      "current_model": "deepseek-flash",
+      "current_provider": "qwen",
+      "current_model": "qwen3.8-max",
       "target_provider": "qwen",
       "target_model": "qwen3.8-max",
-      "status": "NOT_MIGRATED",
-      "evidence": "DIRECTLY_OBSERVED",
+      "status": "MIGRATED_PRODUCTION_CONFIGURED",
+      "evidence": "DIRECTLY_OBSERVED_RUNTIME_CONFIG_AND_ROUTE_TEST",
       "notes": "Only display content and citations may be streamed publicly."
     },
     {
       "role": "PROBLEM_SOLVING",
-      "current_provider": "deepseek",
-      "current_model": "deepseek-flash",
+      "current_provider": "qwen",
+      "current_model": "qwen3.8-max",
       "target_provider": "qwen",
       "target_model": "qwen3.8-max",
-      "status": "NOT_MIGRATED",
-      "evidence": "DIRECTLY_OBSERVED",
-      "notes": "This is the first proposed low-coupling Qwen migration role after stable streaming."
+      "status": "MIGRATED_PRODUCTION_PROVEN",
+      "evidence": "REAL_CLERK_RUN_run_5f72e7ade7054874920da9ca8737a19e",
+      "notes": "A real Clerk student request completed through Qwen with grounded course citations; provider identity remains restricted to server audit."
     },
     {
       "role": "PRACTICE_AUTHOR",
-      "current_provider": "deepseek",
-      "current_model": "deepseek-flash",
+      "current_provider": "qwen",
+      "current_model": "qwen3.8-max",
       "target_provider": "qwen",
       "target_model": "qwen3.8-max",
-      "status": "BLOCKED_BY_PROVIDER_IDENTITY_CONTRACT",
-      "evidence": "TESTED_STATIC_CONTRACT",
-      "notes": "question_author.py currently accepts only a verified DeepSeek receipt or labelled fixture. Repair the provider identity contract without weakening question content validation."
+      "status": "MIGRATED_PRODUCTION_PROVEN",
+      "evidence": "REAL_CLERK_RUN_run_508ecdad5a894f1bab2d4dd1678cda61",
+      "notes": "The trusted identity contract now accepts only the server-qualified Qwen route or the legacy DeepSeek route. The live author stage completed without relaxing question validation."
     },
     {
       "role": "QUESTION_BLIND_SOLVER",
-      "current_provider": "deepseek",
-      "current_model": "deepseek-flash",
+      "current_provider": "qwen",
+      "current_model": "qwen3.8-max",
       "target_provider": "qwen",
       "target_model": "qwen3.8-max",
-      "status": "BLOCKED_BY_PROVIDER_IDENTITY_CONTRACT",
-      "evidence": "TESTED_STATIC_CONTRACT",
-      "notes": "blind_solve.py has the same DeepSeek-or-labelled-fixture restriction."
+      "status": "MIGRATED_PRODUCTION_PROVEN",
+      "evidence": "REAL_CLERK_RUN_run_508ecdad5a894f1bab2d4dd1678cda61",
+      "notes": "The same trusted identity contract applies. The live blind-solver reservation was sent only after the author stage completed and reached a completed terminal."
     },
     {
       "role": "QUESTION_REVIEW_VALIDATOR",
-      "current_provider": "deepseek",
-      "current_model": "deepseek-flash",
+      "current_provider": "qwen",
+      "current_model": "qwen3.8-max",
       "target_provider": "qwen",
       "target_model": "qwen3.8-max",
-      "status": "BLOCKED_BY_PROVIDER_IDENTITY_CONTRACT",
-      "evidence": "TESTED_STATIC_CONTRACT",
-      "notes": "The reviewer contract and qualification lineage require an explicit Qwen-compatible identity path."
+      "status": "MIGRATED_WITH_AUDITED_PRODUCTION_HISTORY",
+      "evidence": "PRODUCTION_LEDGER_COMPLETED_QWEN_LLM_REVIEW_2026-10-15",
+      "notes": "The reviewer preserves qualification lineage and accepts the server-qualified Qwen identity without trusting a client label."
     },
     {
       "role": "ASSESSMENT_AUTHOR",
-      "current_provider": "deepseek",
-      "current_model": "deepseek-flash",
+      "current_provider": "qwen",
+      "current_model": "qwen3.8-max",
       "target_provider": "qwen",
       "target_model": "qwen3.8-max",
-      "status": "NOT_MIGRATED",
-      "evidence": "DIRECTLY_OBSERVED",
+      "status": "MIGRATED_WITH_AUDITED_PRODUCTION_HISTORY",
+      "evidence": "PRODUCTION_LEDGER_COMPLETED_QWEN_ASSESSMENT_AUTHOR_2026-10-15",
       "notes": "Uses the existing Question Engine and server-owned source, point, operation, rubric and ledger identities."
     },
     {
       "role": "GRADING_FEEDBACK_EXPLANATION",
-      "current_provider": "deepseek",
-      "current_model": "deepseek-flash",
+      "current_provider": "qwen",
+      "current_model": "qwen3.8-max",
       "target_provider": "qwen",
       "target_model": "qwen3.8-max",
-      "status": "NOT_MIGRATED",
-      "evidence": "DIRECTLY_OBSERVED",
+      "status": "MIGRATED_PRODUCTION_CONFIGURED",
+      "evidence": "DIRECTLY_OBSERVED_RUNTIME_CONFIG_AND_ROUTE_TEST",
       "notes": "Deterministic grading authority remains server-side; an LLM may only supply the permitted semantic explanation."
     },
     {
       "role": "COURSE_CLASSIFICATION_POINT_ORGANIZATION",
-      "current_provider": "deepseek",
-      "current_model": "deepseek-flash",
+      "current_provider": "qwen",
+      "current_model": "qwen3.8-max",
       "target_provider": "qwen",
       "target_model": "qwen3.8-max",
-      "status": "NOT_MIGRATED",
-      "evidence": "INFERRED_FROM_CURRENT_PROVIDER_MODE",
-      "notes": "Call-site enumeration and an isolated receipt are still required before migration."
+      "status": "MIGRATED_PRODUCTION_CONFIGURED",
+      "evidence": "DIRECTLY_OBSERVED_RUNTIME_CONFIG_AND_ROUTE_TEST",
+      "notes": "Background private-tree map work remains on DeepSeek; general classification and point organization use the generic provider."
     },
     {
       "role": "TASK_AGENT_GENERAL",
@@ -133,9 +133,19 @@
       "current_model": "qwen3.8-max",
       "target_provider": "qwen",
       "target_model": "qwen3.8-max",
-      "status": "CONFIGURED_NOT_END_TO_END_PROVEN",
-      "evidence": "DIRECTLY_OBSERVED_CONFIG",
-      "notes": "The Agent service is configured for Qwen, but current evidence does not prove that each student call site traverses it."
+      "status": "CONFIGURED_WITH_EXISTING_PRODUCTION_EVIDENCE",
+      "evidence": "DIRECTLY_OBSERVED_CONFIG_AND_PRIOR_LEDGER",
+      "notes": "The Agent service remains configured for Qwen; R5 did not replace its independent audit trail."
+    },
+    {
+      "role": "RAG_GROUNDED_QA",
+      "current_provider": "qwen",
+      "current_model": "qwen3.8-max",
+      "target_provider": "qwen",
+      "target_model": "qwen3.8-max",
+      "status": "MIGRATED_PRODUCTION_CONFIGURED",
+      "evidence": "DIRECTLY_OBSERVED_RUNTIME_CONFIG_AND_ROUTE_TEST",
+      "notes": "Grounded QA now uses the qualified generic provider while deterministic retrieval, source ACL, citation validation and answer persistence remain server-owned."
     },
     {
       "role": "EMBEDDING_RETRIEVAL",
@@ -159,10 +169,9 @@
     }
   ],
   "open_gates": [
-    "Enumerate all live call sites and bind each to one listed role.",
-    "Add an explicit Qwen receipt identity accepted by author, blind-solver and reviewer contracts without accepting arbitrary client labels.",
-    "Run authorized per-role capability and business-path evidence before switching any user scope.",
-    "Keep the DeepSeek route online as a truthful rollback until each Qwen role is accepted.",
-    "Remove model labels only from system UI; do not alter user content or restricted audit records."
+    "Preserve and reconcile the real Clerk Do One specification-audit UNKNOWN timeout without replay; author and blind-solver completed, but the cold question was not published.",
+    "Complete R5 off-host backup verification before releasing the shared production lock.",
+    "Keep the DeepSeek route online as a truthful rollback and as the private-tree exception.",
+    "Complete R6 system-UI model-name scan and accepted i18n/OpenJEV boundary work without altering user content or restricted audit records."
   ]
 }
