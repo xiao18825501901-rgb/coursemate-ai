@@ -30,7 +30,7 @@ HANDSHAKE_RULE: Final = (
     "The sum of all vertex degrees equals twice the number of edges."
 )
 
-_SHAPES: Final = {
+SUPPORTED_GRAPH_POINT_SHAPES: Final = {
     "vd_degree_definition_required": ("SHORT_TEXT", "definition"),
     "vd_handshake_identity_required": ("SHORT_TEXT", "definition"),
     "vd_even_odd_degree_count": ("EXPLANATION", "analysis"),
@@ -247,7 +247,7 @@ def build_graph_point_content(
     if len(point_input.targets) != 1:
         return None
     target = point_input.targets[0]
-    expected_shape = _SHAPES.get(target.item_id)
+    expected_shape = SUPPORTED_GRAPH_POINT_SHAPES.get(target.item_id)
     slot = point_input.point_slot
     source = _source_text(point_input)
     if (

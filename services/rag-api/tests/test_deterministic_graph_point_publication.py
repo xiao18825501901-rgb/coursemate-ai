@@ -15,6 +15,9 @@ from app.learning.assessments import AssessmentService
 from app.learning.deterministic_graph_point_assessment import (
     DeterministicGraphPointPublisher,
 )
+from app.learning.deterministic_graph_point_catalog import (
+    DeterministicGraphPointCatalogReader,
+)
 from app.learning.orchestrator import LearningOrchestrator
 from app.learning.models import AssessmentAnswer
 from app.learning.question_runtime import QuestionEngineRuntime
@@ -112,6 +115,21 @@ def graph_case(client):
         node_id=node.json()["id"],
     )
     return workspace, node.json(), source
+
+
+def test_deterministic_catalog_derives_k_only_from_supported_original_targets(tmp_path):
+    with client_at(tmp_path) as client:
+        _workspace, _node, source = graph_case(client)
+        result = DeterministicGraphPointCatalogReader().read_with_targets_for(source, "en")
+
+    assert result is not None
+    catalog, targets = result
+    assert len(catalog.points) == 1
+    assert catalog.points[0].canonical_key == "vd_degree_definition_required"
+    assert targets == {
+        catalog.points[0].point_id: ("vd_degree_definition_required",)
+    }
+    assert catalog.scope.source_snapshot == source.identity()
 
 
 def test_deterministic_graph_point_publishes_ready_with_zero_model_calls(tmp_path):

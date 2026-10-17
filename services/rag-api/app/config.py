@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     v3_qwen_reasoning_effort: Literal["", "xhigh"] = ""
     # Independent generic route: never overwrite the private-tree credential.
     generic_llm_enabled: bool = False
+    assessment_point_policy_enabled: bool = False
     cj_qwen_api_key: SecretStr | None = None
     cj_qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     cj_qwen_model: Literal["qwen3.8-max"] = "qwen3.8-max"

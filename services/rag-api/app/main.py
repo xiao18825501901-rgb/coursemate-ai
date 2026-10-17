@@ -30,6 +30,9 @@ from app.jev.gateway import DisabledTransport, JevGateway, OpenJevTransport, Tra
 from app.jev.receipt_store import SqlReceiptStore
 from app.jev.service import SemanticDecisionService
 from app.learning.assessment_point_configuration import AssessmentPointPolicyService
+from app.learning.deterministic_graph_point_catalog import (
+    DeterministicGraphPointCatalogReader,
+)
 from app.learning.deepseek_reviewer import DeepSeekStrongReviewer
 from app.learning.hybrid_quality import HybridQualityService
 from app.learning.openjev_observer import OpenJevLocalObserver
@@ -245,6 +248,14 @@ def create_app(
         )
     )
     if resolved_settings.v3_enabled:
+        resolved_point_policy = assessment_point_policy
+        if (
+            resolved_point_policy is None
+            and resolved_settings.assessment_point_policy_enabled
+        ):
+            resolved_point_policy = AssessmentPointPolicyService(
+                DeterministicGraphPointCatalogReader()
+            )
         # The learning orchestrator gets the same shared service: pedagogy (call
         # site 6), the assessment criterion review (8) and the prerequisite review
         # (11) live in here, and without it those three call sites would never be
@@ -259,7 +270,7 @@ def create_app(
             hybrid_reviewer=hybrid_reviewer_from_settings(
                 resolved_settings, database, jev_service=application.state.jev_service
             ),
-            assessment_point_policy=assessment_point_policy,
+            assessment_point_policy=resolved_point_policy,
         )
         application.state.official_knowledge_draft_builder = OfficialKnowledgeDraftBuilder(
             database, resolved_settings, application.state.learning
