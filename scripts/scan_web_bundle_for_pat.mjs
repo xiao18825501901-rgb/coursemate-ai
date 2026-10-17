@@ -108,6 +108,7 @@ const offenders = [
 
 const clientPath = path.join(sources, "ui", "canvasImport.js");
 const componentPath = path.join(sources, "ui", "CanvasImport.jsx");
+const zhLocalePath = path.join(sources, "ui", "locales", "zh-CN.json");
 const credentialFieldOwners = sourceFiles
   .filter((file) => readFileSync(file, "utf8").includes("personal_access_token"))
   .map((file) => path.relative(sources, file));
@@ -136,7 +137,10 @@ if (passwordFields.length !== 1) {
   offenders.push("the owner token field must not have a browser-autofill name or id");
 }
 
-const sourceContractText = `${component}\n${client}`;
+// Plain-language safeguards may live in the locale catalog after UI localization. The scanner
+// still requires the exact Chinese contract to ship, while credential ownership remains limited
+// to executable source files above.
+const sourceContractText = `${component}\n${client}\n${readFileSync(zhLocalePath, "utf8")}`;
 for (const required of REQUIRED_BUILT_TEXT) {
   if (!sourceContractText.includes(required)) offenders.push(`the owner flow source is missing: ${required}`);
 }
