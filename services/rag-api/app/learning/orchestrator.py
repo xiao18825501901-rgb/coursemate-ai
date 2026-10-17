@@ -105,11 +105,17 @@ class LearningOrchestrator:
         jev: SemanticDecisionService | None = None,
         hybrid_reviewer: Any | None = None,
         assessment_point_policy: AssessmentPointPolicyService | None = None,
+        generic_provider: LearningProvider | None = None,
     ) -> None:
         self.db = database
         self.settings = settings
         self.retriever = retriever
-        self.provider = LearningProvider(settings)
+        # Map50 is the sole DeepSeek exception. Interactive teaching, solving,
+        # Question Engine and assessment roles use the independently qualified
+        # generic provider when enabled; retaining both objects makes rollback a
+        # configuration change rather than a credential rewrite.
+        self.tree_provider = LearningProvider(settings)
+        self.provider = generic_provider or self.tree_provider
         # Non-authoritative semantic-decision layer; None (default) disables Jev
         # entirely so the deterministic path is byte-identical to before.
         self.jev = jev
@@ -140,6 +146,11 @@ class LearningOrchestrator:
         )
         if self.assessments.point_store is not None:
             self.assessments.point_ready_verifier = self.question_engine.point_ready_for
+
+    def provider_for(
+        self, quota_scope: Literal["INTERACTIVE", "BACKGROUND_AUTO_MAP"]
+    ) -> LearningProvider:
+        return self.tree_provider if quota_scope == "BACKGROUND_AUTO_MAP" else self.provider
 
     def problem_index(
         self,
@@ -2032,7 +2043,7 @@ class LearningOrchestrator:
             workspace_id, operation, role, max_output_tokens, quota_scope
         )
         try:
-            output, run = self.provider.generate(
+            output, run = self.provider_for(quota_scope).generate(
                 schema,
                 instructions=instructions,
                 context=context,

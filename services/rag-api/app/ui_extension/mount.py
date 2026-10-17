@@ -54,23 +54,40 @@ def _coverage_reviewer(settings: Settings) -> object:
 
     from app.learning.coverage_review import resolve_coverage_reviewer
 
+    use_generic = settings.generic_llm_enabled
     return resolve_coverage_reviewer(
         "production" if settings.app_env == "production" else "development",
         os.getenv("CMUI_COVERAGE_REVIEWER"),
         allow_billable=os.getenv("CMUI_ALLOW_BILLABLE", "false").lower() == "true",
-        base_url=os.getenv("CMUI_DEEPSEEK_BASE_URL")
-        or (
-            settings.v3_model_base_url
-            if settings.v3_model == "deepseek-flash"
-            else "https://api.deepseek.com"
+        base_url=(
+            settings.cj_qwen_base_url
+            if use_generic
+            else os.getenv("CMUI_DEEPSEEK_BASE_URL")
+            or (
+                settings.v3_model_base_url
+                if settings.v3_model == "deepseek-flash"
+                else "https://api.deepseek.com"
+            )
         ),
-        api_key=os.getenv("CMUI_DEEPSEEK_API_KEY")
-        or (settings.v3_model_api_key.get_secret_value() if settings.v3_model_api_key else ""),
-        model=os.getenv("CMUI_DEEPSEEK_MODEL") or "deepseek-flash",
+        api_key=(
+            settings.cj_qwen_api_key.get_secret_value()
+            if use_generic and settings.cj_qwen_api_key
+            else os.getenv("CMUI_DEEPSEEK_API_KEY")
+            or (
+                settings.v3_model_api_key.get_secret_value()
+                if settings.v3_model_api_key
+                else ""
+            )
+        ),
+        model=(
+            settings.cj_qwen_model
+            if use_generic
+            else os.getenv("CMUI_DEEPSEEK_MODEL") or "deepseek-flash"
+        ),
         timeout=float(
             os.getenv("CMUI_MODEL_TIMEOUT", str(settings.v3_model_timeout_seconds))
         ),
-        provider="deepseek",
+        provider="qwen" if use_generic else "deepseek",
     )
 
 
@@ -115,11 +132,12 @@ def _ui_settings(settings: Settings) -> object:
         settings.v3_model_api_key.get_secret_value() if settings.v3_model_api_key else ""
     )
     ui.deepseek_protocol = os.getenv("CMUI_DEEPSEEK_PROTOCOL", "responses")
-    # Historical Qwen fields retained only for reading old records.
-    ui.qwen_model = settings.v3_model
-    ui.qwen_base_url = os.getenv("CMUI_QWEN_BASE_URL") or (settings.v3_model_base_url or "")
+    # The qualified generic route is independent from the private-tree
+    # credential. Environment overrides remain for rollback-compatible deploys.
+    ui.qwen_model = settings.cj_qwen_model
+    ui.qwen_base_url = os.getenv("CMUI_QWEN_BASE_URL") or settings.cj_qwen_base_url
     ui.qwen_key = os.getenv("CMUI_QWEN_API_KEY") or (
-        settings.v3_model_api_key.get_secret_value() if settings.v3_model_api_key else ""
+        settings.cj_qwen_api_key.get_secret_value() if settings.cj_qwen_api_key else ""
     )
     ui.qwen_protocol = os.getenv("CMUI_QWEN_PROTOCOL", "chat_completions")
     ui.timeout = float(

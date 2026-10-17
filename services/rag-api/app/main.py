@@ -30,10 +30,11 @@ from app.jev.gateway import DisabledTransport, JevGateway, OpenJevTransport, Tra
 from app.jev.receipt_store import SqlReceiptStore
 from app.jev.service import SemanticDecisionService
 from app.learning.assessment_point_configuration import AssessmentPointPolicyService
+from app.learning.deepseek_reviewer import DeepSeekStrongReviewer
 from app.learning.deterministic_graph_point_catalog import (
     DeterministicGraphPointCatalogReader,
 )
-from app.learning.deepseek_reviewer import DeepSeekStrongReviewer
+from app.learning.generic_provider import build_generic_provider
 from app.learning.hybrid_quality import HybridQualityService
 from app.learning.openjev_observer import OpenJevLocalObserver
 from app.learning.orchestrator import LearningOrchestrator
@@ -98,15 +99,20 @@ def hybrid_reviewer_from_settings(
     """
     if not settings.hybrid_quality_enabled:
         return None
+    provider = (
+        build_generic_provider(settings)
+        if settings.generic_llm_enabled
+        else LearningProvider(settings)
+    )
     reviewer = DeepSeekStrongReviewer(
-        LearningProvider(settings),
-        model_alias=settings.v3_model,
+        provider,
+        model_alias=provider.cache_model,
         provider_label=(
             "DEEPSEEK_API"
-            if settings.v3_model == "deepseek-flash"
+            if provider.cache_model == "deepseek-flash"
             else "ALIBABA_MODEL_STUDIO_COMPATIBLE"
         ),
-        protocol="responses",
+        protocol=provider.cache_protocol,
         max_output_tokens=settings.hybrid_review_max_output_tokens,
     )
     observer = (
@@ -248,6 +254,11 @@ def create_app(
         )
     )
     if resolved_settings.v3_enabled:
+        generic_provider = (
+            build_generic_provider(resolved_settings)
+            if resolved_settings.generic_llm_enabled
+            else None
+        )
         resolved_point_policy = assessment_point_policy
         if (
             resolved_point_policy is None
@@ -271,6 +282,7 @@ def create_app(
                 resolved_settings, database, jev_service=application.state.jev_service
             ),
             assessment_point_policy=resolved_point_policy,
+            generic_provider=generic_provider,
         )
         application.state.official_knowledge_draft_builder = OfficialKnowledgeDraftBuilder(
             database, resolved_settings, application.state.learning
