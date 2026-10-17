@@ -35,6 +35,10 @@ from pydantic import Field, StringConstraints, model_validator
 from app.errors import ApiError
 from app.learning.models import Contract
 from app.learning.provider import ProviderCallFailure
+from app.learning.provider_identity import (
+    verified_run_identity,
+    verified_structured_provider,
+)
 from app.learning.question_author import AuthoredQuestionCandidate
 from app.learning.question_evidence import QuestionEvidencePack
 
@@ -184,21 +188,16 @@ class BlindSolveProviderRun(Contract):
     error_class: None = None
 
     @model_validator(mode="after")
-    def deepseek_or_labelled_fixture_only(self) -> BlindSolveProviderRun:
-        fixture = (
-            self.model == "FAKE_TEST_ONLY"
-            and self.provider == "deterministic"
-            and self.protocol == "fixture"
-            and self.region == "LOCAL_TEST"
-        )
-        deepseek = (
-            self.model == "deepseek-flash"
-            and self.provider == "DEEPSEEK_API"
-            and self.protocol == "responses"
-            and self.region == "ENDPOINT_DEEPSEEK"
-        )
-        if not (fixture or deepseek):
-            raise ValueError("blind-solve receipts must be DeepSeek or labelled test fixtures")
+    def trusted_provider_only(self) -> BlindSolveProviderRun:
+        if not verified_run_identity(
+            model=self.model,
+            provider=self.provider,
+            protocol=self.protocol,
+            region=self.region,
+        ):
+            raise ValueError(
+                "blind-solve receipts must have an exact trusted provider identity"
+            )
         return self
 
 
@@ -329,22 +328,10 @@ def run_blind_solve(
             "The candidate and objective-scoped evidence pack do not match.",
         )
 
-    protocol = getattr(provider, "cache_protocol", None)
-    fixture = (
-        protocol == "fixture"
-        and getattr(provider, "cache_model", None) == "FAKE_TEST_ONLY"
-        and getattr(provider, "cache_region", None) == "LOCAL_TEST"
-    )
-    deepseek = (
-        getattr(provider, "cache_model", None) == "deepseek-flash"
-        and getattr(provider, "is_deepseek", False) is True
-        and protocol == "responses"
-        and getattr(provider, "cache_region", None) == "ENDPOINT_DEEPSEEK"
-    )
-    if not (fixture or deepseek):
+    if not verified_structured_provider(provider):
         raise BlindSolveError(
             "BLIND_SOLVER_PROVIDER_BLOCKED",
-            "Independent solving permits only the verified DeepSeek Responses path.",
+            "Independent solving requires a server-verified provider identity.",
         )
 
     request = BlindSolveRequest(

@@ -23,6 +23,10 @@ from app.learning.provider import (
     schema_error_summary,
     structured_input_hash,
 )
+from app.learning.provider_identity import (
+    verified_run_identity,
+    verified_structured_provider,
+)
 from app.learning.question_blueprint import Hex64, QuestionBlueprint
 from app.learning.question_evidence import QuestionEvidencePack
 from app.learning.task_spec import (
@@ -254,21 +258,16 @@ class AuthorProviderRun(Contract):
     error_class: None = None
 
     @model_validator(mode="after")
-    def deepseek_or_labelled_fixture_only(self) -> AuthorProviderRun:
-        fixture = (
-            self.model == "FAKE_TEST_ONLY"
-            and self.provider == "deterministic"
-            and self.protocol == "fixture"
-            and self.region == "LOCAL_TEST"
-        )
-        deepseek = (
-            self.model == "deepseek-flash"
-            and self.provider == "DEEPSEEK_API"
-            and self.protocol == "responses"
-            and self.region == "ENDPOINT_DEEPSEEK"
-        )
-        if not (fixture or deepseek):
-            raise ValueError("question author receipts must be DeepSeek or labelled test fixtures")
+    def trusted_provider_only(self) -> AuthorProviderRun:
+        if not verified_run_identity(
+            model=self.model,
+            provider=self.provider,
+            protocol=self.protocol,
+            region=self.region,
+        ):
+            raise ValueError(
+                "question author receipts must have an exact trusted provider identity"
+            )
         return self
 
 
@@ -548,14 +547,10 @@ def author_question(
     """Generate but do not publish one candidate bound to exact inputs and prompt revision."""
     _assert_inputs_match(blueprint, evidence)
     protocol = getattr(provider, "cache_protocol", None)
-    if protocol is not None and protocol != "fixture" and not (
-        getattr(provider, "cache_model", None) == "deepseek-flash"
-        and getattr(provider, "is_deepseek", False) is True
-        and protocol == "responses"
-    ):
+    if protocol is not None and not verified_structured_provider(provider):
         raise AuthorGenerationError(
             "AUTHOR_PROVIDER_BLOCKED",
-            "Question authoring permits only the verified DeepSeek Responses path.",
+            "Question authoring requires a server-verified provider identity.",
         )
     context = author_context(blueprint, evidence)
     try:

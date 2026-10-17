@@ -55,6 +55,7 @@ from app.learning.hybrid_review import (
 )
 from app.learning.models import Contract
 from app.learning.provider import ProviderCallFailure
+from app.learning.provider_identity import verified_run_identity
 
 # Prompt revisions are part of `method_identity`, so a change to the reviewer
 # instructions must bump the version: a qualification obtained with v1 must never
@@ -109,21 +110,16 @@ class StrongReviewRun(Contract):
     error_class: None = None
 
     @model_validator(mode="after")
-    def deepseek_or_labelled_fixture_only(self) -> StrongReviewRun:
-        fixture = (
-            self.model == "FAKE_TEST_ONLY"
-            and self.provider == "deterministic"
-            and self.protocol == "fixture"
-            and self.region == "LOCAL_TEST"
-        )
-        deepseek = (
-            self.model == "deepseek-flash"
-            and self.provider == "DEEPSEEK_API"
-            and self.protocol == "responses"
-            and self.region == "ENDPOINT_DEEPSEEK"
-        )
-        if not (fixture or deepseek):
-            raise ValueError("strong-review receipts must be DeepSeek or labelled test fixtures")
+    def trusted_provider_only(self) -> StrongReviewRun:
+        if not verified_run_identity(
+            model=self.model,
+            provider=self.provider,
+            protocol=self.protocol,
+            region=self.region,
+        ):
+            raise ValueError(
+                "strong-review receipts must have an exact trusted provider identity"
+            )
         return self
 
 
