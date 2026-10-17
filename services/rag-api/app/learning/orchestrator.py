@@ -314,7 +314,11 @@ class LearningOrchestrator:
                 request,
                 configuration_id=configuration_id,
             )
-        if len(families) < 5:
+        # A selected configuration has already proved that every frozen slot
+        # has one compatible READY question. The legacy unconfigured path still
+        # requires five distinct families; dynamic K configurations may safely
+        # contain fewer than five slots.
+        if configuration_id is None and len(families) < 5:
             return self.prepare_pool(workspace_id, owner, request)
 
         def save(
