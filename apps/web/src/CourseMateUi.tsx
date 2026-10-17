@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { App as CourseMateApp } from "./ui/App.jsx";
 import { BRAND } from "./brand";
+import { UiLocaleProvider } from "./ui/UiLocale";
 
 import "./ui/styles.css";
 import "./ui/styles-extra.css";
@@ -56,7 +57,7 @@ function TestAuthBridge({ token }: { token: string }) {
     };
   }, [token]);
 
-  return bridgeReady ? <CourseMateApp /> : null;
+  return bridgeReady ? <UiLocaleProvider><CourseMateApp /></UiLocaleProvider> : null;
 }
 
 /**
@@ -94,7 +95,7 @@ function AuthBridge() {
     };
   }, [clerk, getToken]);
 
-  return bridgeReady && isLoaded ? <CourseMateApp /> : null;
+  return bridgeReady && isLoaded ? <UiLocaleProvider><CourseMateApp /></UiLocaleProvider> : null;
 }
 
 export function CourseMateUi() {

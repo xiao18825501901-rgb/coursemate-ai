@@ -211,6 +211,29 @@
 .theme-toggle .ico { width: 17px; height: 17px; }
 .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
 
+.dashboard-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.dashboard-controls .theme-toggle { min-height: 44px; min-width: 44px; }
+.cj-language-control { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.cj-language-control button {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: inherit;
+}
+.cj-language-control button[aria-pressed='true'] { border-color: var(--accent); }
+.cj-language-control button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 620px) {
+  .dashboard-heading { flex-wrap: wrap; }
+}
+
 /* Both composer controls share this real control. The native range supplies
    mouse, touch and keyboard interaction; labelled ticks make all values
    discoverable without relying on colour alone. */
