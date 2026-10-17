@@ -115,6 +115,7 @@ class LearningOrchestrator:
         # generic provider when enabled; retaining both objects makes rollback a
         # configuration change rather than a credential rewrite.
         self.tree_provider = LearningProvider(settings)
+        self._generic_provider_supplied = generic_provider is not None
         self.provider = generic_provider or self.tree_provider
         # Non-authoritative semantic-decision layer; None (default) disables Jev
         # entirely so the deterministic path is byte-identical to before.
@@ -150,7 +151,11 @@ class LearningOrchestrator:
     def provider_for(
         self, quota_scope: Literal["INTERACTIVE", "BACKGROUND_AUTO_MAP"]
     ) -> LearningProvider:
-        return self.tree_provider if quota_scope == "BACKGROUND_AUTO_MAP" else self.provider
+        if quota_scope == "BACKGROUND_AUTO_MAP" and getattr(
+            self, "_generic_provider_supplied", True
+        ):
+            return self.tree_provider
+        return self.provider
 
     def problem_index(
         self,
