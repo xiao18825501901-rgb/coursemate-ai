@@ -4,6 +4,7 @@ import math
 import re
 import sqlite3
 from collections import defaultdict
+from collections.abc import Callable
 from typing import Any, cast
 from uuid import uuid4
 
@@ -27,6 +28,7 @@ from app.learning.assessment_point_configuration import (
 )
 from app.learning.assessment_point_store import AssessmentPointConfigurationStore
 from app.learning.assessment_question_slots import (
+    POINT_ASSESSMENT_POLICY_VERSION,
     AssessmentQuestionSlot,
     assessment_setup_contract,
     default_assessment_question_slots,
@@ -85,11 +87,16 @@ class AssessmentService:
         jev: SemanticDecisionService | None = None,
         *,
         point_policy: AssessmentPointPolicyService | None = None,
+        point_ready_verifier: Callable[[sqlite3.Row, sqlite3.Row, str], bool] | None = None,
     ) -> None:
         self.db = database
         # Non-authoritative semantic-decision layer. None (default) disables Jev
         # entirely; the deterministic grading path is byte-identical to before.
         self.jev = jev
+        # A newly generated point question is eligible only while its original
+        # source, catalog, plan and review receipts still validate. Legacy pool
+        # revisions retain their historical eligibility rules.
+        self.point_ready_verifier = point_ready_verifier
         self.point_store = (
             AssessmentPointConfigurationStore(database, point_policy)
             if point_policy is not None
@@ -348,6 +355,27 @@ class AssessmentService:
         node: sqlite3.Row,
         configuration_id: str,
     ) -> tuple[list[sqlite3.Row], tuple[AssessmentQuestionSlot, ...]]:
+        configuration = connection.execute(
+            "SELECT policy_version,spec_version FROM assessment_configurations WHERE id=? "
+            "AND workspace_id=? AND owner_user_id=? AND course_id=? AND node_id=? "
+            "AND status='FROZEN'",
+            (
+                configuration_id,
+                workspace["id"],
+                workspace["owner_user_id"],
+                workspace["course_id"],
+                node["id"],
+            ),
+        ).fetchone()
+        if configuration is None or (
+            configuration["policy_version"] == POINT_ASSESSMENT_POLICY_VERSION
+            and int(configuration["spec_version"]) != int(node["spec_version"])
+        ):
+            raise ApiError(
+                404,
+                "ASSESSMENT_CONFIGURATION_NOT_FOUND",
+                "The Assessment configuration was not found.",
+            )
         slots = self.configuration_slots(connection, configuration_id)
         eligible = self._eligible_pool(connection, workspace, node)
         by_id = {str(row["id"]): row for row in eligible}
@@ -366,6 +394,16 @@ class AssessmentService:
                 if str(cast(sqlite3.Row, question)["question_type"]) != slot.question_type:
                     raise ApiError(409, "ASSESSMENT_CONFIGURATION_TYPE_MISMATCH", "A configured question no longer matches its slot type.")
             return [cast(sqlite3.Row, row) for row in chosen], slots
+
+        if configuration["policy_version"] == POINT_ASSESSMENT_POLICY_VERSION:
+            # Matching a question type or family is not proof that the question
+            # assesses the frozen point. Only the original reviewed binding may
+            # open a point-policy assessment.
+            raise ApiError(
+                409,
+                "ASSESSMENT_CONFIGURATION_POOL_INSUFFICIENT",
+                "The original assessable-point question bindings are not ready.",
+            )
 
         chosen: list[sqlite3.Row] = []
         families: set[str] = set()
@@ -483,6 +521,13 @@ class AssessmentService:
             row
             for row in candidates
             if self._question_engine_revision_is_current(connection, str(row["id"]))
+            and (
+                not str(row["id"]).startswith(("pointqe_", "pointdet_"))
+                or (
+                    self.point_ready_verifier is not None
+                    and self.point_ready_verifier(workspace, node, str(row["id"]))
+                )
+            )
             and self._rubric(
                 connection,
                 row["id"],
@@ -669,6 +714,16 @@ class AssessmentService:
             "excludes_answer_exposed_problem_families": True,
             "excludes_assisted_assessment_families": True,
         }
+        if configured_slots and isinstance(configured_slots[0], PointQuestionSlot):
+            if self.point_store is None or configuration_id is None:
+                raise ApiError(
+                    409,
+                    "ASSESSMENT_POINT_PLAN_INVALID",
+                    "The original point configuration is required before opening.",
+                )
+            _, point_plan = self.point_store.read(connection, configuration_id)
+            selection_policy["policy_version"] = POINT_ASSESSMENT_POLICY_VERSION
+            selection_policy["point_plan_hash"] = point_plan.content_hash
         frozen_items = [
             {
                 "ordinal": ordinal,
