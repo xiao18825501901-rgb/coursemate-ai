@@ -82,6 +82,7 @@ V3_MIGRATIONS = (
     "079_point_question_provenance.sql",
     "080_visual_owner_review_immutability.sql",
     "081_visual_runtime_drain.sql",
+    "082_assessment_slot_preparation_progress.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -151,7 +152,7 @@ V3_REPLAY_SUPERSEDED_BY = {
     "072_assessment_preparation_retry_epochs.sql": 72,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 81
+LATEST_V3_SCHEMA_VERSION = 82
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (

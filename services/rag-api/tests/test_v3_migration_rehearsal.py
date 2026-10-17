@@ -352,7 +352,7 @@ def test_rehearsal_preserves_legacy_fields_when_migration_adds_course_columns(
     )
 
 
-def test_stable_source_carries_the_accepted_production_schema_boundary() -> None:
-    """R3 code must build the same pre-existing schema boundary as production."""
+def test_stable_source_carries_the_additive_slot_progress_schema_boundary() -> None:
+    """R3 adds only the durable per-slot workflow sidecar after production 81."""
 
-    assert LATEST_V3_SCHEMA_VERSION == 81
+    assert LATEST_V3_SCHEMA_VERSION == 82

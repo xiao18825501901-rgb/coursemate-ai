@@ -1,3 +1,4 @@
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
@@ -11,6 +12,7 @@ from app.learning.assessment_point_configuration import AssessmentPointPolicySer
 from app.learning.assessment_point_dispatch import resolve_point_dispatch
 from app.learning.assessment_point_store import AssessmentPointConfigurationStore
 from app.learning.assessments import AssessmentService
+from app.learning.orchestrator import LearningOrchestrator
 from app.learning.question_runtime import QuestionEngineRuntime
 
 
@@ -94,3 +96,73 @@ def test_dispatch_rejects_a_caller_modified_point_slot(tmp_path):
         context.__exit__(None, None, None)
 
     assert raised.value.code == "ASSESSMENT_POINT_SLOT_MISMATCH"
+
+
+def test_slot_progress_cannot_claim_ready_without_authoritative_question(tmp_path):
+    context, client, workspace, _node, _store, configuration, slots = frozen_case(
+        tmp_path
+    )
+    try:
+        with client.app.state.database.connect() as db:
+            db.execute(
+                "INSERT INTO assessment_configuration_preparations("
+                "id,configuration_id,workspace_id,status,total_slots) "
+                "VALUES(?,?,?,'PREPARING',?)",
+                ("prep", configuration["id"], workspace["id"], len(slots)),
+            )
+            db.execute(
+                "INSERT INTO assessment_configuration_slot_preparations("
+                "preparation_id,configuration_id,slot_id,ordinal,status) "
+                "VALUES(?,?,?,?, 'PENDING')",
+                ("prep", configuration["id"], slots[0].slot_key, 1),
+            )
+            with pytest.raises(sqlite3.IntegrityError, match="authoritative"):
+                db.execute(
+                    "UPDATE assessment_configuration_slot_preparations "
+                    "SET status='READY' WHERE preparation_id='prep'"
+                )
+    finally:
+        context.__exit__(None, None, None)
+
+
+def test_configured_preparation_reports_each_missing_slot_without_inventing_ready(
+    tmp_path,
+):
+    context, client, workspace, _node, _store, configuration, slots = frozen_case(
+        tmp_path
+    )
+    subject = object.__new__(LearningOrchestrator)
+    try:
+        with client.app.state.database.connect() as db:
+            db.execute(
+                "INSERT INTO assessment_configuration_preparations("
+                "id,configuration_id,workspace_id,status,total_slots,current_stage) "
+                "VALUES(?,?,?,'PREPARING',?,'QUEUED')",
+                ("prep-view", configuration["id"], workspace["id"], len(slots)),
+            )
+            subject._reconcile_configured_slot_progress(
+                db,
+                preparation_id="prep-view",
+                configuration_id=configuration["id"],
+            )
+            row = db.execute(
+                "SELECT * FROM assessment_configuration_preparations WHERE id='prep-view'"
+            ).fetchone()
+            view = subject._configured_preparation_view(db, row)
+    finally:
+        context.__exit__(None, None, None)
+
+    assert view["prepared_questions"] == 0
+    assert view["can_start_from_ready_pool"] is False
+    assert view["slot_progress"] == [
+        {
+            "slot_id": slots[0].slot_key,
+            "ordinal": 1,
+            "status": "PENDING",
+            "current_stage": "QUEUED",
+            "error_code": None,
+            "error_message": None,
+            "diagnostic_id": None,
+            "updated_at": view["slot_progress"][0]["updated_at"],
+        }
+    ]

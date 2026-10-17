@@ -398,6 +398,11 @@ class LearningOrchestrator:
                 (configuration_id,),
             ).fetchone()
             if row is not None:
+                self._reconcile_configured_slot_progress(
+                    db,
+                    preparation_id=str(row["id"]),
+                    configuration_id=configuration_id,
+                )
                 complete = self._configured_prepared_count(db, configuration_id) == len(slots)
                 if complete and str(row["status"]) != "READY":
                     self._recover_completed_configuration(db, row, len(slots))
@@ -505,6 +510,12 @@ class LearningOrchestrator:
                         existing["id"],
                     ),
                 )
+            current_preparation_id = preparation_id if existing is None else str(existing["id"])
+            self._reconcile_configured_slot_progress(
+                db,
+                preparation_id=current_preparation_id,
+                configuration_id=configuration_id,
+            )
             queued = db.execute(
                 "SELECT * FROM assessment_configuration_preparations WHERE configuration_id=?",
                 (configuration_id,),
@@ -530,6 +541,43 @@ class LearningOrchestrator:
             ).fetchone()[0]
         )
 
+    @staticmethod
+    def _reconcile_configured_slot_progress(
+        db: sqlite3.Connection,
+        *,
+        preparation_id: str,
+        configuration_id: str,
+    ) -> None:
+        """Project frozen slots and authoritative bindings into progress rows.
+
+        Progress is a read model only. It can become READY solely when the
+        immutable configuration already contains the matching question binding.
+        """
+
+        db.execute(
+            "INSERT OR IGNORE INTO assessment_configuration_slot_preparations("
+            "preparation_id,configuration_id,slot_id,ordinal,status,current_stage) "
+            "SELECT ?,slot.configuration_id,slot.slot_id,slot.ordinal,"
+            "CASE WHEN bound.slot_id IS NULL THEN 'PENDING' ELSE 'READY' END,"
+            "CASE WHEN bound.slot_id IS NULL THEN 'QUEUED' ELSE 'READY_REUSED' END "
+            "FROM assessment_configuration_slots AS slot "
+            "LEFT JOIN assessment_configuration_questions AS bound "
+            "ON bound.configuration_id=slot.configuration_id AND bound.slot_id=slot.slot_id "
+            "WHERE slot.configuration_id=?",
+            (preparation_id, configuration_id),
+        )
+        db.execute(
+            "UPDATE assessment_configuration_slot_preparations SET status='READY',"
+            "current_stage='READY_REUSED',error_code=NULL,error_message=NULL,diagnostic_id=NULL,"
+            "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+            "WHERE preparation_id=? AND EXISTS ("
+            "SELECT 1 FROM assessment_configuration_questions AS bound "
+            "WHERE bound.configuration_id="
+            "assessment_configuration_slot_preparations.configuration_id "
+            "AND bound.slot_id=assessment_configuration_slot_preparations.slot_id)",
+            (preparation_id,),
+        )
+
     def _configured_preparation_view(
         self, db: sqlite3.Connection, row: sqlite3.Row
     ) -> dict[str, Any]:
@@ -553,12 +601,31 @@ class LearningOrchestrator:
                 (configuration_id,),
             ).fetchall()
         ]
+        slot_progress = [
+            {
+                "slot_id": str(item["slot_id"]),
+                "ordinal": int(item["ordinal"]),
+                "status": str(item["status"]),
+                "current_stage": item["current_stage"],
+                "error_code": item["error_code"],
+                "error_message": item["error_message"],
+                "diagnostic_id": item["diagnostic_id"],
+                "updated_at": item["updated_at"],
+            }
+            for item in db.execute(
+                "SELECT slot_id,ordinal,status,current_stage,error_code,error_message,"
+                "diagnostic_id,updated_at FROM assessment_configuration_slot_preparations "
+                "WHERE preparation_id=? ORDER BY ordinal",
+                (str(row["id"]),),
+            ).fetchall()
+        ]
         return {
             "status": str(row["status"]),
             "preparation_job_id": str(row["id"]),
             "configuration_id": configuration_id,
             "question_count": total,
             "slots": selections,
+            "slot_progress": slot_progress,
             "prepared_questions": prepared,
             "eligible_families": prepared,
             "current_ordinal": row["current_ordinal"],
@@ -606,6 +673,11 @@ class LearningOrchestrator:
             ).fetchone()
             if row is None:
                 raise ApiError(404, "ASSESSMENT_PREPARATION_NOT_FOUND", "测评准备任务不存在。")
+            self._reconcile_configured_slot_progress(
+                db,
+                preparation_id=str(row["id"]),
+                configuration_id=configuration_id,
+            )
             total = int(row["total_slots"] or 0)
             prepared = self._configured_prepared_count(db, configuration_id)
             if total and prepared == total and str(row["status"]) != "READY":
@@ -678,6 +750,11 @@ class LearningOrchestrator:
                 "WHERE prep.id=?",
                 (row["id"],),
             ).fetchone()
+            self._reconcile_configured_slot_progress(
+                db,
+                preparation_id=str(row["id"]),
+                configuration_id=str(row["configuration_id"]),
+            )
             slots = self.assessments.configuration_slots(db, str(row["configuration_id"]))
             # A resumed preparation authors only what is missing.  Offering a slot that
             # is already legitimately bound makes the engine author a *second* question
