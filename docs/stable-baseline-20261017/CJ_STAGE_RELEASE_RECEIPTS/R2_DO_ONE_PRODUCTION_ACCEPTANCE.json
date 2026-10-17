@@ -1,0 +1,105 @@
+{
+  "stage_id": "R2_DO_ONE_READY_REUSE",
+  "status": "PASS_DEPLOYED_AND_AUTHENTICATED",
+  "accepted_at_utc": "2026-10-17T10:56:30Z",
+  "candidate": {
+    "sha": "a9a12ef7e8f50a78247627f9a47db427803d3b64",
+    "parent_frozen_candidate": "98a33bc559f8f7ee0234d8c506596cfe1b1008e0",
+    "release_directory": "/srv/coursemate/releases/r2-1-a9a12ef",
+    "artifact_sha256": "6fe9109693752d34875ffc286dc06d4bf8a216eb852e79d656f4c9bd2897f3b6",
+    "deployed_at_utc": "2026-10-17T10:53:57Z"
+  },
+  "production_identity": {
+    "rag_process_cwd": "/srv/coursemate/releases/r2-1-a9a12ef/services/rag-api",
+    "rag_pid_at_receipt": 291422,
+    "agent_release": "/srv/coursemate/releases/legacy-deb82cc518b2",
+    "frontend_deploy_id": "6ad2924de5ac21464a8d04ea",
+    "frontend_redeployed": false,
+    "schema": {"rag": 81, "ui": 16, "agent": 3},
+    "publish_lock_present_after_switch": false,
+    "monitor": "PASS",
+    "disk_free_bytes": 5438377984
+  },
+  "pre_switch_recovery": {
+    "existing_full_backup": "/srv/coursemate/backups/coursemate-v2-20261016T210436.288677Z",
+    "off_host_code_only_switch_snapshot": "private-runtime/r2-release/pre-r2-98a33bc-20261017T100000Z.tar.gz",
+    "off_host_snapshot_sha256": "646613b1c07cb9cae0c727355a12baada34275300de98025e9967975c002dfc6",
+    "rag_snapshot_sha256": "9b1232a2e7de947224787bfab97a3eeae12590243f79545d0a98e3a2e9d2126d",
+    "ui_snapshot_sha256": "6dd6d296a0a3d19c596685366d30b3c273b10de0fc7e58926e67ee53ec4ec2b6",
+    "sqlite_integrity": {"rag": "ok", "ui": "ok"},
+    "foreign_key_rows": {"rag": 0, "ui": 0}
+  },
+  "first_production_attempt": {
+    "candidate_sha": "98a33bc559f8f7ee0234d8c506596cfe1b1008e0",
+    "run_id_hash": "9ad7070ecf99df84",
+    "result": "FAILED_SAFELY",
+    "error": "QUESTION_ENGINE_FAILED",
+    "root_cause": "The unbound Pair selected the first authorized ATOMIC node with an active Spec before checking READY reuse. That node had no compatible READY revision, while a later usable node did.",
+    "student_content_exposed": false,
+    "unknown_created": false,
+    "calls": [
+      {"role": "QUESTION_AUTHOR", "status": "COMPLETED", "input_tokens": 7319, "output_tokens": 1964},
+      {"role": "QUESTION_AUTHOR", "status": "COMPLETED", "input_tokens": 7319, "output_tokens": 1675},
+      {"role": "QUESTION_BLIND_SOLVER", "status": "COMPLETED", "input_tokens": 1570, "output_tokens": 802}
+    ],
+    "preservation": "The failed operation and its metering evidence remain in production; it was not replayed or rewritten."
+  },
+  "minimal_correction": {
+    "description": "For an unbound course-level practice request, scan only caller-authorized ATOMIC nodes with active Specs for an unexposed compatible READY revision before entering billing or generation gates. Explicit-node behavior is unchanged.",
+    "red_test": "The new regression returned HTTP 402 before the correction.",
+    "verification": {
+      "new_regression": "1 passed after correction",
+      "mounted_question_engine_file": "9 passed",
+      "adjacent_runtime_budget_ui_history": "48 passed",
+      "ruff_f_and_b": "PASS",
+      "new_paid_calls_during_offline_verification": 0
+    }
+  },
+  "authenticated_clerk_acceptance": {
+    "site": "https://coursejesus.com",
+    "course": "CS3481",
+    "client_click_at_utc": "2026-10-17T10:54:19.690Z",
+    "run_created_at_utc": "2026-10-17T10:54:24.885Z",
+    "run_done_at_utc": "2026-10-17T10:54:24.957Z",
+    "click_to_done_ms": 5267,
+    "server_run_to_done_ms": 72,
+    "run_id_hash": "57f1bf0db379c0b3",
+    "exercise_id_hash": "b1b08455d0130f8e",
+    "question_revision_id_hash": "73ef43eda9dc900e",
+    "question_verification_status": "AI_REVIEWED",
+    "question_generation_version": "exercise.v2+question-engine.v1",
+    "ready_usage": [
+      {"role": "QUESTION_READY_POOL", "status": "REUSED"},
+      {"role": "QUESTION_AUTHOR", "status": "NOT_CALLED_READY_REUSE"},
+      {"role": "QUESTION_BLIND_SOLVER", "status": "NOT_CALLED_READY_REUSE"}
+    ],
+    "generation_operation_rows": 0,
+    "generation_model_reservations": 0,
+    "generation_model_evidence_rows": 0,
+    "answer_submitted_at_utc": "2026-10-17T10:54:58.314Z",
+    "grading_started_at_utc": "2026-10-17T10:55:01.884Z",
+    "grading_completed_at_utc": "2026-10-17T10:55:04.929Z",
+    "click_to_graded_ms": 6615,
+    "grading_call": {"role": "PRACTICE_FEEDBACK", "status": "COMPLETED", "input_tokens": 2537, "output_tokens": 469},
+    "student_result": "回答正确",
+    "assistance": "NONE",
+    "answer_revealed_at_utc": "2026-10-17T10:55:18.540Z",
+    "step_count": 5,
+    "history": "PASS: after creating a new Pair, the 18:54 Pair appeared in 题目历史 and restored the question, grading feedback, revealed answer and five solution steps.",
+    "pair_restore": "PASS"
+  },
+  "data_and_side_effects": {
+    "schema_migration": false,
+    "legacy_scores_recomputed": false,
+    "unknown_replayed": false,
+    "question_quality_gate_bypassed": false,
+    "frontend_changed": false,
+    "student_data_deleted": false
+  },
+  "rollback": {
+    "r2_1_to_r2": "Remove only zzzzzzzzzzzzzzzzzzzzzzzz-coursejesus-r2-1-a9a12ef.conf, daemon-reload and restart coursemate-rag.service.",
+    "r2_to_r1": "Then remove only zzzzzzzzzzzzzzzzzzzzzzz-coursejesus-r2-98a33bc.conf, daemon-reload and restart coursemate-rag.service.",
+    "database_restore_required": false,
+    "frontend_rollback_required": false
+  }
+}
