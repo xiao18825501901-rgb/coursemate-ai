@@ -8,12 +8,13 @@ import { CourseFiles, Discussion, Inbox, Calendar, Learn } from './pages.jsx';
 import { CanvasImport } from './CanvasImport.jsx';
 import { FileUploadQueue, runUploadBatch, uploadItemsFrom } from './FileUploadQueue.jsx';
 import { UiLocaleContext, LanguageControl, defaultUiTranslate } from './UiLocale';
+import { ProfileForm } from './ProfileForm.jsx';
 const COLORS = ['#38585b', '#756480', '#95657b', '#5b7793', '#a18b58', '#558b7a'];
 export const campusVerificationRequired = (config, course, verification) =>
     !!config?.student_verification_required_for_campus &&
     (course?.display_type === 'campus' || course?.requires_student_verification) &&
     !verification?.verified;
-const HELPS = [['开始学习', '控制面板先提供“从 Canvas 导入”和“创建自己的课程”两个入口；在“课程 → 所有课程”点加号可选择显示在控制面板的课程。'], ['创建自己的课程', '点击虚线框或所有课程顶部的“创建课程”。新课程默认私人，创建后自动加入控制面板。'], ['文件与课程资料', '点击文件名预览；行末三点菜单下载。在官方课程添加的个人文件仅自己可见。'], ['知识和题目，一起学', '左边学知识，右边解题。拖动中间分隔条调比例，左上角按钮进入页面全屏，Esc 退出。'], ['题目详解', '题目 Pane 保持完整参考解法。每个已揭晓步骤可在独立、可拖动和缩放的“详解”窗口中继续追问，不会改变左侧学习对话。'], ['学习历史', '每个模式有独立历史入口。对话和完成的生成记录由服务器保存，刷新、退出重登后可以恢复。'], ['日历与学习计划', '日历下方有计划入口，安排保存在账户下。已完成任务会同步显示在日历和列表。'], ['评论和信息', '课程评论对能访问该课程的用户可见。别人回复你的评论会通知你。私信只有参与双方可以读取。']];
+const HELPS = ['start', 'create', 'files', 'learn', 'explanations', 'history', 'calendar', 'messages'];
 export class App extends React.Component {
     static contextType = UiLocaleContext;
     t = (id, params) => (this.context?.t || defaultUiTranslate)(id, params);
@@ -130,13 +131,28 @@ export class App extends React.Component {
     }
     catch { } }
     toast = (message) => { this.setState({ toast: message }); clearTimeout(this.toastTimer); this.toastTimer = setTimeout(() => this.setState({ toast: '' }), 5000); };
-    modal = (title, body) => this.setState({ modal: { title, body } });
+    modal = (title, body) => this.setState({ modal: { body, ...(title?.titleKey ?
+        { titleKey: title.titleKey, titleParams: title.params || {} } : { title }) } });
     close = () => this.setState({ modal: null });
     courseTypeLabel = (c) => this.t(c.display_type === 'campus' ? 'courses.campus' : c.display_type === 'shared' ? 'courses.shared' : 'courses.private');
     courseTypeClass = (c) => c.display_type === 'campus' ? 'course-type-badge campus' : c.display_type === 'shared' ? 'course-type-badge shared' : 'course-type-badge private';
     isCampusUnverified = (c) => campusVerificationRequired(this.state.config, c, this.state.verification);
     loadVerification = async () => { try { const verification = await getVerification(); this.setState({ verification }); } catch { } };
-    renderVerification() { const v = this.state.verification; const verified = !!v?.verified; const gateRequired = !!this.state.config?.student_verification_required_for_campus; const methodLabel = v?.method === 'registered' ? '历史注册记录' : v?.method === 'code' ? '兑换码' : v?.method === 'grandfathered' ? '历史用户' : (v?.method || ''); return <div className="verification-box"><div className="row between"><span className="verification-status">学生认证</span>{verified ? <span className="verification-status done">已通过{methodLabel ? '（' + methodLabel + '）' : ''}</span> : gateRequired ? <span className="verification-status">尚未认证</span> : <span className="verification-status done">当前非必需</span>}</div>{gateRequired && !verified ? <p className="helper-note campus-hint">当前策略要求新注册用户完成学生认证后访问校园课程。</p> : <p className="helper-note">当前不是访问校园课程的必需条件；正常登录且账号有效即可学习。</p>}</div>; }
+    renderVerification() {
+        const v = this.state.verification, verified = !!v?.verified;
+        const gateRequired = !!this.state.config?.student_verification_required_for_campus;
+        const methodLabel = ['registered', 'code', 'grandfathered'].includes(v?.method)
+            ? this.t(`account.methods.${v.method}`) : v?.method ? this.t('common.unknown') : '';
+        const status = this.t(verified ? 'account.verified' : gateRequired ? 'account.notVerified' : 'account.notRequired');
+        return <div className="verification-box"><div className="row between">
+            <span className="verification-status">{this.t('account.studentVerification')}</span>
+            <span className={'verification-status' + (verified || !gateRequired ? ' done' : '')}>
+                {verified && methodLabel ? this.t('account.verifiedMethod', { status, method: methodLabel }) : status}
+            </span>
+        </div><p className={'helper-note' + (gateRequired && !verified ? ' campus-hint' : '')}>
+            {this.t(gateRequired && !verified ? 'account.campusVerificationRequired' : 'account.campusVerificationOptional')}
+        </p></div>;
+    }
     async login(account) { try {
         await send('/dev/login', { account });
         this.setState({ error: '' });
@@ -157,38 +173,71 @@ export class App extends React.Component {
         else
             await send(`/courses/${c.id}/pin`, {}, 'PUT');
         await this.refresh();
-        this.toast(c.pinned ? '已移出控制面板（未删除课程）' : '已添加到控制面板');
+        this.toast(this.t(c.pinned ? 'courses.removedDashboardToast' : 'courses.addedDashboardToast'));
     }
     catch (e) {
         this.toast(e.message);
     } }
-    createCourse = () => this.modal('创建你的课程', <CourseForm onCreate={async data => { const result = await send('/courses', data); await this.refresh(); return result; }} onFinish={course => { this.close(); goto(`course/${course.id}/files`); this.toast('课程与资料已保存'); }}/>);
-    canvasImport = () => this.modal('从 Canvas 导入课程', <CanvasImport toast={this.toast} closeModal={this.close} close={this.close} localUpload={this.createCourse} onFinished={() => this.refresh()}/>);
-    profile = () => this.modal('个人资料与偏好', <ProfileForm user={this.state.user} onSubmit={async (data) => { const user = await send('/me', data, 'PATCH'); this.setState({ user }); this.close(); this.toast('资料已保存到服务器'); }}/>);
+    createCourse = () => this.modal({ titleKey: 'courseForm.title' }, <CourseForm onCreate={async data => { const result = await send('/courses', data); await this.refresh(); return result; }} onFinish={course => { this.close(); goto(`course/${course.id}/files`); this.toast(this.t('courseForm.saved')); }}/>);
+    canvasImport = () => this.modal({ titleKey: 'canvas.title' }, <CanvasImport toast={this.toast} closeModal={this.close} close={this.close} localUpload={this.createCourse} onFinished={() => this.refresh()}/>);
+    profile = () => this.modal({ titleKey: 'profile.title' }, <ProfileForm user={this.state.user} onSubmit={async (data) => { const user = await send('/me', data, 'PATCH'); this.setState({ user }); this.close(); this.toast(this.t('profile.saved')); }}/>);
     renderNav() { const { route: r, drawer, unread } = this.state; return <nav className="global-nav" aria-label={this.t('navigation.mainLabel')}><button className="brand" onClick={() => goto('dashboard')} title={`${BRAND.name} ${this.t('dashboard.title')}`}><img className="brand-mark" src={BRAND.logoPath} alt={BRAND.logoAlt} width={32} height={32} decoding="async"/><span>{BRAND.name}</span></button><div className="nav-items">{[['account', 'user'], ['dashboard', 'dashboard'], ['courses', 'courses'], ['calendar', 'calendar'], ['inbox', 'inbox'], ['help', 'help']].map(([id, icon]) => <button key={id} className={'global-item ' + ((drawer === id || r.page === id || (id === 'courses' && r.page === 'course')) ? 'active' : '')} onClick={() => ['account', 'courses', 'help'].includes(id) ? this.setState({ drawer: drawer === id ? null : id }) : goto(id)}><Icon name={icon}/><span>{this.t(`navigation.${id}`)}</span>{id === 'inbox' && unread > 0 && <span className="badge">{unread > 99 ? '99+' : unread}</span>}</button>)}</div><div className="nav-bottom"><span className="demo-mark">{this.state.config?.environment === 'production' ? 'LEARN' : 'DEV'}</span></div></nav>; }
     renderDrawer() { const { drawer, courses, user } = this.state; if (!drawer)
-        return null; return <><div className="drawer-backdrop" onClick={() => this.setState({ drawer: null })}/><aside className="drawer" role="dialog" aria-label={drawer === 'account' ? '账户面板' : drawer === 'courses' ? '课程面板' : '帮助面板'}><IconButton name="close" title="关闭侧栏" className="icon-btn drawer-close" onClick={() => this.setState({ drawer: null })}/>{drawer === 'account' ? <><div className="account-hero"><Avatar name={user.name}/><h2>{user.name}</h2><p>@{user.handle}</p><button className="btn small" onClick={() => this.logout()}>退出登录</button></div><div className="divider"/>{[['bell', '通知', () => goto('inbox')], ['user', '个人资料', this.profile], ['folder', '文件', () => goto('courses')], ['settings', '设置', this.profile]].map(([icon, title, fn]) => <button className="drawer-link" key={title} onClick={() => { this.setState({ drawer: null }); fn(); }}><Icon name={icon}/>{title}</button>)}{this.renderVerification()}</> : drawer === 'courses' ? <><h2 className="drawer-title">课程</h2><div className="divider"/><button className="drawer-link" onClick={() => goto('courses')}>所有课程 <Icon name="arrow"/></button><div className="divider"/>{courses.filter(c => c.pinned).map(c => <button key={c.id} className="drawer-course" onClick={() => goto(`course/${c.id}/learn`)}><strong><i className="color-dot" style={{ background: c.color }}/>{c.code} {c.name}</strong><p>已加入控制面板</p></button>)}<p className="helper-note" style={{ marginTop: 24 }}>在“所有课程”中点击加号，把希望显示的课程加入控制面板。</p></> : <><h2 className="drawer-title">帮助</h2><div className="help-art"><img className="brand-mark" src={BRAND.logoPath} alt={BRAND.logoAlt} width={32} height={32} decoding="async"/></div><div className="help-intro"><h3>让每一步学习，都有方向</h3><p>{BRAND.name} 使用指南</p></div>{HELPS.map(([title, text]) => <details key={title} className="help-link"><summary>{title}</summary><p className="helper-note" style={{ marginTop: 10 }}>{text}</p></details>)}</>}</aside></>; }
+        return null; return <><div className="drawer-backdrop" onClick={() => this.setState({ drawer: null })}/><aside className="drawer" role="dialog" aria-label={this.t(`navigation.${drawer}Panel`)}><IconButton name="close" title={this.t('navigation.closeSidebar')} className="icon-btn drawer-close" onClick={() => this.setState({ drawer: null })}/>{drawer === 'account' ? <><div className="account-hero"><Avatar name={user.name}/><h2>{user.name}</h2><p>@{user.handle}</p><button className="btn small" onClick={() => this.logout()}>{this.t('auth.signOut')}</button></div><div className="divider"/>{[['bell', 'notifications', () => goto('inbox')], ['user', 'profile', this.profile], ['folder', 'files', () => goto('courses')], ['settings', 'settings', this.profile]].map(([icon, title, fn]) => <button className="drawer-link" key={title} onClick={() => { this.setState({ drawer: null }); fn(); }}><Icon name={icon}/>{this.t(`account.${title}`)}</button>)}<LanguageControl />{this.renderVerification()}</> : drawer === 'courses' ? <><h2 className="drawer-title">{this.t('navigation.courses')}</h2><div className="divider"/><button className="drawer-link" onClick={() => goto('courses')}>{this.t('courses.all')} <Icon name="arrow"/></button><div className="divider"/>{courses.filter(c => c.pinned).map(c => <button key={c.id} className="drawer-course" onClick={() => goto(`course/${c.id}/learn`)}><strong><i className="color-dot" style={{ background: c.color }}/>{c.code} {c.name}</strong><p>{this.t('courses.addedToDashboard')}</p></button>)}<p className="helper-note" style={{ marginTop: 24 }}>{this.t('courses.drawerPinHelp')}</p></> : <><h2 className="drawer-title">{this.t('help.title')}</h2><div className="help-art"><img className="brand-mark" src={BRAND.logoPath} alt={BRAND.logoAlt} width={32} height={32} decoding="async"/></div><div className="help-intro"><h3>{this.t('help.direction')}</h3><p>{this.t('help.brandGuide', { brand: BRAND.name })}</p></div>{HELPS.map(id => <details key={id} className="help-link"><summary>{this.t(`help.articles.${id}.title`)}</summary><p className="helper-note" style={{ marginTop: 10 }}>{this.t(`help.articles.${id}.body`)}</p></details>)}</>}</aside></>; }
     renderDashboard() { const rows = this.state.courses.filter(c => c.pinned); const dark = this.state.theme === 'dark'; const themeLabel = this.t(dark ? 'dashboard.lightTheme' : 'dashboard.darkTheme'); return <div className="page"><header className="page-heading dashboard-heading"><div><h1>{this.t('dashboard.title')}</h1><p>{this.t('dashboard.addFromAll')}</p></div><div className="dashboard-controls"><button type="button" className="theme-toggle" aria-label={themeLabel} title={themeLabel} aria-pressed={dark} onClick={() => this.setTheme(dark ? 'light' : 'dark')}><Icon name={dark ? 'sun' : 'moon'}/><span>{themeLabel}</span></button><LanguageControl /></div></header><div className="dashboard-grid"><button type="button" className="add-course-card" onClick={this.canvasImport}><span className="add-plus"><Icon name="upload"/></span><strong>{this.t('dashboard.importCanvas')}</strong></button><button type="button" className="add-course-card" onClick={this.createCourse}><span className="add-plus"><Icon name="plus"/></span><strong>{this.t('dashboard.createCourse')}</strong></button>{rows.map(c => <article className="course-card" key={c.id}><button className="course-card-menu icon-btn" title={this.t('courses.unpin')} aria-label={`${this.t('courses.unpin')} ${c.code}`} onClick={() => this.togglePin(c)}><Icon name="more"/></button><div className="course-cover" style={{ background: c.color }} onClick={() => goto(`course/${c.id}/learn`)}><span className="cover-code">{c.code}</span></div><div className="course-card-body" onClick={() => goto(`course/${c.id}/learn`)}><h3 title={c.name}>{c.name}</h3><p><span className={this.courseTypeClass(c)}>{this.courseTypeLabel(c)}</span></p></div><div className="card-tools">{[['comment', 'comments'], ['folder', 'files'], ['book', 'learn']].map(([icon, tab]) => <button key={tab} className={tab === 'learn' ? 'learn-tool' : ''} title={this.t(`courses.${tab}`)} aria-label={`${c.code} ${this.t(`courses.${tab}`)}`} onClick={() => goto(`course/${c.id}/${tab}`)}><Icon name={icon}/>{tab === 'learn' && <span>{this.t('courses.learn')}</span>}</button>)}</div></article>)}</div><p className="dashboard-guide"><button className="link" onClick={() => goto('courses')}>{this.t('courses.all')} <span>→</span></button></p></div>; }
-    renderCourses() { return <div className="page"><header className="page-heading"><h1>所有课程</h1></header><div className="course-banner"><div className="row"><div className="banner-icon"><Icon name="plus"/></div><div><h3>让你的学习资料，成为一门课程</h3><p>创建私人课程，上传讲义和笔记，再用你喜欢的方式学习。</p></div></div><div className="course-banner-actions"><button type="button" className="btn primary" onClick={this.createCourse}><Icon name="plus"/>创建课程</button><button type="button" className="btn primary" onClick={this.canvasImport}><Icon name="upload"/>从 Canvas 导入</button></div></div><div className="table-wrap"><table><thead><tr><th>课程</th><th>类型</th><th>可见性</th><th>控制面板</th></tr></thead><tbody>{this.state.courses.map(c => <tr key={c.id}><td><button className="course-name" onClick={() => goto(`course/${c.id}/learn`)}><i className="color-dot" style={{ background: c.color }}/><span><strong>{c.name}</strong><small>{c.code}{c.description ? ' · ' + c.description : ''}</small></span></button></td><td><span className={this.courseTypeClass(c)}>{this.courseTypeLabel(c)}</span></td><td><span className={'chip ' + (c.visibility === 'public' ? 'neutral' : '')}>{c.visibility === 'public' ? '公开' : '仅自己'}</span></td><td>{this.isCampusUnverified(c) && !c.pinned ? <span className="helper-note campus-hint" title="需先完成学生认证">先完成学生认证</span> : <button className={'add-toggle ' + (c.pinned ? 'added' : '')} aria-label={(c.pinned ? '移除 ' : '添加 ') + c.code} title={c.pinned ? '移出控制面板' : '添加到控制面板'} onClick={() => this.togglePin(c)}><Icon name={c.pinned ? 'check' : 'plus'}/></button>}</td></tr>)}</tbody></table></div><p className="helper-note" style={{ marginTop: 20 }}>点击加号即可把课程卡片放到控制面板。移除快捷入口不会删除课程或学习记录。</p></div>; }
+    renderCourses() { return <div className="page">
+        <header className="page-heading"><h1>{this.t('courses.all')}</h1></header>
+        <div className="course-banner"><div className="row">
+            <div className="banner-icon"><Icon name="plus"/></div>
+            <div><h2>{this.t('courses.materialsToCourse')}</h2><p>{this.t('courses.materialsToCourseHint')}</p></div>
+        </div><div className="course-banner-actions">
+            <button type="button" className="btn primary" onClick={this.createCourse}><Icon name="plus"/>{this.t('courses.create')}</button>
+            <button type="button" className="btn primary" onClick={this.canvasImport}><Icon name="upload"/>{this.t('dashboard.importCanvas')}</button>
+        </div></div>
+        <div className="table-wrap"><table><thead><tr>
+            <th>{this.t('courses.courseColumn')}</th><th>{this.t('courses.typeColumn')}</th>
+            <th>{this.t('courses.visibilityColumn')}</th><th>{this.t('dashboard.title')}</th>
+        </tr></thead><tbody>{this.state.courses.map(c => <tr key={c.id}>
+            <td><button className="course-name" onClick={() => goto(`course/${c.id}/learn`)}>
+                <i className="color-dot" style={{ background: c.color }}/>
+                <span><strong>{c.name}</strong><small>{c.code}{c.description ? ' · ' + c.description : ''}</small></span>
+            </button></td>
+            <td><span className={this.courseTypeClass(c)}>{this.courseTypeLabel(c)}</span></td>
+            <td><span className={'chip ' + (c.visibility === 'public' ? 'neutral' : '')}>
+                {this.t(c.visibility === 'public' ? 'courses.publicVisibility' : 'courses.onlyMe')}
+            </span></td>
+            <td>{this.isCampusUnverified(c) && !c.pinned
+                ? <span className="helper-note campus-hint" title={this.t('courses.verificationRequired')}>{this.t('courses.verifyFirst')}</span>
+                : <button className={'add-toggle ' + (c.pinned ? 'added' : '')}
+                    aria-label={`${this.t(c.pinned ? 'courses.unpin' : 'courses.pin')} ${c.code}`}
+                    title={this.t(c.pinned ? 'courses.unpin' : 'courses.pin')} onClick={() => this.togglePin(c)}>
+                    <Icon name={c.pinned ? 'check' : 'plus'}/>
+                </button>}</td>
+        </tr>)}</tbody></table></div>
+        <p className="helper-note" style={{ marginTop: 20 }}>{this.t('courses.pinHelp')}</p>
+    </div>; }
     renderCourse() {
         const { cid, tab } = this.state.route;
         const c = this.state.courses.find(x => x.id === cid);
         if (!c)
-            return <div className="page"><h2>课程不存在或暂无访问权限</h2><button className="btn" onClick={() => goto('courses')}>返回所有课程</button></div>;
+            return <div className="page"><h2>{this.t('courses.noAccess')}</h2><button className="btn" onClick={() => goto('courses')}>{this.t('courses.returnAll')}</button></div>;
         const common = { course: c, user: this.state.user, config: this.state.config, toast: this.toast, modal: this.modal, closeModal: this.close, refresh: () => this.refresh() };
-        return <div className="course-shell"><aside className="course-side"><button className="course-back" onClick={() => goto('courses')}><Icon name="back"/>所有课程</button><div className="side-name" title={c.name} tabIndex={0}>{c.name}</div><div className="side-code" title={c.code} tabIndex={0}>{c.code}</div><div className="side-nav">{[['comment', 'comments', '评论'], ['folder', 'files', '文件'], ['book', 'learn', '学习']].map(([icon, id, label]) => <button className={'course-nav-link ' + (tab === id ? 'active' : '')} key={id} onClick={() => goto(`course/${cid}/${id}`)}><Icon name={icon}/>{label}</button>)}</div><div className="side-course-meta">{c.official ? '课程共享资料 · 个人学习记录' : c.visibility === 'private' ? '私人课程 · 仅自己可见' : '公开课程'}<br />{BRAND.name} Learning Space</div></aside><main className="course-main"><header className="course-top"><Icon name="courses"/><span>{c.code}</span><Icon name="arrow"/><span className="crumb-weak">{tab === 'files' ? '文件' : tab === 'comments' ? '评论' : '学习'}</span></header>{tab === 'files' ? <CourseFiles key={cid} {...common}/> : tab === 'comments' ? <Discussion key={cid} {...common}/> : <Learn key={cid} {...common}/>}</main></div>;
+        return <div className="course-shell"><aside className="course-side"><button className="course-back" onClick={() => goto('courses')}><Icon name="back"/>{this.t('courses.all')}</button><div className="side-name" title={c.name} tabIndex={0}>{c.name}</div><div className="side-code" title={c.code} tabIndex={0}>{c.code}</div><div className="side-nav">{[['comment', 'comments', 'courses.comments'], ['folder', 'files', 'courses.files'], ['book', 'learn', 'courses.learn']].map(([icon, id, label]) => <button className={'course-nav-link ' + (tab === id ? 'active' : '')} key={id} onClick={() => goto(`course/${cid}/${id}`)}><Icon name={icon}/>{this.t(label)}</button>)}</div><div className="side-course-meta">{this.t(c.official ? 'courses.sharedMaterialsPrivateHistory' : c.visibility === 'private' ? 'courses.privateCourseNote' : 'courses.publicCourse')}<br />{BRAND.name} {this.t('courses.learningSpace')}</div></aside><main className="course-main"><header className="course-top"><Icon name="courses"/><span>{c.code}</span><Icon name="arrow"/><span className="crumb-weak">{this.t(tab === 'files' ? 'courses.files' : tab === 'comments' ? 'courses.comments' : 'courses.learn')}</span></header>{tab === 'files' ? <CourseFiles key={cid} {...common}/> : tab === 'comments' ? <Discussion key={cid} {...common}/> : <Learn key={cid} {...common}/>}</main></div>;
     }
     render() {
         const { user, loading, config, route: r, modal, error, toast } = this.state;
+        const modalTitle = modal?.titleKey ? this.t(modal.titleKey, modal.titleParams) : modal?.title;
         if (loading)
             return <div className="login-page"><img className="brand-mark" src={BRAND.logoPath} alt={BRAND.logoAlt} width={32} height={32} decoding="async"/><p>正在连接 {BRAND.name}…</p></div>;
         if (!user)
             return <div className="login-page"><div className="login-card"><div className="login-brand"><img className="brand-mark" src={BRAND.logoPath} alt={BRAND.logoAlt} width={32} height={32} decoding="async"/>{BRAND.name}</div><p className="login-tagline">From Confusion to Revelation</p>{config?.auth_mode === 'development' ? <><div className="notice">本地联调模式 · 真实 SQLite 数据<br />{developmentServiceNotice(config.provider_mode)}<br />测试账号只在本机启用，生产环境会拒绝此登录方式。</div>{[['alice', '以秋同学登录'], ['bob', '以林同学登录'], ['admin', '以课程管理员登录']].map(([a, label]) => <button key={a} className="btn primary" onClick={() => this.login(a)}>{label}</button>)}</> : <button className="btn primary" onClick={() => window.CourseMateAuth?.signIn?.() || window.Clerk?.openSignIn()}>登录 / 注册</button>}{error && error !== '请登录' && !error.includes('请先选择') && <p className="error-text">{error}</p>}</div></div>;
         return <>{this.renderNav()}<div className="app" key={user.id}>{r.page === 'courses' ? this.renderCourses() : r.page === 'course' ? this.renderCourse() : r.page === 'calendar' ? <Calendar user={user} courses={this.state.courses} toast={this.toast} modal={this.modal} closeModal={this.close}/> : r.page === 'inbox' ? <Inbox onJoined={() => this.refresh()} user={user} config={config} toast={this.toast} modal={this.modal} closeModal={this.close} onRead={() => this.loadUnread()}/> : this.renderDashboard()}</div>{this.renderDrawer()}{modal && <div className="modal-layer" onClick={e => { if (e.target === e.currentTarget)
-            this.close(); }}><section className="modal" role="dialog" aria-modal="true" aria-label={modal.title}><header className="modal-header"><h2>{modal.title}</h2><IconButton name="close" title="关闭窗口" onClick={this.close}/></header><div className="modal-body">{modal.body}</div></section></div>}{toast && <div className="toast" role="status">{toast}</div>}</>;
+            this.close(); }}><section className="modal" role="dialog" aria-modal="true" aria-label={modalTitle}><header className="modal-header"><h2>{modalTitle}</h2><IconButton name="close" title={this.t('common.closeWindow')} onClick={this.close}/></header><div className="modal-body">{modal.body}</div></section></div>}{toast && <div className="toast" role="status">{toast}</div>}</>;
     }
 }
 class CourseForm extends React.Component {
+    static contextType = UiLocaleContext;
+    t = (id, params) => (this.context?.t || defaultUiTranslate)(id, params);
     state = { color: COLORS[0], busy: false, error: '', uploadQueue: [], course: null };
     updateUpload = (clientItemId, patch) => this.setState(state => ({ uploadQueue: state.uploadQueue.map(item => item.clientItemId === clientItemId ? { ...item, ...patch } : item) }));
     selectFiles(e) { const input = e.currentTarget; const added = uploadItemsFrom(input.files); input.value = ''; if (added.length) this.setState(state => ({ uploadQueue: [...state.uploadQueue, ...added] })); }
@@ -218,16 +267,35 @@ class CourseForm extends React.Component {
     catch (e) {
         this.setState({ error: e.message, busy: false });
     } }
-    render() { const { busy, course, uploadQueue } = this.state; const failed = uploadQueue.some(item => item.status === 'failed'); const createLabel = uploadQueue.length ? `创建课程并上传这 ${uploadQueue.length} 个文件` : '创建课程'; return <form className="course-create-form" onSubmit={e => this.submit(e)}><fieldset disabled={busy || !!course}><div className="field"><label htmlFor="course-name">课程名称</label><input id="course-name" name="name" required maxLength="100" placeholder="例如：机器学习基础"/></div><div className="field"><label htmlFor="course-code">课程编号（选填）</label><input id="course-code" name="code" maxLength="30" placeholder="例如：CS3501"/></div><div className="field"><label htmlFor="course-description">课程说明</label><textarea id="course-description" name="description" maxLength="500"/></div><div className="field"><label htmlFor="course-requirements">你希望怎样学？</label><textarea id="course-requirements" name="requirements" placeholder="例如：中文教学、保留英文术语，先讲直觉，再做例题。" maxLength="10000"/></div><div className="swatches">{COLORS.map(color => <button type="button" className={'swatch ' + (this.state.color === color ? 'selected' : '')} key={color} style={{ background: color }} onClick={() => this.setState({ color })} aria-label={'课程颜色 ' + color}/>)}</div></fieldset><div className="field course-file-picker"><label htmlFor="course-files">课程资料（选填，可多选）</label><input id="course-files" type="file" multiple disabled={busy || !!course} accept=".pdf,.txt,.md,.csv,.ipynb,.docx,.pptx,.png,.jpg,.jpeg,.webp" onChange={e => this.selectFiles(e)}/><small className="helper-note">支持 Ctrl/Shift/Ctrl+A 多选；每次同时上传 2 个；同名但内容不同的文件会作为独立资料处理。</small></div><FileUploadQueue items={uploadQueue} busy={busy} onRetry={id => this.retryFile(id)} onRemove={id => this.removeFile(id)}/><p className="helper-note" style={{ margin: '18px 0' }}><Icon name="lock"/> 新课程默认私人，创建后自动添加到你的控制面板。</p>{this.state.error && <p className="error-text">{this.state.error}</p>}{!course ? <button className="btn primary" disabled={busy}>{busy ? '创建并上传中…' : createLabel}</button> : <div className="upload-complete-actions"><span className="helper-note">课程只创建了一次；成功项不会因重试而再次索引。</span>{failed && <button type="button" className="btn" disabled={busy} onClick={() => this.retryFailed()}>重试全部失败项</button>}<button type="button" className="btn primary" disabled={busy} onClick={() => this.props.onFinish(course)}>进入课程文件</button></div>}</form>; }
-}
-class ProfileForm extends React.Component {
-    state = { error: '', busy: false };
-    async submit(e) { e.preventDefault(); const f = new FormData(e.currentTarget); try {
-        this.setState({ busy: true });
-        await this.props.onSubmit({ name: f.get('name'), handle: f.get('handle'), bio: f.get('bio'), language: f.get('language'), timezone: f.get('timezone'), reply_notify: f.has('reply_notify'), discoverable: f.has('discoverable') });
+    render() {
+        const { busy, course, uploadQueue } = this.state;
+        const failed = uploadQueue.some(item => item.status === 'failed');
+        const createLabel = uploadQueue.length
+            ? this.t('courseForm.createWithFiles', { count: uploadQueue.length })
+            : this.t('courses.create');
+        return <form className="course-create-form" onSubmit={e => this.submit(e)}>
+            <fieldset disabled={busy || !!course}>
+                <div className="field"><label htmlFor="course-name">{this.t('courses.courseName')}</label>
+                    <input id="course-name" name="name" required maxLength="100" placeholder={this.t('courseForm.nameExample')}/></div>
+                <div className="field"><label htmlFor="course-code">{this.t('courseForm.code')}</label>
+                    <input id="course-code" name="code" maxLength="30" placeholder={this.t('courseForm.codeExample')}/></div>
+                <div className="field"><label htmlFor="course-description">{this.t('courseForm.description')}</label>
+                    <textarea id="course-description" name="description" maxLength="500"/></div>
+                <div className="field"><label htmlFor="course-requirements">{this.t('courseForm.requirements')}</label>
+                    <textarea id="course-requirements" name="requirements" placeholder={this.t('courseForm.requirementsExample')} maxLength="10000"/></div>
+                <div className="swatches">{COLORS.map(color => <button type="button" className={'swatch ' + (this.state.color === color ? 'selected' : '')} key={color}
+                    style={{ background: color }} onClick={() => this.setState({ color })} aria-label={this.t('courseForm.color', { color })}/>)}</div>
+            </fieldset>
+            <div className="field course-file-picker"><label htmlFor="course-files">{this.t('courseForm.materials')}</label>
+                <input id="course-files" type="file" multiple disabled={busy || !!course} accept=".pdf,.txt,.md,.csv,.ipynb,.docx,.pptx,.png,.jpg,.jpeg,.webp" onChange={e => this.selectFiles(e)}/>
+                <small className="helper-note">{this.t('courseForm.multiSelectHelp')}</small></div>
+            <FileUploadQueue items={uploadQueue} busy={busy} onRetry={id => this.retryFile(id)} onRemove={id => this.removeFile(id)}/>
+            <p className="helper-note" style={{ margin: '18px 0' }}><Icon name="lock"/> {this.t('courseForm.privateNote')}</p>
+            {this.state.error && <p className="error-text">{this.state.error}</p>}
+            {!course ? <button className="btn primary" disabled={busy}>{busy ? this.t('courseForm.creating') : createLabel}</button>
+                : <div className="upload-complete-actions"><span className="helper-note">{this.t('courseForm.onceOnly')}</span>
+                    {failed && <button type="button" className="btn" disabled={busy} onClick={() => this.retryFailed()}>{this.t('courseForm.retryAll')}</button>}
+                    <button type="button" className="btn primary" disabled={busy} onClick={() => this.props.onFinish(course)}>{this.t('courseForm.openFiles')}</button></div>}
+        </form>;
     }
-    catch (e) {
-        this.setState({ error: e.message, busy: false });
-    } }
-    render() { const u = this.props.user; return <form onSubmit={e => this.submit(e)}><div className="field"><label>显示名称</label><input name="name" defaultValue={u.name} required maxLength="50"/></div><div className="field"><label>用户名（用来查找联系人）</label><input name="handle" defaultValue={u.handle} required pattern="[a-z0-9][a-z0-9_-]{2,29}"/></div><div className="field"><label>个人简介</label><textarea name="bio" defaultValue={u.bio} maxLength="250"/></div><div className="field"><label>教学语言</label><select name="language" defaultValue={u.language}><option value="zh-CN">中文 · 保留英文术语</option><option value="en">English</option><option value="bilingual">中英双语</option><option value="auto">跟随提问语言</option></select></div><div className="field"><label>学习日历时区</label><select name="timezone" defaultValue={u.timezone}>{['Asia/Hong_Kong', 'Asia/Shanghai', 'Asia/Singapore', 'UTC', 'America/New_York', 'Europe/London'].map(z => <option key={z}>{z}</option>)}</select></div><label className="check-line"><input type="checkbox" name="discoverable" defaultChecked={!!u.discoverable}/>允许其他用户通过名字或用户名找到我</label><label className="check-line"><input type="checkbox" name="reply_notify" defaultChecked={!!u.reply_notify}/>接收课程评论回复通知</label>{this.state.error && <p className="error-text">{this.state.error}</p>}<button className="btn primary" style={{ marginTop: 18 }} disabled={this.state.busy}>保存资料</button></form>; }
 }
