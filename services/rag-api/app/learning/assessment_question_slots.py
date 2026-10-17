@@ -212,31 +212,43 @@ def slots_from_selections(
     """Compile content-free UI selections into server-owned generation intents."""
 
     marks = assessment_marks_basis_points(len(selections))
-    compiled: list[AssessmentQuestionSlot] = []
-    for index, (selection, basis_points) in enumerate(zip(selections, marks, strict=True), start=1):
-        bloom, difficulty, features, focus, misconception = _TASK_FORM_POLICY[selection.task_form]
-        # A task form cannot silently turn an explicitly selected type into a
-        # different grader contract.
-        if selection.question_type == "CODE" and selection.task_form != "code":
-            raise ValueError("CODE slots require the code task form")
-        if selection.question_type != "CODE" and selection.task_form == "code":
-            raise ValueError("The code task form requires a CODE slot")
-        compiled.append(
-            AssessmentQuestionSlot(
-                slot_key=selection.slot_id,
-                ordinal=index,
-                marks=basis_points / 100,
-                marks_basis_points=basis_points,
-                bloom_target=bloom,
-                target_difficulty=difficulty,
-                difficulty_features=features,
-                question_type=selection.question_type,
-                expected_answer_form=_ANSWER_FORM[selection.question_type],
-                scoring_focus=focus,
-                misconception_target=misconception,
-            )
+    return tuple(
+        AssessmentQuestionSlot.model_validate(
+            question_slot_values(selection, index, basis_points)
         )
-    return tuple(compiled)
+        for index, (selection, basis_points) in enumerate(
+            zip(selections, marks, strict=True), start=1
+        )
+    )
+
+
+def question_slot_values(
+    selection: AssessmentSlotSelection,
+    ordinal: int,
+    basis_points: int,
+) -> dict[str, object]:
+    """Apply the shared form policy without authorizing count or sources."""
+
+    bloom, difficulty, features, focus, misconception = _TASK_FORM_POLICY[
+        selection.task_form
+    ]
+    if selection.question_type == "CODE" and selection.task_form != "code":
+        raise ValueError("CODE slots require the code task form")
+    if selection.question_type != "CODE" and selection.task_form == "code":
+        raise ValueError("The code task form requires a CODE slot")
+    return {
+        "slot_key": selection.slot_id,
+        "ordinal": ordinal,
+        "marks": basis_points / 100,
+        "marks_basis_points": basis_points,
+        "bloom_target": bloom,
+        "target_difficulty": difficulty,
+        "difficulty_features": list(features),
+        "question_type": selection.question_type,
+        "expected_answer_form": _ANSWER_FORM[selection.question_type],
+        "scoring_focus": focus,
+        "misconception_target": misconception,
+    }
 
 
 def assessment_setup_contract() -> dict[str, object]:
