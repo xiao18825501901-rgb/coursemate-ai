@@ -1,7 +1,7 @@
 {
   "receipt_version": "coursejesus.r6.i18n-model-ui.candidate-preflight.v1",
   "recorded_at_utc": "2026-10-17T16:08:00Z",
-  "status": "CANDIDATE_CODE_FROZEN_PENDING_BACKEND_FULL_REGRESSION_AND_PRODUCTION_DEPLOYMENT",
+  "status": "CANDIDATE_FROZEN_ELIGIBLE_FOR_PRODUCTION_DEPLOYMENT",
   "candidate": {
     "sha": "46d1bb328ce63d3002df2c583c23f1a089ed2621",
     "scope": "frontend-only UI locale completion, safe public error envelopes, visual controls, learning and assessment workspaces",
@@ -34,7 +34,7 @@
     "production_build": "PASS",
     "bundle_secret_scan": "PASS; 7 built files, no persistence, URL or logging leak",
     "student_ui_provider_model_static_scan": "PASS; no DeepSeek or Qwen terms in non-test apps/web/src/ui files",
-    "backend_full_regression": "IN_PROGRESS_IN_ORIGINAL_SESSION; not restarted",
+    "backend_full_regression": "PASS: 2439 passed, 11 skipped, 4 warnings in 5444.00 seconds; original session was not restarted",
     "unknown_replays": 0,
     "new_model_http_calls": 0
   },
@@ -56,7 +56,7 @@
     "model_routing_changed": false
   },
   "production_before_switch": {
-    "checked_at_utc": "2026-10-17T16:07:32Z",
+    "checked_at_utc": "2026-10-17T16:53:29Z",
     "backend_sha": "05946c2194f1ead7e5392b846a09abe94661a15b",
     "backend_release_directory": "/srv/coursemate/releases/r5-05946c2",
     "backend_pid": 300739,
@@ -68,15 +68,13 @@
     "netlify_current_deploy_state": "ready",
     "release_lock": "ABSENT",
     "established_backend_connections": 2,
-    "backend_journal_lines_last_10_minutes": 117,
+    "backend_journal_lines_last_5_minutes": 127,
     "root_disk": "99G total, 90G used, 4.8G available, 95%",
     "root_inode_use": "13%"
   },
   "deployment_gate": {
-    "state": "NOT_YET_AUTHORIZED_BY_THIS_RECEIPT",
+    "state": "PASS_PENDING_SHORT_LIVED_RELEASE_LOCK",
     "remaining": [
-      "backend full regression reaches a terminal result",
-      "reconfirm lock, production identity, traffic and disk immediately before publish",
       "publish the frozen frontend build to the existing Netlify site",
       "perform authenticated Clerk desktop and mobile acceptance",
       "write production and rollback receipt"
