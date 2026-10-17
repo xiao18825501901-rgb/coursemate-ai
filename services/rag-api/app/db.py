@@ -83,6 +83,8 @@ V3_MIGRATIONS = (
     "080_visual_owner_review_immutability.sql",
     "081_visual_runtime_drain.sql",
     "082_assessment_slot_preparation_progress.sql",
+    "083_point_question_cross_configuration_reuse.sql",
+    "084_deterministic_point_questions.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -90,6 +92,8 @@ V3_MIGRATIONS = (
 # Keep historical SQL immutable and skip only a superseded rebuild after its
 # superseding version has committed its ledger row.
 V3_REPLAY_SUPERSEDED_BY = {
+    "084_deterministic_point_questions.sql": 84,
+    "083_point_question_cross_configuration_reuse.sql": 83,
     "078_point_assessment_plans.sql": 78,
     "077_metered_strong_review_roles.sql": 77,
     # Migration 021's legacy evidence backfill is safe while 021 is first
@@ -152,7 +156,7 @@ V3_REPLAY_SUPERSEDED_BY = {
     "072_assessment_preparation_retry_epochs.sql": 72,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 82
+LATEST_V3_SCHEMA_VERSION = 84
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (

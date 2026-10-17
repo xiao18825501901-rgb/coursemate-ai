@@ -57,7 +57,7 @@ class QuestionPersistenceResult(Contract):
     question_revision_id: str
     status: Literal["READY", "NEEDS_REVIEW", "REJECTED"]
     readiness_reason: str
-    verification_method: Literal["AI_REVIEWED", "MODEL_ONLY"]
+    verification_method: Literal["AI_REVIEWED", "MODEL_ONLY", "DETERMINISTIC"]
     idempotent: bool
 
 

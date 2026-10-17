@@ -352,7 +352,7 @@ def test_rehearsal_preserves_legacy_fields_when_migration_adds_course_columns(
     )
 
 
-def test_stable_source_carries_the_additive_slot_progress_schema_boundary() -> None:
-    """R3 adds only the durable per-slot workflow sidecar after production 81."""
+def test_stable_source_carries_the_additive_dynamic_assessment_schema_boundary() -> None:
+    """R3 adds slot progress, legal reuse and deterministic point questions."""
 
-    assert LATEST_V3_SCHEMA_VERSION == 82
+    assert LATEST_V3_SCHEMA_VERSION == 84

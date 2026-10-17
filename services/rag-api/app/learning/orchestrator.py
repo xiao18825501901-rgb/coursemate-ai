@@ -62,6 +62,7 @@ from app.learning.question_runtime import (
     QuestionEngineRuntime,
     QuestionEngineRuntimeError,
 )
+from app.learning.model_operation_authority import preparation_model_claim
 from app.learning.workspaces import document_version_for, original_path, workspace_for
 from app.rag.retrieval import HybridRetriever
 from app.repositories.chunks import RetrievalAccess
@@ -135,7 +136,10 @@ class LearningOrchestrator:
             metered_generate=self.generate,
             learning_loop=self.learning_loop,
             hybrid_reviewer=hybrid_reviewer,
+            point_store=self.assessments.point_store,
         )
+        if self.assessments.point_store is not None:
+            self.assessments.point_ready_verifier = self.question_engine.point_ready_for
 
     def problem_index(
         self,
@@ -791,6 +795,7 @@ class LearningOrchestrator:
 
         def progress(update: dict[str, Any]) -> None:
             with self.db.connect() as db:
+                stage = str(update["stage"])
                 db.execute(
                     "UPDATE assessment_configuration_preparations SET prepared_slots=?,"
                     "current_ordinal=?,current_stage=?,"
@@ -800,11 +805,32 @@ class LearningOrchestrator:
                     (
                         int(update["prepared_slots"]),
                         int(update["ordinal"]),
-                        str(update["stage"]),
+                        stage,
                         row["id"],
                         worker_id,
                     ),
                 )
+                if stage == "SLOT_READY":
+                    db.execute(
+                        "UPDATE assessment_configuration_slot_preparations SET "
+                        "status='READY',current_stage='READY',error_code=NULL,"
+                        "error_message=NULL,diagnostic_id=NULL,"
+                        "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                        "WHERE preparation_id=? AND ordinal=? AND EXISTS ("
+                        "SELECT 1 FROM assessment_configuration_questions AS bound "
+                        "WHERE bound.configuration_id="
+                        "assessment_configuration_slot_preparations.configuration_id "
+                        "AND bound.slot_id=assessment_configuration_slot_preparations.slot_id)",
+                        (row["id"], int(update["ordinal"])),
+                    )
+                else:
+                    db.execute(
+                        "UPDATE assessment_configuration_slot_preparations SET "
+                        "status='PREPARING',current_stage=?,"
+                        "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                        "WHERE preparation_id=? AND ordinal=? AND status!='READY'",
+                        (stage, row["id"], int(update["ordinal"])),
+                    )
 
         # A preparation written before this worker existed carries no operation, and
         # str(None) is not a missing value -- it is the four-character string "None",
@@ -832,18 +858,19 @@ class LearningOrchestrator:
 
         error: QuestionEngineRuntimeError | None = None
         try:
-            self.question_engine.generate_assessment_set(
-                owner_user_id=str(row["owner_user_id"]),
-                workspace_id=str(row["workspace_id"]),
-                course_id=str(row["course_id"]),
-                private_course_id=str(row["private_course_id"]),
-                node_id=str(row["node_id"]),
-                preparation_key=str(row["configuration_id"]),
-                slots=slots,
-                operation_id=operation_id,
-                should_cancel=cancelled,
-                progress=progress,
-            )
+            with preparation_model_claim(str(row["id"]), worker_id):
+                self.question_engine.generate_assessment_set(
+                    owner_user_id=str(row["owner_user_id"]),
+                    workspace_id=str(row["workspace_id"]),
+                    course_id=str(row["course_id"]),
+                    private_course_id=str(row["private_course_id"]),
+                    node_id=str(row["node_id"]),
+                    preparation_key=str(row["configuration_id"]),
+                    slots=tuple(slots),
+                    operation_id=operation_id,
+                    should_cancel=cancelled,
+                    progress=progress,
+                )
         except QuestionEngineRuntimeError as caught:
             error = caught
         except Exception as caught:  # noqa: BLE001 - attributed, never swallowed
@@ -865,6 +892,11 @@ class LearningOrchestrator:
                 "SELECT * FROM assessment_configuration_preparations WHERE id=?",
                 (row["id"],),
             ).fetchone()
+            self._reconcile_configured_slot_progress(
+                db,
+                preparation_id=str(row["id"]),
+                configuration_id=str(row["configuration_id"]),
+            )
             prepared = self._configured_prepared_count(db, str(row["configuration_id"]))
             if current is None:
                 return None

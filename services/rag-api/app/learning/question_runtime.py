@@ -43,6 +43,9 @@ from app.learning.assessment_question_slots import (
     default_assessment_question_slots,
 )
 from app.learning.blind_solve import BlindSolveError, BlindSolveReceipt, run_blind_solve
+from app.learning.deterministic_graph_point_assessment import (
+    DeterministicGraphPointPublisher,
+)
 from app.learning.hybrid_quality import HybridReviewUnavailable
 from app.learning.learning_loop import LearningLoopError, LearningLoopService
 from app.learning.models import Contract, Identifier, Text
@@ -87,6 +90,7 @@ from app.learning.question_validator import (
     required_specialized_semantic_dimension,
     validate_question_candidate,
 )
+from app.learning.structured_calls import ModelCallClaim
 from app.learning.workspaces import workspace_for
 
 GENERATION_VERSION: Final = "exercise.v2+question-engine.v1"
@@ -290,6 +294,40 @@ class QuestionEngineRuntime:
         # deterministic hard-gate failure is refused before it is consulted.
         self.hybrid_reviewer = hybrid_reviewer
         self.point_store = point_store
+        self.deterministic_point_publisher = (
+            DeterministicGraphPointPublisher(database, self._verify_point_input)
+            if point_store is not None
+            else None
+        )
+
+    def _verify_point_input(
+        self,
+        claim: ModelCallClaim,
+        point_input: AssessmentPointQuestionInput,
+    ) -> None:
+        claim.verify()
+        if (
+            claim.owner_user_id != point_input.owner_user_id
+            or claim.course_id != point_input.course_id
+            or claim.content_language != point_input.content_language
+        ):
+            raise ApiError(409, "ASSESSMENT_POINT_SCOPE_CONFLICT", "Point scope changed.")
+        current = self.point_question_inputs(
+            owner_user_id=point_input.owner_user_id,
+            workspace_id=point_input.workspace_id,
+            course_id=point_input.course_id,
+            private_course_id=point_input.private_course_id,
+            node_id=point_input.node_id,
+            configuration_id=point_input.configuration_id,
+            slots=(point_input.point_slot,),
+            content_language=point_input.content_language,
+        )
+        if len(current) != 1 or current[0].identity() != point_input.identity():
+            raise ApiError(
+                409,
+                "ASSESSMENT_POINT_SOURCE_CHANGED",
+                "The original point input is no longer current.",
+            )
 
     def _provider_for_operation(
         self,
@@ -2363,6 +2401,51 @@ class QuestionEngineRuntime:
             for item in resolved
         )
 
+    def point_ready_for(
+        self,
+        workspace: sqlite3.Row,
+        node: sqlite3.Row,
+        question_revision_id: str,
+    ) -> bool:
+        """Revalidate a generated point revision before a future assessment opens."""
+
+        if self.deterministic_point_publisher is None:
+            return False
+        with self.database.connect() as connection:
+            saved = connection.execute(
+                "SELECT point_input_json FROM assessment_point_deterministic_provenance "
+                "WHERE question_revision_id=? AND workspace_id=?",
+                (question_revision_id, workspace["id"]),
+            ).fetchone()
+        if saved is None:
+            return False
+        try:
+            point_input = AssessmentPointQuestionInput.model_validate_json(
+                saved["point_input_json"]
+            )
+            if (
+                point_input.owner_user_id != workspace["owner_user_id"]
+                or point_input.course_id != workspace["course_id"]
+                or point_input.private_course_id != workspace["private_course_id"]
+                or point_input.node_id != node["id"]
+                or point_input.spec_version != node["spec_version"]
+            ):
+                return False
+            claim = ModelCallClaim(
+                request_id="point-ready-read:" + point_input.identity(),
+                owner_user_id=point_input.owner_user_id,
+                course_id=point_input.course_id,
+                content_language=point_input.content_language,
+                verify=lambda: None,
+            )
+            result = self.deterministic_point_publisher.read_ready(claim, point_input)
+            return (
+                result is not None
+                and result.question_revision_id == question_revision_id
+            )
+        except (ApiError, ValidationError, ValueError, KeyError, TypeError):
+            return False
+
     def generate_assessment_set(
         self,
         *,
@@ -2400,6 +2483,83 @@ class QuestionEngineRuntime:
                     "QUESTION_WORKSPACE_MISMATCH",
                     "The assessment request does not match the learner workspace.",
                 )
+            point_slots = tuple(slots or ())
+            if point_slots and any(isinstance(slot, PointQuestionSlot) for slot in point_slots):
+                if not all(isinstance(slot, PointQuestionSlot) for slot in point_slots):
+                    raise QuestionEngineRuntimeError(
+                        "ASSESSMENT_POINT_SLOT_MISMATCH",
+                        "Point and legacy slots cannot be mixed in one frozen configuration.",
+                    )
+                if self.deterministic_point_publisher is None:
+                    raise QuestionEngineRuntimeError(
+                        "ASSESSMENT_POINT_METHOD_NOT_QUALIFIED",
+                        "The source-bound point preparation method is unavailable.",
+                    )
+                inputs = self.point_question_inputs(
+                    owner_user_id=owner_user_id,
+                    workspace_id=workspace_id,
+                    course_id=course_id,
+                    private_course_id=private_course_id,
+                    node_id=node_id,
+                    configuration_id=preparation_key,
+                    slots=cast(tuple[PointQuestionSlot, ...], point_slots),
+                    content_language=None,
+                )
+                prepared_points: list[dict[str, Any]] = []
+                for point_input in inputs:
+                    self._check_cancelled(should_cancel)
+                    if progress is not None:
+                        progress(
+                            {
+                                "ordinal": point_input.point_slot.ordinal,
+                                "stage": "DETERMINISTIC_PROOF",
+                                "prepared_slots": len(prepared_points),
+                            }
+                        )
+                    claim = ModelCallClaim(
+                        request_id=(operation_id or "point-deterministic:")
+                        + point_input.identity(),
+                        owner_user_id=owner_user_id,
+                        course_id=course_id,
+                        content_language=point_input.content_language,
+                        verify=lambda: self._check_cancelled(should_cancel),
+                    )
+                    result = self.deterministic_point_publisher.prepare_or_read(
+                        claim,
+                        point_input,
+                        operation_id=operation_id,
+                    )
+                    if result is None:
+                        raise QuestionEngineRuntimeError(
+                            "ASSESSMENT_POINT_METHOD_NOT_QUALIFIED",
+                            "This point requires the qualified reviewed generation method.",
+                        )
+                    with self.database.connect() as connection:
+                        question = connection.execute(
+                            "SELECT family_id FROM assessment_question_revisions WHERE id=?",
+                            (result.question_revision_id,),
+                        ).fetchone()
+                    prepared_points.append(
+                        {
+                            "slot_key": point_input.point_slot.slot_key,
+                            "ordinal": point_input.point_slot.ordinal,
+                            "marks": point_input.point_slot.marks,
+                            "blueprint_id": point_input.blueprint_id,
+                            "family_id": str(question["family_id"]),
+                            "question_revision_id": result.question_revision_id,
+                            "verification_status": result.verification_method,
+                            "usage": [],
+                        }
+                    )
+                    if progress is not None:
+                        progress(
+                            {
+                                "ordinal": point_input.point_slot.ordinal,
+                                "stage": "SLOT_READY",
+                                "prepared_slots": len(prepared_points),
+                            }
+                        )
+                return prepared_points
             with self.database.connect() as connection:
                 version = connection.execute(
                     "SELECT MAX(version) FROM teaching_specs WHERE node_id=?", (node_id,)
