@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any, Final, Literal, Protocol
 
@@ -38,6 +39,21 @@ RULE_VIOLATION_POLICY_VERSION: Final = "question-rule-violation-policy-v1"
 PROMPT_PATH: Final = Path(__file__).with_name("prompts") / "question_author_v5.md"
 
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+
+
+def point_marks_basis_points(value: Any) -> int:
+    """Return an exact 1..10000 basis-point mark value for a dynamic item."""
+
+    if type(value) not in (int, float):
+        raise ValueError("Point marks must be a numeric basis-point value")
+    scaled = Decimal(str(value)) * 100
+    if (
+        not scaled.is_finite()
+        or scaled != scaled.to_integral_value()
+        or not 1 <= scaled <= 10_000
+    ):
+        raise ValueError("Point marks must exactly represent 1 to 10000 basis points")
+    return int(scaled)
 
 
 class AuthorGenerationError(RuntimeError):

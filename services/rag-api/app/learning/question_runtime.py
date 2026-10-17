@@ -28,6 +28,16 @@ from app.errors import ApiError
 from app.jev import callsites
 from app.jev.models import owner_scope_hash
 from app.jev.service import SemanticDecisionService
+from app.learning.assessment_point_configuration import PointQuestionSlot
+from app.learning.assessment_point_dispatch import (
+    ResolvedPointDispatch,
+    resolve_point_dispatch,
+)
+from app.learning.assessment_point_question_inputs import (
+    AssessmentPointQuestionInput,
+    build_point_question_input,
+)
+from app.learning.assessment_point_store import AssessmentPointConfigurationStore
 from app.learning.assessment_question_slots import (
     AssessmentQuestionSlot,
     default_assessment_question_slots,
@@ -267,6 +277,7 @@ class QuestionEngineRuntime:
         metered_generate: Callable[..., tuple[Any, dict[str, Any]]] | None = None,
         learning_loop: LearningLoopService | None = None,
         hybrid_reviewer: Any | None = None,
+        point_store: AssessmentPointConfigurationStore | None = None,
     ) -> None:
         self.database = database
         self.provider = provider
@@ -278,6 +289,7 @@ class QuestionEngineRuntime:
         # is configured it can only ever *add* a qualified acceptance path.  A
         # deterministic hard-gate failure is refused before it is consulted.
         self.hybrid_reviewer = hybrid_reviewer
+        self.point_store = point_store
 
     def _provider_for_operation(
         self,
@@ -2291,6 +2303,65 @@ class QuestionEngineRuntime:
                 "ASSESSMENT_SLOT_CONFLICT",
                 "The assessment preparation slot is already bound to different input.",
             )
+
+    def resolve_point_dispatch(
+        self,
+        *,
+        owner_user_id: str,
+        workspace_id: str,
+        course_id: str,
+        private_course_id: str,
+        node_id: str,
+        configuration_id: str,
+        slots: tuple[PointQuestionSlot, ...] | None,
+        content_language: str | None,
+    ) -> tuple[ResolvedPointDispatch, ...]:
+        return resolve_point_dispatch(
+            self.database,
+            self.point_store,
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            course_id=course_id,
+            private_course_id=private_course_id,
+            node_id=node_id,
+            configuration_id=configuration_id,
+            slots=slots,
+            content_language=content_language,
+        )
+
+    def point_question_inputs(
+        self,
+        *,
+        owner_user_id: str,
+        workspace_id: str,
+        course_id: str,
+        private_course_id: str,
+        node_id: str,
+        configuration_id: str,
+        slots: tuple[PointQuestionSlot, ...] | None,
+        content_language: str | None,
+    ) -> tuple[AssessmentPointQuestionInput, ...]:
+        resolved = self.resolve_point_dispatch(
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            course_id=course_id,
+            private_course_id=private_course_id,
+            node_id=node_id,
+            configuration_id=configuration_id,
+            slots=slots,
+            content_language=content_language,
+        )
+        return tuple(
+            build_point_question_input(
+                item,
+                owner_user_id=owner_user_id,
+                workspace_id=workspace_id,
+                course_id=course_id,
+                private_course_id=private_course_id,
+                node_id=node_id,
+            )
+            for item in resolved
+        )
 
     def generate_assessment_set(
         self,
