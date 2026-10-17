@@ -31,7 +31,8 @@
     "remote_raw_sha256": "b71fb0ac0ffc107bd48ef6fd34219e0b7bea63f5a72c474546551491aebff530",
     "off_host_gzip_path": "private-runtime/r3-release/r3-pre-93c2523-rag.sqlite3.gz",
     "off_host_gzip_sha256": "c4199b89e3934a1b845ab384a7dc34710f5918e6927ed9142be131a4c81c010c",
-    "verified_before_lock_release": true
+    "verified_before_lock_release": true,
+    "remote_raw_removed_after_off_host_verification": true
   },
   "dynamic_k": {
     "policy_version": "cj.assessment.points.v1",
@@ -128,5 +129,12 @@
       "Do not replace or reverse-migrate the production database."
     ],
     "data_preservation": "The rollback changes code routing only and preserves all sessions, attempts, scores, histories, UNKNOWN records, and ledgers."
+  },
+  "release_lock": {
+    "path": "/run/lock/coursejesus-production-publish.lock",
+    "verified_owner": "five-work-r3",
+    "verified_candidate": "a8d08f1e7d2e397b02ec11f60669ef91ef7b8b76",
+    "released": true,
+    "post_release_service_health": "PASS"
   }
 }
