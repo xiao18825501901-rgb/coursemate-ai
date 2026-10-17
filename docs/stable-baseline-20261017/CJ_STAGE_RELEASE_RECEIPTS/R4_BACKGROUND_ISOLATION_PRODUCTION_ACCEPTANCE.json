@@ -1,0 +1,78 @@
+{
+  "receipt_version": "coursejesus.r4.background-isolation.production-acceptance.v1",
+  "recorded_at_utc": "2026-10-17T13:06:00Z",
+  "result": "PASS",
+  "release": {
+    "candidate_sha": "accff2ebaa4ec06cc2673a2bcd7b61855e48f700",
+    "backend_release_directory": "/srv/coursemate/releases/r4-accff2e",
+    "backend_unit": "coursemate-rag",
+    "backend_pid_at_acceptance": 298503,
+    "backend_port": 28000,
+    "frontend_changed": false,
+    "netlify_deploy_id": "6ad362811442c797c05e1be2",
+    "schema_version": 84,
+    "schema_migration": false
+  },
+  "artifact": {
+    "path": "release-artifacts/coursejesus-r4-accff2e.tar.gz",
+    "sha256": "4a46d33574a817693a206732d371fc40678fe951872bbf1efb3378080ac58ce8",
+    "remote_hash_verified": true
+  },
+  "change": {
+    "root_cause": "The async UI extension dispatcher invoked synchronous upload/indexing and retrieval functions directly on the ASGI event loop.",
+    "file_upload_fix": "Run the existing synchronous file upload/indexing boundary in asyncio.to_thread.",
+    "retrieval_fix": "Run the existing synchronous context retrieval boundary in asyncio.to_thread.",
+    "new_service_or_queue": false,
+    "database_authority_changed": false,
+    "authentication_changed": false
+  },
+  "verification": {
+    "upload_heartbeat_red": "FAIL after 0.25 seconds before fix",
+    "retrieval_heartbeat_red": "1 failed, 1 passed before retrieval fix",
+    "focused_green": "20 passed, 1 warning in 57.55 seconds",
+    "broader_relevant_regression": "60 passed, 1 warning in 150.03 seconds",
+    "ruff": "PASS",
+    "compileall": "PASS",
+    "git_diff_check": "PASS",
+    "isolated_startup_with_database_copy": "PASS",
+    "production_health": "PASS",
+    "production_service_identity": "PASS",
+    "real_clerk_course_list": "PASS",
+    "real_clerk_course_knowledge": "PASS: 12 nodes",
+    "real_clerk_pair_and_history_read": "PASS",
+    "browser_console_errors": 0,
+    "note": "The original acceptance tab became stale across the service switch and displayed Failed to fetch. A fresh tab in the same authenticated Clerk browser loaded the dashboard and target course successfully; server logs show the corresponding authenticated requests completed with HTTP 200."
+  },
+  "database": {
+    "integrity_check": "ok",
+    "foreign_key_violations": 0,
+    "schema_version": 84,
+    "historical_data_rewritten": false
+  },
+  "backup": {
+    "remote_gzip_path": "/srv/coursemate/releases/.r4-pre-accff2e-rag.sqlite3.gz",
+    "remote_raw_sha256": "e2c9353b1e174c25e590788a97ae458ee7544c7f610f32507e91e1e977654536",
+    "remote_gzip_sha256": "98aea9435d998dbf6bab1bb087186f3560aaef54c0c30153a418e0b79e388b4b",
+    "off_host_gzip_path": "private-runtime/r4-release/r4-pre-accff2e-rag.sqlite3.gz",
+    "off_host_gzip_sha256": "98aea9435d998dbf6bab1bb087186f3560aaef54c0c30153a418e0b79e388b4b",
+    "off_host_verification": "PASS",
+    "remote_removed": true
+  },
+  "rollback": {
+    "code_only": true,
+    "procedure": [
+      "Remove /etc/systemd/system/coursemate-rag.service.d/zzzzzzzzzzzzzzzzzzzzzzzzzzz-coursejesus-r4-accff2e.conf.",
+      "Run systemctl daemon-reload and restart coursemate-rag.",
+      "Verify CWD and PYTHONPATH return to /srv/coursemate/releases/r3-hotfix-c9dbd1b/services/rag-api.",
+      "Do not replace or reverse-migrate the production database."
+    ],
+    "data_preservation": "Rollback changes only the code routing and preserves courses, source files, pairs, assessments, scores, histories, UNKNOWN records, and usage ledgers."
+  },
+  "release_lock": {
+    "path": "/run/lock/coursejesus-production-publish.lock",
+    "owner": "stable-baseline-r4",
+    "candidate": "accff2ebaa4ec06cc2673a2bcd7b61855e48f700",
+    "released": true,
+    "release_condition": "Off-host backup hash must match before lock release."
+  }
+}
