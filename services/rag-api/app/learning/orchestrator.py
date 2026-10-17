@@ -395,7 +395,7 @@ class LearningOrchestrator:
 
         workspace = workspace_for(self.db, workspace_id, owner)
         with self.db.connect() as db:
-            node = self.assessments._atomic_node(db, workspace, request.node_id)
+            self.assessments._atomic_node(db, workspace, request.node_id)
             slots = self.assessments.configuration_slots(db, configuration_id)
             row = db.execute(
                 "SELECT * FROM assessment_configuration_preparations WHERE configuration_id=?",
