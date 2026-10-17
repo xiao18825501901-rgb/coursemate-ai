@@ -29,6 +29,7 @@ from app.errors import ApiError
 from app.jev.gateway import DisabledTransport, JevGateway, OpenJevTransport, Transport
 from app.jev.receipt_store import SqlReceiptStore
 from app.jev.service import SemanticDecisionService
+from app.learning.assessment_point_configuration import AssessmentPointPolicyService
 from app.learning.deepseek_reviewer import DeepSeekStrongReviewer
 from app.learning.hybrid_quality import HybridQualityService
 from app.learning.openjev_observer import OpenJevLocalObserver
@@ -119,6 +120,7 @@ def create_app(
     auth_verifier: AuthVerifier | None = None,
     ui_provider: object | None = None,
     ui_coverage_reviewer: object | None = None,
+    assessment_point_policy: AssessmentPointPolicyService | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     if resolved_settings.auth_test_user_id and (
@@ -257,6 +259,7 @@ def create_app(
             hybrid_reviewer=hybrid_reviewer_from_settings(
                 resolved_settings, database, jev_service=application.state.jev_service
             ),
+            assessment_point_policy=assessment_point_policy,
         )
         application.state.official_knowledge_draft_builder = OfficialKnowledgeDraftBuilder(
             database, resolved_settings, application.state.learning

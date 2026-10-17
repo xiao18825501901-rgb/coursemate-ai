@@ -14,6 +14,7 @@ from app.db import Database
 from app.errors import ApiError
 from app.jev import callsites
 from app.jev.service import SemanticDecisionService
+from app.learning.assessment_point_configuration import AssessmentPointPolicyService
 from app.learning.assessments import AssessmentService
 from app.learning.compiler import (
     TEMPLATE_VERSION,
@@ -102,6 +103,7 @@ class LearningOrchestrator:
         retriever: HybridRetriever,
         jev: SemanticDecisionService | None = None,
         hybrid_reviewer: Any | None = None,
+        assessment_point_policy: AssessmentPointPolicyService | None = None,
     ) -> None:
         self.db = database
         self.settings = settings
@@ -116,7 +118,11 @@ class LearningOrchestrator:
         self.knowledge = KnowledgeService(database, jev)
         self.plans = TeachingPlanRepository(database)
         self.problems = ProblemRepository(database)
-        self.assessments = AssessmentService(database, jev)
+        self.assessments = AssessmentService(
+            database,
+            jev,
+            point_policy=assessment_point_policy,
+        )
         self.learning_loop = LearningLoopService(
             database,
             internal_user_ids=settings.admin_user_id_set,
