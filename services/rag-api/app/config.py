@@ -50,6 +50,20 @@ class Settings(BaseSettings):
     v3_model: Literal["deepseek-flash", "qwen3.8-max"] = "deepseek-flash"
     v3_model_api_key: SecretStr | None = None
     v3_model_base_url: str | None = None
+    # Historical direct adapters stay OFF unless their exact saved identity
+    # requires otherwise. New generic work uses the separately qualified route.
+    v3_qwen_protocol: Literal["responses", "chat_completions"] = "responses"
+    v3_qwen_native_reasoning: bool = False
+    v3_qwen_reasoning_effort: Literal["", "xhigh"] = ""
+    # Independent generic route: never overwrite the private-tree credential.
+    generic_llm_enabled: bool = False
+    cj_qwen_api_key: SecretStr | None = None
+    cj_qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    cj_qwen_model: Literal["qwen3.8-max"] = "qwen3.8-max"
+    cj_qwen_capability_receipt_id: str = ""
+    cj_qwen_secret_generation_id: str = ""
+    cj_qwen_native_reasoning: bool = True
+    cj_qwen_reasoning_effort: Literal["xhigh"] = "xhigh"
     v3_max_output_tokens: int = Field(default=4000, ge=500, le=8000)
     v3_model_timeout_seconds: int = Field(default=180, ge=30, le=600)
     v3_daily_operations: int = Field(default=30, ge=1, le=500)
