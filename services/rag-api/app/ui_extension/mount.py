@@ -134,10 +134,20 @@ def _ui_settings(settings: Settings) -> object:
     ui.deepseek_protocol = os.getenv("CMUI_DEEPSEEK_PROTOCOL", "responses")
     # The qualified generic route is independent from the private-tree
     # credential. Environment overrides remain for rollback-compatible deploys.
-    ui.qwen_model = settings.cj_qwen_model
-    ui.qwen_base_url = os.getenv("CMUI_QWEN_BASE_URL") or settings.cj_qwen_base_url
+    ui.qwen_model = (
+        settings.cj_qwen_model if settings.generic_llm_enabled else settings.v3_model
+    )
+    ui.qwen_base_url = os.getenv("CMUI_QWEN_BASE_URL") or (
+        settings.cj_qwen_base_url
+        if settings.generic_llm_enabled
+        else settings.v3_model_base_url or ""
+    )
     ui.qwen_key = os.getenv("CMUI_QWEN_API_KEY") or (
-        settings.cj_qwen_api_key.get_secret_value() if settings.cj_qwen_api_key else ""
+        settings.cj_qwen_api_key.get_secret_value()
+        if settings.generic_llm_enabled and settings.cj_qwen_api_key
+        else settings.v3_model_api_key.get_secret_value()
+        if settings.v3_model_api_key
+        else ""
     )
     ui.qwen_protocol = os.getenv("CMUI_QWEN_PROTOCOL", "chat_completions")
     ui.timeout = float(
