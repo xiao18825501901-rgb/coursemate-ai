@@ -1,6 +1,13 @@
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=6000)]
 Identifier = Annotated[str, StringConstraints(pattern=r"^[a-zA-Z0-9_-]{1,100}$")]
@@ -544,6 +551,24 @@ class AssessmentSlotSelection(Contract):
     slot_id: Identifier
     question_type: Literal["MCQ_SINGLE", "NUMERIC", "SHORT_TEXT", "EXPLANATION", "CODE"]
     task_form: Literal["concept", "definition", "calculation", "analysis", "evaluation", "code"]
+
+
+AssessmentSecondPurpose = Literal[
+    "APPLICATION", "CONDITION_CHANGE", "DISCRIMINATION", "ERROR_DIAGNOSIS"
+]
+
+
+class PointSlotSelection(AssessmentSlotSelection):
+    primary_point_id: Identifier
+    variation_purpose: AssessmentSecondPurpose | None = None
+    independently_scored_parts: Literal[1] = 1
+
+    @field_validator("independently_scored_parts", mode="before")
+    @classmethod
+    def one_integer_scored_item(cls, value: Any) -> Any:
+        if type(value) is not int or value != 1:
+            raise ValueError("Each point slot must contain exactly one scored item")
+        return value
 
 
 class AssessmentStartInput(OperationInput):
