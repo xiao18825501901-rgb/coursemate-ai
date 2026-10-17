@@ -1,0 +1,17 @@
+{
+  "report_version": "coursejesus.legacy-core-e2e.v1",
+  "recorded_at_utc": "2026-10-17T17:10:00Z",
+  "production_backend_sha": "05946c2194f1ead7e5392b846a09abe94661a15b",
+  "production_frontend_deploy": "6ad3aaef94c4761799bc1df1",
+  "schema_version": 84,
+  "results": [
+    {"capability":"knowledge_learning","result":"PASS","first_visible_ms":5788,"complete_ms":15648,"citations":4,"history_restore":"PASS","evidence":"CJ_STAGE_RELEASE_RECEIPTS/R1_AUTHENTICATED_CLERK_ACCEPTANCE.json"},
+    {"capability":"knowledge_tree","result":"PASS_READ_EXISTING_TREE","observed_nodes":12,"maximum_allowed_nodes":50,"new_provider_generation_in_this_activity":"NOT_RUN","evidence":"CJ_STAGE_RELEASE_RECEIPTS/R4_BACKGROUND_ISOLATION_PRODUCTION_ACCEPTANCE.json"},
+    {"capability":"do_one","result":"PASS_READY_REUSE","question_visible_ms":5267,"grading_complete_ms":6615,"answer_reveal":"PASS","solution_steps":5,"history_and_pair_restore":"PASS","cold_generation":"FAILED_CLOSED_ON_PRESERVED_SPECIFICATION_AUDIT_UNKNOWN; NOT_REPLAYED","evidence":"CJ_STAGE_RELEASE_RECEIPTS/R2_DO_ONE_PRODUCTION_ACCEPTANCE.json and R5_MODEL_ROLE_PRODUCTION_ACCEPTANCE.json"},
+    {"capability":"problem_response","result":"PASS","first_visible_ms":5367,"complete_ms":6957,"deterministic_answer_check":"PASS","evidence":"CJ_STAGE_RELEASE_RECEIPTS/R1_AUTHENTICATED_CLERK_ACCEPTANCE.json"},
+    {"capability":"assessment","result":"PASS_FOR_AUDITED_GRAPH_CATALOG","policy":"cj.assessment.points.v1","audited_k":4,"session_id":"d325878bdb6c4329920efbfa2230f6dd","score":100,"marks":[25,25,25,25],"history_persistence":"PASS","scope_note":"K=4 belongs only to this versioned Graph Theory catalog and is not a global fixed K.","evidence":"CJ_STAGE_RELEASE_RECEIPTS/R3_DYNAMIC_K_PRODUCTION_ACCEPTANCE.json"},
+    {"capability":"rag","result":"PASS","course_citations":4,"authenticated_course_files_and_nodes_read":"PASS","evidence":"CJ_STAGE_RELEASE_RECEIPTS/R1_AUTHENTICATED_CLERK_ACCEPTANCE.json and R4_BACKGROUND_ISOLATION_PRODUCTION_ACCEPTANCE.json"},
+    {"capability":"openjev","result":"PASS_EXISTING_ADVISORY_BOUNDARY","new_live_model_call_in_this_activity":"NOT_RUN","boundary":"advisory and non-blocking except where an existing explicit hard rule requires a valid verdict","evidence":"CJ_CORE_MODULE_DEPENDENCY_MAP.md and docs/coursejesus/QUESTION_ENGINE_P5_LIVE_ACCEPTANCE.md"}
+  ],
+  "full_backend_regression": {"result":"PASS","passed":2439,"skipped":11,"warnings":4,"duration_seconds":5444.00,"restarted":false}
+}

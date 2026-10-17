@@ -1,0 +1,13 @@
+{
+  "receipt_version": "coursejesus.legacy-deployment.v1",
+  "recorded_at_utc": "2026-10-17T17:10:00Z",
+  "result": "DEPLOYED_COMPATIBILITY_CARRIER",
+  "historical_business_baseline": "26c89fd63f93018d57c3c4eb748d614a559ce8a7",
+  "production_backend": {"sha":"05946c2194f1ead7e5392b846a09abe94661a15b","release":"/srv/coursemate/releases/r5-05946c2","schema":84,"changed_by_r6":false},
+  "production_frontend": {"feature_sha":"46d1bb328ce63d3002df2c583c23f1a089ed2621","deploy_id":"6ad3aaef94c4761799bc1df1","site":"https://coursejesus.com"},
+  "data_strategy": "Compatibility carrier over current schema; no destructive downgrade or reverse migration.",
+  "student_data_deleted": false,
+  "historical_scores_recomputed": false,
+  "unknown_requests_replayed": false,
+  "rollback": {"frontend":"restore deploy 6ad362811442c797c05e1be2","backend":"use the R5 code-only rollback procedure; do not replace the production database"}
+}

@@ -1,0 +1,64 @@
+{
+  "receipt_version": "coursejesus.r6.frontend.production.v1",
+  "recorded_at_utc": "2026-10-17T17:10:00Z",
+  "result": "PASS_AFTER_AUTOMATIC_ROLLBACK_AND_ENV_COMPLETE_REBUILD",
+  "source": {
+    "feature_sha": "46d1bb328ce63d3002df2c583c23f1a089ed2621",
+    "receipt_head_before_publish": "8e112381f6803be5ad371b33e47481d2157221af"
+  },
+  "backend": {
+    "changed": false,
+    "candidate_sha": "05946c2194f1ead7e5392b846a09abe94661a15b",
+    "release_directory": "/srv/coursemate/releases/r5-05946c2",
+    "pid": 300739,
+    "port": 28000,
+    "schema_version": 84,
+    "health_after_publish": "PASS"
+  },
+  "frontend": {
+    "site_id": "166afb5a-4103-4236-9f13-4be34dc68cd2",
+    "site_name": "coursemate-ai-qqtt",
+    "url": "https://coursejesus.com",
+    "previous_deploy": "6ad362811442c797c05e1be2",
+    "final_deploy": "6ad3aaef94c4761799bc1df1",
+    "final_state": "ready",
+    "published_at_utc": "2026-10-17T17:05:54.349Z",
+    "ui_asset": "assets/ui-AatCLmgZ.js",
+    "ui_asset_sha256": "fd8428fe3ffeffa3201a233b68fefd11bda23c7c86527f219205da7ff21a8726",
+    "online_hash_match": true
+  },
+  "failed_first_attempt": {
+    "deploy_id": "6ad3a9239665b732c5b4b06d",
+    "failure": "The locally built Vite bundle did not contain Netlify production VITE variables and rendered the fail-closed authentication-not-configured page.",
+    "student_data_changed": false,
+    "backend_or_schema_changed": false,
+    "automatic_action": "Restored deploy 6ad362811442c797c05e1be2 immediately, then rebuilt from the same source with the existing production VITE environment.",
+    "unknown_or_model_calls_created": 0
+  },
+  "authenticated_clerk_acceptance": {
+    "browser": "existing authenticated dedicated in-app browser",
+    "dashboard_zh_cn": "PASS",
+    "dashboard_en": "PASS",
+    "language_control_adjacent_to_theme": "PASS",
+    "language_switch_preserved_course_content_language": "PASS",
+    "course_node_count_after_reload": 12,
+    "learning_history_after_reload": "PASS",
+    "practice_history_after_reload": "PASS",
+    "mobile_dashboard_390x844": "PASS",
+    "system_provider_model_name_scan": "PASS_ON_OBSERVED_SYSTEM_CHROME",
+    "note": "Historical content was preserved verbatim. An old pre-contract teaching record still contains its historical continuation-anchor text; this deployment did not rewrite student history."
+  },
+  "release_lock": {
+    "path": "/run/lock/coursejesus-production-publish.lock",
+    "owner": "CourseJesus-five-work-r6",
+    "released": true,
+    "post_release_presence": false
+  },
+  "rollback": {
+    "frontend_only": true,
+    "deploy_id": "6ad362811442c797c05e1be2",
+    "command_contract": "Netlify restoreSiteDeploy against the existing site and deploy id",
+    "database_restore_required": false
+  },
+  "git_cd_warning": "The site remains connected to main. A later main-branch automatic deploy can replace this manual production deploy and must include the same R6 source and production environment."
+}

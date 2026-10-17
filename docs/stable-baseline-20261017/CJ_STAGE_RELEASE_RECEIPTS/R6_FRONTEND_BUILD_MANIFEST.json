@@ -1,18 +1,20 @@
 {
-  "manifest_version": "coursejesus.r6.frontend-build.v1",
-  "built_at_utc": "2026-10-17T16:04:06Z",
+  "manifest_version": "coursejesus.r6.frontend-build.v2",
+  "built_at_utc": "2026-10-17T17:05:20Z",
   "source_code_sha": "46d1bb328ce63d3002df2c583c23f1a089ed2621",
-  "receipt_head_after_build": "bf24598",
+  "receipt_head_before_publish": "8e112381f6803be5ad371b33e47481d2157221af",
   "build_command": "npm --workspace apps/web run build",
+  "build_environment": "Netlify production VITE variables injected locally; values are intentionally omitted",
   "file_count": 16,
-  "total_bytes": 1182232,
+  "total_bytes": 1536862,
   "secret_scan": "PASS",
+  "clerk_publishable_key_presence": "PASS",
   "files": {
-    "assets/dist-DSoz_yeA.js": "e586e1cb64872d9ce75bf825a97fc7251561c5c76967d44d032a64ddf0794f4d",
+    "assets/dist-D5EpmTVa.js": "88b15ca7d70c723efef3d3735c5565f1d21c3916df5f5b6aa2607650401e8045",
+    "assets/main-fheD-vH_.js": "a9a9cf1314772df9de24d8dac633b474e507ab81fa5cb5e8b04a80313aff05ae",
     "assets/main-jxvg7O-T.css": "84b81c1012cf880128edeeae785d75bbbd17ce42d849694241ddca7d4fa754e9",
-    "assets/main-U-3lbYrT.js": "22239d9a79b101c4b287b89588097b4163ea7e493cc2c07245cb75d85051bdcb",
+    "assets/ui-AatCLmgZ.js": "fd8428fe3ffeffa3201a233b68fefd11bda23c7c86527f219205da7ff21a8726",
     "assets/ui-D-87nq6z.css": "ef3bbfa065786a0c121349bd5c5e4f5d1b665fb9dc052eb60b40cde88d8cbc5c",
-    "assets/ui-DjP6LJ_g.js": "f9835ebd0a1376e8fa907a8280c50b4d2b836a259137b923d0f82c9c17225dcb",
     "brand/apple-touch-icon-180.png": "1093445a1908c0b02d4c3f83917400c00d794445a1baf116127f3eb62a6bfda1",
     "brand/favicon-16.png": "b30acb445cd48cd230fdca3f8fbc0a51c02b10dbf3847dc5bd1e9386f876c99b",
     "brand/favicon-32.png": "3bed13446e21ab2ad25ef866d801d34fb030895721895646899245792abbb752",
@@ -21,14 +23,15 @@
     "brand/icon-512.png": "5310568637b83b92acee929cf4e4a780c115d1bbd0c4370cb6882ed5788f3390",
     "brand/logo-mark-512.png": "89627f908028b6a66292ba2be1f339b384e037d98376425139d27c70df2a4302",
     "favicon.svg": "295e29cf8ecb4259a05dece4d6d27514d2efeac26133404c370b32a4caf9b03a",
-    "index.html": "ed034bf2a7b41bd250700f6324f4c4b25f82248a73276c9c4dddfd25ec2e75d7",
+    "index.html": "41efd4a72bb9c43934cc663b468c7445e06110960d3f4f33d7febbf98a07462c",
     "manifest.webmanifest": "5d9d7418c93076ce4e67704a2f74a14336bdcdff83394d49afd1046957aa1019",
-    "ui.html": "583e44d52f97d8505e12959a7f2f4acaf232b82420b4901644d343a7b150663c"
+    "ui.html": "c32b976b42fc7007074b943ed6cc2eb5208f5bb6a6f8242d8910a95053eb5385"
   },
   "publish_target": {
     "existing_site_id": "166afb5a-4103-4236-9f13-4be34dc68cd2",
     "existing_site_name": "coursemate-ai-qqtt",
     "create_new_site": false,
-    "current_deploy_before_publish": "6ad362811442c797c05e1be2"
+    "previous_deploy": "6ad362811442c797c05e1be2",
+    "published_deploy": "6ad3aaef94c4761799bc1df1"
   }
 }

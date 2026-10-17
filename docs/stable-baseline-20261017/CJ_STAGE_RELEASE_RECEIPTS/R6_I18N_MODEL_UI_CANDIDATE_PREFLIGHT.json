@@ -1,7 +1,7 @@
 {
   "receipt_version": "coursejesus.r6.i18n-model-ui.candidate-preflight.v1",
   "recorded_at_utc": "2026-10-17T16:08:00Z",
-  "status": "CANDIDATE_FROZEN_ELIGIBLE_FOR_PRODUCTION_DEPLOYMENT",
+  "status": "DEPLOYED_AND_AUTHENTICATED_ACCEPTANCE_COMPLETE",
   "candidate": {
     "sha": "46d1bb328ce63d3002df2c583c23f1a089ed2621",
     "scope": "frontend-only UI locale completion, safe public error envelopes, visual controls, learning and assessment workspaces",
@@ -73,12 +73,12 @@
     "root_inode_use": "13%"
   },
   "deployment_gate": {
-    "state": "PASS_PENDING_SHORT_LIVED_RELEASE_LOCK",
-    "remaining": [
-      "publish the frozen frontend build to the existing Netlify site",
-      "perform authenticated Clerk desktop and mobile acceptance",
-      "write production and rollback receipt"
-    ]
+    "state": "PASS",
+    "remaining": [],
+    "production_deploy_id": "6ad3aaef94c4761799bc1df1",
+    "authenticated_clerk_desktop": "PASS",
+    "authenticated_clerk_mobile_390x844": "PASS",
+    "release_lock_released": true
   },
   "rollback": {
     "frontend": "If authenticated acceptance fails, republish the prior immutable Netlify deploy 6ad362811442c797c05e1be2 or fix forward without changing the backend or database.",
