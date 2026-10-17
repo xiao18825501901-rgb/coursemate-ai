@@ -16,13 +16,13 @@ from app.db import Database
 from app.errors import ApiError
 from app.learning.assessment_point_catalog import canonical_hash
 from app.learning.assessment_point_question_inputs import AssessmentPointQuestionInput
+from app.learning.deterministic_graph_grading import METHOD
 from app.learning.model_operation_authority import authorize_model_operation
 from app.learning.models import Contract, Identifier, Text
 from app.learning.question_blueprint import Hex64
 from app.learning.question_persistence import QuestionPersistenceResult
 from app.learning.structured_calls import ModelCallClaim
 
-METHOD: Final = "finite-loop-free-graph-degree-assessment.v1"
 DEGREE_RULE: Final = (
     "In an undirected graph, the degree of a vertex is the number of incident edges."
 )

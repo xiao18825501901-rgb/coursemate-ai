@@ -34,6 +34,9 @@ from app.learning.assessment_question_slots import (
     default_assessment_question_slots,
     slots_from_selections,
 )
+from app.learning.deterministic_graph_grading import (
+    verify_graph_point_short_text,
+)
 from app.learning.models import (
     AssessmentAnswer,
     AssessmentGradeProposal,
@@ -1947,6 +1950,19 @@ class AssessmentService:
             except (KeyError, TypeError, ValueError):
                 return False
         if question["question_type"] == "SHORT_TEXT":
+            rubric_item_ids = {
+                str(criterion.get("item_id", ""))
+                for criterion in question.get("rubric", [])
+                if isinstance(criterion, dict)
+            }
+            if len(rubric_item_ids) == 1:
+                graph_verdict = verify_graph_point_short_text(
+                    rubric_item_ids.pop(),
+                    submitted,
+                    answer.get("deterministic_proof") or {},
+                )
+                if graph_verdict is not None:
+                    return graph_verdict
             case_sensitive = bool(answer.get("case_sensitive", False))
             normalized = " ".join(submitted.split())
             if not case_sensitive:

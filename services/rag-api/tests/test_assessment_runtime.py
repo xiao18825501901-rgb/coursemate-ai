@@ -1308,6 +1308,115 @@ def test_mcq_deterministic_check_preserves_existing_numeric_key_contract() -> No
     assert AssessmentService._deterministic_correct(question) is False
 
 
+@pytest.mark.parametrize(
+    ("item_id", "student_answer"),
+    (
+        (
+            "vd_degree_definition_required",
+            "顶点的度是与该顶点关联的边数。"
+            "deg(A)=2，deg(B)=2，deg(C)=3，deg(D)=1。",
+        ),
+        (
+            "vd_handshake_identity_required",
+            "度数和恒等式为 Σv∈V deg(v)=2|E|。"
+            "本图度数和=2+2+3+1=8，边数|E|=4，2|E|=8，因此两侧相等。",
+        ),
+        (
+            "vd_degree_definition_required",
+            "The degree of a vertex is the number of incident edges. "
+            "deg(A)=2, deg(B)=2, deg(C)=3, and deg(D)=1.",
+        ),
+        (
+            "vd_handshake_identity_required",
+            "The degree-sum identity is sum_v deg(v)=2|E|. "
+            "deg(A)=2, deg(B)=2, deg(C)=3, deg(D)=1; "
+            "the degree sum is 8, |E|=4, and 2|E|=8.",
+        ),
+    ),
+)
+def test_graph_point_short_text_accepts_structurally_equivalent_correct_answer(
+    item_id: str,
+    student_answer: str,
+) -> None:
+    question = {
+        "student_answer": student_answer,
+        "question_type": "SHORT_TEXT",
+        "answer_key": {
+            "accepted": ["a deliberately different canonical rendering"],
+            "deterministic_proof": {
+                "method": "finite-loop-free-graph-degree-assessment.v1",
+                "vertices": ["A", "B", "C", "D"],
+                "degrees": {"A": 2, "B": 2, "C": 3, "D": 1},
+                "degree_sum": 8,
+                "edge_count": 4,
+                "twice_edge_count": 8,
+            },
+        },
+        "rubric": [{"item_id": item_id}],
+    }
+
+    assert AssessmentService._deterministic_correct(question) is True
+
+
+@pytest.mark.parametrize(
+    ("item_id", "student_answer"),
+    (
+        (
+            "vd_degree_definition_required",
+            "顶点的度就是与该顶点相连的边的数量。"
+            "deg(A)=2，deg(B)=2，deg(C)=2，deg(D)=2。",
+        ),
+        (
+            "vd_degree_definition_required",
+            "deg(A)=2，deg(B)=2，deg(C)=3，deg(D)=1。",
+        ),
+        (
+            "vd_handshake_identity_required",
+            "Σdeg(v)=|E|。deg(A)=2，deg(B)=2，deg(C)=3，deg(D)=1，"
+            "度数和为8；共有4条边。",
+        ),
+        (
+            "vd_handshake_identity_required",
+            "Σdeg(v)=2|E|。deg(A)=2，deg(B)=2，deg(C)=3，deg(D)=1，"
+            "度数和为8；共有5条边，所以2|E|=10。",
+        ),
+    ),
+)
+def test_graph_point_short_text_rejects_incomplete_or_incorrect_claims(
+    item_id: str,
+    student_answer: str,
+) -> None:
+    question = {
+        "student_answer": student_answer,
+        "question_type": "SHORT_TEXT",
+        "answer_key": {
+            "accepted": ["a deliberately different canonical rendering"],
+            "deterministic_proof": {
+                "method": "finite-loop-free-graph-degree-assessment.v1",
+                "vertices": ["A", "B", "C", "D"],
+                "degrees": {"A": 2, "B": 2, "C": 3, "D": 1},
+                "degree_sum": 8,
+                "edge_count": 4,
+                "twice_edge_count": 8,
+            },
+        },
+        "rubric": [{"item_id": item_id}],
+    }
+
+    assert AssessmentService._deterministic_correct(question) is False
+
+
+def test_unrelated_short_text_keeps_exact_accepted_value_contract() -> None:
+    question = {
+        "student_answer": "semantically equivalent wording",
+        "question_type": "SHORT_TEXT",
+        "answer_key": {"accepted": ["canonical wording"]},
+        "rubric": [{"item_id": "unrelated_item"}],
+    }
+
+    assert AssessmentService._deterministic_correct(question) is False
+
+
 def test_mcq_grader_context_expands_frontend_index_to_selected_option() -> None:
     prepared = {
         "session": {"id": "session-1"},
