@@ -1,0 +1,63 @@
+{
+  "stage_id": "R1_SAFE_STREAMING",
+  "status": "PASS_DEPLOYED_AND_AUTHENTICATED",
+  "observed_at_utc": "2026-10-17T09:47:34Z",
+  "production_identity": {
+    "candidate_sha": "a4e4c152731b18c7b2d9d27b12d5196c3c5a5df2",
+    "backend_release": "/srv/coursemate/releases/r1-a4e4c15/services/rag-api",
+    "frontend_deploy_id": "6ad2924de5ac21464a8d04ea",
+    "site": "https://coursejesus.com",
+    "clerk_session": "AUTHENTICATED_DEDICATED_IN_APP_BROWSER",
+    "course": "CS3481",
+    "provider_route": "deepseek",
+    "schema": {"rag": 81, "ui": 16, "agent": 3}
+  },
+  "teaching": {
+    "run_hash": "1e23b3d7bfd614a5",
+    "client_click_at_utc": "2026-10-17T09:45:05.831Z",
+    "run_created_at_utc": "2026-10-17T09:45:11.160Z",
+    "first_public_delta_at_utc": "2026-10-17T09:45:11.619Z",
+    "done_at_utc": "2026-10-17T09:45:21.479Z",
+    "click_to_first_public_text_ms": 5788,
+    "click_to_done_ms": 15648,
+    "server_run_to_first_delta_ms": 459,
+    "server_run_to_done_ms": 10319,
+    "persisted_text_length": 1276,
+    "citation_count": 4,
+    "input_tokens": 4004,
+    "output_tokens": 737,
+    "estimated_actual_usd_from_deployed_rates": 0.0020856,
+    "student_visible_internal_anchor_scan": "PASS",
+    "student_visible_model_name_scan": "PASS",
+    "history_restore_after_reload": "PASS"
+  },
+  "problem_response": {
+    "run_hash": "b4cbb74fa48a6e95",
+    "client_click_at_utc": "2026-10-17T09:46:42.312Z",
+    "run_created_at_utc": "2026-10-17T09:46:47.129Z",
+    "first_public_delta_at_utc": "2026-10-17T09:46:47.679Z",
+    "done_at_utc": "2026-10-17T09:46:49.269Z",
+    "click_to_first_public_text_ms": 5367,
+    "click_to_done_ms": 6957,
+    "server_run_to_first_delta_ms": 550,
+    "server_run_to_done_ms": 2140,
+    "persisted_text_length": 138,
+    "citation_count": 0,
+    "input_tokens": 1869,
+    "output_tokens": 76,
+    "estimated_actual_usd_from_deployed_rates": 0.0006519,
+    "deterministic_answer_check": "PASS_0.75_OR_75_PERCENT",
+    "student_visible_internal_anchor_scan": "PASS",
+    "student_visible_model_name_scan": "PASS"
+  },
+  "cost": {
+    "deployed_input_usd_per_million": 0.3,
+    "deployed_output_usd_per_million": 1.2,
+    "combined_estimated_actual_usd": 0.0027375,
+    "unknown_requests_created": 0,
+    "automatic_replays": 0
+  },
+  "measurement_note": "The automation controller observed final DOM text later because separate computer-use calls add tool latency. Product timing is derived from the client click timestamp correlated to the immutable server run/event timestamps; controller round-trip latency is excluded.",
+  "privacy": "No Clerk token, cookie, user identifier, prompt text, response body, source excerpt or secret is stored in this receipt.",
+  "decision": "R1 authenticated production gate passes. R2 may proceed from the deployed R1 base; later Qwen migration remains owned by R5."
+}
