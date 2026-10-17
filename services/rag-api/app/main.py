@@ -34,7 +34,7 @@ from app.learning.deepseek_reviewer import DeepSeekStrongReviewer
 from app.learning.deterministic_graph_point_catalog import (
     DeterministicGraphPointCatalogReader,
 )
-from app.learning.generic_provider import build_generic_provider
+from app.learning.generic_provider import build_generic_provider, generic_model_settings
 from app.learning.hybrid_quality import HybridQualityService
 from app.learning.openjev_observer import OpenJevLocalObserver
 from app.learning.orchestrator import LearningOrchestrator
@@ -44,6 +44,7 @@ from app.rag.answers import (
     DeepSeekAnswerProvider,
     ExtractiveAnswerProvider,
     MissingAnswerProvider,
+    QwenAnswerProvider,
 )
 from app.rag.embeddings import (
     DeterministicEmbeddingProvider,
@@ -177,6 +178,14 @@ def create_app(
     if answer_provider is None:
         if resolved_settings.rag_provider_mode == "deterministic":
             answer_provider = ExtractiveAnswerProvider()
+        elif resolved_settings.generic_llm_enabled:
+            generic_settings = generic_model_settings(resolved_settings)
+            generic_secret = generic_settings.v3_model_api_key
+            answer_provider = QwenAnswerProvider(
+                api_key=(generic_secret.get_secret_value() if generic_secret else ""),
+                model=generic_settings.v3_model,
+                base_url=generic_settings.v3_model_base_url or "",
+            )
         else:
             # Grounded QA uses DeepSeek explicitly.  There is no OpenAI/Qwen
             # fallback: without a DeepSeek credential the role stays missing.

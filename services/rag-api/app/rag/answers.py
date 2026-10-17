@@ -5,7 +5,10 @@ from typing import Any, Protocol
 from openai import OpenAI
 
 from app.evaluation.deepseek_contract import REASONING_DISABLED
-from app.evaluation.provider_safety import validate_deepseek_base_url
+from app.evaluation.provider_safety import (
+    validate_deepseek_base_url,
+    validate_model_studio_base_url,
+)
 from app.jev import callsites
 from app.jev.service import SemanticDecisionService
 from app.provider_client import build_openai_client, timeouts_for
@@ -145,6 +148,83 @@ class DeepSeekAnswerProvider:
                 yield event.delta
             elif event.type == "response.failed":
                 raise RuntimeError("DeepSeek response failed")
+
+
+class QwenAnswerProvider:
+    """Stream grounded public text through the qualified Model Studio route.
+
+    Grounded QA is a normal direct-work role, so native reasoning is disabled.
+    Even if an upstream chunk carries a reasoning field, only ``content`` is
+    projected to the caller.
+    """
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str = "qwen3.8-max",
+        client: OpenAI | None = None,
+        base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        max_output_tokens: int = 1_200,
+    ) -> None:
+        endpoint = validate_model_studio_base_url(base_url)
+        self.client = client or build_openai_client(
+            api_key=api_key,
+            base_url=endpoint,
+            timeouts=timeouts_for(read_seconds=ANSWER_READ_SECONDS),
+        )
+        self.model = model
+        self.max_output_tokens = max_output_tokens
+
+    def stream_answer(
+        self, *, question: str, context: str, instructions: str
+    ) -> Iterator[str]:
+        stream = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": instructions},
+                {"role": "user", "content": f"Question:\n{question}\n\n{context}"},
+            ],
+            max_tokens=self.max_output_tokens,
+            stream=True,
+            stream_options={"include_usage": True},
+            extra_body={"enable_thinking": False},
+        )
+        finished = False
+        try:
+            for chunk in stream:
+                choices = getattr(chunk, "choices", None) or []
+                if not choices:
+                    continue
+                if len(choices) != 1:
+                    raise RuntimeError("Qwen answer stream is invalid")
+                choice = choices[0]
+                delta = choice.delta
+                if (
+                    getattr(delta, "tool_calls", None)
+                    or getattr(delta, "function_call", None)
+                    or getattr(delta, "refusal", None)
+                ):
+                    raise RuntimeError("Qwen answer stream contains non-text output")
+                content = getattr(delta, "content", None)
+                if content is not None:
+                    if finished:
+                        raise RuntimeError("Qwen answer stream continued after completion")
+                    if not isinstance(content, str):
+                        raise RuntimeError("Qwen answer stream contains invalid text")
+                    if content:
+                        yield content
+                finish_reason = getattr(choice, "finish_reason", None)
+                if finish_reason not in {None, "stop"}:
+                    raise RuntimeError("Qwen answer stream did not complete")
+                if finish_reason == "stop":
+                    finished = True
+            if not finished:
+                raise RuntimeError("Qwen answer stream did not complete")
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
 
 
 class MissingAnswerProvider:
