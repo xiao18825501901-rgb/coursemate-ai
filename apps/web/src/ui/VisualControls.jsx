@@ -1,6 +1,7 @@
 import React from 'react';
 import { cancelVisualJob, createVisual, fallbackVisualJob, getVisualJob, listMessageVisuals, retryVisualJob } from './api.js';
 import { VisualJobStatus } from './VisualJobStatus.jsx';
+import { defaultUiTranslate } from './UiLocale';
 
 const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
 
@@ -79,14 +80,15 @@ export class VisualControls extends React.Component {
     }
     render() {
         if (!this.props.enabled || !this.props.pairId) return null;
+        const t = this.props.t || defaultUiTranslate;
         return <div className="visual-controls">
-            <div className="visual-actions" aria-label="视觉学习操作">
-                <button type="button" disabled={this.state.busy} onClick={() => this.create('diagram')}>显示图解</button>
-                <button type="button" disabled={this.state.busy} onClick={() => this.create('visual')}>生成图片</button>
-                <button type="button" disabled={this.state.busy} onClick={() => this.create('animate')}>动画展示</button>
+            <div className="visual-actions" aria-label={t('visual.actions')}>
+                <button type="button" disabled={this.state.busy} onClick={() => this.create('diagram')}>{t('visual.diagram')}</button>
+                <button type="button" disabled={this.state.busy} onClick={() => this.create('visual')}>{t('visual.image')}</button>
+                <button type="button" disabled={this.state.busy} onClick={() => this.create('animate')}>{t('visual.animation')}</button>
             </div>
             {this.state.error && <p className="visual-error">{this.state.error}</p>}
-            {this.state.jobs.map(job => <VisualJobStatus key={job.id} job={job} onCancel={id => this.cancel(id)} onRetry={id => this.retry(id)} onFallback={id => this.fallback(id)}/>)}
+            {this.state.jobs.map(job => <VisualJobStatus key={job.id} job={job} t={t} onCancel={id => this.cancel(id)} onRetry={id => this.retry(id)} onFallback={id => this.fallback(id)}/>)}
         </div>;
     }
 }

@@ -12,14 +12,15 @@ export const CITATION_REJECTED = "REJECTED";
 
 /**
  * @param {{support?: string, audit_reject_reason?: string|null}|null|undefined} citation
+ * @param {(key: string) => string|null|undefined} [translate]
  * @returns {{flag: "contradicted"|"unverified", note: string}|null}
  */
-export function citationVerdict(citation) {
+export function citationVerdict(citation, translate = null) {
   const support = citation && citation.support;
   if (support === CITATION_CONTRADICTED) {
     return {
       flag: "contradicted",
-      note: "这段引用与原文的数值或结论相冲突，请点开核对原文。",
+      note: translate?.("workspace.citationContradictedNote") || "这段引用与原文的数值或结论相冲突，请点开核对原文。",
     };
   }
   if (
@@ -28,7 +29,7 @@ export function citationVerdict(citation) {
   ) {
     return {
       flag: "unverified",
-      note: "这段引用没能在原文中核实（也可能只是当前片段没有提到），请点开原文确认。",
+      note: translate?.("workspace.citationUnverifiedNote") || "这段引用没能在原文中核实（也可能只是当前片段没有提到），请点开原文确认。",
     };
   }
   return null;

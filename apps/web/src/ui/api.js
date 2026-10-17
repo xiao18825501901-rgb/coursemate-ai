@@ -93,13 +93,13 @@ export function createSSEParser(handle) {
         if(s.startsWith(':'))return;
         const i=s.indexOf(':'), field=i<0?s:s.slice(0,i);
         let value=i<0?'':s.slice(i+1);if(value.startsWith(' '))value=value.slice(1);
-        if(field==='data'){chars+=value.length;if(chars>1000000)throw Error('SSE 数据超限');data.push(value);}
+        if(field==='data'){chars+=value.length;if(chars>1000000)throw uiError('STREAM_LIMIT');data.push(value);}
         else if(field==='event')event=value;
         else if(field==='id'&&!value.includes('\0'))id=Number(value)||0;
     }
     return (chunk,final=false)=>{
         buffer+=chunk;
-        if(buffer.length>1000000)throw Error('SSE 数据超限');
+        if(buffer.length>1000000)throw uiError('STREAM_LIMIT');
         while(true){
             const index=buffer.search(/[\r\n]/);if(index<0)break;
             if(buffer[index]==='\r'&&index===buffer.length-1&&!final)break;
@@ -111,7 +111,7 @@ export function createSSEParser(handle) {
 }
 export async function streamEvents(run, handle, signal, after = 0) {
     const response=await request(`/runs/${run}/events?after=${after}`,{raw:true,signal});
-    if(!response.body)throw Error('浏览器没有收到可读取的数据流');
+    if(!response.body)throw uiError('STREAM_UNAVAILABLE');
     const reader=response.body.getReader(), decoder=new TextDecoder();let last=after;
     const parse=createSSEParser((event,payload,id)=>{
         if(id && id<=last)return;
@@ -188,10 +188,11 @@ export async function submitFeedback(payload) {
         let body = null;
         try { body = await response.json(); } catch { /* keep body null */ }
         const nested = body && (body.error || body.detail);
-        const message = typeof nested === 'string' ? nested : (nested && typeof nested === 'object' && nested.message) || `请求失败 (${response.status})`;
-        const err = new Error(message || `请求失败 (${response.status})`);
+        const rawMessage = typeof nested === 'string' ? nested : (nested && typeof nested === 'object' && nested.message) || '';
+        const err = new Error(translatedErrorMessage('HTTP_STATUS', response.status));
         err.status = response.status;
         err.body = body;
+        err.rawMessage = rawMessage;
         throw err;
     }
     return response.json();

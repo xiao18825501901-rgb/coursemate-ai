@@ -34,11 +34,11 @@ export class App extends React.Component {
                 }
                 else {
                     if (config.auth_mode === 'injected')
-                        throw new Error('DSH 需要接入当前项目已验证的认证桥');
+                        throw new Error(this.t('auth.injectedBridgeRequired'));
                     if (!window.Clerk) {
                         if (!config.clerk_publishable_key || !config.clerk_issuer)
-                            throw new Error('Clerk 前端配置未完成');
-                        await new Promise((resolve, reject) => { const s = document.createElement('script'); s.src = config.clerk_issuer.replace(/\/$/, '') + '/npm/@clerk/clerk-js@5/dist/clerk.browser.js'; s.crossOrigin = 'anonymous'; s.dataset.clerkPublishableKey = config.clerk_publishable_key; s.onload = resolve; s.onerror = () => reject(new Error('Clerk 加载失败')); document.head.appendChild(s); });
+                            throw new Error(this.t('auth.clerkNotConfigured'));
+                        await new Promise((resolve, reject) => { const s = document.createElement('script'); s.src = config.clerk_issuer.replace(/\/$/, '') + '/npm/@clerk/clerk-js@5/dist/clerk.browser.js'; s.crossOrigin = 'anonymous'; s.dataset.clerkPublishableKey = config.clerk_publishable_key; s.onload = resolve; s.onerror = () => reject(new Error(this.t('auth.clerkLoadFailed'))); document.head.appendChild(s); });
                     }
                     await window.Clerk.load();
                     setTokenGetter(() => window.Clerk.session?.getToken() || null);
@@ -113,7 +113,7 @@ export class App extends React.Component {
             await send('/me/preferences', { theme }, 'PUT');
             try { localStorage.setItem(this.themeKey(this.state.user), theme); } catch { }
         } catch (error) {
-            this.toast(`主题已临时切换；服务器保存失败：${error.message}`);
+            this.toast(this.t('dashboard.themeSaveFailed', { error: error.message }));
         }
     };
     async refresh() { try {

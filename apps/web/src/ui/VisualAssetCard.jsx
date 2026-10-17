@@ -1,5 +1,6 @@
 import React from 'react';
 import { request } from './api.js';
+import { defaultUiTranslate } from './UiLocale';
 
 export class VisualAssetCard extends React.Component {
     state = { url: '', error: '' };
@@ -27,12 +28,13 @@ export class VisualAssetCard extends React.Component {
     };
     render() {
         const { asset } = this.props;
+        const t = this.props.t || defaultUiTranslate;
         return <figure className="visual-asset-card">
             {this.state.error && <p className="visual-error">{this.state.error}</p>}
-            {!this.state.url && !this.state.error && <div className="visual-placeholder" aria-busy="true">正在读取视觉资源…</div>}
+            {!this.state.url && !this.state.error && <div className="visual-placeholder" aria-busy="true">{t('visual.loadingAsset')}</div>}
             {this.state.url && asset.mime_type.startsWith('image/') && <img src={this.state.url} alt={asset.alt_text}/>}
-            <figcaption><span>{asset.alt_text}</span><button type="button" onClick={this.download} disabled={!this.state.url}>下载</button></figcaption>
-            {asset.semantic_validation === 'LIMITED' && <small>生成图像为教学示意；文字与结构由系统单独校验。</small>}
+            <figcaption><span>{asset.alt_text}</span><button type="button" onClick={this.download} disabled={!this.state.url}>{t('visual.download')}</button></figcaption>
+            {asset.semantic_validation === 'LIMITED' && <small>{t('visual.limitedNotice')}</small>}
         </figure>;
     }
 }

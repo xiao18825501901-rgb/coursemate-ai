@@ -477,7 +477,7 @@ export class FeedbackForm extends React.Component {
 }
 export class Learn extends React.Component {
     static contextType = UiLocaleContext;
-    state = { attachments:{teach:[],problem:[]}, uploading:{teach:false,problem:false}, nodes: [], knowledgeBuild: null, expanded: false, hover: null, ratio: .5, fullscreen: false, mobile: 'teach', conv: { teach: null, problem: null }, messages: { teach: [], problem: [] }, inputs: { teach: '', problem: '' }, run: { teach: null, problem: null }, partial: { teach: '', problem: '' }, status: { teach: '', problem: '' }, activeNode: null, error: '', busy: { teach: false, problem: false }, thinking: { teach: false }, exercises: {}, practiceAnswers: {}, practiceBusy: {}, explanations: {}, windows: {}, pair: null, assessment: null, assessPicker: null, visualAssistance: { enabled: false, loading: true }, visualPreferenceBusy: false, visualAutoEligible: {} };
+    state = { attachments:{teach:[],problem:[]}, uploading:{teach:false,problem:false}, nodes: [], knowledgeBuild: null, expanded: false, hover: null, ratio: .5, fullscreen: false, mobile: 'teach', conv: { teach: null, problem: null }, messages: { teach: [], problem: [] }, inputs: { teach: '', problem: '' }, run: { teach: null, problem: null }, partial: { teach: '', problem: '' }, status: { teach: '', problem: '' }, statusKeys: { teach: null, problem: null }, activeNode: null, error: '', busy: { teach: false, problem: false }, thinking: { teach: false }, exercises: {}, practiceAnswers: {}, practiceBusy: {}, explanations: {}, windows: {}, pair: null, assessment: null, assessPicker: null, visualAssistance: { enabled: false, loading: true }, visualPreferenceBusy: false, visualAutoEligible: {} };
     translate(name, params = {}) { return (this.context?.t || defaultUiTranslate)(name, params); }
     controllers = {};
     explanationControllers = {};
@@ -539,14 +539,22 @@ export class Learn extends React.Component {
         const body = ['BLOCKED', 'FAILED'].includes(status) && build.message ? build.message : fallback;
         return <div className="empty-state"><Icon name="tree"/><h3>{title}</h3><p>{body}</p></div>;
     }
-    displayStatus(status) {
+    displayStatus(status, lane) {
         if (!status) return '';
+        const keyed = this.state.statusKeys?.[lane];
+        if (keyed?.name) return this.uiStatus(keyed.name, keyed.params || {});
         if (typeof status === 'object' && status.i18nKey) return this.translate(status.i18nKey, status.params || {});
         const legacy = { '正在输出中': 'workspace.outputStatus', '正在思考中': 'workspace.thinkingStatus' }[status];
         return legacy ? this.translate(legacy) : status;
     }
-    uiStatus(name, params = {}) { return { i18nKey: 'workspace.' + name, params }; }
-    setLaneUiStatus(lane, name, params = {}) { this.setLane('status', lane, { i18nKey: 'workspace.' + name, params }); }
+    uiStatus(name, params = {}) { return this.translate('workspace.' + name, params); }
+    setLaneUiStatus(lane, name, params = {}) {
+        if (this.unmounted) return;
+        this.setState(s => ({
+            status: { ...s.status, [lane]: this.uiStatus(name, params) },
+            statusKeys: { ...s.statusKeys, [lane]: { name, params } },
+        }));
+    }
     diag() { /* diagnostics removed after the round-93 investigation */ }
     async reconcile(lane, cid, rid, controller = null) {
         // Bounded, model-free reconciliation of one run against the server's canonical record.
@@ -610,8 +618,8 @@ export class Learn extends React.Component {
             this.setLane('run', lane, null);
             if (run && run.status === 'completed') {
                 const coverage = run.coverage;
-                const coverageLabel = coverage && coverage.status === 'submitted' ? (coverage.covered_items && JSON.parse(coverage.covered_items).length > 0 ? ' · 已计入覆盖' : ' · 覆盖待确认') : '';
-                this.setLane('status', lane, coverageLabel.trim());
+                const coverageLabel = coverage && coverage.status === 'submitted' ? (coverage.covered_items && JSON.parse(coverage.covered_items).length > 0 ? 'coverageCounted' : 'coveragePending') : null;
+                if (coverageLabel) this.setLaneUiStatus(lane, coverageLabel); else this.setLane('status', lane, '');
                 const latestAssistant = [...(saved.messages || [])].reverse().find(message => message.role === 'assistant');
                 if (latestAssistant && this.state.visualAssistance.enabled && this.props.config.visual_auto_enabled)
                     this.setState(state => ({ visualAutoEligible: { ...state.visualAutoEligible, [latestAssistant.id]: true } }));
@@ -622,7 +630,7 @@ export class Learn extends React.Component {
         }
         else {
             this.setLane('partial', lane, run ? run.partial_text : '');
-            this.setLane('status', lane, '正在输出中');
+            this.setLaneUiStatus(lane, 'outputStatus');
         }
         return true;
     }
@@ -640,10 +648,12 @@ export class Learn extends React.Component {
             return;
         this.setLane('busy', lane, false);
         this.setLane('run', lane, null);
-        this.setLane('status', lane, '这次回答写进了另一段对话；打开「历史对话」可以找回。');
+        this.setLaneUiStatus(lane, 'orphanedAnswer');
     }
     setLane(field, lane, value, callback) { if (this.unmounted)
-        return; this.setState(s => ({ [field]: { ...s[field], [lane]: value } }), callback); }
+        return; this.setState(s => field === 'status'
+            ? { status: { ...s.status, [lane]: value }, statusKeys: { ...s.statusKeys, [lane]: null } }
+            : { [field]: { ...s[field], [lane]: value } }, callback); }
     async saveLayout() { try {
         await send(`/courses/${this.props.course.id}/layout`, { ratio: this.state.ratio, teach_conversation: this.state.conv.teach, problem_conversation: this.state.conv.problem, active_node: this.state.activeNode }, 'PUT');
     }
@@ -690,7 +700,7 @@ export class Learn extends React.Component {
                     this.watch(lane, active.id, data.conversation.id, true);
                 }
                 else if (active && active.status === 'failed') {
-                    this.setLane('status', lane, `上次生成未完成：${active.error}`);
+                    this.setLaneUiStatus(lane, 'previousGenerationFailed', { error: active.error });
                     this.setLane('partial', lane, active.partial_text);
                 }
             }
@@ -717,10 +727,10 @@ export class Learn extends React.Component {
         this.watch(lane, active.id, id, true);
     }
     else if (active && active.status === 'failed') {
-        this.setLane('status', lane, `上次生成未完成：${active.error}`);
+        this.setLaneUiStatus(lane, 'previousGenerationFailed', { error: active.error });
         this.setLane('partial', lane, active.partial_text);
     } }
-    history() { this.props.modal('历史对话', <PairHistory course={this.props.course.id} toast={this.props.toast} closeModal={this.props.closeModal} onSelect={id => { this.props.closeModal(); this.restorePair(id); }} onDeleted={(id, teachConv, problemConv) => { if (teachConv === this.state.conv.teach || problemConv === this.state.conv.problem) {
+    history() { this.props.modal(this.translate('workspace.history'), <PairHistory course={this.props.course.id} toast={this.props.toast} closeModal={this.props.closeModal} onSelect={id => { this.props.closeModal(); this.restorePair(id); }} onDeleted={(id, teachConv, problemConv) => { if (teachConv === this.state.conv.teach || problemConv === this.state.conv.problem) {
         this.setState({ pair: null, conv: { teach: null, problem: null }, messages: { teach: [], problem: [] }, partial: { teach: '', problem: '' }, status: { teach: '', problem: '' }, run: { teach: null, problem: null }, busy: { teach: false, problem: false } });
     } }}/>); }
     async ensurePair() {
@@ -756,7 +766,7 @@ export class Learn extends React.Component {
         this.streamRetries[lane]=0;
         this.setLane('busy', lane, true);
         this.setLane('partial', lane, '');
-        this.setLane('status', lane, '正在思考中');
+        this.setLaneUiStatus(lane, 'thinkingStatus');
         try {
             let id = this.state.conv[lane];
             if (!id) {
@@ -819,10 +829,10 @@ export class Learn extends React.Component {
                         } });
                     } catch { /* Performance marks are diagnostics and never block the answer. */ }
                 });
-                this.setLane('status', lane, '正在输出中');
+                this.setLaneUiStatus(lane, 'outputStatus');
             }
             if (type === 'status')
-                this.setLane('status', lane, seenDelta ? '正在输出中' : (data.label || '正在思考中')); if (type === 'error')
+                this.setLane('status', lane, seenDelta ? this.uiStatus('outputStatus') : (data.label || this.uiStatus('thinkingStatus'))); if (type === 'error')
                 this.setLane('status', lane, data.message || (data.code + ' · ' + data.message)); }, controller.signal);
             if (this.state.conv[lane] === cid && !this.unmounted)
                 await this.reconcile(lane, cid, rid, controller);
@@ -839,13 +849,13 @@ export class Learn extends React.Component {
                 const attempts = this.streamRetries[lane] || 0;
                 if (attempts < 1) {
                     this.streamRetries[lane] = attempts + 1;
-                    this.setLane('status', lane, '连接中断，正在重新连接（不会重复调用模型）…');
+                    this.setLaneUiStatus(lane, 'reconnecting');
                     await this.watch(lane, rid, cid, true);
                     return;
                 }
                 const reconciled = await this.reconcile(lane, cid, rid, controller);
                 if (!reconciled) {
-                    this.setLane('status', lane, '连接中断。回答仍保存在服务器，可打开「历史对话」恢复，不会自动再次调用模型。');
+                    this.setLaneUiStatus(lane, 'disconnectedSaved');
                     this.setLane('busy', lane, false);
                 }
             }
@@ -870,7 +880,7 @@ export class Learn extends React.Component {
         const input=e.currentTarget, file=input.files[0];if(!file)return;
         this.setLane('uploading',lane,true);
         try{
-            if(this.state.attachments[lane].length>=4)throw Error('每次最多选择 4 个附件');
+            if(this.state.attachments[lane].length>=4)throw Error(this.translate('workspace.attachmentLimit', { count: 4 }));
             const data=new FormData();data.append('file',file);data.append('folder','我的题目');
             const saved=await request(`/courses/${this.props.course.id}/files`,{method:'POST',body:data});
             if(!this.state.attachments[lane].some(x=>x.id===saved.id))this.setLane('attachments',lane,[...this.state.attachments[lane],saved]);
@@ -885,7 +895,7 @@ export class Learn extends React.Component {
             this.currentPairId() === context.pairId && this.state.run.problem === rid;
     }
     async doExercise(explicitNode = null, cycleId = null, purpose = null) { const lane = 'problem'; if (this.state.busy.problem)
-        return; this.follow.problem = true; this.setLane('busy', lane, true); this.setLane('partial', lane, ''); this.setLane('status', lane, '正在出题…'); try {
+        return; this.follow.problem = true; this.setLane('busy', lane, true); this.setLane('partial', lane, ''); this.setLaneUiStatus(lane, 'questionGenerating'); try {
         const context = { courseId: this.props.course.id, pairId: this.currentPairId() };
         const run = await createExercise(context.courseId, explicitNode, context.pairId, cycleId, purpose);
         this.setLane('run', lane, run.id);
@@ -906,7 +916,7 @@ export class Learn extends React.Component {
             if (!this.isCurrentExerciseRun(rid, context)) return false;
             if (!terminal.includes(run.status)) {
                 this.setLane('partial', 'problem', run.partial_text || this.state.partial.problem);
-                this.setLane('status', 'problem', run.status === 'running' ? '题目仍在生成，正在恢复连接…' : (run.status_label || '正在准备题目…'));
+                this.setLaneUiStatus('problem', run.status === 'running' ? 'questionRecovering' : 'questionPreparing');
                 await new Promise(resolve => {
                     const timer = window.setTimeout(resolve, 1800);
                     controller.signal.addEventListener('abort', () => { window.clearTimeout(timer); resolve(); }, { once: true });
@@ -920,13 +930,13 @@ export class Learn extends React.Component {
                 this.setLane('messages', 'problem', Array.isArray(saved.messages) ? saved.messages : []);
             }
             this.setLane('partial', 'problem', run.status === 'completed' ? '' : (run.partial_text || ''));
-            this.setLane('status', 'problem', run.status === 'completed' ? '' : (run.error || (run.status === 'cancelled' ? '已停止生成' : '题目生成未完成')));
+            this.setLane('status', 'problem', run.status === 'completed' ? '' : (run.error || this.uiStatus(run.status === 'cancelled' ? 'generationStopped' : 'questionGenerationIncomplete')));
             this.setLane('busy', 'problem', false);
             this.setLane('run', 'problem', null);
             return true;
         }
         if (this.isCurrentExerciseRun(rid, context)) {
-            this.setLane('status', 'problem', '题目仍在服务器生成，可稍后打开历史对话恢复；系统不会重复提交。');
+            this.setLaneUiStatus('problem', 'questionStillRunning');
             this.setLane('busy', 'problem', false);
         }
         return false;
@@ -939,20 +949,20 @@ export class Learn extends React.Component {
             await streamEvents(rid, (type, data) => { if (!this.isCurrentExerciseRun(rid, context)) return; if (type === 'delta') {
                 seenDelta = true;
                 this.setState(s => ({ partial: { ...s.partial, problem: s.partial.problem + data.text } }));
-                this.setLane('status', 'problem', '正在输出中');
+                this.setLaneUiStatus('problem', 'outputStatus');
             }
             if (type === 'status')
-                this.setLane('status', 'problem', seenDelta ? '正在输出中' : (data.label || '正在思考中')); if (type === 'error')
+                this.setLane('status', 'problem', seenDelta ? this.uiStatus('outputStatus') : (data.label || this.uiStatus('thinkingStatus'))); if (type === 'error')
                 this.setLane('status', 'problem', data.message || (data.code + ' · ' + data.message)); }, controller.signal);
             await this.reconcileExercise(rid, context, controller);
         }
         catch (e) {
             if (e.name !== 'AbortError') {
-                this.setLane('status', 'problem', '连接中断，正在读取同一题目任务（不会重复调用模型）…');
+                this.setLaneUiStatus('problem', 'questionReconnect');
                 try { await this.reconcileExercise(rid, context, controller); }
                 catch {
                     if (this.isCurrentExerciseRun(rid, context)) {
-                        this.setLane('status', 'problem', '暂时无法读取题目状态；原任务和诊断记录已保留，不会自动重发。');
+                        this.setLaneUiStatus('problem', 'questionStatusUnavailable');
                         this.setLane('busy', 'problem', false);
                     }
                 }
@@ -973,7 +983,7 @@ export class Learn extends React.Component {
     }
     async submitPracticeAnswer(exerciseId, base) { if (this.state.practiceBusy[exerciseId]) return;
         const answer = (this.state.practiceAnswers[exerciseId] || '').trim();
-        if (!answer) { this.props.toast('请先写下你的作答'); return; }
+        if (!answer) { this.props.toast(this.translate('workspace.practiceAnswerRequired')); return; }
         this.setPracticeBusy(exerciseId, true); try {
             const attempt = await submitPracticeAttempt(exerciseId, answer);
             this.mergeExercise(exerciseId, base, { latest_attempt: attempt });
@@ -1116,7 +1126,7 @@ export class Learn extends React.Component {
             this.setState(s => ({ explanations: { ...s.explanations, [key]: { ...(s.explanations[key] || {}), status: 'generating', partial: ((s.explanations[key] || {}).partial || '') + data.text } } })); if (type === 'error')
             this.setState(s => ({ explanations: { ...s.explanations, [key]: { ...(s.explanations[key] || {}), status: 'error', error: data.message || data.code } } })); }, controller.signal).then(() => { if (!this.unmounted)
             this.refreshExplanation(key); }).catch(e => { if (e.name !== 'AbortError' && !this.unmounted)
-            this.setState(s => ({ explanations: { ...s.explanations, [key]: { ...(s.explanations[key] || {}), status: 'error', error: '连接中断' } } })); });
+            this.setState(s => ({ explanations: { ...s.explanations, [key]: { ...(s.explanations[key] || {}), status: 'error', error: this.translate('workspace.connectionInterrupted') } } })); });
     }
     sendExplanationFollowUp(key, text) { const exp = this.state.explanations[key]; if (!exp || !text || !text.trim())
         return; const t = text.trim(); this.setState(s => ({ explanations: { ...s.explanations, [key]: { ...(s.explanations[key] || {}), status: 'generating', partial: '', error: '' } } })); (async () => { try {
@@ -1188,22 +1198,22 @@ export class Learn extends React.Component {
         const rows = await request(`/courses/${this.props.course.id}/files`);
         const f = rows.find(x => x.id === c.document_id);
         if (!f)
-            throw new Error('原文件不存在或不可访问');
+            throw new Error(this.translate('workspace.sourceUnavailable'));
         this.props.modal(f.name, <Preview course={this.props.course} file={f} toast={this.props.toast}/>);
     }
     catch (e) {
         this.props.toast(e.message);
     } }
-    reportProblem() { const all = [...this.state.messages.teach, ...this.state.messages.problem]; const lastUser = all.filter(m => m.role === 'user').pop(); const lastAnswer = all.filter(m => m.role === 'assistant').pop(); this.props.modal('报告问题', <FeedbackForm course={this.props.course} config={this.props.config} lastMessage={lastUser} lastAnswer={lastAnswer} runId={this.state.run?.teach || this.state.run?.problem || null} onDone={() => { this.props.closeModal(); this.props.toast('已收到你的问题报告，我们会尽快查看。'); }}/>); }
+    reportProblem() { const all = [...this.state.messages.teach, ...this.state.messages.problem]; const lastUser = all.filter(m => m.role === 'user').pop(); const lastAnswer = all.filter(m => m.role === 'assistant').pop(); this.props.modal(this.translate('workspace.reportIssue'), <FeedbackForm course={this.props.course} config={this.props.config} lastMessage={lastUser} lastAnswer={lastAnswer} runId={this.state.run?.teach || this.state.run?.problem || null} onDone={() => { this.props.closeModal(); this.props.toast(this.translate('feedbackReport.received')); }}/>); }
     requestVisualAssistance = (afterEnable = null) => {
         if (this.state.visualAssistance.enabled) { afterEnable?.(); return; }
-        this.props.modal('启用图片/视频辅助教学？', <VisualAssistanceConsent
+        this.props.modal(this.translate('visual.consentTitle'), <VisualAssistanceConsent
             onCancel={this.props.closeModal}
             onConfirm={async () => {
                 const preference = await setVisualAssistance(this.props.course.id, true);
                 if (this.unmounted) return;
                 this.props.closeModal();
-                this.props.toast('图片/视频辅助已启用');
+                this.props.toast(this.translate('workspace.visualAssistanceEnabled'));
                 // Run the pending action only after the ON state has reached
                 // VisualControls; otherwise it still sees stale OFF props.
                 this.setState(
@@ -1218,7 +1228,7 @@ export class Learn extends React.Component {
         try {
             const preference = await setVisualAssistance(this.props.course.id, false);
             if (!this.unmounted) this.setState({ visualAssistance: { ...preference, loading: false } });
-            this.props.toast('图片/视频辅助已关闭');
+            this.props.toast(this.translate('workspace.visualAssistanceDisabled'));
         } catch (error) { this.props.toast(error.message); }
         finally { if (!this.unmounted) this.setState({ visualPreferenceBusy: false }); }
     };
@@ -1234,10 +1244,10 @@ export class Learn extends React.Component {
                 {messages.length === 0 && !this.state.partial[lane] ? <div className="pane-welcome"><div className="welcome-symbol"><Icon name={isTeach ? 'book' : 'edit'}/></div><h2>{this.translate(isTeach ? 'workspace.teachingWelcomeTitle' : 'workspace.problemWelcomeTitle')}</h2><p>{this.translate(isTeach ? 'workspace.teachingWelcomeBody' : 'workspace.problemWelcomeBody')}</p><div className="suggestion-stack">{(isTeach ? [(this.props.course.id === 'cs3481' ? '请用中文解释 DBSCAN 的核心点' : '请用中文介绍这门课的核心知识'), '我想先看看这门课的知识地图'] : [(this.props.course.id === 'cs3481' ? '讲解 Tutorial_02_Clustering.pdf 的 Question 2' : '请结合我上传的题目说明解题步骤'), '解题时怎样判断应该用哪种方法？']).map(text => <button key={text} onClick={() => this.ask(lane, text)}>{text}<Icon name="arrow"/></button>)}</div></div> : messages.map(m => {
                     const exercise = this.state.exercises[m.exercise] || m.exercise_state;
                     const visibleMessage = m.exercise && !exercise?.revealed ? {...m, steps: []} : m;
-                    return <article className={'chat-message-new ' + m.role} key={m.id}><div className="message-byline">{m.role === 'user' ? this.props.user.name : BRAND.name}</div>{m.attachments?.length > 0 && <div className="attachment-chips">{m.attachments.map(f => <span key={f.id}><Icon name="file"/>{f.name}</span>)}</div>}<RichText text={m.text} message={visibleMessage}/>{m.role === 'assistant' && m.exercise && this.renderExercise(m)}{m.role === 'assistant' && <VisualControls locale={this.context.locale} t={this.context.t} videoEnabled={this.state.visualAssistance.video_enabled === true} enabled={!!this.props.config.visual_engine_enabled} autoEnabled={!!this.state.visualAutoEligible[m.id]} assistanceEnabled={!!this.state.visualAssistance.enabled} requestAssistance={this.requestVisualAssistance} courseId={this.props.course.id} pairId={this.state.pair} message={m} toast={this.props.toast}/>} {m.citations?.length > 0 && <div className="citation-row">{m.citations.map(c => { const verdict = citationVerdict(c); return <button key={c.id} title={verdict ? verdict.note : undefined} className={verdict ? 'citation-flagged citation-' + verdict.flag : ''} onClick={() => this.source(c)}><Icon name="file"/>{c.name} · p.{c.page}{verdict && <span className="citation-warning" role="img" aria-label={this.translate(verdict.flag === 'contradicted' ? 'workspace.citationContradicted' : 'workspace.citationUnverified')}><Icon name="help"/></span>}</button>; })}</div>}</article>;
+                    return <article className={'chat-message-new ' + m.role} key={m.id}><div className="message-byline">{m.role === 'user' ? this.props.user.name : BRAND.name}</div>{m.attachments?.length > 0 && <div className="attachment-chips">{m.attachments.map(f => <span key={f.id}><Icon name="file"/>{f.name}</span>)}</div>}<RichText text={m.text} message={visibleMessage}/>{m.role === 'assistant' && m.exercise && this.renderExercise(m)}{m.role === 'assistant' && <VisualControls locale={this.context.locale} t={this.context.t} videoEnabled={this.state.visualAssistance.video_enabled === true} enabled={!!this.props.config.visual_engine_enabled} autoEnabled={!!this.state.visualAutoEligible[m.id]} assistanceEnabled={!!this.state.visualAssistance.enabled} requestAssistance={this.requestVisualAssistance} courseId={this.props.course.id} pairId={this.state.pair} message={m} toast={this.props.toast}/>} {m.citations?.length > 0 && <div className="citation-row">{m.citations.map(c => { const verdict = citationVerdict(c, this.context.t); return <button key={c.id} title={verdict ? verdict.note : undefined} className={verdict ? 'citation-flagged citation-' + verdict.flag : ''} onClick={() => this.source(c)}><Icon name="file"/>{c.name} · p.{c.page}{verdict && <span className="citation-warning" role="img" aria-label={this.translate(verdict.flag === 'contradicted' ? 'workspace.citationContradicted' : 'workspace.citationUnverified')}><Icon name="help"/></span>}</button>; })}</div>}</article>;
                 })}{this.state.partial[lane] && <article className="chat-message-new assistant"><div className="message-byline">{BRAND.name} <span>{this.translate('workspace.partialOutput')}</span></div><RichText text={this.state.partial[lane]}/></article>}
             </div>
-            <footer className="pane-footer"><div className="generation-status" role="status">{this.displayStatus(this.state.status[lane])}</div>{this.state.attachments[lane].length > 0 && <div className="attachment-chips">{this.state.attachments[lane].map(f => <span key={f.id}><Icon name="file"/>{f.name}<button title={this.translate('workspace.removeAttachment')} onClick={() => this.setLane('attachments', lane, this.state.attachments[lane].filter(x => x.id !== f.id))}>×</button></span>)}</div>}<form className="chat-composer" onSubmit={e => { e.preventDefault(); this.ask(lane); }}><textarea aria-label={this.translate(isTeach ? 'workspace.teachingInput' : 'workspace.problemInput')} placeholder={this.translate(isTeach ? 'workspace.teachingPlaceholder' : 'workspace.problemPlaceholder')} value={this.state.inputs[lane]} maxLength="6000" onChange={e => this.setLane('inputs', lane, e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); this.ask(lane); } }}/><div className="composer-bottom"><div className="row"><label className="attach-button" role="button" tabIndex={this.state.busy[lane] || this.state.uploading[lane] ? -1 : 0} aria-label={this.translate(isTeach ? 'workspace.teachingAttach' : 'workspace.problemAttach')} title={this.translate('workspace.attach')} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.querySelector('input')?.click(); } }}><Icon name="file"/><input type="file" hidden aria-label={this.translate(isTeach ? 'workspace.teachingAttachment' : 'workspace.problemAttachment')} accept=".pdf,.txt,.md,.csv,.ipynb,.png,.jpg,.jpeg,.webp,.docx,.pptx" disabled={this.state.busy[lane] || this.state.uploading[lane]} onChange={e => this.attach(lane, e)}/></label>{this.state.uploading[lane] && <span className="helper-note">{this.translate('workspace.uploading')}</span>}{isTeach && <span className="thinking-control"><span className="thinking-label">{this.translate('workspace.thinking')}</span><button type="button" className={'thinking-circle' + (this.state.thinking.teach ? ' on' : '')} aria-pressed={this.state.thinking.teach} aria-label={this.translate('workspace.thinkingToggle')} onClick={() => this.setState(s => ({thinking: {...s.thinking, teach: !s.thinking.teach}}))}><span className="thinking-dot"/></button></span>}</div><div className="row" style={{gap: 8}}>{!isTeach && <button type="button" className="do-exercise-btn" onClick={() => this.doExercise()} disabled={this.state.busy.problem || this.state.uploading.problem}>{this.translate('workspace.doOne')}</button>}{this.state.busy[lane] ? <IconButton name="stop" title={this.translate('workspace.stop')} onClick={() => this.stop(lane)}/> : <button className="send-button" aria-label={this.translate(isTeach ? 'workspace.sendTeaching' : 'workspace.sendProblem')} disabled={!this.state.inputs[lane].trim() || this.state.uploading[lane]}><Icon name="send"/></button>}</div></div></form></footer>
+            <footer className="pane-footer"><div className="generation-status" role="status">{this.displayStatus(this.state.status[lane], lane)}</div>{this.state.attachments[lane].length > 0 && <div className="attachment-chips">{this.state.attachments[lane].map(f => <span key={f.id}><Icon name="file"/>{f.name}<button title={this.translate('workspace.removeAttachment')} onClick={() => this.setLane('attachments', lane, this.state.attachments[lane].filter(x => x.id !== f.id))}>×</button></span>)}</div>}<form className="chat-composer" onSubmit={e => { e.preventDefault(); this.ask(lane); }}><textarea aria-label={this.translate(isTeach ? 'workspace.teachingInput' : 'workspace.problemInput')} placeholder={this.translate(isTeach ? 'workspace.teachingPlaceholder' : 'workspace.problemPlaceholder')} value={this.state.inputs[lane]} maxLength="6000" onChange={e => this.setLane('inputs', lane, e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); this.ask(lane); } }}/><div className="composer-bottom"><div className="row"><label className="attach-button" role="button" tabIndex={this.state.busy[lane] || this.state.uploading[lane] ? -1 : 0} aria-label={this.translate(isTeach ? 'workspace.teachingAttach' : 'workspace.problemAttach')} title={this.translate('workspace.attach')} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.querySelector('input')?.click(); } }}><Icon name="file"/><input type="file" hidden aria-label={this.translate(isTeach ? 'workspace.teachingAttachment' : 'workspace.problemAttachment')} accept=".pdf,.txt,.md,.csv,.ipynb,.png,.jpg,.jpeg,.webp,.docx,.pptx" disabled={this.state.busy[lane] || this.state.uploading[lane]} onChange={e => this.attach(lane, e)}/></label>{this.state.uploading[lane] && <span className="helper-note">{this.translate('workspace.uploading')}</span>}{isTeach && <span className="thinking-control"><span className="thinking-label">{this.translate('workspace.thinking')}</span><button type="button" className={'thinking-circle' + (this.state.thinking.teach ? ' on' : '')} aria-pressed={this.state.thinking.teach} aria-label={this.translate('workspace.thinkingToggle')} onClick={() => this.setState(s => ({thinking: {...s.thinking, teach: !s.thinking.teach}}))}><span className="thinking-dot"/></button></span>}</div><div className="row" style={{gap: 8}}>{!isTeach && <button type="button" className="do-exercise-btn" onClick={() => this.doExercise()} disabled={this.state.busy.problem || this.state.uploading.problem}>{this.translate('workspace.doOne')}</button>}{this.state.busy[lane] ? <IconButton name="stop" title={this.translate('workspace.stop')} onClick={() => this.stop(lane)}/> : <button className="send-button" aria-label={this.translate(isTeach ? 'workspace.sendTeaching' : 'workspace.sendProblem')} disabled={!this.state.inputs[lane].trim() || this.state.uploading[lane]}><Icon name="send"/></button>}</div></div></form></footer>
         </section>;
     }
     render() { return <div className={'learn-new ' + (this.state.fullscreen ? 'focus-mode' : '')}><button className="knowledge-strip" onClick={() => this.setState({ expanded: !this.state.expanded })}><span className="row"><Icon name="tree"/><strong>{this.translate('knowledge.title')}</strong><small>{this.translate('knowledge.nodeSummary', { count: this.state.nodes.length })}</small></span><Icon name={this.state.expanded ? 'up' : 'down'}/></button><div className="workspace-new"><header className="workspace-toolbar"><IconButton name={this.state.fullscreen ? 'collapse' : 'expand'} title={this.context.t(this.state.fullscreen ? 'workspace.exitFullscreen' : 'workspace.fullscreen')} onClick={() => this.setState({ fullscreen: !this.state.fullscreen })}/><span className="muted small">{this.props.course.code} · {this.context.t('workspace.title')}</span>{this.props.config.visual_engine_enabled && <VisualAssistanceToggle enabled={!!this.state.visualAssistance.enabled} busy={this.state.visualPreferenceBusy || this.state.visualAssistance.loading} onEnableRequest={() => this.requestVisualAssistance()} onDisable={this.disableVisualAssistance}/>}<button type="button" className="btn small" onClick={() => this.reportProblem()}><Icon name="help"/>{this.context.t('workspace.reportIssue')}</button><span className="model-label">{this.translate(this.props.config.provider_mode === 'disabled' ? 'workspace.serviceDisconnected' : 'workspace.serviceConnected')}</span></header><div className="mobile-pane-tabs"><button className={this.state.mobile === 'teach' ? 'active' : ''} onClick={() => this.setState({ mobile: 'teach' })}>{this.context.t('workspace.teaching')}</button><button className={this.state.mobile === 'problem' ? 'active' : ''} onClick={() => this.setState({ mobile: 'problem' })}>{this.context.t('workspace.problem')}</button></div>{this.state.error && <p className="error-text">{this.state.error}</p>}<div className={'workspace-columns '+(this.state.resizing?'is-resizing':'')} ref={el => this.workspace = el} style={{ gridTemplateColumns: `minmax(0,${this.state.ratio}fr) 9px minmax(0,${1 - this.state.ratio}fr)` }}>{this.renderPane('teach')}<div className="pane-divider" role="separator" aria-label={this.translate('workspace.resizePanes')} aria-orientation="vertical" aria-valuemin="25" aria-valuemax="75" aria-valuenow={Math.round(this.state.ratio * 100)} tabIndex="0" onMouseDown={e => this.drag(e)} onTouchStart={e=>this.drag(e)} onKeyDown={e => { if (['ArrowLeft', 'ArrowRight'].includes(e.key)) {
@@ -1293,7 +1303,6 @@ function defaultTaskForm(questionType) {
     return { MCQ_SINGLE: 'concept', NUMERIC: 'calculation', SHORT_TEXT: 'definition', EXPLANATION: 'analysis', CODE: 'code' }[questionType] || 'analysis';
 }
 
-const ASSESSMENT_TYPE_LABEL = { MCQ_SINGLE: '单项选择', NUMERIC: '数值计算', SHORT_TEXT: '简短回答', EXPLANATION: '分析与解释', CODE: '代码应用' };
 
 function validTaskForms(questionType, forms) {
     if (questionType === 'CODE')
@@ -1328,6 +1337,8 @@ function assessmentDraftFromAnswers(questions, answers) {
     return questions.map((question, index) => `${index + 1}. ${answers[question.id] || ''}`).join('\n');
 }
 export class AssessmentWorkspace extends React.Component {
+    static contextType = UiLocaleContext;
+    translate(name, params = {}) { return (this.context?.t || defaultUiTranslate)('assessment.' + name, params); }
     state = { view: null, summary: null, setup: null, slots: [], configurationId: null, busy: false, error: '', preparing: null, answers: {}, attachments: [], windows: {}, explanations: {} };
     assessmentIntentId = 'assessment-intent-' + key();
     winZ = 0;
@@ -1442,7 +1453,7 @@ export class AssessmentWorkspace extends React.Component {
     async saveDraft() { const view = this.state.view; if (!view)
         return; try {
         await saveAssessmentDraft(this.props.course.id, view.id, { unified_answer: assessmentDraftFromAnswers(view.questions || [], this.state.answers), attachments: this.state.attachments.map(a => ({ id: a.id, kind: 'image' })) });
-        this.props.toast('草稿已保存。');
+        this.props.toast(this.translate('workspace.draftSaved'));
     }
     catch (e) {
         this.props.toast(e.message);
@@ -1450,7 +1461,7 @@ export class AssessmentWorkspace extends React.Component {
     async submit() { const view = this.state.view; if (!view || view.status !== 'IN_PROGRESS')
         return; const mappedAnswers = (view.questions || []).map(question => ({ blueprint_item_id: question.id, answer: this.state.answers[question.id] || '' }));
         const unanswered = mappedAnswers.filter(answer => !answer.answer.trim());
-        if (unanswered.length && !this.state.attachments.length && !window.confirm(`还有 ${unanswered.length} 题未作答，确认提交？`))
+        if (unanswered.length && !this.state.attachments.length && !window.confirm(this.translate('workspace.unansweredConfirm', { count: unanswered.length })))
             return; this.setState({ busy: true, error: '' }); try {
         const unified = assessmentDraftFromAnswers(view.questions || [], this.state.answers);
         await saveAssessmentDraft(this.props.course.id, view.id, { unified_answer: unified, attachments: this.state.attachments.map(a => ({ id: a.id, kind: 'image' })) });
@@ -1466,7 +1477,7 @@ export class AssessmentWorkspace extends React.Component {
         this.setState({ busy: false });
     } }
     async abandon() { const view = this.state.view; if (!view)
-        return; if (!window.confirm('放弃本次测评？未提交的答案将按草稿保留。'))
+        return; if (!window.confirm(this.translate('workspace.abandonConfirm')))
         return; await this.saveDraft(); try {
         await abandonAssessment(this.props.course.id, view.id);
         this.setState({ view: null, preparing: null });
@@ -1488,20 +1499,20 @@ export class AssessmentWorkspace extends React.Component {
     raiseExplanation(key) { const z = ++this.winZ; this.setState(s => ({ windows: { ...s.windows, [key]: { ...(s.windows[key] || {}), z } } })); }
     async ensureExplanation(key, blueprintItemId, stepId) { try {
         const created = await createAssessmentExplanation(this.props.course.id, this.state.view.id, blueprintItemId, stepId);
-        this.setState(s => ({ explanations: { ...s.explanations, [key]: { status: 'completed', text: created.content?.text || '暂无详解', messages: [] } } }));
+        this.setState(s => ({ explanations: { ...s.explanations, [key]: { status: 'completed', text: created.content?.text || this.translate('workspace.noExplanation'), messages: [] } } }));
     }
     catch (e) {
         this.setState(s => ({ explanations: { ...s.explanations, [key]: { status: 'error', error: e.message } } }));
     } }
     renderWindows() { const keys = Object.keys(this.state.windows); if (!keys.length)
-        return null; return keys.map(key => <ExplanationWindow key={key} win={this.state.windows[key]} exp={this.state.explanations[key]} onClose={() => this.closeExplanation(key)} onRaise={() => this.raiseExplanation(key)} onFollowUp={() => this.props.toast('测评详解暂不支持追问。')} onCancel={() => { }}/>); }
+        return null; return keys.map(key => <ExplanationWindow key={key} win={this.state.windows[key]} exp={this.state.explanations[key]} onClose={() => this.closeExplanation(key)} onRaise={() => this.raiseExplanation(key)} onFollowUp={() => this.props.toast(this.translate('workspace.noFollowUp'))} onCancel={() => { }}/>); }
     statusLabel() { const { view, preparing } = this.state; if (preparing)
-        return preparing.status === 'READY' ? '题库已就绪' : preparing.status === 'BLOCKED' ? '题库准备受阻' : preparing.status === 'CANCELLED' ? '已取消' : '正在准备题库'; if (!view)
-            return '未开始'; if (view.status === 'IN_PROGRESS')
-            return '测评进行中'; if (view.status === 'SUBMITTED')
-            return '待复核'; if (view.status === 'GRADED')
-            return '已评阅'; return view.status; }
-    renderPreparing() { const p = this.state.preparing; const prepared = p.prepared_questions ?? p.eligible_families ?? 0; const total = p.question_count || this.state.slots.length; const stage = p.current_stage === 'RESOLVING_EVIDENCE' ? `正在读取第 ${p.current_ordinal || prepared + 1} 题课程证据` : p.current_stage === 'AUTHOR_AND_BLIND_SOLVE' ? `正在检查第 ${p.current_ordinal || prepared + 1} 题参考解` : '正在准备本节测评'; return <div className="assessment-preparing"><p>{p.status === 'BLOCKED' ? (p.error_message || '测评准备暂时受阻。') : stage}</p><p>已准备 {prepared}/{total} 题</p>{p.status === 'BLOCKED' && <p className="error-text">已完成的兼容槽位会保留，重试只补缺项。{p.diagnostic_id ? ` 诊断编号：${p.diagnostic_id}` : ''}</p>}<div className="row" style={{ marginTop: 12 }}>{p.status === 'BLOCKED' && <button className="btn" disabled={this.state.busy || p.error_code === 'MODEL_REQUEST_UNCERTAIN'} onClick={() => this.retryPreparation()}>继续准备</button>}{p.status === 'PREPARING' && <button className="btn" onClick={() => this.cancelPreparation()}>取消准备</button>}</div></div>; }
+        return this.translate(`workspace.${preparing.status === 'READY' ? 'ready' : preparing.status === 'BLOCKED' ? 'blocked' : preparing.status === 'CANCELLED' ? 'cancelled' : 'preparing'}`); if (!view)
+            return this.translate('workspace.notStarted'); if (view.status === 'IN_PROGRESS')
+            return this.translate('workspace.inProgress'); if (view.status === 'SUBMITTED')
+            return this.translate('workspace.submitted'); if (view.status === 'GRADED')
+            return this.translate('workspace.graded'); return view.status; }
+    renderPreparing() { const p = this.state.preparing; const prepared = p.prepared_questions ?? p.eligible_families ?? 0; const total = p.question_count || this.state.slots.length; const number = p.current_ordinal || prepared + 1; const stage = p.current_stage === 'RESOLVING_EVIDENCE' ? this.translate('workspace.evidenceStage', { number }) : p.current_stage === 'AUTHOR_AND_BLIND_SOLVE' ? this.translate('workspace.solverStage', { number }) : this.translate('workspace.preparingSection'); return <div className="assessment-preparing"><p>{p.status === 'BLOCKED' ? (p.error_message || this.translate('workspace.blockedMessage')) : stage}</p><p>{this.translate('workspace.preparedProgress', { current: prepared, total })}</p>{p.status === 'BLOCKED' && <p className="error-text">{this.translate('workspace.retained')}{p.diagnostic_id ? ` ${this.translate('workspace.diagnostic', { id: p.diagnostic_id })}` : ''}</p>}<div className="row" style={{ marginTop: 12 }}>{p.status === 'BLOCKED' && <button className="btn" disabled={this.state.busy || p.error_code === 'MODEL_REQUEST_UNCERTAIN'} onClick={() => this.retryPreparation()}>{this.translate('workspace.continuePreparation')}</button>}{p.status === 'PREPARING' && <button className="btn" onClick={() => this.cancelPreparation()}>{this.translate('workspace.cancelPreparation')}</button>}</div></div>; }
     changeSlot(index, questionType) { this.setState(state => ({ slots: state.slots.map((slot, current) => current === index ? { ...slot, question_type: questionType, task_form: defaultTaskForm(questionType) } : slot), configurationId: null })); }
     changeTaskForm(index, taskForm) { this.setState(state => ({ slots: state.slots.map((slot, current) => current === index ? { ...slot, task_form: taskForm } : slot), configurationId: null })); }
     addSlot() { const setup = this.state.setup; if (!setup || this.state.slots.length >= setup.maximum_questions)
@@ -1514,15 +1525,17 @@ export class AssessmentWorkspace extends React.Component {
     removeSlot(index) { if (!this.canRemoveSlot(index))
         return; this.setState(state => ({ slots: state.slots.filter((_, current) => current !== index), configurationId: null })); }
     renderSetup() { const { setup, slots } = this.state; if (!setup)
-        return <div className="assessment-start"><p>正在加载测评配置…</p></div>; if (setup.policy_version === 'cj.assessment.points.v1' && setup.status !== 'READY')
-        return <div className="assessment-start"><p>当前课程来源尚未准备好可测考点。</p><p className="helper-note">系统不会把尚未完成审查误报为 0 个考点，也不会创建空试卷。</p></div>; const marks = configuredAssessmentMarks(slots, setup.policy_version); return <div className="assessment-setup"><div className="assessment-setup-intro"><h2>配置本次测评</h2><p>{this.props.course.code} · {this.props.node.title}</p><p className="helper-note">只配置题数、题型和能力形式；确认前不会生成、预取或显示任何具体题目。最少 {setup.minimum_questions} 题，总分 100。</p></div><div className="assessment-slot-list">{slots.map((slot, index) => { const point = (setup.points || []).find(item => item.point_id === slot.primary_point_id); const types = point ? (setup.supported_types || []).filter(type => point.allowed_forms.includes(type.id)) : (setup.supported_types || []); const forms = validTaskForms(slot.question_type, setup.task_forms || []); return <div className="assessment-slot-row" key={slot.slot_id}><strong>第 {index + 1} 题</strong><label><span>题型</span><select aria-label={`第 ${index + 1} 题题型`} value={slot.question_type} onChange={event => this.changeSlot(index, event.target.value)}>{types.map(type => <option key={type.id} value={type.id}>{type.label}</option>)}</select></label><label><span>能力形式</span><select aria-label={`第 ${index + 1} 题能力形式`} value={slot.task_form} onChange={event => this.changeTaskForm(index, event.target.value)}>{forms.map(form => <option key={form.id} value={form.id}>{form.label}</option>)}</select></label><span className="assessment-slot-marks">{marks[index].toFixed(2)} 分</span><button type="button" className="icon-btn" aria-label={`删除第 ${index + 1} 题`} disabled={!this.canRemoveSlot(index)} onClick={() => this.removeSlot(index)}>−</button></div>; })}</div><div className="assessment-setup-actions"><button type="button" className="btn" disabled={slots.length >= setup.maximum_questions} onClick={() => this.addSlot()}>添加题目</button><span className="helper-note">共 {slots.length} 题 · 100.00 分</span><button type="button" className="btn primary" disabled={this.state.busy} onClick={() => this.start()}>{this.state.busy ? '正在冻结配置…' : '确认配置并开始测评'}</button></div></div>; }
-    renderQuestion(q, i, editable = false) { const value = this.state.answers[q.id] || ''; const prompt = assessmentPromptWithoutRepeatedOptions(q.prompt, q.options); return <article className="assessment-question" key={q.id}><header><strong>第 {i + 1} 题</strong><small>{ASSESSMENT_TYPE_LABEL[q.question_type] || q.question_type}{q.marks ? ' · ' + q.marks + ' 分' : ''}{q.verification_method === 'AI_REVIEWED' ? ' · AI参考自测' : ''}</small></header><p className="assessment-prompt">{prompt}</p>{q.options && q.options.length ? <div className="assessment-options">{q.options.map((option, j) => editable ? <label key={j} className={'assessment-option ' + (value === String(j) ? 'selected' : '')}><input type="radio" name={'assessment-' + q.id} value={j} checked={value === String(j)} aria-label={`第 ${i + 1} 题选项 ${j + 1}：${option}`} onChange={e => this.setState(s => ({ answers: { ...s.answers, [q.id]: e.target.value } }))}/><span>{option}</span></label> : <span key={j} className="assessment-option-readonly">{option}</span>)}</div> : null}{editable && (!q.options || !q.options.length) ? <textarea aria-label={`第 ${i + 1} 题答案`} value={value} maxLength="12000" placeholder="填写本题答案…" onChange={e => this.setState(s => ({ answers: { ...s.answers, [q.id]: e.target.value } }))}/> : null}</article>; }
+        return <div className="assessment-start"><p>{this.translate('workspace.setupLoading')}</p></div>; if (setup.policy_version === 'cj.assessment.points.v1' && setup.status !== 'READY')
+        return <div className="assessment-start"><p>{this.translate('pointsNotReady')}</p><p className="helper-note">{this.translate('pointQualificationRequired')}</p></div>; const marks = configuredAssessmentMarks(slots, setup.policy_version); return <div className="assessment-setup"><div className="assessment-setup-intro"><h2>{this.translate('setupTitle')}</h2><p>{this.props.course.code} · {this.props.node.title}</p><p className="helper-note">{this.translate('workspace.legacySetupHint', { minimum: setup.minimum_questions })}</p></div><div className="assessment-slot-list">{slots.map((slot, index) => { const point = (setup.points || []).find(item => item.point_id === slot.primary_point_id); const types = point ? (setup.supported_types || []).filter(type => point.allowed_forms.includes(type.id)) : (setup.supported_types || []); const forms = validTaskForms(slot.question_type, setup.task_forms || []); return <div className="assessment-slot-row" key={slot.slot_id}><strong>{this.translate('questionOrdinal', { number: index + 1 })}</strong><label><span>{this.translate('form')}</span><select aria-label={this.translate('workspace.questionTypeAria', { number: index + 1 })} value={slot.question_type} onChange={event => this.changeSlot(index, event.target.value)}>{types.map(type => <option key={type.id} value={type.id}>{this.translate(`workspace.types.${type.id}`) || type.label}</option>)}</select></label><label><span>{this.translate('ability')}</span><select aria-label={this.translate('workspace.skillAria', { number: index + 1 })} value={slot.task_form} onChange={event => this.changeTaskForm(index, event.target.value)}>{forms.map(form => <option key={form.id} value={form.id}>{this.translate(`taskForm.${form.id}`) || form.label}</option>)}</select></label><span className="assessment-slot-marks">{this.translate('marks', { marks: marks[index].toFixed(2) })}</span><button type="button" className="icon-btn" aria-label={this.translate('deleteQuestion', { number: index + 1 })} disabled={!this.canRemoveSlot(index)} onClick={() => this.removeSlot(index)}>−</button></div>; })}</div><div className="assessment-setup-actions"><button type="button" className="btn" disabled={slots.length >= setup.maximum_questions} onClick={() => this.addSlot()}>{this.translate('workspace.addQuestion')}</button><span className="helper-note">{this.translate('workspace.totalQuestions', { count: slots.length })}</span><button type="button" className="btn primary" disabled={this.state.busy} onClick={() => this.start()}>{this.translate(this.state.busy ? 'workspace.freezing' : 'confirmStart')}</button></div></div>; }
+    renderQuestion(q, i, editable = false) { const value = this.state.answers[q.id] || ''; const prompt = assessmentPromptWithoutRepeatedOptions(q.prompt, q.options); return <article className="assessment-question" key={q.id}><header><strong>{this.translate('questionOrdinal', { number: i + 1 })}</strong><small>{this.translate(`workspace.types.${q.question_type}`) || q.question_type}{q.marks ? ' · ' + this.translate('marks', { marks: q.marks }) : ''}{q.verification_method === 'AI_REVIEWED' ? ' · ' + this.translate('workspace.aiReference') : ''}</small></header><p className="assessment-prompt">{prompt}</p>{q.options && q.options.length ? <div className="assessment-options">{q.options.map((option, j) => editable ? <label key={j} className={'assessment-option ' + (value === String(j) ? 'selected' : '')}><input type="radio" name={'assessment-' + q.id} value={j} checked={value === String(j)} aria-label={this.translate('workspace.optionAria', { number: i + 1, optionNumber: j + 1, option })} onChange={e => this.setState(s => ({ answers: { ...s.answers, [q.id]: e.target.value } }))}/><span>{option}</span></label> : <span key={j} className="assessment-option-readonly">{option}</span>)}</div> : null}{editable && (!q.options || !q.options.length) ? <textarea aria-label={this.translate('workspace.answerAria', { number: i + 1 })} value={value} maxLength="12000" placeholder={this.translate('workspace.answerPlaceholder')} onChange={e => this.setState(s => ({ answers: { ...s.answers, [q.id]: e.target.value } }))}/> : null}</article>; }
     renderReview(q, i) { const review = q.review; if (!review)
-        return null; const refNote = referenceVerificationNote(review.reference_verification); return <div className="assessment-review"><p className="helper-note">你的答案：{review.submitted_answer ?? '（未作答）'}</p><p className="helper-note">得分：{review.awarded_marks ?? '—'} / {q.marks}</p>{review.rubric?.length ? <ul className="assessment-rubric">{review.rubric.map(c => <li key={c.criterion_id}>{c.dimension}：{c.description}</li>)}</ul> : null}{review.feedback ? <p className="helper-note">{review.feedback}</p> : null}{review.reference_solution ? <div className="reference-solution"><strong>参考解（分步）</strong>{review.reference_solution.answer ? <p>{review.reference_solution.answer}</p> : null}{(review.reference_solution.steps || []).map(step => <div className="reference-step" key={step.step_id}><span>{step.ordinal}. {step.operation} → {step.result}</span><button className="step-explain-link" onClick={() => this.openStepExplanation(q, step)}>详解</button></div>)}{(review.reference_solution.source_refs || []).length ? <p className="muted">来源：{review.reference_solution.source_refs.join(', ')}</p> : null}{refNote ? <p className={`reference-verification ${refNote.kind}`} role="note">{refNote.note}</p> : null}</div> : null}</div>; }
-    render() { const { view, busy, error } = this.state; const active = view && view.status === 'IN_PROGRESS'; const done = view && (view.status === 'GRADED' || view.status === 'SUBMITTED'); const provisionalScore = view?.status === 'SUBMITTED' ? provisionalAssessmentScore(view.questions) : null; return <div className="assessment-overlay" role="dialog" aria-label="测评工作区"><div className="assessment-workspace"><header className="assessment-topbar"><div><strong>{this.props.course.code}</strong> · {this.props.node.title}</div><span className="muted">{this.statusLabel()}</span><button className="btn" onClick={this.props.onExit}>退出</button></header><div className="assessment-body">{error && <p className="error-text" role="alert">{error}</p>}{this.state.preparing && this.renderPreparing()}{!view && !this.state.preparing && this.renderSetup()}{active && <div className="assessment-questions">{view.questions.map((q, i) => this.renderQuestion(q, i, true))}</div>}{done && <><div className="assessment-summary"><strong>{view.status === 'GRADED' ? '已评阅' : '待复核'}</strong>{typeof view.raw_score === 'number' ? <span>原始分：{view.raw_score} / 100</span> : provisionalScore !== null ? <span>暂计：{provisionalScore} / 100（待复核，不是正式 Raw Score）</span> : null}{view.grade?.label ? <span>映射：{view.grade.label}</span> : null}</div><div className="assessment-questions">{view.questions.map((q, i) => <div key={q.id}>{this.renderQuestion(q, i)}{this.renderReview(q, i)}</div>)}</div><div className="row" style={{ marginTop: 16 }}><button className="btn" onClick={() => this.setState({ view: null, preparing: null }, () => this.loadSetup())}>返回配置</button><button className="btn primary" onClick={() => this.setState({ view: null, preparing: null }, () => this.loadSetup())}>重新配置测评</button></div></>}</div>{active && <footer className="assessment-composer"><div className="assessment-hint">答案按题保存；选择题请选择一项，其他题请在题目下方填写。也可上传图片或文档。</div><div className="row"><label className="attach-button" role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault();
-        e.currentTarget.querySelector('input')?.click(); } }}><Icon name="file"/><input type="file" hidden accept=".pdf,.txt,.md,.csv,.ipynb,.png,.jpg,.jpeg,.webp,.docx,.pptx" onChange={e => this.attach(e)}/></label>{this.state.attachments.length > 0 && <span className="muted">{this.state.attachments.length} 个附件</span>}</div><div className="row" style={{ marginTop: 8 }}><button className="btn" disabled={busy} onClick={() => this.saveDraft()}>保存草稿</button><button className="btn" disabled={busy} onClick={() => this.abandon()}>放弃</button><button className="btn primary" disabled={busy} onClick={() => this.submit()}>{busy ? '正在提交并批改…' : '提交答案'}</button></div></footer>}{this.renderWindows()}</div></div>; }
+        return null; const refNote = referenceVerificationNote(review.reference_verification, this.context?.t); return <div className="assessment-review"><p className="helper-note">{this.translate('workspace.yourAnswer', { answer: review.submitted_answer ?? this.translate('workspace.unanswered') })}</p><p className="helper-note">{this.translate('workspace.awarded', { awarded: review.awarded_marks ?? '—', total: q.marks })}</p>{review.rubric?.length ? <ul className="assessment-rubric">{review.rubric.map(c => <li key={c.criterion_id}>{c.dimension}：{c.description}</li>)}</ul> : null}{review.feedback ? <p className="helper-note">{review.feedback}</p> : null}{review.reference_solution ? <div className="reference-solution"><strong>{this.translate('workspace.referenceSteps')}</strong>{review.reference_solution.answer ? <p>{review.reference_solution.answer}</p> : null}{(review.reference_solution.steps || []).map(step => <div className="reference-step" key={step.step_id}><span>{step.ordinal}. {step.operation} → {step.result}</span><button className="step-explain-link" onClick={() => this.openStepExplanation(q, step)}>{this.translate('workspace.explain')}</button></div>)}{(review.reference_solution.source_refs || []).length ? <p className="muted">{this.translate('workspace.sources', { sources: review.reference_solution.source_refs.join(', ') })}</p> : null}{refNote ? <p className={`reference-verification ${refNote.kind}`} role="note">{refNote.note}</p> : null}</div> : null}</div>; }
+    render() { const { view, busy, error } = this.state; const active = view && view.status === 'IN_PROGRESS'; const done = view && (view.status === 'GRADED' || view.status === 'SUBMITTED'); const provisionalScore = view?.status === 'SUBMITTED' ? provisionalAssessmentScore(view.questions) : null; return <div className="assessment-overlay" role="dialog" aria-label={this.translate('workspace.dialog')}><div className="assessment-workspace"><header className="assessment-topbar"><div><strong>{this.props.course.code}</strong> · {this.props.node.title}</div><span className="muted">{this.statusLabel()}</span><button className="btn" onClick={this.props.onExit}>{this.translate('workspace.exit')}</button></header><div className="assessment-body">{error && <p className="error-text" role="alert">{error}</p>}{this.state.preparing && this.renderPreparing()}{!view && !this.state.preparing && this.renderSetup()}{active && <div className="assessment-questions">{view.questions.map((q, i) => this.renderQuestion(q, i, true))}</div>}{done && <><div className="assessment-summary"><strong>{this.translate(view.status === 'GRADED' ? 'workspace.graded' : 'workspace.submitted')}</strong>{typeof view.raw_score === 'number' ? <span>{this.translate('workspace.rawScore', { score: view.raw_score })}</span> : provisionalScore !== null ? <span>{this.translate('workspace.provisional', { score: provisionalScore })}</span> : null}{view.grade?.label ? <span>{this.translate('workspace.gradeMapping', { grade: view.grade.label })}</span> : null}</div><div className="assessment-questions">{view.questions.map((q, i) => <div key={q.id}>{this.renderQuestion(q, i)}{this.renderReview(q, i)}</div>)}</div><div className="row" style={{ marginTop: 16 }}><button className="btn" onClick={() => this.setState({ view: null, preparing: null }, () => this.loadSetup())}>{this.translate('workspace.backHistory')}</button><button className="btn primary" onClick={() => this.setState({ view: null, preparing: null }, () => this.loadSetup())}>{this.translate('workspace.configureAnother')}</button></div></>}</div>{active && <footer className="assessment-composer"><div className="assessment-hint">{this.translate('workspace.answerHint')}</div><div className="row"><label className="attach-button" role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault();
+        e.currentTarget.querySelector('input')?.click(); } }}><Icon name="file"/><input type="file" hidden accept=".pdf,.txt,.md,.csv,.ipynb,.png,.jpg,.jpeg,.webp,.docx,.pptx" onChange={e => this.attach(e)}/></label>{this.state.attachments.length > 0 && <span className="muted">{this.translate('workspace.attachments', { count: this.state.attachments.length })}</span>}</div><div className="row" style={{ marginTop: 8 }}><button className="btn" disabled={busy} onClick={() => this.saveDraft()}>{this.translate('saveDraft')}</button><button className="btn" disabled={busy} onClick={() => this.abandon()}>{this.translate('workspace.abandon')}</button><button className="btn primary" disabled={busy} onClick={() => this.submit()}>{this.translate(busy ? 'workspace.submitBusy' : 'submit')}</button></div></footer>}{this.renderWindows()}</div></div>; }
 }
 export class ExplanationWindow extends React.Component {
+    static contextType = UiLocaleContext;
+    translate(name, params = {}) { return (this.context?.t || defaultUiTranslate)('explanationWindow.' + name, params); }
     state = { x: 0, y: 0, w: 520, h: 420, followUp: '' };
     componentDidMount() { const w = this.props.win || {}; this.setState({ x: w.x ?? 60, y: w.y ?? 60, w: w.w ?? 520, h: w.h ?? 420 }); }
     startDrag(e) { if (e.target.closest('button') || e.target.closest('input'))
@@ -1538,7 +1551,7 @@ export class ExplanationWindow extends React.Component {
             {x:Math.max(0,Math.min(window.innerWidth-80,s.x+delta[0])),y:Math.max(0,Math.min(window.innerHeight-60,s.y+delta[1]))});
     }
     submit(e) { e.preventDefault(); this.props.onFollowUp(this.state.followUp); this.setState({ followUp: '' }); }
-    render() { const { win, exp } = this.props; const { x, y, w, h, followUp } = this.state; const status = exp?.status; const generating = status === 'generating'; const messages = exp?.messages || []; const partial = exp?.partial || ''; return <div className="explain-window" style={{ left: x, top: y, width: w, height: h, zIndex: win.z }} role="dialog" aria-label={'详解 · 第 ' + win.ordinal + ' 步'} onMouseDown={() => this.props.onRaise()} onTouchStart={() => this.props.onRaise()}><div className="explain-head" role="button" tabIndex={0} aria-label="移动详解窗口（方向键）" onKeyDown={e => { if(e.target===e.currentTarget) this.keyboardAdjust(e); }} onMouseDown={e => this.startDrag(e)} onTouchStart={e => this.startDrag(e)}><strong>详解 · 第 {win.ordinal} 步</strong><button type="button" className="explain-close" aria-label="关闭详解" onClick={() => this.props.onClose()}>×</button></div><div className="explain-body">{messages.map(m => <div className={'explain-bubble ' + m.role} key={m.id || m.role + m.text.slice(0, 8)}><RichText text={m.text}/></div>)}{generating && <div className="explain-bubble assistant"><RichText text={partial || '正在思考中…'}/></div>}{status === 'completed' && messages.length === 0 && <div className="explain-bubble assistant"><RichText text={exp.text}/></div>}{status === 'error' && <div className="explain-status"><span className="error-text">{exp.error || '生成失败'}</span></div>}{status === 'cancelled' && <div className="explain-status">已停止，窗口可关闭。</div>}{!status && <div className="explain-status">正在加载…</div>}</div><form className="explain-foot" onSubmit={e => this.submit(e)}><input type="text" aria-label="追问" placeholder="追问这个步骤…" value={followUp} disabled={generating} onChange={e => this.setState({ followUp: e.target.value })}/>{generating ? <button type="button" className="btn" onClick={() => this.props.onCancel()}>停止</button> : <button type="submit" className="btn primary" disabled={!followUp.trim() || status === 'error'}>追问</button>}</form><div className="explain-resize" role="button" tabIndex={0} aria-label="调整窗口大小" onKeyDown={e => this.keyboardAdjust(e,true)} onMouseDown={e => this.startResize(e)} onTouchStart={e => this.startResize(e)}/></div>; }
+    render() { const { win, exp } = this.props; const { x, y, w, h, followUp } = this.state; const status = exp?.status; const generating = status === 'generating'; const messages = exp?.messages || []; const partial = exp?.partial || ''; const title = this.translate('title', { number: win.ordinal }); return <div className="explain-window" style={{ left: x, top: y, width: w, height: h, zIndex: win.z }} role="dialog" aria-label={title} onMouseDown={() => this.props.onRaise()} onTouchStart={() => this.props.onRaise()}><div className="explain-head" role="button" tabIndex={0} aria-label={this.translate('move')} onKeyDown={e => { if(e.target===e.currentTarget) this.keyboardAdjust(e); }} onMouseDown={e => this.startDrag(e)} onTouchStart={e => this.startDrag(e)}><strong>{title}</strong><button type="button" className="explain-close" aria-label={this.translate('close')} onClick={() => this.props.onClose()}>×</button></div><div className="explain-body">{messages.map(m => <div className={'explain-bubble ' + m.role} key={m.id || m.role + m.text.slice(0, 8)}><RichText text={m.text}/></div>)}{generating && <div className="explain-bubble assistant"><RichText text={partial || this.translate('preparing')}/></div>}{status === 'completed' && messages.length === 0 && <div className="explain-bubble assistant"><RichText text={exp.text}/></div>}{status === 'error' && <div className="explain-status"><span className="error-text">{exp.error || this.translate('failed')}</span></div>}{status === 'cancelled' && <div className="explain-status">{this.translate('stopped')}</div>}{!status && <div className="explain-status">{this.translate('loading')}</div>}</div><form className="explain-foot" onSubmit={e => this.submit(e)}><input type="text" aria-label={this.translate('followUp')} placeholder={this.translate('placeholder')} value={followUp} disabled={generating} onChange={e => this.setState({ followUp: e.target.value })}/>{generating ? <button type="button" className="btn" onClick={() => this.props.onCancel()}>{this.translate('stop')}</button> : <button type="submit" className="btn primary" disabled={!followUp.trim() || status === 'error'}>{this.translate('submit')}</button>}</form><div className="explain-resize" role="button" tabIndex={0} aria-label={this.translate('resize')} onKeyDown={e => this.keyboardAdjust(e,true)} onMouseDown={e => this.startResize(e)} onTouchStart={e => this.startResize(e)}/></div>; }
 }
 export class PairHistory extends React.Component {
     static contextType = UiLocaleContext;

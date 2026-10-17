@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { VisualAssistanceConsent, VisualAssistanceToggle } from './VisualAssistanceToggle.jsx';
+import { LanguageControl, UiLocaleProvider } from './UiLocale';
 
 describe('visual assistance consent', () => {
   it('renders the server state accessibly and requests confirmation only while off', () => {
@@ -35,5 +36,14 @@ describe('visual assistance consent', () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: '确认启用' }));
     expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it('switches visual-assistance system copy without changing consent state', () => {
+    const onEnableRequest = vi.fn();
+    render(<UiLocaleProvider><LanguageControl/><VisualAssistanceToggle enabled={false} busy={false}
+      onEnableRequest={onEnableRequest} onDisable={vi.fn()}/></UiLocaleProvider>);
+    fireEvent.click(screen.getByRole('button', { name: 'English' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Image/video assistance · Off' }));
+    expect(onEnableRequest).toHaveBeenCalledTimes(1);
   });
 });

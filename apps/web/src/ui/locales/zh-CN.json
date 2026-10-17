@@ -520,6 +520,8 @@
     "visualAssistanceDisabled": "图片/视频辅助已关闭",
     "citationContradicted": "引用与原文冲突",
     "citationUnverified": "引用未能在原文中核实",
+    "citationContradictedNote": "这段引用与原文的数值或结论相冲突，请点开核对原文。",
+    "citationUnverifiedNote": "这段引用没能在原文中核实（也可能只是当前片段没有提到），请点开原文确认。",
     "send": "发送",
     "stop": "停止生成",
     "newPair": "新对话",
@@ -624,11 +626,40 @@
       "OTHER": "其他"
     }
   },
+  "visual": {
+    "toggleOn": "图片/视频辅助 · 已启用",
+    "toggleOff": "图片/视频辅助 · 关闭",
+    "shortLabel": "视觉辅助",
+    "consentTitle": "启用图片/视频辅助教学？",
+    "consentBody": "启用后，CourseJesus 会在课程学习中按需生成图片、图解或动画内容。文字回答仍会优先显示，视觉内容将在后台异步生成。你可以随时关闭。",
+    "notNow": "暂不启用",
+    "enabling": "正在启用…",
+    "confirmEnable": "确认启用",
+    "actions": "视觉学习操作",
+    "diagram": "显示图解",
+    "image": "生成图片",
+    "animation": "动画展示",
+    "loadingAsset": "正在读取视觉资源…",
+    "download": "下载",
+    "limitedNotice": "生成图像为教学示意；文字与结构由系统单独校验。",
+    "cacheHit": "已从安全缓存恢复",
+    "cancel": "取消",
+    "retry": "重试",
+    "fallback": "使用确定性图解",
+    "failure": "视觉生成未完成（{{code}}），文字回答仍可正常使用。",
+    "diagnosticSaved": "诊断信息已保存",
+    "status": {
+      "QUEUED": "等待生成", "PLANNING": "正在规划", "RENDERING": "正在生成",
+      "WAITING_FOR_RENDERER": "正在唤醒图片生成服务", "VALIDATING": "正在校验",
+      "COMPLETED": "已完成", "FAILED": "生成失败", "CANCELLED": "已取消", "RETRYING": "正在重试"
+    }
+  },
   "assessment": {
     "workspace": {
       "dialog": "测评工作区",
       "exit": "退出",
       "notStarted": "未开始",
+      "inProgress": "测评进行中",
       "ready": "题库已就绪",
       "blocked": "题库准备受阻",
       "cancelled": "已取消",
@@ -726,7 +757,7 @@
     "onePerPoint": "默认每个考点一题",
     "maxTwo": "每个考点最多两个独立评分项",
     "minimumOne": "至少需要一道题",
-    "pointsNotReady": "考点尚未就绪，请先准备来源与考点",
+    "pointsNotReady": "当前课程来源尚未准备好可测考点。",
     "pointQualificationRequired": "来源已可用，但考点准备的质量验证尚未完成。不会虚构考点或扣费出题；知识学习与原有历史仍可使用。",
     "pointRequestUncertain": "先前考点准备请求的结果尚未确认，需要核对原运行记录；不会重复发送请求。",
     "preparePoints": "准备考点",

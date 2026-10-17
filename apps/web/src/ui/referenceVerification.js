@@ -24,9 +24,10 @@ export const REFERENCE_UNVERIFIED = "reference_evidence_unverified";
 
 /**
  * @param {{verdict?: string, verified?: boolean, definitive?: boolean}|null|undefined} verification
+ * @param {(key: string) => string|null|undefined} [translate]
  * @returns {{kind: "negative"|"unverified", note: string}|null}
  */
-export function referenceVerificationNote(verification) {
+export function referenceVerificationNote(verification, translate = null) {
   if (!verification || typeof verification !== "object") {
     return null;
   }
@@ -34,25 +35,25 @@ export function referenceVerificationNote(verification) {
   if (verdict === REFERENCE_UNAUTHORIZED) {
     return {
       kind: "negative",
-      note: "这份参考解引用的资料当前无权访问，已标记待复核。",
+      note: translate?.("assessment.referenceVerification.unauthorized") || "这份参考解引用的资料当前无权访问，已标记待复核。",
     };
   }
   if (verdict === REFERENCE_STALE) {
     return {
       kind: "negative",
-      note: "这份参考解引用的资料版本已过期或缺失，已标记待复核。",
+      note: translate?.("assessment.referenceVerification.stale") || "这份参考解引用的资料版本已过期或缺失，已标记待复核。",
     };
   }
   if (verdict === REFERENCE_CONTRADICTED) {
     return {
       kind: "negative",
-      note: "核验认为引用的资料与参考解的结论相冲突，已标记待复核。",
+      note: translate?.("assessment.referenceVerification.contradicted") || "核验认为引用的资料与参考解的结论相冲突，已标记待复核。",
     };
   }
   if (verdict === REFERENCE_UNVERIFIED) {
     return {
       kind: "unverified",
-      note: "这份参考解没有可核验的引用来源。",
+      note: translate?.("assessment.referenceVerification.unverified") || "这份参考解没有可核验的引用来源。",
     };
   }
   if (verification.definitive === true) {
@@ -62,7 +63,7 @@ export function referenceVerificationNote(verification) {
   if (verification.verified === true) {
     return {
       kind: "unverified",
-      note: "引用的来源与权限已核实；尚未做语义支持判断。",
+      note: translate?.("assessment.referenceVerification.notAssessed") || "引用的来源与权限已核实；尚未做语义支持判断。",
     };
   }
   return null;

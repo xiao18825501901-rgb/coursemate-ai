@@ -520,6 +520,8 @@
     "visualAssistanceDisabled": "Image/video assistance disabled",
     "citationContradicted": "Citation conflicts with the source",
     "citationUnverified": "Citation could not be verified in the source",
+    "citationContradictedNote": "This citation conflicts with a value or conclusion in the source. Open it and compare the original text.",
+    "citationUnverifiedNote": "This citation could not be verified in the source; the current excerpt may not address it. Open the source to confirm.",
     "send": "Send",
     "stop": "Stop generating",
     "newPair": "New conversation",
@@ -624,11 +626,40 @@
       "OTHER": "Other"
     }
   },
+  "visual": {
+    "toggleOn": "Image/video assistance · On",
+    "toggleOff": "Image/video assistance · Off",
+    "shortLabel": "Visual assistance",
+    "consentTitle": "Enable image/video learning assistance?",
+    "consentBody": "When enabled, CourseJesus can generate images, diagrams, or animations as needed during learning. The text response still appears first, while visual content is generated asynchronously in the background. You can turn this off at any time.",
+    "notNow": "Not now",
+    "enabling": "Enabling…",
+    "confirmEnable": "Enable",
+    "actions": "Visual learning actions",
+    "diagram": "Show diagram",
+    "image": "Generate image",
+    "animation": "Show animation",
+    "loadingAsset": "Loading visual resource…",
+    "download": "Download",
+    "limitedNotice": "This generated image is a teaching aid; text and structure are validated separately.",
+    "cacheHit": "Restored from the safe cache",
+    "cancel": "Cancel",
+    "retry": "Retry",
+    "fallback": "Use deterministic diagram",
+    "failure": "Visual generation did not complete ({{code}}). The text response remains available.",
+    "diagnosticSaved": "Diagnostic details saved",
+    "status": {
+      "QUEUED": "Waiting", "PLANNING": "Planning", "RENDERING": "Generating",
+      "WAITING_FOR_RENDERER": "Starting the image service", "VALIDATING": "Validating",
+      "COMPLETED": "Completed", "FAILED": "Generation failed", "CANCELLED": "Cancelled", "RETRYING": "Retrying"
+    }
+  },
   "assessment": {
     "workspace": {
       "dialog": "Assessment workspace",
       "exit": "Exit",
       "notStarted": "Not started",
+      "inProgress": "Assessment in progress",
       "ready": "Questions are ready",
       "blocked": "Question preparation is blocked",
       "cancelled": "Cancelled",
