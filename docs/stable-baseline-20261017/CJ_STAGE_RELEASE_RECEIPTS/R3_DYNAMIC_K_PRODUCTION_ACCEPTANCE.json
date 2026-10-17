@@ -1,0 +1,132 @@
+{
+  "receipt_version": "coursejesus.r3.dynamic-k.production-acceptance.v1",
+  "recorded_at_utc": "2026-10-17T12:33:20Z",
+  "result": "PASS_AFTER_SCOPED_GRADING_HOTFIX",
+  "release": {
+    "r3_candidate_sha": "a8d08f1e7d2e397b02ec11f60669ef91ef7b8b76",
+    "backend_hotfix_sha": "c9dbd1b49f2a5a8d8d116cc8c461f074cb051f8a",
+    "backend_release_directory": "/srv/coursemate/releases/r3-hotfix-c9dbd1b",
+    "backend_unit": "coursemate-rag",
+    "backend_pid_at_acceptance": 296668,
+    "backend_port": 28000,
+    "frontend_changed_by_hotfix": false,
+    "netlify_deploy_id": "6ad362811442c797c05e1be2",
+    "public_url": "https://coursejesus.com",
+    "schema_version": 84,
+    "schema_migration_by_hotfix": false
+  },
+  "artifact": {
+    "path": "release-artifacts/coursejesus-r3-hotfix-c9dbd1b.tar.gz",
+    "sha256": "0c2a5ad300b5d929c951eab0565b63643a50c2ae407123789a339e661c23468d"
+  },
+  "database": {
+    "path": "/srv/coursemate/data/releases/20260919T202006Z/rag.sqlite3",
+    "integrity_check": "ok",
+    "foreign_key_violations": 0,
+    "migration_table_version": 84,
+    "old_scores_recomputed": false
+  },
+  "backup": {
+    "remote_raw_path": "/srv/coursemate/releases/.r3-pre-93c2523-rag.sqlite3",
+    "remote_raw_sha256": "b71fb0ac0ffc107bd48ef6fd34219e0b7bea63f5a72c474546551491aebff530",
+    "off_host_gzip_path": "private-runtime/r3-release/r3-pre-93c2523-rag.sqlite3.gz",
+    "off_host_gzip_sha256": "c4199b89e3934a1b845ab384a7dc34710f5918e6927ed9142be131a4c81c010c",
+    "verified_before_lock_release": true
+  },
+  "dynamic_k": {
+    "policy_version": "cj.assessment.points.v1",
+    "configuration_id": "assessment-config-8cd6d2082407a50522285c59d96ad11d",
+    "configuration_status": "FROZEN",
+    "catalog_hash": "f658a94bdc29ceeba4f55582b33008e1997a3f5163ce49f6901ddb0a8264b114",
+    "source_snapshot": "30916ec61486029dc9ad49927e7a1e12564801bfd0099faeddc7ae73543c2484",
+    "k": 4,
+    "default_n": 4,
+    "total_marks_basis_points": 10000,
+    "preparation_status": "READY",
+    "prepared_slots": 4,
+    "total_slots": 4,
+    "point_ids": [
+      "graph-point-d2637a30d0e811e86aded2ab8252eacb",
+      "graph-point-48c94d34521aa6aa86b318760330c448",
+      "graph-point-d318e7a01df700da772f7b26f8e8b9ae",
+      "graph-point-b72aa8aa8cf50b0c1299ea2587382e6d"
+    ],
+    "all_question_revisions_validated": true,
+    "all_question_revisions_ready": true,
+    "publication_method": "finite-loop-free-graph-degree-assessment.v1"
+  },
+  "first_production_attempt": {
+    "session_id": "1968e230dd2244cea3cc459bfd715984",
+    "started_at_utc": "2026-10-17T12:08:34.479Z",
+    "graded_at_utc": "2026-10-17T12:09:19.412Z",
+    "status": "GRADED",
+    "score": 50,
+    "max_score": 100,
+    "marks_by_question": [0, 0, 25, 25],
+    "preserved_unchanged_after_hotfix": true,
+    "failure": {
+      "symptom": "Two semantically correct SHORT_TEXT answers failed exact whole-string matching.",
+      "root_cause": "The trusted deterministic graph publisher emitted one canonical reference string in accepted, while assessment grading treated accepted as an exact normalized-string allowlist.",
+      "scope": [
+        "vd_degree_definition_required",
+        "vd_handshake_identity_required"
+      ]
+    }
+  },
+  "hotfix": {
+    "behavior": "Use structure-aware deterministic verification only for the trusted graph assessment method and the two named rubric items.",
+    "unrelated_short_text_behavior_changed": false,
+    "historical_scores_changed": false,
+    "new_model_calls_for_fix_or_deploy": 0,
+    "unknown_requests_replayed": 0
+  },
+  "final_production_attempt": {
+    "session_id": "d325878bdb6c4329920efbfa2230f6dd",
+    "started_at_utc": "2026-10-17T12:29:34.690Z",
+    "submitted_at_utc": "2026-10-17T12:30:03.431Z",
+    "graded_at_utc": "2026-10-17T12:30:03.431Z",
+    "status": "GRADED",
+    "mode": "INDEPENDENT",
+    "assistance_status": "UNASSISTED",
+    "score": 100,
+    "max_score": 100,
+    "marks_by_question": [25, 25, 25, 25],
+    "same_answers_as_first_attempt": true,
+    "browser_ui_verified": true,
+    "answer_feedback_verified": true,
+    "reference_solutions_verified": true,
+    "history_persistence_verified_by_database": true,
+    "owner_user_id_sha256": "42e46c352632559027bcf8ba7c71aced62927cefb4d97834f2ef2a3fbac1a332"
+  },
+  "model_usage_during_two_acceptance_submissions": {
+    "completed_grader_http_calls": 2,
+    "first_attempt_reservation_id": "6f6d58a5037147f196ae42e7db1daa56",
+    "second_attempt_reservation_id": "dafc63bb07704f0da206e55b96a24ab7",
+    "first_attempt_tokens": {"input": 3033, "output": 397},
+    "second_attempt_tokens": {"input": 3033, "output": 399},
+    "unknown_or_inflight_calls_at_receipt": 0,
+    "note": "Each submission required the existing semantic grader for the two EXPLANATION items; the two corrected SHORT_TEXT items were deterministic."
+  },
+  "verification": {
+    "focused_red_tests_before_fix": "2 failed",
+    "focused_green_tests_after_fix": "9 passed",
+    "relevant_regression": "55 passed, 1 warning",
+    "ruff": "PASS",
+    "compileall": "PASS",
+    "git_diff_check": "PASS",
+    "isolated_startup_rehearsal": "PASS_AFTER_ADDING_EXISTING_PROTECTED_CLERK_ENV",
+    "production_health": "PASS",
+    "service_identity": "PASS",
+    "database_integrity": "PASS"
+  },
+  "rollback": {
+    "code_only": true,
+    "procedure": [
+      "Remove /etc/systemd/system/coursemate-rag.service.d/zzzzzzzzzzzzzzzzzzzzzzzzzz-coursejesus-r3-hotfix-c9dbd1b.conf.",
+      "Run systemctl daemon-reload and restart coursemate-rag.",
+      "Verify service CWD and PYTHONPATH return to the R3 a8d08f1 release.",
+      "Do not replace or reverse-migrate the production database."
+    ],
+    "data_preservation": "The rollback changes code routing only and preserves all sessions, attempts, scores, histories, UNKNOWN records, and ledgers."
+  }
+}
