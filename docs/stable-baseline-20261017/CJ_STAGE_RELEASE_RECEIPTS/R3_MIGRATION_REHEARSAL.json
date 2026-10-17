@@ -1,0 +1,76 @@
+{
+  "stage_id": "R3_DYNAMIC_K_SCHEMA_81_TO_84",
+  "status": "PASS_NOT_DEPLOYED",
+  "observed_at_utc": "2026-10-17T09:35:07Z",
+  "candidate_head_before_receipt": "b39ca9494cecaa52a5358cee7bc8524c3eff71d6",
+  "source": {
+    "kind": "sealed_local_copy_of_verified_persistent_backup",
+    "path": "private-runtime/isolated-db-s0/rag.sqlite3",
+    "bytes": 703983616,
+    "sha256": "5c025597cffde51d5ffdbbb420363fdbec23d29ba346f250d14c62d65bb8c67b",
+    "schema_max": 81,
+    "source_was_modified": false
+  },
+  "rehearsal": {
+    "path": "private-runtime/r3-migration-rehearsal-20261017T093334Z/rag.sqlite3",
+    "initial_copy_sha256": "5c025597cffde51d5ffdbbb420363fdbec23d29ba346f250d14c62d65bb8c67b",
+    "post_migration_bytes": 705490944,
+    "post_migration_sha256": "ffa122a1f33ab0911c734a9ed1500030eff2a41cd399cf797fa8e914545ba43c",
+    "first_start_seconds": 0.91,
+    "restart_seconds": 0.742,
+    "is_ready": true,
+    "schema_before": 81,
+    "schema_after": 84,
+    "migrations": [
+      "082_assessment_slot_preparation_progress.sql",
+      "083_point_question_cross_configuration_reuse.sql",
+      "084_deterministic_point_questions.sql"
+    ],
+    "integrity_check": "ok",
+    "foreign_key_violations": 0,
+    "integrity_check_seconds": 1.818
+  },
+  "preservation": {
+    "critical_table_content_hashes_match": true,
+    "critical_tables_compared": 18,
+    "assessment_sessions": 14,
+    "assessment_submission_revisions": 8,
+    "assessment_grading_receipts": 8,
+    "grade_snapshots": 7,
+    "grade_snapshot_raw_score_sum": 216.5,
+    "assessment_question_revisions": 180,
+    "assessment_reference_solutions": 180,
+    "assessment_rubric_criteria": 336,
+    "question_engine_provenance": 180,
+    "generic_llm_calls": {
+      "COMPLETED": 2,
+      "UNKNOWN": 1
+    },
+    "learning_model_call_reservations": {
+      "COMPLETED": 4805,
+      "FAILED": 236,
+      "RESERVED": 2,
+      "UNKNOWN": 11
+    },
+    "learning_operations": {
+      "COMPLETED": 4149,
+      "FAILED": 564,
+      "RUNNING": 6,
+      "UNKNOWN": 14
+    }
+  },
+  "expected_additive_state": {
+    "assessment_configuration_slot_preparations": 105,
+    "assessment_point_question_reuse_receipts": 0,
+    "assessment_point_deterministic_provenance": 0,
+    "restart_preserved_counts": true
+  },
+  "side_effects": {
+    "production_write": false,
+    "production_migration": false,
+    "model_http_calls": 0,
+    "unknown_replays": 0,
+    "student_data_recomputed": false
+  },
+  "decision": "Schema 81 to 84 is eligible for candidate-level regression. This receipt does not authorize production deployment or claim authenticated Clerk acceptance."
+}
