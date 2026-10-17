@@ -85,7 +85,6 @@ export function PointAssessmentSetup({ setup, slots, course, node, busy, formsFo
             {t(busy ? 'assessment.confirming' : 'assessment.confirmStart')}</button>
     </div></div>;
 }
-
 export function AssessmentContentLanguageChoice({ onChoose, value = '', disabled = false }) {
     const { t } = useContext(UiLocaleContext);
     return <div className="assessment-start"><label>{t('assessment.contentLanguage')}

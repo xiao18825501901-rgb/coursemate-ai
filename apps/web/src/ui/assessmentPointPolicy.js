@@ -39,4 +39,3 @@ export function pointMarksBasisPoints(setup, slots) {
     });
     return marks;
 }
-
