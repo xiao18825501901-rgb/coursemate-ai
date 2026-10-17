@@ -2,6 +2,7 @@ import { BRAND } from "../brand";
 import { RichText } from './richtext.jsx';
 import { DirectoryPicker } from './DirectoryPicker.jsx';
 import React from 'react';
+import { UiLocaleContext } from './UiLocale';
 import { request, send, remove, download, key, streamEvents, listPairs, getPair, createPair, renamePair, deletePair, bindPair, createExercise, getExercise, revealExercise, requestExerciseHint, submitPracticeAttempt, scheduleLearningFollowup, configureLearningDiagnostic, skipLearningDiagnostic, markLearningDiagnosticUnsure, createExplanation, getExplanation, postExplanationMessage, cancelExplanation, searchPeople, listShares, getShare, createShare, joinShare, getAssessment, getAssessmentSetup, getAssessmentPreparation, startAssessment, getAssessmentSession, submitAssessment, abandonAssessment, saveAssessmentDraft, loadAssessmentDraft, cancelPreparation, resumePreparation, createAssessmentExplanation, submitFeedback, getVisualAssistance, setVisualAssistance } from './api.js';
 import { dateKey, zonedParts, wallTimeToISO, formatBytes, formatTime, goto } from './utils.js';
 import { citationVerdict } from './citationSupport.js';
@@ -12,6 +13,7 @@ import { VisualControls } from './VisualControls.jsx';
 import { VisualAssistanceConsent, VisualAssistanceToggle } from './VisualAssistanceToggle.jsx';
 import { serviceConnectionLabel } from './servicePresentation.js';
 export class CourseFiles extends React.Component {
+    static contextType = UiLocaleContext;
     state = { files: [], q: '', folder: '', error: '', loading: true, menu: null, uploadQueue: [], uploading: false };
     componentDidMount() { this.load(); }
     async load() { try {
@@ -44,7 +46,7 @@ export class CourseFiles extends React.Component {
                 return request(`/courses/${this.props.course.id}/files`, { method: 'POST', body });
             }, this.updateUpload, 2);
             await this.load();
-            this.props.toast(outcome.failed ? '部分文件上传失败，可在队列中只重试失败项' : '所选文件已处理完成');
+            this.props.toast(this.context.t(outcome.failed ? 'courses.uploadBatchFailed' : 'courses.uploadBatchComplete'));
         }
         catch (error) {
             this.setState({ error: error instanceof Error ? error.message : String(error) });
@@ -78,30 +80,36 @@ export class CourseFiles extends React.Component {
     } }
     render() {
         const { files, q, folder, menu, uploadQueue, uploading } = this.state;
+        const { t } = this.context;
         const prefix = folder ? folder + '/' : '';
         const folders = q ? [] : [...new Set(files.map(f => f.folder).filter(f => f.startsWith(prefix) && f !== folder).map(f => f.slice(prefix.length).split('/')[0]))];
         const rows = files.filter(f => q ? f.name.toLowerCase().includes(q.toLowerCase()) : f.folder === folder);
-        return <div className="course-scroll"><div className="section-heading"><h1>文件</h1><label className="btn" role="button" tabIndex={uploading ? -1 : 0} aria-label="添加我的资料" onKeyDown={e=>{if(!uploading&&(e.key==="Enter"||e.key===" ")){e.preventDefault();e.currentTarget.querySelector("input")?.click();}}}><Icon name="plus"/>{uploading ? '正在上传…' : '添加我的资料'}<input type="file" multiple disabled={uploading} style={{ display: 'none' }} onChange={e => this.selectUploads(e)} accept=".pdf,.txt,.md,.csv,.ipynb,.docx,.pptx,.png,.jpg,.jpeg,.webp"/></label></div><FileUploadQueue items={uploadQueue} busy={uploading} onRetry={id => this.retryUpload(id)} onRemove={id => this.removeUpload(id)}/>{uploadQueue.some(item => item.status === 'failed') && <button type="button" className="btn small upload-retry-all" disabled={uploading} onClick={() => this.retryFailed()}>重试全部失败项</button>}<form className="file-search" onSubmit={e => e.preventDefault()}><div className="search-field"><Icon name="search"/><input aria-label="搜索文件" placeholder="搜索文件…" value={q} onChange={e => this.setState({ q: e.target.value })}/></div><button className="btn">搜索</button></form><div className="file-path"><button onClick={() => this.setState({ folder: '', q: '' })}>{this.props.course.code} {this.props.course.name}</button>{folder && <><Icon name="arrow"/><span>{folder}</span></>}</div>{this.state.error && <p className="error-text">{this.state.error}</p>}<table className="file-table"><thead><tr><th>名称</th><th>大小</th><th>动作</th></tr></thead><tbody>{folders.map(f => <tr key={f}><td><button className="file-name-btn" onClick={() => this.setState({ folder: prefix + f })}><Icon name="folder"/><span>{f}</span></button></td><td className="file-size">—</td><td /></tr>)}{rows.map(f => <tr key={f.id}><td><button className={'file-name-btn ' + (f.mime === 'application/pdf' ? 'pdf' : '')} onClick={() => this.preview(f)}><Icon name="file"/><span>{f.name}{f.scope === 'private' && <small className="private-note">仅自己</small>}</span></button>{f.error && <p className="helper-note file-note">{f.error}</p>}</td><td className="file-size">{formatBytes(f.size)}</td><td className="file-action"><IconButton name="more" title={'文件操作 ' + f.name} onClick={() => this.setState({ menu: menu === f.id ? null : f.id })}/>{menu === f.id && <div className="dropdown"><button onClick={() => this.save(f)}><Icon name="download"/>下载</button>{f.scope === 'private' && <button onClick={async () => { if (!window.confirm('删除自己的这份文件及其本地索引？'))
+        return <div className="course-scroll"><div className="section-heading"><h1>{t('courses.files')}</h1><label className="btn" role="button" tabIndex={uploading ? -1 : 0} aria-label={t('courses.addMaterials')} onKeyDown={e=>{if(!uploading&&(e.key==="Enter"||e.key===" ")){e.preventDefault();e.currentTarget.querySelector("input")?.click();}}}><Icon name="plus"/>{uploading ? t('courses.uploading') : t('courses.addMaterials')}<input type="file" multiple disabled={uploading} style={{ display: 'none' }} onChange={e => this.selectUploads(e)} accept=".pdf,.txt,.md,.csv,.ipynb,.docx,.pptx,.png,.jpg,.jpeg,.webp"/></label></div><FileUploadQueue items={uploadQueue} busy={uploading} onRetry={id => this.retryUpload(id)} onRemove={id => this.removeUpload(id)}/>{uploadQueue.some(item => item.status === 'failed') && <button type="button" className="btn small upload-retry-all" disabled={uploading} onClick={() => this.retryFailed()}>{t('courses.retryFailed')}</button>}<form className="file-search" onSubmit={e => e.preventDefault()}><div className="search-field"><Icon name="search"/><input aria-label={t('courses.searchFiles')} placeholder={t('courses.searchFiles')} value={q} onChange={e => this.setState({ q: e.target.value })}/></div><button className="btn">{t('common.search')}</button></form><div className="file-path"><button onClick={() => this.setState({ folder: '', q: '' })}>{this.props.course.code} {this.props.course.name}</button>{folder && <><Icon name="arrow"/><span>{folder}</span></>}</div>{this.state.error && <p className="error-text">{this.state.error}</p>}<table className="file-table"><thead><tr><th>{t('courses.fileName')}</th><th>{t('courses.fileSize')}</th><th>{t('courses.fileActions')}</th></tr></thead><tbody>{folders.map(f => <tr key={f}><td><button className="file-name-btn" onClick={() => this.setState({ folder: prefix + f })}><Icon name="folder"/><span>{f}</span></button></td><td className="file-size">—</td><td /></tr>)}{rows.map(f => <tr key={f.id}><td><button className={'file-name-btn ' + (f.mime === 'application/pdf' ? 'pdf' : '')} onClick={() => this.preview(f)}><Icon name="file"/><span>{f.name}{f.scope === 'private' && <small className="private-note">{t('courses.onlyMe')}</small>}</span></button>{f.error && <p className="helper-note file-note">{f.error}</p>}</td><td className="file-size">{formatBytes(f.size)}</td><td className="file-action"><IconButton name="more" title={t('courses.fileActionsLabel', {name:f.name})} onClick={() => this.setState({ menu: menu === f.id ? null : f.id })}/>{menu === f.id && <div className="dropdown"><button onClick={() => this.save(f)}><Icon name="download"/>{t('common.download')}</button>{f.scope === 'private' && <button onClick={async () => { if (!window.confirm(t('courses.deleteFileConfirm')))
             return; try {
             await remove(`/courses/${this.props.course.id}/files/${f.id}`);
             await this.load();
         }
         catch (e) {
             this.props.toast(e.message);
-        } }}><Icon name="trash"/>删除我的文件</button>}</div>}</td></tr>)}</tbody></table>{!rows.length && !folders.length && <div className="empty-state"><Icon name="folder"/><h3>{this.state.loading ? '正在读取文件…' : q ? '没有找到匹配文件' : '还没有资料'}</h3><p>添加讲义、笔记或题目，开始你的课程。</p></div>}<p className="file-foot">名称 → 预览 · 右侧菜单 → 下载。新增资料保存在服务器，官方课程里的个人补充仅本人可见。</p></div>;
+        } }}><Icon name="trash"/>{t('courses.deleteMyFile')}</button>}</div>}</td></tr>)}</tbody></table>{!rows.length && !folders.length && <div className="empty-state"><Icon name="folder"/><h3>{this.state.loading ? t('common.loading') : q ? t('courses.noMatchingFiles') : t('courses.emptyFiles')}</h3><p>{t('courses.filesEmptyHint')}</p></div>}<p className="file-foot">{t('courses.filesHelp')}</p></div>;
     }
 }
 class Preview extends React.Component {
-    state = { url: '', text: '', error: '', zoom: 100 };
-    componentDidMount() { this.load(); }
+    static contextType = UiLocaleContext;
+    state = { url: '', text: '', error: '', zoom: 100, previewReady: false };
+    componentDidMount() {
+        this.unmounted = false;
+        this.previewEpoch = (this.previewEpoch || 0) + 1;
+        this.load(this.previewEpoch);
+    }
     componentWillUnmount() { if (this.state.url)
         URL.revokeObjectURL(this.state.url); this.unmounted = true; }
-    async load() {
+    async load(epoch) {
         try {
             const f = this.props.file;
             if (['application/pdf', 'image/png', 'image/jpeg', 'image/webp'].includes(f.mime)) {
                 const url = await download(this.props.course.id, f, true);
-                if (this.unmounted) {
+                if (this.unmounted || epoch !== this.previewEpoch) {
                     URL.revokeObjectURL(url);
                     return;
                 }
@@ -109,12 +117,12 @@ class Preview extends React.Component {
             }
             else {
                 const p = await request(`/courses/${this.props.course.id}/files/${f.id}/text`);
-                if (!this.unmounted)
-                    this.setState({ text: p.pages.map(x => x.text).join('\n\n') || '此格式暂无文本预览，原文件仍可下载。' });
+                if (!this.unmounted && epoch === this.previewEpoch)
+                    this.setState({ text: p.pages.map(x => x.text).join('\n\n'), previewReady: true });
             }
         }
         catch (e) {
-            if (!this.unmounted)
+            if (!this.unmounted && epoch === this.previewEpoch)
                 this.setState({ error: e.message });
         }
     }
@@ -129,20 +137,21 @@ class Preview extends React.Component {
     catch (e) {
         this.props.toast(e.message);
     } }
-    render() { const f = this.props.file; return <div className="real-preview"><div className="row between"><span className="muted">{formatBytes(f.size)} · 课程资料预览</span><button className="btn small" onClick={() => this.save()}><Icon name="download"/>下载</button></div>{this.state.error ? <div className="error-text">{this.state.error}</div> : this.state.url ? f.mime === 'application/pdf' ? <iframe title={f.name} src={this.state.url + '#toolbar=1'} className="pdf-frame"/> : <div className="image-preview"><img alt={f.name} src={this.state.url}/></div> : this.state.text ? <pre className="text-preview">{this.state.text}</pre> : <div className="empty-state">正在加载预览…</div>}</div>; }
+    render() { const f = this.props.file; const { t } = this.context; return <div className="real-preview"><div className="row between"><span className="muted">{formatBytes(f.size)} · {t('courses.previewHeading')}</span><button className="btn small" onClick={() => this.save()}><Icon name="download"/>{t('common.download')}</button></div>{this.state.error ? <div className="error-text">{this.state.error}</div> : this.state.url ? f.mime === 'application/pdf' ? <iframe title={f.name} src={this.state.url + '#toolbar=1'} className="pdf-frame"/> : <div className="image-preview"><img alt={f.name} src={this.state.url}/></div> : this.state.text ? <pre className="text-preview">{this.state.text}</pre> : <div className="empty-state">{t(this.state.previewReady ? 'courses.previewUnsupported' : 'courses.previewLoading')}</div>}</div>; }
 }
 export class Discussion extends React.Component {
+    static contextType = UiLocaleContext;
     state = { rows: [], text: '', replyTo: null, reply: '', busy: false, error: '' };
-    componentDidMount() { this.load(); this.timer = setInterval(() => { if (!document.hidden)
+    componentDidMount() { this.unmounted = false; this.mountEpoch = (this.mountEpoch || 0) + 1; this.load(); this.timer = setInterval(() => { if (!document.hidden)
         this.load(); }, 15000); }
     componentWillUnmount() { clearInterval(this.timer); this.unmounted = true; }
-    async load() { try {
+    async load() { const epoch = this.mountEpoch; try {
         const rows = await request(`/courses/${this.props.course.id}/comments`);
-        if (!this.unmounted)
+        if (!this.unmounted && epoch === this.mountEpoch)
             this.setState({ rows, error: '' });
     }
     catch (e) {
-        if (!this.unmounted)
+        if (!this.unmounted && epoch === this.mountEpoch)
             this.setState({ error: e.message });
     } }
     async post(parent = null) { const text = parent ? this.state.reply : this.state.text; if (!text.trim())
@@ -168,14 +177,16 @@ export class Discussion extends React.Component {
     catch (e) {
         this.props.toast(e.message);
     } }
-    render() { const { rows } = this.state; return <div className="course-scroll"><div className="section-heading"><div><h1>评论</h1><p className="helper-note" style={{ marginTop: 7 }}>交流思路，也把你的问题留在这里。</p></div><span className="chip neutral">{this.props.course.visibility === 'private' ? '私人课程讨论' : '课程公共讨论'}</span></div><form className="discussion-compose" onSubmit={e => { e.preventDefault(); this.post(); }}><div className="compose-main"><Avatar name={this.props.user.name}/><div><textarea aria-label="课程评论" placeholder="对这门课有什么想法？一起交流吧…" maxLength="6000" value={this.state.text} onChange={e => this.setState({ text: e.target.value })}/><div className="row between"><small className="muted">对所有有权访问本课程的用户可见</small><button className="btn primary small" disabled={this.state.busy || !this.state.text.trim()}>发表评论</button></div></div></div></form>{this.state.error && <p className="error-text">{this.state.error}</p>}<div className="discussion-feed">{rows.filter(x => !x.parent).map(row => <article className="discussion" key={row.id} id={'comment-' + row.id}><Avatar name={row.name}/><div className="discussion-content"><div className="discussion-title"><strong>{row.name}</strong><time>{formatTime(row.created_at)}</time></div><p className="discussion-text">{row.text}</p><div className="discussion-actions"><button onClick={() => this.setState({ replyTo: row.id, reply: '' })}><Icon name="comment"/>回复</button><button onClick={() => this.like(row)}><Icon name="heart"/>{row.likes || '赞'}</button>{row.author === this.props.user.id && !row.deleted && <button onClick={async () => { if (window.confirm('删除这条评论？')) {
+    render() { const { rows } = this.state; const { t } = this.context; return <div className="course-scroll course-discussion"><div className="section-heading"><div><h1>{t('discussion.title')}</h1><p className="helper-note" style={{ marginTop: 7 }}>{t('discussion.subtitle')}</p></div><span className="chip neutral">{t(this.props.course.visibility === 'private' ? 'discussion.privateScope' : 'discussion.publicScope')}</span></div><form className="discussion-compose" onSubmit={e => { e.preventDefault(); this.post(); }}><div className="compose-main"><Avatar name={this.props.user.name}/><div><textarea aria-label={t('discussion.commentLabel')} placeholder={t('discussion.commentPlaceholder')} maxLength="6000" value={this.state.text} onChange={e => this.setState({ text: e.target.value })}/><div className="row between"><small className="muted">{t('discussion.visibilityNotice')}</small><button className="btn primary small" disabled={this.state.busy || !this.state.text.trim()}>{t('discussion.post')}</button></div></div></div></form>{this.state.error && <p className="error-text">{this.state.error}</p>}<div className="discussion-feed">{rows.filter(x => !x.parent).map(row => <article className="discussion" key={row.id} id={'comment-' + row.id}><Avatar name={row.name}/><div className="discussion-content"><div className="discussion-title"><strong>{row.name}</strong><time>{formatTime(row.created_at)}</time></div><p className="discussion-text">{row.text}</p><div className="discussion-actions"><button onClick={() => this.setState({ replyTo: row.id, reply: '' })}><Icon name="comment"/>{t('discussion.reply')}</button><button onClick={() => this.like(row)}><Icon name="heart"/>{row.likes || t('discussion.like')}</button>{row.author === this.props.user.id && !row.deleted && <button onClick={async () => { if (window.confirm(t('discussion.deleteConfirm'))) {
         await remove(`/courses/${this.props.course.id}/comments/${row.id}`);
         this.load();
-    } }}>删除</button>}</div>{rows.filter(x => x.parent === row.id).map(reply => <div className="reply" key={reply.id}><Avatar name={reply.name}/><div><div className="discussion-title"><strong>{reply.name}</strong><time>{formatTime(reply.created_at)}</time></div><p className="discussion-text">{reply.text}</p><button className="link small" onClick={() => this.setState({ replyTo: reply.id, reply: '' })}>回复</button></div></div>)}{(this.state.replyTo === row.id || rows.some(x => x.id === this.state.replyTo && x.parent === row.id)) && <form className="reply-box" onSubmit={e => { e.preventDefault(); this.post(this.state.replyTo); }}><input autoFocus aria-label="回复评论" placeholder="写下你的回复…" value={this.state.reply} maxLength="6000" onChange={e => this.setState({ reply: e.target.value })}/><button className="btn small primary" disabled={this.state.busy}>发送回复</button></form>}</div></article>)}{!rows.length && <div className="empty-state"><Icon name="comment"/><h3>开始这门课的第一段讨论</h3><p>别人回复后，你会在收件箱收到通知。</p></div>}</div></div>; }
+    } }}>{t('discussion.delete')}</button>}</div>{rows.filter(x => x.parent === row.id).map(reply => <div className="reply" key={reply.id}><Avatar name={reply.name}/><div><div className="discussion-title"><strong>{reply.name}</strong><time>{formatTime(reply.created_at)}</time></div><p className="discussion-text">{reply.text}</p><button className="link small" onClick={() => this.setState({ replyTo: reply.id, reply: '' })}>{t('discussion.reply')}</button></div></div>)}{(this.state.replyTo === row.id || rows.some(x => x.id === this.state.replyTo && x.parent === row.id)) && <form className="reply-box" onSubmit={e => { e.preventDefault(); this.post(this.state.replyTo); }}><input autoFocus aria-label={t('discussion.replyLabel')} placeholder={t('discussion.replyPlaceholder')} value={this.state.reply} maxLength="6000" onChange={e => this.setState({ reply: e.target.value })}/><button className="btn small primary" disabled={this.state.busy}>{t('discussion.sendReply')}</button></form>}</div></article>)}{!rows.length && <div className="empty-state"><Icon name="comment"/><h3>{t('discussion.emptyTitle')}</h3><p>{t('discussion.emptyNotice')}</p></div>}</div></div>; }
 }
 export class Inbox extends React.Component {
+    static contextType = UiLocaleContext;
+    translate(name, params = {}) { return (this.context?.t || defaultUiTranslate)('inbox.' + name, params); }
     state = { notifications: [], threads: [], shares: { received: [], sent: [] }, sharesQ: 'received', tab: 'all', selected: null, messages: [], reply: '', error: '', inboxPage:0 };
-    componentDidMount() { this.load(); this.timer = setInterval(() => { if (!document.hidden)
+    componentDidMount() { this.unmounted = false; this.load(); this.timer = setInterval(() => { if (!document.hidden)
         this.load(); }, 10000); }
     componentWillUnmount() { clearInterval(this.timer); this.unmounted = true; }
     async load() { try {
@@ -208,14 +219,14 @@ export class Inbox extends React.Component {
     catch (e) {
         this.props.toast(e.message);
     } }
-    compose = () => this.props.modal('发送信息', <ComposeMessage onSubmit={async (payload) => { const m = await send('/messages', payload); this.props.closeModal(); await this.load(); const t = this.state.threads.find(t => t.id === m.thread); if (t)
-        this.select({ ...t, kind: 'thread' }); this.props.toast('信息已发送到对方收件箱'); }}/>);
-    shareCourse = () => this.props.modal('共享课程', <ShareCourseModal toast={this.props.toast} closeModal={this.props.closeModal} onDone={() => this.load()}/>);
-    campusVerificationLabel = (requires) => requires && this.props.config?.student_verification_required_for_campus ? ' · 需学生认证' : '';
+    compose = () => this.props.modal(this.translate('compose'), <ComposeMessage onSubmit={async (payload) => { const m = await send('/messages', payload); this.props.closeModal(); await this.load(); const t = this.state.threads.find(t => t.id === m.thread); if (t)
+        this.select({ ...t, kind: 'thread' }); this.props.toast(this.translate('messageSent')); }}/>);
+    shareCourse = () => this.props.modal(this.translate('shareCourse'), <ShareCourseModal toast={this.props.toast} closeModal={this.props.closeModal} onDone={() => this.load()}/>);
+    campusVerificationLabel = (requires) => requires && this.props.config?.student_verification_required_for_campus ? ` · ${this.translate('studentVerificationRequired')}` : '';
     async viewShare(share) { try {
         const d = await getShare(share.id);
         const files = d.files || [];
-        this.props.modal('共享内容 · ' + d.course_name, <div className="share-review"><p><strong>{d.sender_name}</strong> · {formatTime(d.snapshot_at)}</p><p className="muted">{files.length} 个文件 · {d.history_scope === 'none' ? '不含历史' : '含历史'}{d.pair_count ? ' · ' + d.pair_count + ' 个知识点对话' : ''}{this.campusVerificationLabel(d.requires_student_verification)}</p><div className="divider"/>{files.map(f => <div key={f.id || f.name} className="share-pair-row"><Icon name="file"/><span>{f.name}</span></div>)}{!files.length && <p className="helper-note">没有文件</p>}</div>);
+        this.props.modal(this.translate('sharedContentTitle', { course: d.course_name }), <div className="share-review"><p><strong>{d.sender_name}</strong> · {formatTime(d.snapshot_at)}</p><p className="muted">{this.translate('filesCount', { count: files.length })} · {this.translate(d.history_scope === 'none' ? 'noHistoryShort' : 'historyIncluded')}{d.pair_count ? ' · ' + this.translate('conversationsCount', { count: d.pair_count }) : ''}{this.campusVerificationLabel(d.requires_student_verification)}</p><div className="divider"/>{files.map(f => <div key={f.id || f.name} className="share-pair-row"><Icon name="file"/><span>{f.name}</span></div>)}{!files.length && <p className="helper-note">{this.translate('noFiles')}</p>}</div>);
     }
     catch (e) {
         this.props.toast(e.message);
@@ -223,17 +234,17 @@ export class Inbox extends React.Component {
     async joinShare(share) { try {
         await joinShare(share.id);
         await this.props.onJoined?.();
-        this.props.toast('已加入课程');
+        this.props.toast(this.translate('joinedToast'));
         await this.load();
         this.props.onRead?.();
     }
     catch (e) {
         if (e.status === 403 && this.props.config?.student_verification_required_for_campus)
-            this.props.toast('请先完成学生认证（账户 → 学生认证）');
+            this.props.toast(this.translate('verificationRequiredToast'));
         else
             this.props.toast(e.message);
     } }
-    renderShares() { const { shares, sharesQ } = this.state; const rows = shares[sharesQ] || []; return <div className="inbox-share-list"><div className="mail-tabs"><button className={sharesQ === 'received' ? 'active' : ''} onClick={() => this.setState({ sharesQ: 'received' })}>收到</button><button className={sharesQ === 'sent' ? 'active' : ''} onClick={() => this.setState({ sharesQ: 'sent' })}>发出</button></div>{rows.map(sh => <div key={sh.id} className="inbox-share-item"><div className="inbox-share-head"><strong>{sh.course_name}</strong><span>{formatTime(sh.snapshot_at)}</span></div><div className="share-meta">{sharesQ === 'received' && sh.sender_name ? sh.sender_name + ' · ' : ''}{sh.file_count} 个文件 · {sh.history_scope === 'none' ? '不含历史' : '含历史'}{this.campusVerificationLabel(sh.requires_student_verification)}</div><div className="share-actions"><button className="btn" onClick={() => this.viewShare(sh)}>查看共享内容</button>{sharesQ === 'received' && (sh.joined_course_id ? <span className="helper-note">已加入</span> : <button className="btn primary" onClick={() => this.joinShare(sh)}>加入所有课程</button>)}</div></div>)}{!rows.length && <div className="empty-state">还没有共享课程</div>}</div>; }
+    renderShares() { const { shares, sharesQ } = this.state; const rows = shares[sharesQ] || []; return <div className="inbox-share-list"><div className="mail-tabs"><button className={sharesQ === 'received' ? 'active' : ''} onClick={() => this.setState({ sharesQ: 'received' })}>{this.translate('received')}</button><button className={sharesQ === 'sent' ? 'active' : ''} onClick={() => this.setState({ sharesQ: 'sent' })}>{this.translate('sent')}</button></div>{rows.map(sh => <div key={sh.id} className="inbox-share-item"><div className="inbox-share-head"><strong>{sh.course_name}</strong><span>{formatTime(sh.snapshot_at)}</span></div><div className="share-meta">{sharesQ === 'received' && sh.sender_name ? sh.sender_name + ' · ' : ''}{this.translate('filesCount', { count: sh.file_count })} · {this.translate(sh.history_scope === 'none' ? 'noHistoryShort' : 'historyIncluded')}{this.campusVerificationLabel(sh.requires_student_verification)}</div><div className="share-actions"><button className="btn" onClick={() => this.viewShare(sh)}>{this.translate('viewShared')}</button>{sharesQ === 'received' && (sh.joined_course_id ? <span className="helper-note">{this.translate('joined')}</span> : <button className="btn primary" onClick={() => this.joinShare(sh)}>{this.translate('addSharedCourse')}</button>)}</div></div>)}{!rows.length && <div className="empty-state">{this.translate('emptyShares')}</div>}</div>; }
     async reply(e) { e.preventDefault(); const s = this.state.selected; try {
         await send('/messages', { recipient: s.peer.id, text: this.state.reply, request_id: key() });
         this.setState({ reply: '' });
@@ -242,12 +253,14 @@ export class Inbox extends React.Component {
     catch (e) {
         this.props.toast(e.message);
     } }
-    render() { const { notifications, threads, selected: s, tab, messages } = this.state; const all = [...notifications.map(n => ({ ...n, kind: 'notice', title: '回复了你的课程评论', name: n.actor_name, preview: n.text, time: n.created_at, unread: !n.read_at })), ...threads.map(t => ({ ...t, kind: 'thread', title: t.peer.name, name: t.peer.name, preview: t.last?.text || '', time: t.last?.created_at || t.created_at }))].filter(x => tab === 'all' || (tab === 'reply' ? x.kind === 'notice' : x.kind === 'thread')).sort((a, b) => b.time.localeCompare(a.time)); return <div className="page"><header className="page-heading row between"><div><h1>收件箱</h1><p>课程里的回应，以及与你有关的交流。</p></div><div className="row" style={{ gap: 8 }}><button className="btn" onClick={this.shareCourse}><Icon name="shareCourse"/>共享课程</button><button className="btn primary" onClick={this.compose}><Icon name="edit"/>写信息</button></div></header><nav aria-label="收件箱分页" className="row"><button className="btn small" disabled={this.state.inboxPage===0} onClick={()=>this.setState(s=>({inboxPage:s.inboxPage-1}),()=>this.load())}>上一页通知与共享</button><span>第 {this.state.inboxPage+1} 页</span><button className="btn small" onClick={()=>this.setState(s=>({inboxPage:s.inboxPage+1}),()=>this.load())}>下一页通知与共享</button></nav>{this.state.error && <p className="error-text">{this.state.error}</p>}<div className="inbox-layout"><div className="mail-list"><div className="mail-tabs">{[['all', '全部'], ['reply', '评论回复'], ['dm', '私信'], ['shares', '共享']].map(([id, label]) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => this.setState({ tab: id })}>{label}</button>)}</div>{tab === 'shares' ? this.renderShares() : <>{all.map(x => <button className={'mail-item ' + (s?.id === x.id ? 'selected' : '')} key={x.id} onClick={() => this.select(x)}><Avatar name={x.name}/><div className="mail-info"><div className="from">{x.name}<span>{formatTime(x.time)}</span></div><strong>{x.title}</strong><p>{x.preview}</p></div>{x.unread > 0 && <i className="unread-dot"/>}</button>)}{!all.length && <div className="empty-state">还没有信息</div>}</>}</div><div className="mail-detail">{!s ? <div className="empty-state"><Icon name="mail"/><h3>选择一条信息，开始交流</h3><p>你的私信不会出现在公开课程评论中。</p></div> : s.kind === 'notice' ? <><div className="mail-detail-head"><h2>{s.actor_name} 回复了你</h2><Icon name="comment"/></div><p className="helper-note">{formatTime(s.created_at)}</p><div className="mail-message">{s.text}</div><button className="btn primary" onClick={() => goto(`course/${s.course}/comments`)}>查看课程讨论 <Icon name="arrow"/></button></> : <><div className="mail-detail-head"><div><h2>{s.peer.name}</h2><span className="helper-note">@{s.peer.handle}</span></div><IconButton name="more" title="屏蔽此联系人" onClick={async () => { if (window.confirm('屏蔽后双方无法继续发私信。确认？')) {
+    render() { const { notifications, threads, selected: s, tab, messages } = this.state; const all = [...notifications.map(n => ({ ...n, kind: 'notice', title: this.translate('noticeReplyTitle'), name: n.actor_name, preview: n.text, time: n.created_at, unread: !n.read_at })), ...threads.map(t => ({ ...t, kind: 'thread', title: t.peer.name, name: t.peer.name, preview: t.last?.text || '', time: t.last?.created_at || t.created_at }))].filter(x => tab === 'all' || (tab === 'reply' ? x.kind === 'notice' : x.kind === 'thread')).sort((a, b) => b.time.localeCompare(a.time)); return <div className="page"><header className="page-heading row between"><div><h1>{this.translate('title')}</h1><p>{this.translate('subtitle')}</p></div><div className="row" style={{ gap: 8 }}><button className="btn" onClick={this.shareCourse}><Icon name="shareCourse"/>{this.translate('shareCourse')}</button><button className="btn primary" onClick={this.compose}><Icon name="edit"/>{this.translate('compose')}</button></div></header><nav aria-label={this.translate('pagination')} className="row"><button className="btn small" disabled={this.state.inboxPage===0} onClick={()=>this.setState(s=>({inboxPage:s.inboxPage-1}),()=>this.load())}>{this.translate('previousPage')}</button><span>{this.translate('page', { page: this.state.inboxPage + 1 })}</span><button className="btn small" onClick={()=>this.setState(s=>({inboxPage:s.inboxPage+1}),()=>this.load())}>{this.translate('nextPage')}</button></nav>{this.state.error && <p className="error-text">{this.state.error}</p>}<div className="inbox-layout"><div className="mail-list"><div className="mail-tabs">{[['all', 'tabAll'], ['reply', 'tabReplies'], ['dm', 'tabDirect'], ['shares', 'tabShared']].map(([id, label]) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => this.setState({ tab: id })}>{this.translate(label)}</button>)}</div>{tab === 'shares' ? this.renderShares() : <>{all.map(x => <button className={'mail-item ' + (s?.id === x.id ? 'selected' : '')} key={x.id} onClick={() => this.select(x)}><Avatar name={x.name}/><div className="mail-info"><div className="from">{x.name}<span>{formatTime(x.time)}</span></div><strong>{x.title}</strong><p>{x.preview}</p></div>{x.unread > 0 && <i className="unread-dot"/>}</button>)}{!all.length && <div className="empty-state">{this.translate('empty')}</div>}</>}</div><div className="mail-detail">{!s ? <div className="empty-state"><Icon name="mail"/><h3>{this.translate('emptySelectTitle')}</h3><p>{this.translate('emptySelectBody')}</p></div> : s.kind === 'notice' ? <><div className="mail-detail-head"><h2>{this.translate('repliedToYou', { name: s.actor_name })}</h2><Icon name="comment"/></div><p className="helper-note">{formatTime(s.created_at)}</p><div className="mail-message">{s.text}</div><button className="btn primary" onClick={() => goto(`course/${s.course}/comments`)}>{this.translate('viewDiscussion')} <Icon name="arrow"/></button></> : <><div className="mail-detail-head"><div><h2>{s.peer.name}</h2><span className="helper-note">@{s.peer.handle}</span></div><IconButton name="more" title={this.translate('blockContact')} onClick={async () => { if (window.confirm(this.translate('blockConfirm'))) {
         await send(`/people/${s.peer.id}/block`, {}, 'PUT');
-        this.props.toast('已屏蔽此联系人');
-    } }}/></div><div className="direct-message-log">{messages.map(m => <div className={'dm-bubble ' + (m.sender === this.props.user.id ? 'mine' : '')} key={m.id}><div className="helper-note">{m.name} · {formatTime(m.created_at)}</div><p>{m.text}</p></div>)}</div><form onSubmit={e => this.reply(e)}><textarea aria-label="私信回复" placeholder="写下回复…" value={this.state.reply} maxLength="6000" onChange={e => this.setState({ reply: e.target.value })}/><button className="btn primary" disabled={!this.state.reply.trim()}>发送回复</button></form></>}</div></div></div>; }
+        this.props.toast(this.translate('blocked'));
+    } }}/></div><div className="direct-message-log">{messages.map(m => <div className={'dm-bubble ' + (m.sender === this.props.user.id ? 'mine' : '')} key={m.id}><div className="helper-note">{m.name} · {formatTime(m.created_at)}</div><p>{m.text}</p></div>)}</div><form onSubmit={e => this.reply(e)}><textarea aria-label={this.translate('replyLabel')} placeholder={this.translate('replyPlaceholder')} value={this.state.reply} maxLength="6000" onChange={e => this.setState({ reply: e.target.value })}/><button className="btn primary" disabled={!this.state.reply.trim()}>{this.translate('sendReply')}</button></form></>}</div></div></div>; }
 }
 class ComposeMessage extends React.Component {
+    static contextType = UiLocaleContext;
+    translate(name, params = {}) { return (this.context?.t || defaultUiTranslate)('inbox.' + name, params); }
     state = { q: '', people: [], person: null, text: '', error: '', busy: false };
     componentWillUnmount() { clearTimeout(this.timer); }
     search(q) { this.setState({ q }); clearTimeout(this.timer); this.timer = setTimeout(async () => { try {
@@ -265,9 +278,11 @@ class ComposeMessage extends React.Component {
     catch (e) {
         this.setState({ error: e.message, busy: false });
     } }
-    render() { return <form onSubmit={e => this.submit(e)}><div className="field"><label>收件人</label><DirectoryPicker selected={this.state.person?[this.state.person.id]:[]} onSelect={person=>this.setState({person})}/>{this.state.person && <p className="helper-note">收件人：{this.state.person.name}</p>}</div><div className="field"><label>信息内容</label><textarea required maxLength="6000" style={{ minHeight: 130 }} value={this.state.text} onChange={e => this.setState({ text: e.target.value })}/></div><p className="helper-note">只展示已允许搜索的用户，不公开邮箱或手机号。</p>{this.state.error && <p className="error-text">{this.state.error}</p>}<button className="btn primary" style={{ marginTop: 20 }} disabled={!this.state.person || this.state.busy}>发送信息</button></form>; }
+    render() { return <form onSubmit={e => this.submit(e)}><div className="field"><label>{this.translate('recipient')}</label><DirectoryPicker selected={this.state.person?[this.state.person.id]:[]} onSelect={person=>this.setState({person})}/>{this.state.person && <p className="helper-note">{this.translate('selectedRecipient', { name: this.state.person.name })}</p>}</div><div className="field"><label>{this.translate('message')}</label><textarea required maxLength="6000" style={{ minHeight: 130 }} value={this.state.text} onChange={e => this.setState({ text: e.target.value })}/></div><p className="helper-note">{this.translate('privacyNotice')}</p>{this.state.error && <p className="error-text">{this.state.error}</p>}<button className="btn primary" style={{ marginTop: 20 }} disabled={!this.state.person || this.state.busy}>{this.translate('sendMessage')}</button></form>; }
 }
 class ShareCourseModal extends React.Component {
+    static contextType = UiLocaleContext;
+    translate(name, params = {}) { return (this.context?.t || defaultUiTranslate)('inbox.' + name, params); }
     state = { step: 1, courses: [], course: null, q: '', people: [], recipients: [], scope: 'none', pairs: [], selectedPairs: [], fileCount: 0, busy: false, error: '', requestId: null };
     componentDidMount() { this.loadCourses(); }
     componentWillUnmount() { clearTimeout(this.timer); }
@@ -305,17 +320,19 @@ class ShareCourseModal extends React.Component {
     async send() { const payload = { course: this.state.course.id, recipients: this.state.recipients.map(r => r.id), history_scope: this.state.scope, selected_pair_ids: this.state.scope === 'selected' ? this.state.selectedPairs : [] }; const requestId = this.state.requestId || key(); this.setState({ requestId, busy: true }); try {
         const result = await createShare(payload, requestId);
         this.props.closeModal();
-        this.props.toast('共享已发送' + (result.reused ? '（已复用之前的请求）' : ''));
+        this.props.toast(this.translate('shareSent') + (result.reused ? this.translate('reusedRequestSuffix') : ''));
         this.props.onDone?.();
     }
     catch (e) {
         this.setState({ error: e.message, busy: false });
     } }
-    scopeLabel() { return this.state.scope === 'all' ? '全部发送' : this.state.scope === 'none' ? '全部不发送' : '选择特定知识点对话'; }
-    render() { const { step, courses, course, q, people, recipients, scope, pairs, selectedPairs, fileCount, busy, error } = this.state; return <div className="share-wizard">{error && <p className="error-text">{error}</p>}{step === 1 && <div className="share-step"><h4>1. 选择要共享的课程</h4><div className="node-picker-list">{courses.map(c => <button type="button" key={c.id} className="node-picker-row" onClick={() => this.pickCourse(c)}><Icon name="book"/><span>{c.name}</span><small className="muted">{c.code}</small></button>)}{!courses.length && <p className="helper-note" style={{ padding: 12 }}>没有可共享的课程</p>}</div></div>}{step === 2 && <div className="share-step"><h4>2. 选择接收者</h4><DirectoryPicker selected={recipients.map(r=>r.id)} onSelect={p=>this.toggleRecipient(p)}/><div className="recipient-chips">{recipients.map(r => <span className="recipient-chip" key={r.id}>{r.name}<button type="button" onClick={() => this.toggleRecipient(r)}>×</button></span>)}</div><div className="row" style={{ marginTop: 16 }}><button className="btn" onClick={() => this.setState({ step: 1 })}>上一步</button><button className="btn primary" disabled={!recipients.length} onClick={() => this.setState({ step: 3 })}>下一步</button></div></div>}{step === 3 && <div className="share-step"><h4>3. 历史范围</h4><div className="share-radio"><label><input type="radio" name="scope" checked={scope === 'all'} onChange={() => this.pickScope('all')}/>全部发送</label><label><input type="radio" name="scope" checked={scope === 'none'} onChange={() => this.pickScope('none')}/>全部不发送</label><label><input type="radio" name="scope" checked={scope === 'selected'} onChange={() => this.pickScope('selected')}/>选择特定知识点对话</label></div>{scope === 'selected' && <div className="share-pair-list">{pairs.map(p => <label key={p.id} className="share-pair-row"><input type="checkbox" checked={selectedPairs.includes(p.id)} onChange={() => this.togglePair(p.id)}/><span>{p.title}</span><small className="muted">{formatTime(p.updated_at)}</small></label>)}{!pairs.length && <p className="helper-note" style={{ padding: 12 }}>没有知识点对话</p>}</div>}<div className="row" style={{ marginTop: 16 }}><button className="btn" onClick={() => this.setState({ step: 2 })}>上一步</button><button className="btn primary" disabled={scope === 'selected' && !selectedPairs.length} onClick={() => this.review()}>下一步</button></div></div>}{step === 4 && <div className="share-step"><h4>4. 确认发送</h4><div className="share-review"><p>课程：{course?.name}</p><p>接收者：{recipients.map(r => r.name).join('、')}</p><p>文件：{fileCount} 个</p><p>历史：{this.scopeLabel()}{scope === 'selected' ? '（' + selectedPairs.length + ' 个对话）' : ''}</p></div><div className="row" style={{ marginTop: 16 }}><button className="btn" onClick={() => this.setState({ step: 3 })}>上一步</button><button className="btn primary" disabled={busy} onClick={() => this.send()}>{busy ? '发送中…' : '确认发送'}</button></div></div>}</div>; }
+    scopeLabel() { return this.translate(this.state.scope === 'all' ? 'allHistory' : this.state.scope === 'none' ? 'noHistory' : 'selectedHistory'); }
+    render() { const { step, courses, course, recipients, scope, pairs, selectedPairs, fileCount, busy, error } = this.state; return <div className="share-wizard">{error && <p className="error-text">{error}</p>}{step === 1 && <div className="share-step"><h4>{this.translate('shareStepCourse')}</h4><div className="node-picker-list">{courses.map(c => <button type="button" key={c.id} className="node-picker-row" onClick={() => this.pickCourse(c)}><Icon name="book"/><span>{c.name}</span><small className="muted">{c.code}</small></button>)}{!courses.length && <p className="helper-note" style={{ padding: 12 }}>{this.translate('noShareableCourses')}</p>}</div></div>}{step === 2 && <div className="share-step"><h4>{this.translate('shareStepRecipients')}</h4><DirectoryPicker selected={recipients.map(r=>r.id)} onSelect={p=>this.toggleRecipient(p)}/><div className="recipient-chips">{recipients.map(r => <span className="recipient-chip" key={r.id}>{r.name}<button type="button" aria-label={this.translate('removeRecipient', { name: r.name })} onClick={() => this.toggleRecipient(r)}>×</button></span>)}</div><div className="row" style={{ marginTop: 16 }}><button className="btn" onClick={() => this.setState({ step: 1 })}>{this.translate('previousStep')}</button><button className="btn primary" disabled={!recipients.length} onClick={() => this.setState({ step: 3 })}>{this.translate('nextStep')}</button></div></div>}{step === 3 && <div className="share-step"><h4>{this.translate('shareStepHistory')}</h4><div className="share-radio"><label><input type="radio" name="scope" checked={scope === 'all'} onChange={() => this.pickScope('all')}/>{this.translate('allHistory')}</label><label><input type="radio" name="scope" checked={scope === 'none'} onChange={() => this.pickScope('none')}/>{this.translate('noHistory')}</label><label><input type="radio" name="scope" checked={scope === 'selected'} onChange={() => this.pickScope('selected')}/>{this.translate('selectedHistory')}</label></div>{scope === 'selected' && <div className="share-pair-list">{pairs.map(p => <label key={p.id} className="share-pair-row"><input type="checkbox" checked={selectedPairs.includes(p.id)} onChange={() => this.togglePair(p.id)}/><span>{p.title}</span><small className="muted">{formatTime(p.updated_at)}</small></label>)}{!pairs.length && <p className="helper-note" style={{ padding: 12 }}>{this.translate('noConversations')}</p>}</div>}<div className="row" style={{ marginTop: 16 }}><button className="btn" onClick={() => this.setState({ step: 2 })}>{this.translate('previousStep')}</button><button className="btn primary" disabled={scope === 'selected' && !selectedPairs.length} onClick={() => this.review()}>{this.translate('nextStep')}</button></div></div>}{step === 4 && <div className="share-step"><h4>{this.translate('shareStepConfirm')}</h4><div className="share-review"><p>{this.translate('courseReview', { course: course?.name || '' })}</p><p>{this.translate('recipientsReview', { recipients: recipients.map(r => r.name).join(this.translate('nameSeparator')) })}</p><p>{this.translate('filesReview', { count: fileCount })}</p><p>{this.translate('historyReview', { scope: this.scopeLabel() })}{scope === 'selected' ? this.translate('selectedConversationSuffix', { count: selectedPairs.length }) : ''}</p></div><div className="row" style={{ marginTop: 16 }}><button className="btn" onClick={() => this.setState({ step: 3 })}>{this.translate('previousStep')}</button><button className="btn primary" disabled={busy} onClick={() => this.send()}>{this.translate(busy ? 'sending' : 'confirmSend')}</button></div></div>}</div>; }
 }
 export class Calendar extends React.Component {
-    state = { month: new Date(new Date().getFullYear(), new Date().getMonth(), 1), tasks: [], plan: '', answer: '', busy: false, error: '' };
+    static contextType = UiLocaleContext;
+    t = (name, params) => this.context.t('calendar.' + name, params);
+    state = { month: new Date(new Date().getFullYear(), new Date().getMonth(), 1), tasks: [], plan: '', answer: '', answerFallback: false, busy: false, error: '' };
     componentDidMount() { this.load(); }
     async load() { try {
         this.setState({ tasks: await request('/tasks'), error: '' });
@@ -323,10 +340,10 @@ export class Calendar extends React.Component {
     catch (e) {
         this.setState({ error: e.message });
     } }
-    task = (date, id = null) => { const task = this.state.tasks.find(x => x.id === id); this.props.modal(task ? '修改学习安排' : '新建学习安排', <TaskForm task={task} date={date} courses={this.props.courses} user={this.props.user} onSubmit={async (value) => { if (task)
+    task = (date, id = null) => { const task = this.state.tasks.find(x => x.id === id); this.props.modal({ titleKey: task ? 'calendar.editTask' : 'calendar.createTask' }, <TaskForm task={task} date={date} courses={this.props.courses} user={this.props.user} onSubmit={async (value) => { if (task)
         await send('/tasks/' + task.id, { title: value.title, due_at: value.due_at, version: task.version }, 'PATCH');
     else
-        await send('/tasks', value); this.props.closeModal(); await this.load(); this.props.toast('学习安排已保存'); }}/>); };
+        await send('/tasks', value); this.props.closeModal(); await this.load(); this.props.toast(this.t('saved')); }}/>); };
     async done(t) { try {
         await send('/tasks/' + t.id, { version: t.version, status: t.status === 'done' ? 'todo' : 'done' }, 'PATCH');
         await this.load();
@@ -334,24 +351,89 @@ export class Calendar extends React.Component {
     catch (e) {
         this.props.toast(e.message);
     } }
-    async plan(e) { e.preventDefault(); this.setState({ busy: true, answer: '' }); try {
+    async plan(e) { e.preventDefault(); this.setState({ busy: true, answer: '', answerFallback: false }); try {
         const result = await send('/tasks/plan', { text: this.state.plan, request_id: key() });
-        this.setState({ answer: result.text || result.answer || result.message || '已执行，请检查安排。', plan: '' });
+        const answer = result.text || result.answer || result.message || '';
+        this.setState({ answer, answerFallback: !answer, plan: '' });
         await this.load();
     }
     catch (e) {
-        this.setState({ answer: e.message });
+        this.setState({ answer: e.message, answerFallback: false });
     }
     finally {
         this.setState({ busy: false });
     } }
-    render() { const { month, tasks } = this.state; const start = new Date(month); start.setDate(1 - ((start.getDay() + 6) % 7)); const days = Array.from({ length: 42 }, (_, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d; }); const zone = this.props.user.timezone; const today = zonedParts(new Date(),zone).date; return <div className="page"><header className="page-heading"><h1>日历</h1><p>把学习放进生活的节奏里。<span className="small">　{zone}</span></p></header>{this.state.error && <p className="error-text">{this.state.error}</p>}<section className="calendar"><div className="calendar-toolbar"><h2>{month.getFullYear()} 年 {month.getMonth() + 1} 月</h2><div className="row"><button className="btn small" onClick={() => this.setState({ month: new Date(new Date().getFullYear(), new Date().getMonth(), 1) })}>今天</button><IconButton name="back" title="上个月" onClick={() => this.setState({ month: new Date(month.getFullYear(), month.getMonth() - 1, 1) })}/><IconButton name="arrow" title="下个月" onClick={() => this.setState({ month: new Date(month.getFullYear(), month.getMonth() + 1, 1) })}/></div></div><div className="calendar-week">{['周一', '周二', '周三', '周四', '周五', '周六', '周日'].map(x => <div key={x}>{x}</div>)}</div><div className="calendar-grid">{days.map(d => <div key={dateKey(d)} className={'calendar-cell ' + (d.getMonth() !== month.getMonth() ? 'out' : '')} onClick={() => this.task(dateKey(d))} role="button" tabIndex="0" onKeyDown={e => { if (e.key === 'Enter')
-        this.task(dateKey(d)); }} aria-label={dateKey(d) + ' 添加安排'}><div className={'calendar-day ' + (dateKey(d) === today ? 'today' : '')}>{d.getDate()}</div>{tasks.filter(t => zonedParts(t.due_at, zone).date === dateKey(d)).map(t => <button key={t.id} className={'calendar-event ' + (t.status === 'done' ? 'done-event' : '')} onClick={e => { e.stopPropagation(); this.task(dateKey(d), t.id); }}>{zonedParts(t.due_at, zone).time} {t.title}</button>)}</div>)}</div></section><section className="plan-section"><div className="row between"><h2>制定学习计划</h2><button className="btn" onClick={() => this.task(today)}><Icon name="plus"/>新建安排</button></div><p>一句话告诉学习计划 Agent，或手动安排下一次复习。</p><div className="plan-layout"><form className="plan-chat" onSubmit={e => this.plan(e)}><div className="row"><span className="mini-logo"><Icon name="book"/></span><h3>学习计划助手</h3></div><p>例如：“明天下午两点复习 DBSCAN”。任务创建、修改和完成会同步到上方日历。</p><textarea aria-label="自然语言学习安排" required maxLength="2000" placeholder="你想怎样安排接下来的学习？" value={this.state.plan} onChange={e => this.setState({ plan: e.target.value })}/><button className="btn primary" disabled={this.state.busy}>{this.state.busy ? '正在处理…' : '安排学习'}</button>{this.state.answer && <p className="plan-response">{this.state.answer}</p>}</form><div className="task-list">{tasks.map(t => <article className="task-card" key={t.id}><button className={'task-check ' + (t.status === 'done' ? 'done' : '')} aria-label={'完成 ' + t.title} onClick={() => this.done(t)}>{t.status === 'done' && <Icon name="check"/>}</button><div style={{ flex: 1 }}><h3 className={t.status === 'done' ? 'completed-title' : ''}>{t.title}</h3><p className="helper-note">{zonedParts(t.due_at, zone).date}　{zonedParts(t.due_at, zone).time}{t.course ? ' · ' + (this.props.courses.find(c => c.id === t.course)?.code || '课程') : ''}</p></div><IconButton name="edit" title={'修改 ' + t.title} onClick={() => this.task('', t.id)}/><IconButton name="trash" title={'删除 ' + t.title} onClick={async () => { if (window.confirm('删除这项学习安排？')) {
-        await remove('/tasks/' + t.id+'?version='+t.version);
-        this.load();
-    } }}/></article>)}{!tasks.length && <div className="empty-state"><Icon name="calendar"/><h3>给下一次学习留一点时间</h3><p>创建安排后会在这里和日历中同步显示。</p></div>}</div></div></section></div>; }
+    render() {
+        const { month, tasks } = this.state;
+        const start = new Date(month);
+        start.setDate(1 - ((start.getDay() + 6) % 7));
+        const days = Array.from({ length: 42 }, (_, i) => {
+            const d = new Date(start); d.setDate(start.getDate() + i); return d;
+        });
+        const zone = this.props.user.timezone;
+        const today = zonedParts(new Date(), zone).date;
+        const monthLabel = new Intl.DateTimeFormat(this.context.locale, { year: 'numeric', month: 'long' }).format(month);
+        return <div className="page course-calendar">
+            <header className="page-heading"><h1>{this.t('title')}</h1><p>{this.t('intro')} <span className="small">{zone}</span></p></header>
+            {this.state.error && <p className="error-text">{this.state.error}</p>}
+            <section className="calendar">
+                <div className="calendar-toolbar"><h2>{monthLabel}</h2><div className="row">
+                    <button className="btn small" onClick={() => this.setState({ month: new Date(new Date().getFullYear(), new Date().getMonth(), 1) })}>{this.t('today')}</button>
+                    <IconButton name="back" title={this.t('previousMonth')} onClick={() => this.setState({ month: new Date(month.getFullYear(), month.getMonth() - 1, 1) })}/>
+                    <IconButton name="arrow" title={this.t('nextMonth')} onClick={() => this.setState({ month: new Date(month.getFullYear(), month.getMonth() + 1, 1) })}/>
+                </div></div>
+                <div className="calendar-week">{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => <div key={day}>{this.t('weekday' + day)}</div>)}</div>
+                <div className="calendar-grid">{days.map(d => <div key={dateKey(d)}
+                    className={'calendar-cell ' + (d.getMonth() !== month.getMonth() ? 'out' : '')}
+                    onClick={() => this.task(dateKey(d))} role="button" tabIndex="0"
+                    onKeyDown={e => { if (e.target === e.currentTarget && ['Enter', ' '].includes(e.key)) {
+                        e.preventDefault(); this.task(dateKey(d));
+                    } }} aria-label={this.t('addOnDate', { date: dateKey(d) })}>
+                    <div className={'calendar-day ' + (dateKey(d) === today ? 'today' : '')}>{d.getDate()}</div>
+                    {tasks.filter(t => zonedParts(t.due_at, zone).date === dateKey(d)).map(t =>
+                        <button key={t.id} className={'calendar-event ' + (t.status === 'done' ? 'done-event' : '')}
+                            onClick={e => { e.stopPropagation(); this.task(dateKey(d), t.id); }}>
+                            {zonedParts(t.due_at, zone).time} {t.title}
+                        </button>)}
+                </div>)}</div>
+            </section>
+            <section className="plan-section">
+                <div className="row between"><h2>{this.t('studyPlan')}</h2><button className="btn" onClick={() => this.task(today)}><Icon name="plus"/>{this.t('newArrangement')}</button></div>
+                <p>{this.t('planIntro')}</p>
+                <div className="plan-layout">
+                    <form className="plan-chat" onSubmit={e => this.plan(e)}>
+                        <div className="row"><span className="mini-logo"><Icon name="book"/></span><h3>{this.t('assistant')}</h3></div>
+                        <p>{this.t('planExample')}</p>
+                        <textarea aria-label={this.t('naturalPlan')} required maxLength="2000" placeholder={this.t('planPlaceholder')}
+                            value={this.state.plan} onChange={e => this.setState({ plan: e.target.value })}/>
+                        <button className="btn primary" disabled={this.state.busy}>{this.t(this.state.busy ? 'processing' : 'schedule')}</button>
+                        {(this.state.answer || this.state.answerFallback) && <p className="plan-response">{this.state.answer || this.t('executed')}</p>}
+                    </form>
+                    <div className="task-list">{tasks.map(t => <article className="task-card" key={t.id}>
+                        <button className={'task-check ' + (t.status === 'done' ? 'done' : '')}
+                            aria-label={this.t(t.status === 'done' ? 'reopenNamed' : 'completeNamed', { title: t.title })}
+                            onClick={() => this.done(t)}>{t.status === 'done' && <Icon name="check"/>}</button>
+                        <div style={{ flex: 1 }}><h3 className={t.status === 'done' ? 'completed-title' : ''}>{t.title}</h3>
+                            <p className="helper-note">{zonedParts(t.due_at, zone).date} {zonedParts(t.due_at, zone).time}
+                                {t.course ? ' · ' + (this.props.courses.find(c => c.id === t.course)?.code || this.t('course')) : ''}</p></div>
+                        <IconButton name="edit" title={this.t('editNamed', { title: t.title })} onClick={() => this.task('', t.id)}/>
+                        <IconButton name="trash" title={this.t('deleteNamed', { title: t.title })} onClick={async () => {
+                            if (window.confirm(this.t('deleteConfirm'))) {
+                                await remove('/tasks/' + t.id + '?version=' + t.version); this.load();
+                            }
+                        }}/>
+                    </article>)}
+                    {!tasks.length && <div className="empty-state"><Icon name="calendar"/><h3>{this.t('emptyTitle')}</h3><p>{this.t('emptyNotice')}</p></div>}
+                    </div>
+                </div>
+            </section>
+        </div>;
+    }
 }
 class TaskForm extends React.Component {
+    static contextType = UiLocaleContext;
+    t = (name, params) => this.context.t('calendar.' + name, params);
+    fieldId = 'task-form-' + key();
     state = { error: '', busy: false };
     async submit(e) { e.preventDefault(); const f = new FormData(e.currentTarget); this.setState({ busy: true }); try {
         await this.props.onSubmit({ title: f.get('title'), due_at: wallTimeToISO(f.get('date'), f.get('time'), this.props.user.timezone), timezone: this.props.user.timezone, course: f.get('course') || null, request_id: key() });
@@ -359,7 +441,25 @@ class TaskForm extends React.Component {
     catch (e) {
         this.setState({ error: e.message, busy: false });
     } }
-    render() { const { task, user, courses } = this.props; const dt = task ? zonedParts(task.due_at, user.timezone) : { date: this.props.date || dateKey(new Date()), time: '14:00' }; return <form onSubmit={e => this.submit(e)}><div className="field"><label>学习内容</label><input name="title" required maxLength="150" defaultValue={task?.title || ''} placeholder="例如：复习 DBSCAN"/></div><div className="row"><div className="field" style={{ flex: 1 }}><label>日期</label><input name="date" type="date" required defaultValue={dt.date}/></div><div className="field"><label>时间</label><input name="time" type="time" required defaultValue={dt.time}/></div></div><div className="field"><label>所属课程</label><select name="course" defaultValue={task?.course || ''} disabled={!!task}><option value="">个人学习</option>{courses.map(c => <option key={c.id} value={c.id}>{c.code} {c.name}</option>)}</select></div><p className="helper-note">时区：{user.timezone}</p>{this.state.error && <p className="error-text">{this.state.error}</p>}<button className="btn primary" disabled={this.state.busy} style={{ marginTop: 18 }}>保存安排</button></form>; }
+    render() {
+        const { task, user, courses } = this.props;
+        const dt = task ? zonedParts(task.due_at, user.timezone) : { date: this.props.date || dateKey(new Date()), time: '14:00' };
+        const field = name => this.fieldId + '-' + name;
+        return <form onSubmit={e => this.submit(e)}>
+            <div className="field"><label htmlFor={field('title')}>{this.t('content')}</label>
+                <input id={field('title')} name="title" required maxLength="150" defaultValue={task?.title || ''} placeholder={this.t('contentExample')}/></div>
+            <div className="row"><div className="field" style={{ flex: 1 }}><label htmlFor={field('date')}>{this.t('date')}</label>
+                <input id={field('date')} name="date" type="date" required defaultValue={dt.date}/></div>
+                <div className="field"><label htmlFor={field('time')}>{this.t('time')}</label>
+                    <input id={field('time')} name="time" type="time" required defaultValue={dt.time}/></div></div>
+            <div className="field"><label htmlFor={field('course')}>{this.t('taskCourse')}</label>
+                <select id={field('course')} name="course" defaultValue={task?.course || ''} disabled={!!task}>
+                    <option value="">{this.t('personal')}</option>{courses.map(c => <option key={c.id} value={c.id}>{c.code} {c.name}</option>)}</select></div>
+            <p className="helper-note">{this.t('timezone', { zone: user.timezone })}</p>
+            {this.state.error && <p className="error-text">{this.state.error}</p>}
+            <button className="btn primary" disabled={this.state.busy} style={{ marginTop: 18 }}>{this.t('save')}</button>
+        </form>;
+    }
 }
 function inline(text) { return text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((x, i) => x.startsWith('**') ? <strong key={i}>{x.slice(2, -2)}</strong> : x.startsWith('`') ? <code key={i}>{x.slice(1, -1)}</code> : x); }
 const FEEDBACK_CATEGORIES = [['ANSWER_WRONG', '答案有误'], ['CITATION_WRONG', '引用有误'], ['QUESTION_INCOMPLETE', '题目不完整'], ['IMAGE_RECOGNITION', '图片识别错误'], ['GRADING_DISPUTE', '评分争议'], ['COURSE_CLASSIFICATION', '课程分类错误'], ['SERVICE_FAULT', '页面/服务故障'], ['OTHER', '其他']];

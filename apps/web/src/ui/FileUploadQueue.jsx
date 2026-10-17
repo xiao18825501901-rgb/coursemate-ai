@@ -2,23 +2,25 @@ import React from 'react';
 
 import { formatBytes } from './utils.js';
 import { request } from './api.js';
+import { UiLocaleContext } from './UiLocale';
 
-const STATUS_LABELS = {
-    queued: '等待上传',
-    uploading: '正在上传',
-    succeeded: '已完成',
-    failed: '上传失败',
+const STATUS_KEYS = {
+    queued: 'fileQueue.queued',
+    uploading: 'courses.uploading',
+    succeeded: 'fileQueue.completed',
+    failed: 'courses.uploadFailed',
 };
 
-function resultLabel(item) {
-    if (item.result?.duplicate) return '已存在，未重复索引';
-    return {
-        indexed: '可检索',
-        processing: '文件已接收，处理中',
-        preview_only: '原文件已保存，无可检索文字',
-        failed: '原文件已保存，处理失败',
-        unavailable: '文件状态不可用',
-    }[item.result?.status] || STATUS_LABELS[item.status];
+function resultLabel(item, t) {
+    if (item.result?.duplicate) return t('fileQueue.duplicate');
+    const key = {
+        indexed: 'fileQueue.indexed',
+        processing: 'fileQueue.processing',
+        preview_only: 'fileQueue.previewOnly',
+        failed: 'fileQueue.processingFailed',
+        unavailable: 'fileQueue.unavailable',
+    }[item.result?.status] || STATUS_KEYS[item.status] || 'common.unknown';
+    return t(key);
 }
 
 function clientItemId() {
@@ -102,23 +104,25 @@ export async function runUploadBatch(courseId, items, upload, onChange, concurre
 }
 
 export function FileUploadQueue({ items, busy = false, onRemove, onRetry }) {
+    const { t } = React.useContext(UiLocaleContext);
     if (!items.length) return null;
     const succeeded = items.filter(item => item.status === 'succeeded').length;
     const processing = items.filter(item => item.status === 'uploading').length;
     const failed = items.filter(item => item.status === 'failed').length;
-    return <div className="upload-queue" aria-label="文件上传队列">
+    return <div className="upload-queue" aria-label={t('courses.queue')}>
         <p className="upload-queue-summary" aria-live="polite">
-            已完成 {succeeded}/{items.length} · 处理中 {processing} 个{failed ? ` · 失败 ${failed} 个` : ''}
+            {t('fileQueue.summary', {done:succeeded,total:items.length,processing})}
+            {failed ? t('fileQueue.failedSummary', {count:failed}) : ''}
         </p>
         {items.map(item => <div className={`upload-queue-item ${item.status}`} key={item.clientItemId}>
             <div className="upload-queue-copy">
                 <strong title={item.name}>{item.name}</strong>
-                <small>{formatBytes(item.size)} · {resultLabel(item)}</small>
+                <small>{formatBytes(item.size)} · {resultLabel(item, t)}</small>
                 {item.error && <span className="upload-queue-error" role="alert">{item.error}</span>}
             </div>
             <div className="upload-queue-actions">
-                {item.status === 'failed' && <button type="button" className="btn small" disabled={busy} onClick={() => onRetry?.(item.clientItemId)}>只重试此项</button>}
-                {['queued', 'failed'].includes(item.status) && <button type="button" className="icon-btn" aria-label={`移除 ${item.name}`} title="从队列移除" disabled={busy} onClick={() => onRemove?.(item.clientItemId)}>×</button>}
+                {item.status === 'failed' && <button type="button" className="btn small" disabled={busy} onClick={() => onRetry?.(item.clientItemId)}>{t('fileQueue.retryItem')}</button>}
+                {['queued', 'failed'].includes(item.status) && <button type="button" className="icon-btn" aria-label={t('fileQueue.removeItem', {name:item.name})} title={t('fileQueue.removeTitle')} disabled={busy} onClick={() => onRemove?.(item.clientItemId)}>×</button>}
             </div>
         </div>)}
     </div>;
