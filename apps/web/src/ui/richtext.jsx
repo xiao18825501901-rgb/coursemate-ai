@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useContext } from 'react';
+import { UiLocaleContext } from './UiLocale';
 
 // KaTeX produces MathML only. No HTML received from the model is ever rendered as HTML.
 function Formula({tex, display=false}) {
+    const { t } = useContext(UiLocaleContext);
     if (!window.CourseMateMath || tex.length>4000) return <code>{tex}</code>;
     try {
         const out=window.CourseMateMath.renderToString(tex,{output:'mathml',displayMode:display,throwOnError:true,trust:false,maxExpand:100,maxSize:12,strict:'error'});
@@ -16,7 +18,7 @@ function Formula({tex, display=false}) {
             return React.createElement(name,props,...Array.from(n.childNodes).map(convert));
         }
         return <span className={display?'formula-display':'formula-inline'}>{math?convert(math,0):tex}</span>;
-    } catch { return <code className="math-source" title="公式未完整或暂不支持，显示原始表达式">{tex}</code>; }
+    } catch { return <code className="math-source" title={t('common.formulaFallback')}>{tex}</code>; }
 }
 function Inline({text}) {
     const parts=String(text).split(/(`[^`\n]+`|\*\*[^*\n]+\*\*|\\\([^\n]*?\\\)|\$[^$\n]+\$)/g);

@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { I18nextProvider } from "react-i18next";
 import zh from "./locales/zh-CN.json";
 import en from "./locales/en.json";
+import { setUiErrorTranslator } from "./api.js";
 
 type Locale = "zh-CN" | "en";
 type Params = Record<string, string | number>;
@@ -58,6 +59,10 @@ export function UiLocaleProvider({ children }: { children: ReactNode }) {
   useLayoutEffect(() => {
     void i18n.changeLanguage(locale);
     document.documentElement.lang = locale;
+  }, [i18n, locale]);
+  useLayoutEffect(() => {
+    const fixed = i18n.getFixedT(locale);
+    return setUiErrorTranslator((key: string, params: Params = {}) => String(fixed(key, params)));
   }, [i18n, locale]);
   const value = useMemo<UiLocaleValue>(() => ({ locale, setLocale, setOwner,
     t: (key, params = {}) => String(i18n.getFixedT(locale)(key, params)) }),

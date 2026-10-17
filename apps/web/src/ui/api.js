@@ -1,26 +1,73 @@
 let tokenGetter = async () => null;
+let uiErrorTranslator = null;
+const LOCALIZED_ERROR_CODES = new Set([
+    'WORKSPACE_BUSY', 'OPERATION_IN_PROGRESS', 'QUESTION_ENGINE_FAILED',
+    'ASSESSMENT_POINTS_NOT_READY', 'CATALOG_SCOPE_OR_VERSION_MISMATCH',
+    'QUESTION_FORM_NOT_ALLOWED', 'SECOND_ITEM_PURPOSE_REQUIRED',
+    'INTENT_PAYLOAD_CONFLICT', 'PAPER_INCOMPLETE', 'ASSESSMENT_ALREADY_ACTIVE',
+    'NEEDS_REVIEW', 'UNKNOWN_REQUEST', 'SOURCE_NOT_READY', 'PERMISSION_DENIED',
+    'SESSION_EXPIRED', 'NETWORK_UNAVAILABLE', 'STREAM_LIMIT', 'STREAM_UNAVAILABLE',
+]);
 export function setTokenGetter(fn) { tokenGetter = fn; }
+export function setUiErrorTranslator(fn) {
+    uiErrorTranslator = typeof fn === 'function' ? fn : null;
+    const installed = uiErrorTranslator;
+    return () => { if (uiErrorTranslator === installed) uiErrorTranslator = null; };
+}
+function translatedErrorMessage(code, status, params = {}, diagnosticId = null) {
+    const displayCode = code === 'STREAM_INTERRUPTED' ? 'NETWORK_UNAVAILABLE' : (LOCALIZED_ERROR_CODES.has(code) ? code : 'HTTP_STATUS');
+    const fallback = displayCode === 'NETWORK_UNAVAILABLE' ? 'Connection unavailable; current progress is retained'
+        : displayCode === 'STREAM_LIMIT' ? 'The response stream exceeded the safe size limit'
+        : displayCode === 'STREAM_UNAVAILABLE' ? 'The browser could not read the response stream'
+        : `Request failed (${status || 'unknown'})`;
+    let message = uiErrorTranslator ? uiErrorTranslator(`errors.${displayCode}`, { ...params, status: status || 'unknown' }) : fallback;
+    if (!message || message === `errors.${displayCode}`) message = fallback;
+    if (diagnosticId) {
+        const diagnostic = uiErrorTranslator ? uiErrorTranslator('errors.diagnostic', { id: diagnosticId }) : `Diagnostic ID: ${diagnosticId}`;
+        message += ` · ${diagnostic}`;
+    }
+    return message;
+}
+function safeParams(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter(([, item]) => ['string', 'number', 'boolean'].includes(typeof item)));
+}
+function uiError(code, { status = null, rawMessage = '', detail = null, body = null, cause = null } = {}) {
+    const objectDetail = detail && typeof detail === 'object' ? detail : null;
+    const params = safeParams(objectDetail?.params);
+    const diagnosticId = objectDetail?.diagnostic_id || body?.diagnostic_id || null;
+    const error = new Error(translatedErrorMessage(code, status, params, diagnosticId));
+    error.status = status;
+    error.code = code;
+    error.detail = detail;
+    error.body = body;
+    error.rawMessage = rawMessage || '';
+    if (cause) error.cause = cause;
+    return error;
+}
 export function base() { return (window.COURSEMATE_CONFIG?.apiBase || '/api/ui/v1').replace(/\/$/, ''); }
 export async function request(path, options = {}) {
     const token = await tokenGetter();
     const headers = { ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...(token ? { 'Authorization': `Bearer ${token}` } : {}) };
-    const response = await fetch(base() + path, { ...options, headers: { ...headers, ...options.headers }, credentials: 'include', cache: 'no-store' });
+    let response;
+    try {
+        response = await fetch(base() + path, { ...options, headers: { ...headers, ...options.headers }, credentials: 'include', cache: 'no-store' });
+    } catch (cause) {
+        if (cause?.name === 'AbortError') throw cause;
+        throw uiError('NETWORK_UNAVAILABLE', { rawMessage: cause?.message || String(cause), cause });
+    }
     if (!response.ok) {
         let error;
         try {
             error = await response.json();
         }
         catch {
-            error = { detail: `请求失败 (${response.status})` };
+            error = { detail: null };
         }
         const detail = error.detail;
-        const message = typeof detail === 'string' ? detail : (detail && typeof detail === 'object' && typeof detail.message === 'string' ? detail.message : (detail && typeof detail === 'object' ? JSON.stringify(detail) : `请求失败 (${response.status})`));
-        const err = new Error(message || `请求失败 (${response.status})`);
-        err.status = response.status;
-        err.code = detail && typeof detail === 'object' ? detail.code || null : null;
-        err.detail = detail;
-        err.body = error;
-        throw err;
+        const rawMessage = typeof detail === 'string' ? detail : (detail && typeof detail === 'object' && typeof detail.message === 'string' ? detail.message : '');
+        const code = detail && typeof detail === 'object' ? detail.code || 'HTTP_STATUS' : (error.code || 'HTTP_STATUS');
+        throw uiError(code, { status: response.status, rawMessage, detail, body: error });
     }
     if (options.raw)
         return response;
