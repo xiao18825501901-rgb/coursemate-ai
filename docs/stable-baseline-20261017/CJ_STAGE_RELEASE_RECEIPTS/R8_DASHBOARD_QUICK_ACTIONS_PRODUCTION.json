@@ -1,0 +1,79 @@
+{
+  "receipt_version": "coursejesus.r8.dashboard-quick-actions.production.v1",
+  "recorded_at_utc": "2026-10-17T18:19:04.6589227Z",
+  "result": "PASS_WITH_MOBILE_PRODUCTION_VIEWPORT_RECHECK_PENDING",
+  "source": {
+    "feature_sha": "7a8fe2cda5bb72c57fdeeabe385ce6a25adc7ffe",
+    "parent_sha": "2df6f0a392166ba487962e34e1084983026e9866"
+  },
+  "build": {
+    "command": "netlify build --context production --filter @coursemate/web",
+    "production_preflight": "PASS",
+    "clerk_publishable_key_presence": "PASS",
+    "api_targets": "PASS_EXISTING_PRODUCTION_VALUES",
+    "tests": {
+      "frontend_files": 53,
+      "frontend_cases": 227,
+      "result": "PASS"
+    },
+    "typecheck": "PASS"
+  },
+  "frontend": {
+    "site_id": "166afb5a-4103-4236-9f13-4be34dc68cd2",
+    "site_name": "coursemate-ai-qqtt",
+    "url": "https://coursejesus.com",
+    "previous_deploy": "6ad3aaef94c4761799bc1df1",
+    "published_deploy": "6ad3bb5cf339f54da2676ba3",
+    "state": "ready",
+    "published_at_utc": "2026-10-17T18:16:00.282Z",
+    "ui_js": {
+      "file": "assets/ui-BLxBrJOc.js",
+      "sha256": "9947D6B4E6C5B6AA3F34058FDEC23567139A2C428F152739FE51BC58313A0A48",
+      "online_hash_match": true
+    },
+    "ui_css": {
+      "file": "assets/ui-BcWrH3Um.css",
+      "sha256": "4C2B435494FC3E5E684934FF13BCA5ECE0E282E7B34AE30AF93A5966DECBB466"
+    }
+  },
+  "backend": {
+    "changed": false,
+    "release_directory": "/srv/coursemate/releases/r5-05946c2/services/rag-api",
+    "pid": 300739,
+    "port": 28000,
+    "health": "PASS",
+    "schema_changed": false
+  },
+  "authenticated_clerk_acceptance": {
+    "dashboard_zh_cn": "PASS",
+    "dashboard_en": "PASS",
+    "action_order": [
+      "从 Canvas 导入",
+      "创建自己的课程",
+      "进入所有课程"
+    ],
+    "equal_desktop_columns": "PASS",
+    "desktop_horizontal_overflow": false,
+    "canvas_existing_dialog_handler": "PASS",
+    "create_course_existing_dialog_handler": "PASS",
+    "all_courses_navigation": "PASS",
+    "dark_theme": "PASS",
+    "light_theme_restored": true,
+    "mobile_production_viewport": "PENDING_BROWSER_VIEWPORT_OVERRIDE_DID_NOT_APPLY",
+    "mobile_reference_fixture": "16_OF_16_PASS_NOT_COUNTED_AS_PRODUCTION_ACCEPTANCE"
+  },
+  "release_lock": {
+    "path": "/run/lock/coursejesus-production-publish.lock",
+    "host": "coursemate-prod-new",
+    "owner": "stable-baseline-dashboard-ui",
+    "released": true,
+    "post_release_probe": "LOCK_FREE"
+  },
+  "rollback": {
+    "frontend_only": true,
+    "previous_deploy": "6ad3aaef94c4761799bc1df1",
+    "database_restore_required": false,
+    "policy": "fix forward from the immutable previous source/deploy; no backend or schema rollback is involved"
+  },
+  "git_cd_warning": "The site is connected to main. A later main-branch deploy can replace this manual release unless it includes this source change and production build environment."
+}
