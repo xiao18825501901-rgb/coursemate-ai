@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from app.config import Settings
-from app.db import Database
+from app.db import LATEST_V3_SCHEMA_VERSION, Database
 from app.visual.providers.base import ProviderState
 from app.visual.providers.mock_comfy import MockComfyProvider
 from app.visual.store import (
@@ -62,7 +62,10 @@ def test_visual_migration_is_current_and_replay_safe(tmp_path: Path) -> None:
     database = database_at(tmp_path)
     database.initialize()
     with database.connect() as connection:
-        assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 69
+        assert (
+            connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
+            == LATEST_V3_SCHEMA_VERSION
+        )
         columns = {
             row[1] for row in connection.execute("PRAGMA table_info(visual_jobs)").fetchall()
         }
