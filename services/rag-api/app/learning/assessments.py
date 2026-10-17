@@ -21,6 +21,17 @@ from app.jev.citation_audit import (
 from app.jev.citation_evidence import DocumentEvidenceResolver
 from app.jev.receipt_store import receipt_connection
 from app.jev.service import SemanticDecisionService
+from app.learning.assessment_point_configuration import (
+    AssessmentPointPolicyService,
+    PointQuestionSlot,
+)
+from app.learning.assessment_point_store import AssessmentPointConfigurationStore
+from app.learning.assessment_question_slots import (
+    AssessmentQuestionSlot,
+    assessment_setup_contract,
+    default_assessment_question_slots,
+    slots_from_selections,
+)
 from app.learning.models import (
     AssessmentAnswer,
     AssessmentGradeProposal,
@@ -29,12 +40,6 @@ from app.learning.models import (
     AssessmentSlotSelection,
     AssessmentSolutionStep,
     GradePolicyDraftInput,
-)
-from app.learning.assessment_question_slots import (
-    AssessmentQuestionSlot,
-    assessment_setup_contract,
-    default_assessment_question_slots,
-    slots_from_selections,
 )
 from app.learning.workspaces import workspace_for
 
@@ -74,11 +79,22 @@ def digest(value: object) -> str:
 class AssessmentService:
     """Owns frozen assessment facts and emits only learner-safe projections."""
 
-    def __init__(self, database: Database, jev: SemanticDecisionService | None = None) -> None:
+    def __init__(
+        self,
+        database: Database,
+        jev: SemanticDecisionService | None = None,
+        *,
+        point_policy: AssessmentPointPolicyService | None = None,
+    ) -> None:
         self.db = database
         # Non-authoritative semantic-decision layer. None (default) disables Jev
         # entirely; the deterministic grading path is byte-identical to before.
         self.jev = jev
+        self.point_store = (
+            AssessmentPointConfigurationStore(database, point_policy)
+            if point_policy is not None
+            else None
+        )
 
     @staticmethod
     def _atomic_node(
@@ -180,11 +196,17 @@ class AssessmentService:
         connection: sqlite3.Connection,
         workspace: sqlite3.Row,
         node_id: str,
+        *,
+        content_language: str | None = None,
     ) -> dict[str, Any]:
         """Return only configuration metadata; never read the question pool."""
 
         node = self._atomic_node(connection, workspace, node_id)
-        contract = assessment_setup_contract()
+        contract = (
+            self.point_store.setup(workspace, node, content_language)
+            if self.point_store is not None
+            else assessment_setup_contract()
+        )
         contract.update(
             {
                 "course_id": str(workspace["course_id"]),
@@ -202,8 +224,21 @@ class AssessmentService:
         selections: list[Any],
         *,
         requested_id: str | None = None,
-    ) -> tuple[sqlite3.Row, tuple[AssessmentQuestionSlot, ...]]:
+        intent_id: str | None = None,
+        content_language: str | None = None,
+    ) -> tuple[sqlite3.Row, tuple[AssessmentQuestionSlot | PointQuestionSlot, ...]]:
         """Persist an immutable, content-free configuration revision."""
+
+        if self.point_store is not None and (intent_id is not None or content_language is not None):
+            return self.point_store.freeze(
+                connection,
+                workspace,
+                node,
+                selections,
+                requested_id=requested_id,
+                intent_id=intent_id,
+                content_language=content_language,
+            )
 
         if requested_id:
             row = connection.execute(
@@ -281,7 +316,22 @@ class AssessmentService:
         self,
         connection: sqlite3.Connection,
         configuration_id: str,
-    ) -> tuple[AssessmentQuestionSlot, ...]:
+    ) -> tuple[AssessmentQuestionSlot | PointQuestionSlot, ...]:
+        configuration = connection.execute(
+            "SELECT policy_version FROM assessment_configurations WHERE id=?",
+            (configuration_id,),
+        ).fetchone()
+        if (
+            configuration is not None
+            and configuration["policy_version"] == "cj.assessment.points.v1"
+        ):
+            if self.point_store is None:
+                raise ApiError(
+                    409,
+                    "ASSESSMENT_POINTS_NOT_READY",
+                    "The assessable-point policy is unavailable.",
+                )
+            return self.point_store.read(connection, configuration_id)[1].items
         rows = connection.execute(
             "SELECT slot_id,question_type,task_form FROM assessment_configuration_slots "
             "WHERE configuration_id=? ORDER BY ordinal",
