@@ -1669,14 +1669,15 @@ class V3DomainAdapter:
         workspace = self._workspace_for_node(course_id, subject)
         if self.learning is None:
             raise ApiError(503, "V3_DISABLED", "The V3 learning engine is disabled.")
+        ready_only = bool(payload.get("_ready_only"))
         # Reuse the learning engine's canonical authorization and active-Spec
         # validation before authoring can spend money.  An unbound Pair must not
         # blindly pick the first ATOMIC row: old trees can legitimately contain
         # atomic nodes whose Spec is not active.  Resolve the first usable node
         # from the caller's effective tree, without widening course visibility.
-        selected_node: dict[str, Any] | None = None
+        selected_nodes: list[dict[str, Any]] = []
         if requested_node:
-            selected_node = self.learning.node(workspace, requested_node)
+            selected_nodes.append(self.learning.node(workspace, requested_node))
         else:
             snapshot = self._knowledge(subject, course_id)
             registry = {
@@ -1704,40 +1705,42 @@ class V3DomainAdapter:
                 if candidate.get("kind") != "ATOMIC":
                     continue
                 try:
-                    selected_node = self.learning.node(workspace, candidate_id)
-                    break
+                    selected_nodes.append(self.learning.node(workspace, candidate_id))
+                    if not ready_only:
+                        break
                 except ApiError as error:
                     if error.code == "SPEC_NOT_AVAILABLE":
                         continue
                     raise
-            if selected_node is None:
+            if not selected_nodes:
                 raise ApiError(
                     409,
                     "NO_EXERCISE_READY_NODE",
                     "No accessible atomic knowledge node has an active Teaching Spec.",
                 )
-        node_id = str(selected_node["id"])
         try:
-            ready_only = bool(payload.get("_ready_only"))
-            operation = (
-                self.question_engine.reuse_ready
-                if ready_only
-                else self.question_engine.reuse_ready_or_generate
-            )
-            generated = operation(
-                owner_user_id=subject,
-                workspace_id=str(workspace["id"]),
-                course_id=course_id,
-                private_course_id=str(workspace["private_course_id"]),
-                node_id=node_id,
-                operation_id=operation_id,
-                should_cancel=cancel_check,
-            )
-            if generated is None:
-                return None
-            generated["target_node_id"] = node_id
-            generated["target_node_title"] = str(selected_node["title"])
-            return generated
+            for selected_node in selected_nodes:
+                node_id = str(selected_node["id"])
+                operation = (
+                    self.question_engine.reuse_ready
+                    if ready_only
+                    else self.question_engine.reuse_ready_or_generate
+                )
+                generated = operation(
+                    owner_user_id=subject,
+                    workspace_id=str(workspace["id"]),
+                    course_id=course_id,
+                    private_course_id=str(workspace["private_course_id"]),
+                    node_id=node_id,
+                    operation_id=operation_id,
+                    should_cancel=cancel_check,
+                )
+                if generated is None:
+                    continue
+                generated["target_node_id"] = node_id
+                generated["target_node_title"] = str(selected_node["title"])
+                return generated
+            return None
         except QuestionEngineRuntimeError as error:
             if error.code == "QUESTION_CANCELLED":
                 raise asyncio.CancelledError() from error

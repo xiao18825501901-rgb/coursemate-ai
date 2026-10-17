@@ -570,6 +570,94 @@ def test_mounted_do_one_ready_reuse_does_not_require_billable_authorization(
         ).fetchone()[0] == 0
 
 
+def test_mounted_do_one_unbound_pair_scans_usable_nodes_for_ready_revision(
+    client: tuple[TestClient, ForbiddenLegacyExerciseProvider],
+) -> None:
+    """An unbound Pair must not stop at the first active Spec when READY is later."""
+
+    test_client, legacy = client
+    created = test_client.post(
+        f"{UI}/courses",
+        headers=auth(),
+        json={"name": "Unbound READY scan course", "description": "offline fixture"},
+    )
+    assert created.status_code == 201, created.text
+    course_id = created.json()["id"]
+    first_node_id = seed_objective(test_client, course_id)
+    ready_node_id = "node-density-ready-later"
+    objective = {
+        "item_id": "objective-density-ready-later",
+        "requirement": "REQUIRED",
+        "objective": "根据 epsilon 邻域计数判断指定样本是否为核心点",
+        "acceptance": "邻域计数、MinPts 比较和结论均可核验",
+        "evidence_ids": ["chunk-density-practice"],
+    }
+    spec_json = json.dumps([objective], ensure_ascii=False, sort_keys=True)
+    database = test_client.app.state.database
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO knowledge_nodes(id,course_id,owner_user_id,title,description,"
+            "major,kind,status) VALUES(?,?,?,'Later READY node','Synthetic','CS',"
+            "'ATOMIC','PRIVATE')",
+            (ready_node_id, course_id, SUBJECT),
+        )
+        connection.execute(
+            "INSERT INTO teaching_specs(node_id,version,content_json,content_hash) "
+            "VALUES(?,1,?,?)",
+            (
+                ready_node_id,
+                spec_json,
+                hashlib.sha256(spec_json.encode()).hexdigest(),
+            ),
+        )
+        workspace = connection.execute(
+            "SELECT id,private_course_id FROM learning_workspaces "
+            "WHERE course_id=? AND owner_user_id=?",
+            (course_id, SUBJECT),
+        ).fetchone()
+    engine = test_client.app.state.ui_extension_adapter.question_engine
+    seeded = engine.generate_one(
+        owner_user_id=SUBJECT,
+        workspace_id=workspace["id"],
+        course_id=course_id,
+        private_course_id=workspace["private_course_id"],
+        node_id=ready_node_id,
+        operation_id="seed-unbound-ready-later-0001",
+    )
+    pair = test_client.post(
+        f"{UI}/pairs", headers=auth(), json={"course": course_id}
+    ).json()
+    ui = test_client.app.state.ui_extension_app
+    ui.state.cfg.provider_mode = "deepseek"
+    ui.state.cfg.allow_billable = False
+
+    started = test_client.post(
+        f"{UI}/courses/{course_id}/exercises",
+        headers=auth(),
+        json={
+            "pair_id": pair["id"],
+            "request_id": "reuse-unbound-ready-later-0001",
+        },
+    )
+
+    assert first_node_id != ready_node_id
+    assert started.status_code == 202, started.text
+    run = wait_terminal(test_client, started.json()["id"])
+    assert run["status"] == "completed", run
+    exercise = ui.state.db.one(
+        "SELECT node,question_revision_id FROM cmui_exercises WHERE run=?",
+        (started.json()["id"],),
+    )
+    assert exercise["node"] == ready_node_id
+    assert exercise["question_revision_id"] == seeded["question_revision_id"]
+    assert legacy.exercise_calls == 0
+    assert ui.state.db.one(
+        "SELECT COUNT(*) AS n FROM cmui_limits "
+        "WHERE owner=? AND bucket='model-runs'",
+        (SUBJECT,),
+    )["n"] == 0
+
+
 def test_mounted_do_one_cold_generation_still_requires_billable_authorization(
     client: tuple[TestClient, ForbiddenLegacyExerciseProvider],
 ) -> None:
