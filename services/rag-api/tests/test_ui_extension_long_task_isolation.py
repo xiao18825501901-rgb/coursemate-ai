@@ -10,8 +10,23 @@ from app.ui_extension.domain import V3DomainAdapter
 
 
 @pytest.mark.asyncio
-async def test_file_upload_processing_does_not_block_the_online_event_loop() -> None:
-    """A slow parser/indexer must not pause unrelated online request work."""
+@pytest.mark.parametrize(
+    ("operation", "method_name", "payload"),
+    [
+        ("file.upload", "_file_upload", {"course": "course-a"}),
+        (
+            "context.retrieve",
+            "_retrieve",
+            {"course": "course-a", "query": "degree"},
+        ),
+    ],
+)
+async def test_long_rag_work_does_not_block_the_online_event_loop(
+    operation: str,
+    method_name: str,
+    payload: dict[str, Any],
+) -> None:
+    """Slow parsing, indexing, or retrieval must not pause unrelated online work."""
 
     adapter = object.__new__(V3DomainAdapter)
     adapter._begin_request = lambda: None  # type: ignore[method-assign]
@@ -25,14 +40,14 @@ async def test_file_upload_processing_does_not_block_the_online_event_loop() -> 
         order.append("upload-finished")
         return {"status": "ready"}
 
-    adapter._file_upload = slow_upload  # type: ignore[method-assign]
+    setattr(adapter, method_name, slow_upload)
 
     async def online_heartbeat() -> None:
         await asyncio.sleep(0)
         order.append("online-heartbeat")
 
     upload_result, _ = await asyncio.gather(
-        adapter._dispatch("file.upload", "student", {"course": "course-a"}),
+        adapter._dispatch(operation, "student", payload),
         online_heartbeat(),
     )
 

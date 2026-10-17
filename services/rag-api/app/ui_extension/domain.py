@@ -2617,7 +2617,10 @@ class V3DomainAdapter:
         if operation == "file.delete":
             return self._file_delete(subject, payload)
         if operation == "context.retrieve":
-            return self._retrieve(subject, payload)
+            # Hybrid retrieval performs synchronous embedding/search work and may
+            # also consult bounded semantic helpers.  It belongs to the online
+            # request, but must not monopolise the shared ASGI event loop.
+            return await asyncio.to_thread(self._retrieve, subject, payload)
         if operation == "attachments.prepare":
             return self._attachments(subject, payload)
         if operation == "task.list":
