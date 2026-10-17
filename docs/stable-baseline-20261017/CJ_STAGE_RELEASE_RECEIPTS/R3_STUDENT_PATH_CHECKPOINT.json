@@ -1,0 +1,55 @@
+{
+  "stage_id": "R3_DYNAMIC_K_STUDENT_PATH",
+  "status": "ENGINEERING_VERIFIED_NOT_DEPLOYED",
+  "observed_at_utc": "2026-10-17T09:24:40.8840860Z",
+  "candidate_head": "8f5d1d6c8ee6e575721b1e3ab59f13ac1a1a8562",
+  "scope": {
+    "enabled_policy": "cj.assessment.points.v1",
+    "default_state": "disabled",
+    "qualified_zero_call_target": "finite undirected graph degree targets with exact source rules",
+    "unsupported_target_behavior": "ASSESSMENT_POINTS_NOT_READY",
+    "legacy_behavior": "unchanged 5-30 question policy and historical readers"
+  },
+  "student_path": {
+    "route": "public UI adapter -> existing LearningOrchestrator -> existing AssessmentService",
+    "result": "K=1 -> prepare 1/1 -> READY -> open -> submit -> deterministic score 100 -> history read",
+    "answer_isolation": "answer and reference solution absent before submission",
+    "model_http_calls": 0,
+    "unknown_replays": 0,
+    "reload_behavior": "server-frozen client intent and language are reused"
+  },
+  "verification": {
+    "point_source_migration_ready_boundary_suite": "46 passed",
+    "public_adapter_and_adjacent_backend_suite": "33 passed",
+    "web_tests": "174 passed",
+    "web_typecheck": "PASS",
+    "web_production_build": "PASS",
+    "web_bundle_secret_scan": "PASS",
+    "known_warning": "Starlette TestClient/httpx deprecation only"
+  },
+  "production_read_only_preflight": {
+    "ssh_target": "coursemate-prod-new",
+    "rag_unit": "coursemate-rag.service active",
+    "active_process_cwd": "/srv/coursemate/releases/r1-a4e4c15/services/rag-api",
+    "current_symlink": "/srv/coursemate/releases/95d6531",
+    "identity_warning": "current symlink differs from active process cwd; stacked systemd drop-ins must be consolidated before release",
+    "agent_unit": "coursemate-agent.service active",
+    "database": "/srv/coursemate/data/releases/20260919T202006Z/rag.sqlite3",
+    "schema_max": 81,
+    "integrity_check": "ok",
+    "foreign_key_violations": 0,
+    "disk_used_percent": 95,
+    "disk_free_kib": 5368148,
+    "inode_used_percent": 13,
+    "release_lock": "ABSENT",
+    "production_point_policy_enabled": false,
+    "production_generic_llm_enabled": false
+  },
+  "release_decision": {
+    "production_write_performed": false,
+    "schema_migration_performed": false,
+    "paid_request_performed": false,
+    "reason_not_deployed": "Only the bounded deterministic graph target is qualified; the production identity split and real authenticated Clerk acceptance remain open gates."
+  },
+  "next_action": "Freeze a candidate against the effective R1 production base, rehearse migrations 082-084 on a current database copy, then run authenticated Clerk acceptance before any lock acquisition or switch."
+}
