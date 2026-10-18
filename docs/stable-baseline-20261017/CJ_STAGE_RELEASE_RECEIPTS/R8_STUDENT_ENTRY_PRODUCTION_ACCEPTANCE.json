@@ -1,0 +1,131 @@
+{
+  "receipt_version": "coursejesus.r8.student-entry.production.v1",
+  "recorded_at_utc": "2026-10-18T05:44:14.2786742Z",
+  "result": "CORE_PATHS_PASS_HISTORY_PATCH_DEPLOYED_FINAL_UI_READBACK_PENDING",
+  "source": {
+    "release_sha": "13ee6793be257d15c11df6f5f8c5481520f4867d",
+    "practice_grade_sha": "827fb945f4e8a7027b7759c52977edf9c8a1d7df",
+    "active_node_ready_reuse_sha": "9e02ce0c160975dcc43d58bd599f6b99c9b2685b"
+  },
+  "backend": {
+    "release_directory": "/srv/coursemate/releases/r8-history-fix-13ee679/services/rag-api",
+    "unit": "coursemate-rag",
+    "pid": 314653,
+    "port": 28000,
+    "health": "PASS",
+    "schema_version": 85,
+    "schema_changed_by_this_release": false,
+    "integrity_check": "ok",
+    "foreign_key_violations": 0,
+    "artifact": {
+      "path": "release-artifacts/r8-history-fix-13ee679.tar.gz",
+      "sha256": "bf1f3af2eb074fa0807517006b8f37fd95405d8059700eccbcb01f81807a08d3"
+    }
+  },
+  "frontend": {
+    "site_id": "166afb5a-4103-4236-9f13-4be34dc68cd2",
+    "site_name": "coursemate-ai-qqtt",
+    "url": "https://coursejesus.com",
+    "deploy_id": "6ad4593cb08dc21cb3548538",
+    "state": "ready",
+    "published_at_utc": "2026-10-18T05:29:35.815Z",
+    "production_build_sha": "13ee6793be257d15c11df6f5f8c5481520f4867d",
+    "clerk_key_class": "pk_live",
+    "test_token_present": false
+  },
+  "backup": {
+    "database_gzip": "/srv/coursemate/backups/r8-predeploy-20261018T042006Z.sqlite3.gz",
+    "sha256": "b28401f91a53a31e6d93d851b93bd05e846ad37f65e46af33a81b19bac4f71af"
+  },
+  "do_one": {
+    "result": "PASS_PRODUCTION_CLERK",
+    "course_id": "cs3481",
+    "node_id": "official-node-2997d5d223a65d32b00c1809",
+    "question_revision_id": "qe_5a08194f2baf4164b903b2618c9c69f3",
+    "exercise_id": "exercise_7af4102a075844fb963bcb82ca31e0a3",
+    "attempt_id": "pa_88a644889b5f4fcea664412a87d06a54",
+    "grading_operation_id": "3df35229-ced8-4139-9901-2c72caeadc02",
+    "verdict": "CORRECT",
+    "grading_provider": "HOST_DETERMINISTIC",
+    "grading_model": "NONE",
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "student_visible_proof": [
+      "question",
+      "answer submission",
+      "correct verdict",
+      "stored answer",
+      "three-step explanation",
+      "history readback"
+    ]
+  },
+  "dynamic_assessment": {
+    "result": "PASS_PRODUCTION_CLERK_K1",
+    "course_id": "cs3481",
+    "node_id": "official-node-2997d5d223a65d32b00c1809",
+    "policy_version": "cj.assessment.points.v1",
+    "k": 1,
+    "default_n": 1,
+    "minimum_n": 1,
+    "maximum_n": 2,
+    "configuration_id": "assessment-config-173db76f803c25a4acf4318bf756deba",
+    "preparation_id": "assessment-config-prep-173db76f803c25a4acf4318bf756deba",
+    "author_operation_id": "assessment-prep-25a4acf4318bf756deba-1",
+    "author_reservation_id": "61522ab8ce214fba89b8881174a0271b",
+    "author_usage": {
+      "input_tokens": 6278,
+      "output_tokens": 9662
+    },
+    "slot_id": "point-item-d7b8f2bb361960a788da46f1",
+    "slot_status": "READY_REUSED",
+    "graded_session_id": "16ee33878c4d44f396936dc9fd965ea0",
+    "attempt_id": "138f1cfc36714830bb00e93a28121752",
+    "grade_snapshot_id": "67e268d4944f4b2aabdd6b847446efc4",
+    "raw_score": 100,
+    "max_score": 100,
+    "student_visible_proof": [
+      "dynamic K configuration",
+      "preparation progress",
+      "frozen one-question paper",
+      "submission",
+      "100/100 grading",
+      "rubric feedback",
+      "reference solution",
+      "source identifiers"
+    ]
+  },
+  "history_regression": {
+    "root_cause": "History/result mode ignored latest graded result and the back-to-history action invoked setup, which opened a newer READY pool as a blank session.",
+    "accidental_blank_session_id": "0b5f770a5e944911abca1cef96fe6d87",
+    "accidental_blank_session_status": "IN_PROGRESS_PRESERVED",
+    "fix": "Expose active_session and latest_result from the node assessment summary; prefer latest_result in history/result mode; reload history rather than setup when returning from a graded result.",
+    "production_node_session_count_before_final_ui_readback": 2,
+    "production_node_session_count_after_nonmutating_browser_attempts": 2,
+    "new_session_created_by_final_readback_attempts": false,
+    "final_visible_history_readback": "PENDING_BROWSER_AUTOMATION_INPUT_DID_NOT_ACTIVATE_CONTROLS"
+  },
+  "unknown_preservation": {
+    "operation_id": "run_90c00...",
+    "reservation_id": "4e61e8...",
+    "status": "UNKNOWN_PRESERVED_NOT_REPLAYED",
+    "tokens": "0/0"
+  },
+  "verification": {
+    "backend_relevant_tests": "32 passed, 1 warning",
+    "frontend_assessment_workspace_tests": "16 passed",
+    "frontend_typecheck": "PASS",
+    "production_build_preflight": "PASS",
+    "production_build_info_online": "PASS"
+  },
+  "remaining_acceptance": {
+    "graded_history_visible_readback_after_patch": "PENDING",
+    "second_cold_start_course_without_preapproved_question_bank": "PENDING",
+    "reason": "The authenticated production page remained readable, but the current browser automation session focused controls without activating their click handlers. No bypass, token extraction, fake identity, or direct database mutation was used."
+  },
+  "rollback": {
+    "backend_previous_release": "/srv/coursemate/releases/r8-mcq-hotfix-827fb94/services/rag-api",
+    "frontend_previous_deploy": "6ad450265760f7f94d548e50",
+    "database_restore_required": false,
+    "historical_scores_recomputed": false
+  }
+}
