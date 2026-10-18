@@ -316,8 +316,31 @@ describe('AssessmentWorkspace', () => {
     });
     render(<AssessmentWorkspace course={{ id: 'cs3481', code: 'CS3481' }} node={{ id: 'n1', title: 'Graph degree' }} toast={vi.fn()} onExit={vi.fn()} />);
 
-    expect(await screen.findByText('当前课程来源尚未准备好可测考点。')).toBeVisible();
+    expect(await screen.findByText('考点尚未整理完成；请依据当前课程资料准备，完成后即可配置测评。')).toBeVisible();
     expect(screen.queryByRole('button', { name: '确认配置并开始测评' })).not.toBeInTheDocument();
+  });
+
+  it('shows the truthful one-call authoring stage while a missing slot is prepared', async () => {
+    vi.mocked(getAssessmentSetup).mockResolvedValue({
+      ...pointSetup,
+      active_preparation: {
+        preparation_job_id: 'prep-point-authoring',
+        configuration_id: 'config-point-authoring',
+        policy_version: 'cj.assessment.points.v1',
+        content_language: 'zh-CN',
+        client_intent_id: 'frozen-intent-authoring',
+        status: 'PREPARING',
+        prepared_questions: 0,
+        question_count: 1,
+        current_ordinal: 1,
+        current_stage: 'AUTHORING_COMPLETE_QUESTION',
+        slots: pointSetup.default_slots,
+      },
+    });
+    render(<AssessmentWorkspace course={{ id: 'cs3481', code: 'CS3481' }} node={{ id: 'n1', title: 'Graph degree' }} toast={vi.fn()} onExit={vi.fn()} />);
+
+    expect(await screen.findByText('正在准备第 1 题的题干、参考解与评分项')).toBeVisible();
+    expect(screen.getByText('已准备 0/1 题')).toBeVisible();
   });
 
   it('reuses the server-frozen intent when resuming a dynamic preparation after reload', async () => {

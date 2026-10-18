@@ -492,7 +492,13 @@ class AssessmentService:
             "WHERE question.course_id=? "
             "AND (question.owner_user_id IS NULL OR question.owner_user_id=?) "
             "AND question.validation_status='VALIDATED' "
-            "AND question.verification_method!='MODEL_ONLY' "
+            "AND (question.verification_method!='MODEL_ONLY' OR EXISTS("
+            " SELECT 1 FROM question_engine_provenance AS entry_provenance"
+            " WHERE entry_provenance.question_revision_id=question.id"
+            " AND entry_provenance.workspace_id=?"
+            " AND entry_provenance.publication_status='READY'"
+            " AND entry_provenance.readiness_reason='SOURCE_BOUND_AUTHOR_COMPLETE'"
+            ")) "
             "AND NOT EXISTS("
             " SELECT 1 FROM assessment_exposure_events AS exposure "
             " WHERE exposure.workspace_id=? "
@@ -515,6 +521,7 @@ class AssessmentService:
                 workspace["id"],
                 workspace["course_id"],
                 workspace["owner_user_id"],
+                workspace["id"],
                 workspace["id"],
                 workspace["id"],
                 workspace["owner_user_id"],

@@ -26,10 +26,9 @@ export function PointAssessmentSetup({ setup, slots, course, node, busy, formsFo
             <p className="helper-note">{t('assessment.candidateTargetCount', { count: setup.candidate_target_count })}</p>}
     </div>;
     if (setup.status !== 'READY' || !setup.points?.length) return <div className="assessment-setup assessment-point-setup">
-        {heading}<p role="status">{t(setup.next_action==='release_qualification_required'
-            ? 'assessment.pointQualificationRequired' : setup.next_action==='reconcile_original_request'
+        {heading}<p role="status">{t(setup.next_action==='reconcile_original_request'
             ? 'assessment.pointRequestUncertain' : 'assessment.pointsNotReady')}</p>
-        <button type="button" className="btn primary" disabled={busy || prepareUncertain || ['release_qualification_required','reconcile_original_request'].includes(setup.next_action)} onClick={onPrepare}>
+        <button type="button" className="btn primary" disabled={busy || prepareUncertain || setup.next_action==='reconcile_original_request'} onClick={onPrepare}>
             {t(busy ? 'assessment.preparingPoints' : 'assessment.preparePoints')}</button>
     </div>;
     return <div className="assessment-setup assessment-point-setup">{heading}<div className="assessment-slot-list">

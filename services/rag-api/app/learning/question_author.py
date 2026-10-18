@@ -543,8 +543,14 @@ def author_question(
     *,
     blueprint: QuestionBlueprint,
     evidence: QuestionEvidencePack,
+    require_task_contract: bool = True,
 ) -> AuthoredQuestionCandidate:
-    """Generate but do not publish one candidate bound to exact inputs and prompt revision."""
+    """Generate one candidate bound to exact inputs and prompt revision.
+
+    ``require_task_contract=False`` is reserved for the student-entry policy:
+    its trusted host consumes the complete question, solution and rubric fields
+    but deliberately does not consume the retired optional qualification draft.
+    """
     _assert_inputs_match(blueprint, evidence)
     protocol = getattr(provider, "cache_protocol", None)
     if protocol is not None and not verified_structured_provider(provider):
@@ -581,7 +587,7 @@ def author_question(
 
     _assert_output_scope(output, blueprint=blueprint, evidence=evidence)
     draft: TaskContractDraft | None = None
-    if output.task_contract is not None:
+    if require_task_contract and output.task_contract is not None:
         try:
             draft = TaskContractDraft.model_validate(output.task_contract)
         except ValueError as error:

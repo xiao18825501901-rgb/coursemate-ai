@@ -29,6 +29,7 @@ from app.errors import ApiError
 from app.jev.gateway import DisabledTransport, JevGateway, OpenJevTransport, Transport
 from app.jev.receipt_store import SqlReceiptStore
 from app.jev.service import SemanticDecisionService
+from app.learning.assessment_entry_source_catalog import AssessmentEntrySourceCatalogReader
 from app.learning.assessment_point_configuration import AssessmentPointPolicyService
 from app.learning.deepseek_reviewer import DeepSeekStrongReviewer
 from app.learning.deterministic_graph_point_catalog import (
@@ -274,7 +275,9 @@ def create_app(
             and resolved_settings.assessment_point_policy_enabled
         ):
             resolved_point_policy = AssessmentPointPolicyService(
-                DeterministicGraphPointCatalogReader()
+                AssessmentEntrySourceCatalogReader(
+                    specialized=DeterministicGraphPointCatalogReader()
+                )
             )
         # The learning orchestrator gets the same shared service: pedagogy (call
         # site 6), the assessment criterion review (8) and the prerequisite review

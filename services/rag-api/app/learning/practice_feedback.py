@@ -1,4 +1,4 @@
-"""DeepSeek-only diagnostic feedback and bounded hints for READY practice questions.
+"""Diagnostic feedback and bounded hints for READY practice questions.
 
 The Question Engine owns question scope and persistence.  This module owns only
 the two structured model contracts.  Its outputs are formative feedback: they
@@ -16,6 +16,7 @@ from pydantic import Field, StringConstraints, model_validator
 from app.errors import ApiError
 from app.learning.models import Contract, Identifier, Text
 from app.learning.provider import ProviderCallFailure
+from app.learning.provider_identity import verified_run_identity
 from app.learning.question_blueprint import Hex64
 
 PRACTICE_FEEDBACK_PROMPT_VERSION: Final = "practice-feedback.v1"
@@ -101,21 +102,16 @@ class PracticeProviderRun(Contract):
     error_class: None = None
 
     @model_validator(mode="after")
-    def deepseek_or_labelled_fixture_only(self) -> PracticeProviderRun:
-        fixture = (
-            self.model == "FAKE_TEST_ONLY"
-            and self.provider == "deterministic"
-            and self.protocol == "fixture"
-            and self.region == "LOCAL_TEST"
-        )
-        deepseek = (
-            self.model == "deepseek-flash"
-            and self.provider == "DEEPSEEK_API"
-            and self.protocol == "responses"
-            and self.region == "ENDPOINT_DEEPSEEK"
-        )
-        if not (fixture or deepseek):
-            raise ValueError("practice feedback receipts must be DeepSeek or labelled fixtures")
+    def verified_provider_or_labelled_fixture_only(self) -> PracticeProviderRun:
+        if not verified_run_identity(
+            model=self.model,
+            provider=self.provider,
+            protocol=self.protocol,
+            region=self.region,
+        ):
+            raise ValueError(
+                "practice feedback receipts must use a verified provider identity"
+            )
         expected = {
             "PRACTICE_FEEDBACK": (
                 PRACTICE_FEEDBACK_PROMPT_VERSION,
@@ -141,10 +137,10 @@ def _provider_cause(cause: Exception, prefix: str) -> PracticeInteractionError:
         "MODEL_LIVE_BLOCKED",
     }:
         return PracticeInteractionError(
-            f"{prefix}_PROVIDER_BLOCKED", "The verified DeepSeek provider is unavailable."
+            f"{prefix}_PROVIDER_BLOCKED", "The verified practice provider is unavailable."
         )
     return PracticeInteractionError(
-        f"{prefix}_PROVIDER_FAILED", "The verified DeepSeek request did not complete."
+        f"{prefix}_PROVIDER_FAILED", "The verified practice request did not complete."
     )
 
 

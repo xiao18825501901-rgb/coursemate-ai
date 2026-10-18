@@ -907,3 +907,242 @@ def persist_question_candidate(
             "QUESTION_PERSISTENCE_CONFLICT",
             "The immutable question revision could not be stored atomically.",
         ) from error
+
+
+def persist_source_bound_candidate(
+    *,
+    database: Database,
+    owner_user_id: str,
+    workspace_id: str,
+    blueprint: QuestionBlueprint,
+    evidence: QuestionEvidencePack,
+    candidate: AuthoredQuestionCandidate,
+    blueprint_payload: dict[str, object] | None = None,
+) -> QuestionPersistenceResult:
+    """Publish one complete, source-bound author result without formal review.
+
+    This is deliberately honest ``MODEL_ONLY`` provenance.  It removes formal
+    qualification, blind solve, human Gold and semantic-review availability as
+    synchronous student-entry gates while retaining the existing question pool,
+    exact source/auth checks, required answer/rubric fields, answer isolation and
+    immutable idempotency.
+    """
+
+    try:
+        computed_revision = candidate.revision_identity()
+    except ValueError as error:
+        raise QuestionPersistenceError(
+            "QUESTION_REVISION_MISMATCH",
+            "The public and private candidate fields do not form one revision.",
+        ) from error
+    if computed_revision != candidate.question_revision:
+        raise QuestionPersistenceError(
+            "QUESTION_REVISION_MISMATCH",
+            "The candidate content no longer matches its immutable revision hash.",
+        )
+    try:
+        workspace = workspace_for(database, workspace_id, owner_user_id)
+    except ApiError as error:
+        raise QuestionPersistenceError(
+            "QUESTION_WORKSPACE_NOT_FOUND", "The learning workspace was not found."
+        ) from error
+    fresh_evidence = _current_evidence(
+        database, workspace=workspace, blueprint=blueprint, evidence=evidence
+    )
+    if candidate.provider_run.input_hash != author_input_hash(blueprint, fresh_evidence):
+        raise QuestionPersistenceError(
+            "QUESTION_AUTHOR_PROVENANCE_INCOMPLETE",
+            "The author result is not bound to the current source input.",
+        )
+    if any(len(criterion) > 2000 for criterion in blueprint.scoring_criteria):
+        raise QuestionPersistenceError(
+            "QUESTION_RUBRIC_INVALID", "A rubric criterion exceeds the persistence limit."
+        )
+    fractions = _criterion_fractions(len(blueprint.scoring_criteria))
+    blueprint_hash = blueprint.identity()
+    evidence_hash = fresh_evidence.identity()
+    private_solution = candidate.private_solution.model_dump(mode="json")
+    answer = {
+        "reference_answer": candidate.private_solution.candidate_answer,
+        "model_candidate_correct_option_index": candidate.private_solution.correct_option_index,
+        "distractor_rationales": private_solution["distractor_rationales"],
+        "rule_violation_analysis": private_solution["rule_violation_analysis"],
+        "solution_steps": private_solution["solution_steps"],
+        "source_refs": private_solution["source_refs"],
+        "verification_notice": "SOURCE_BOUND_MODEL_OUTPUT_NOT_FORMALLY_REVIEWED",
+    }
+    content = {
+        "prompt": candidate.public_question.question_text,
+        "options": candidate.public_question.options,
+        "answer": answer,
+        "blueprint_hash": blueprint_hash,
+        "evidence_pack_hash": evidence_hash,
+        "question_revision": candidate.question_revision,
+    }
+    no_review_hash = _digest(
+        {"question_revision": candidate.question_revision, "review": "NOT_RUN"}
+    )
+    no_review = {
+        "schema_version": "source-bound-question-validation.v1",
+        "status": "VALIDATED",
+        "checks": [
+            "AUTHORIZED_WORKSPACE",
+            "CURRENT_EXACT_SOURCE",
+            "AUTHOR_PROVIDER_IDENTITY",
+            "PUBLIC_PRIVATE_ANSWER_ISOLATION",
+            "REQUIRED_FIELDS_AND_RUBRIC",
+        ],
+        "formal_review": "NOT_RUN",
+    }
+    try:
+        with database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = _existing_result(
+                connection,
+                question_revision_hash=candidate.question_revision,
+                workspace_id=workspace_id,
+                blueprint_hash=blueprint_hash,
+                evidence_pack_hash=evidence_hash,
+            )
+            if existing is not None:
+                return existing
+            current_workspace = connection.execute(
+                "SELECT * FROM learning_workspaces WHERE id=? AND owner_user_id=?",
+                (workspace_id, owner_user_id),
+            ).fetchone()
+            item = connection.execute(
+                "SELECT 1 FROM teaching_items WHERE node_id=? AND spec_version=? AND item_id=?",
+                (blueprint.node_id, blueprint.spec_version, blueprint.objective_id),
+            ).fetchone()
+            if (
+                current_workspace is None
+                or str(current_workspace["course_id"]) != blueprint.course_id
+                or item is None
+                or not _evidence_current_in_transaction(
+                    connection, workspace=current_workspace, evidence=fresh_evidence
+                )
+            ):
+                raise QuestionPersistenceError(
+                    "QUESTION_SOURCE_CHANGED",
+                    "The source-bound question inputs changed before commit.",
+                )
+            question_id = f"qe_{uuid4().hex}"
+            revision = int(
+                connection.execute(
+                    "SELECT COALESCE(MAX(revision),0)+1 FROM assessment_question_revisions "
+                    "WHERE course_id=? AND owner_user_id=? AND family_id=?",
+                    (blueprint.course_id, owner_user_id, blueprint.question_family_id),
+                ).fetchone()[0]
+            )
+            connection.execute(
+                "INSERT INTO assessment_question_revisions("
+                "id,course_id,owner_user_id,family_id,revision,source_kind,question_type,"
+                "difficulty,prompt_text,options_json,answer_json,validation_status,"
+                "verification_method,content_hash,created_by_user_id) "
+                "VALUES(?,?,?,?,?,'MODEL_GENERATED',?,?,?,?,?,'VALIDATED','MODEL_ONLY',?,?)",
+                (
+                    question_id,
+                    blueprint.course_id,
+                    owner_user_id,
+                    blueprint.question_family_id,
+                    revision,
+                    blueprint.question_type,
+                    blueprint.target_difficulty,
+                    candidate.public_question.question_text,
+                    _encode(candidate.public_question.options),
+                    _encode(answer),
+                    _digest(content),
+                    owner_user_id,
+                ),
+            )
+            dimension = _criterion_dimension(blueprint.question_type)
+            for index, (description, fraction) in enumerate(
+                zip(blueprint.scoring_criteria, fractions, strict=True), start=1
+            ):
+                connection.execute(
+                    "INSERT INTO assessment_rubric_criteria("
+                    "question_revision_id,criterion_id,node_id,spec_version,item_id,"
+                    "dimension,max_fraction,description,deterministic_rule_json) "
+                    "VALUES(?,?,?,?,?,?,?,?, '{}')",
+                    (
+                        question_id,
+                        f"criterion_{index}",
+                        blueprint.node_id,
+                        blueprint.spec_version,
+                        blueprint.objective_id,
+                        dimension,
+                        fraction,
+                        description,
+                    ),
+                )
+            steps = [
+                {"step_id": f"step_{step.ordinal}", **step.model_dump(mode="json")}
+                for step in candidate.private_solution.solution_steps
+            ]
+            source_refs = sorted(
+                {
+                    ref
+                    for step in candidate.private_solution.solution_steps
+                    for ref in step.source_refs
+                }
+            )
+            solution = {
+                "answer": candidate.private_solution.candidate_answer,
+                "steps": steps,
+                "source_refs": source_refs,
+            }
+            connection.execute(
+                "INSERT INTO assessment_reference_solutions("
+                "id,question_revision_id,blueprint_item_id,solution_revision,steps_json,"
+                "answer_json,source_refs_json,prompt_version,content_hash) "
+                "VALUES(?,?,NULL,1,?,?,?,?,?)",
+                (
+                    f"qes_{uuid4().hex}",
+                    question_id,
+                    _encode(steps),
+                    _encode(candidate.private_solution.candidate_answer),
+                    _encode(source_refs),
+                    candidate.provider_run.template_version,
+                    _digest(solution),
+                ),
+            )
+            stored_blueprint = blueprint_payload or blueprint.model_dump(mode="json")
+            connection.execute(
+                "INSERT INTO question_engine_provenance("
+                "question_revision_id,workspace_id,blueprint_id,blueprint_hash,"
+                "evidence_pack_hash,question_revision_hash,node_id,spec_version,objective_id,"
+                "blueprint_json,evidence_ids_json,author_run_json,blind_input_hash,"
+                "blind_output_json,blind_run_json,validation_report_json,publication_status,"
+                "readiness_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
+                "'READY','SOURCE_BOUND_AUTHOR_COMPLETE')",
+                (
+                    question_id,
+                    workspace_id,
+                    blueprint.blueprint_id,
+                    blueprint_hash,
+                    evidence_hash,
+                    candidate.question_revision,
+                    blueprint.node_id,
+                    blueprint.spec_version,
+                    blueprint.objective_id,
+                    _encode(stored_blueprint),
+                    _encode(fresh_evidence.evidence_ids),
+                    _encode(candidate.provider_run.model_dump(mode="json")),
+                    no_review_hash,
+                    _encode({"status": "NOT_RUN"}),
+                    _encode({"status": "NOT_RUN", "reason": "STUDENT_ENTRY_POLICY"}),
+                    _encode(no_review),
+                ),
+            )
+            return QuestionPersistenceResult(
+                question_revision_id=question_id,
+                status="READY",
+                readiness_reason="SOURCE_BOUND_AUTHOR_COMPLETE",
+                verification_method="MODEL_ONLY",
+                idempotent=False,
+            )
+    except sqlite3.IntegrityError as error:
+        raise QuestionPersistenceError(
+            "QUESTION_PERSISTENCE_CONFLICT",
+            "The immutable source-bound question could not be stored atomically.",
+        ) from error

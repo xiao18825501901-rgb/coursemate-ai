@@ -1,3 +1,4 @@
+import hashlib
 import json
 import time
 
@@ -240,6 +241,134 @@ def test_enabled_graph_policy_completes_real_http_assessment_with_zero_model_cal
     assert history.json()["status"] == "GRADED"
     assert history.json()["raw_score"] == 100
     assert model_calls == 0
+
+
+def test_source_bound_cold_course_dynamic_k_prepares_opens_grades_and_reads_history(
+    tmp_path,
+):
+    app = create_app(
+        settings=Settings(
+            _env_file=None,
+            database_path=tmp_path / "rag.sqlite3",
+            upload_dir=tmp_path / "uploads",
+            app_env="test",
+            rag_provider_mode="deterministic",
+            v3_enabled=True,
+            assessment_point_policy_enabled=True,
+        ),
+        auth_verifier=Identity(),
+    )
+    with TestClient(app) as client:
+        assert client.post(
+            "/api/courses",
+            headers={"Authorization": "Bearer a"},
+            json={"id": "cs3481", "name": "Cold course"},
+        ).status_code == 201
+        workspace, node, _document, chunk = seeded(client)
+        items = [
+            {
+                "item_id": "bounds",
+                "requirement": "REQUIRED",
+                "objective": "Explain epsilon boundary and self-counting",
+                "acceptance": "State both conditions exactly",
+                "evidence_ids": [chunk],
+            },
+            {
+                "item_id": "application",
+                "requirement": "REQUIRED",
+                "objective": "Apply the two boundary conditions to a new example",
+                "acceptance": "Use both conditions and state the conclusion",
+                "evidence_ids": [chunk],
+            },
+        ]
+        content = json.dumps(items, sort_keys=True, separators=(",", ":"))
+        with client.app.state.database.connect() as db:
+            db.execute(
+                "INSERT INTO teaching_specs(node_id,version,content_json,content_hash) "
+                "VALUES(?,2,?,?)",
+                (node["id"], content, hashlib.sha256(content.encode()).hexdigest()),
+            )
+        base = f"/api/learning/workspaces/{workspace['id']}"
+        setup = client.get(
+            base + f"/assessments/setup/{node['id']}",
+            params={"content_language": "en"},
+        )
+        assert setup.status_code == 200, setup.text
+        assert setup.json()["status"] == "READY"
+        assert setup.json()["minimum_questions"] == 2
+        assert setup.json()["maximum_questions"] == 4
+
+        configured = client.post(
+            base + "/assessments",
+            json={
+                "operation_id": "cold-source-configure",
+                "revision": client.get(base + "/state").json()["revision"],
+                "node_id": node["id"],
+                "client_intent_id": "cold-source-intent",
+                "intent_action": "CONFIGURE",
+                "content_language": "en",
+                "slots": setup.json()["default_slots"],
+            },
+        )
+        assert configured.status_code == 200, configured.text
+        preparation = configured.json()
+        configuration_id = preparation["configuration_id"]
+        deadline = time.monotonic() + 10
+        while preparation["status"] not in {"READY", "FAILED"} and time.monotonic() < deadline:
+            time.sleep(0.05)
+            preparation = client.get(
+                base + f"/assessments/preparations/{configuration_id}"
+            ).json()
+        assert preparation["status"] == "READY", preparation
+        assert preparation["prepared_questions"] == 2
+
+        opened = client.post(
+            base + "/assessments",
+            json={
+                "operation_id": "cold-source-open",
+                "revision": client.get(base + "/state").json()["revision"],
+                "node_id": node["id"],
+                "client_intent_id": "cold-source-intent",
+                "intent_action": "OPEN",
+                "configuration_id": configuration_id,
+                "content_language": "en",
+            },
+        )
+        assert opened.status_code == 200, opened.text
+        session = opened.json()
+        assert len(session["questions"]) == 2
+        assert all(
+            "answer_key" not in question and "reference_solution" not in question
+            for question in session["questions"]
+        )
+        with client.app.state.database.connect() as db:
+            answers = {
+                question["id"]: json.loads(
+                    db.execute(
+                    "SELECT answer_json FROM assessment_question_revisions WHERE id=?",
+                    (question["question_revision_id"],),
+                    ).fetchone()["answer_json"]
+                )["reference_answer"]
+                for question in session["questions"]
+            }
+        submitted = client.post(
+            base + f"/assessments/{session['id']}/submit",
+            json={
+                "operation_id": "cold-source-submit",
+                "revision": client.get(base + "/state").json()["revision"],
+                "answers": [
+                    {"blueprint_item_id": question["id"], "answer": answers[question["id"]]}
+                    for question in session["questions"]
+                ],
+            },
+        )
+        assert submitted.status_code == 200, submitted.text
+        history = client.get(base + f"/assessments/{session['id']}")
+
+    assert submitted.json()["status"] == "GRADED"
+    assert submitted.json()["raw_score"] == 100
+    assert history.status_code == 200
+    assert history.json()["raw_score"] == 100
 
 
 def test_public_student_adapter_exposes_dynamic_point_setup_and_preserves_selection(

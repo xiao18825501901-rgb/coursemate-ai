@@ -140,6 +140,79 @@ def test_runtime_generates_ready_private_exercise_for_exact_workspace_node(
     assert question["owner_user_id"] == OWNER
 
 
+def test_student_entry_authors_once_without_blind_or_formal_review_gate(
+    tmp_path: Path,
+) -> None:
+    database, config = database_with_objective(tmp_path)
+    provider = LearningProvider(config)
+    calls: list[str] = []
+
+    def metered_generate(
+        workspace_id: str,
+        operation_id: str,
+        schema: type[Any],
+        **kwargs: Any,
+    ) -> tuple[Any, dict[str, Any]]:
+        assert workspace_id == WORKSPACE
+        assert operation_id == "student-entry-do-one-0001"
+        calls.append(str(kwargs["role"]))
+        output, run = provider.generate(schema, **kwargs)
+        payload = output.model_dump(mode="json")
+        # Historical author responses sometimes carried a malformed optional
+        # qualification contract while the actual question/reference/rubric
+        # fields were complete.  The normal student-entry path must ignore that
+        # retired approval payload instead of buying the same question again.
+        payload["task_contract"] = {"legacy": "not-a-current-contract"}
+        return payload, run
+
+    runtime = QuestionEngineRuntime(
+        database=database,
+        provider=provider,
+        semantic_decisions=None,
+        metered_generate=metered_generate,
+        source_bound_student_entry=True,
+    )
+
+    result = runtime.generate_one(
+        owner_user_id=OWNER,
+        workspace_id=WORKSPACE,
+        course_id=COURSE,
+        private_course_id=PRIVATE_COURSE,
+        node_id=NODE,
+        operation_id="student-entry-do-one-0001",
+    )
+    reused = runtime.reuse_ready_or_generate(
+        owner_user_id=OWNER,
+        workspace_id=WORKSPACE,
+        course_id=COURSE,
+        private_course_id=PRIVATE_COURSE,
+        node_id=NODE,
+        operation_id="student-entry-do-one-0002",
+    )
+
+    assert calls == ["QUESTION_AUTHOR"]
+    assert reused["question_revision_id"] == result["question_revision_id"]
+    assert reused["usage"] == [
+        {"role": "QUESTION_READY_POOL", "status": "REUSED"},
+        {"role": "QUESTION_AUTHOR", "status": "NOT_CALLED_READY_REUSE"},
+        {"role": "QUESTION_BLIND_SOLVER", "status": "NOT_CALLED_READY_REUSE"},
+    ]
+    assert result["status"] == "READY"
+    assert result["verification_status"] == "MODEL_ONLY"
+    assert "answer" not in result["public"]
+    assert result["private"]["answer"]
+    assert result["usage"][1]["status"] == "NOT_CALLED_STUDENT_ENTRY_POLICY"
+    with database.connect() as connection:
+        row = connection.execute(
+            "SELECT question.verification_method,provenance.publication_status,"
+            "provenance.readiness_reason FROM assessment_question_revisions AS question "
+            "JOIN question_engine_provenance AS provenance "
+            "ON provenance.question_revision_id=question.id WHERE question.id=?",
+            (result["question_revision_id"],),
+        ).fetchone()
+    assert tuple(row) == ("MODEL_ONLY", "READY", "SOURCE_BOUND_AUTHOR_COMPLETE")
+
+
 def test_generate_one_routes_author_and_blind_solver_through_metered_operation(
     tmp_path: Path,
 ) -> None:

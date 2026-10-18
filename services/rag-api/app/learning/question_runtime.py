@@ -82,6 +82,7 @@ from app.learning.question_persistence import (
     QuestionPersistenceError,
     durable_hybrid_receipt_for_dimension,
     persist_question_candidate,
+    persist_source_bound_candidate,
 )
 from app.learning.question_validator import (
     QuestionSemanticSignals,
@@ -174,7 +175,7 @@ class GeneratedExercise(Contract):
     question_revision_id: Identifier
     blueprint_id: Identifier
     status: Literal["READY"]
-    verification_status: Literal["AI_REVIEWED"]
+    verification_status: Literal["AI_REVIEWED", "MODEL_ONLY"]
     generation_version: Literal["exercise.v2+question-engine.v1"]
     prototype_id: Literal[
         "worked_application", "concept_short_answer", "rule_violation_analysis"
@@ -282,6 +283,7 @@ class QuestionEngineRuntime:
         learning_loop: LearningLoopService | None = None,
         hybrid_reviewer: Any | None = None,
         point_store: AssessmentPointConfigurationStore | None = None,
+        source_bound_student_entry: bool = False,
     ) -> None:
         self.database = database
         self.provider = provider
@@ -294,6 +296,7 @@ class QuestionEngineRuntime:
         # deterministic hard-gate failure is refused before it is consulted.
         self.hybrid_reviewer = hybrid_reviewer
         self.point_store = point_store
+        self.source_bound_student_entry = source_bound_student_entry
         self.deterministic_point_publisher = (
             DeterministicGraphPointPublisher(database, self._verify_point_input)
             if point_store is not None
@@ -653,6 +656,7 @@ class QuestionEngineRuntime:
         with self.database.connect() as connection:
             rows = connection.execute(
                 "SELECT question.id,question.question_type,question.prompt_text,"
+                "question.verification_method,"
                 "question.options_json,provenance.blueprint_id,"
                 "provenance.question_revision_hash,provenance.blueprint_json,"
                 "reference.steps_json,reference.answer_json,reference.source_refs_json "
@@ -667,7 +671,9 @@ class QuestionEngineRuntime:
                 "AND provenance.publication_status='READY' "
                 "AND question.course_id=? AND question.owner_user_id=? "
                 "AND question.validation_status='VALIDATED' "
-                "AND question.verification_method='AI_REVIEWED' "
+                "AND (question.verification_method='AI_REVIEWED' OR ("
+                " question.verification_method='MODEL_ONLY'"
+                " AND provenance.readiness_reason='SOURCE_BOUND_AUTHOR_COMPLETE')) "
                 "AND NOT EXISTS("
                 " SELECT 1 FROM learning_loop_exposures AS exposure "
                 " WHERE exposure.owner_user_id=? AND exposure.workspace_id=? "
@@ -732,7 +738,7 @@ class QuestionEngineRuntime:
                 question_revision_id=str(row["id"]),
                 blueprint_id=str(row["blueprint_id"]),
                 status="READY",
-                verification_status="AI_REVIEWED",
+                verification_status=str(row["verification_method"]),
                 generation_version=GENERATION_VERSION,
                 prototype_id=prototype_id,
                 public=PublicExerciseProjection(
@@ -2103,6 +2109,49 @@ class QuestionEngineRuntime:
             )
         return persisted, candidate, blind, report
 
+    def _execute_source_bound_author(
+        self,
+        *,
+        owner_user_id: str,
+        workspace_id: str,
+        course_id: str,
+        node_id: str,
+        objective: TeachingObjective,
+        evidence: QuestionEvidencePack,
+        blueprint: QuestionBlueprint,
+        should_cancel: Callable[[], bool] | None,
+        model_operation_id: str | None,
+        blueprint_payload: dict[str, object] | None = None,
+    ) -> tuple[Any, Any]:
+        """Author once, then apply the trusted source/shape/private-field host gate."""
+
+        self._check_cancelled(should_cancel)
+        provider = self._provider_for_operation(
+            workspace_id=workspace_id, operation_id=model_operation_id
+        )
+        candidate = author_question(
+            provider,
+            blueprint=blueprint,
+            evidence=evidence,
+            require_task_contract=False,
+        )
+        self._check_cancelled(should_cancel)
+        persisted = persist_source_bound_candidate(
+            database=self.database,
+            owner_user_id=owner_user_id,
+            workspace_id=workspace_id,
+            blueprint=blueprint,
+            evidence=evidence,
+            candidate=candidate,
+            blueprint_payload=blueprint_payload,
+        )
+        if persisted.status != "READY" or persisted.verification_method != "MODEL_ONLY":
+            raise QuestionEngineRuntimeError(
+                "QUESTION_NOT_READY",
+                "The source-bound question was not published for student use.",
+            )
+        return persisted, candidate
+
     def _existing_assessment_slot(
         self,
         *,
@@ -2304,16 +2353,19 @@ class QuestionEngineRuntime:
                     blueprint.question_family_id,
                     blueprint.blueprint_id,
                     objective.item_id,
+                    slot.primary_point_id if isinstance(slot, PointQuestionSlot) else None,
                 )
                 connection.execute(
                     "INSERT OR IGNORE INTO assessment_configuration_questions("
                     "configuration_id,workspace_id,slot_id,ordinal,question_revision_id,"
-                    "family_id,blueprint_id,objective_id) VALUES(?,?,?,?,?,?,?,?)",
+                    "family_id,blueprint_id,objective_id,primary_point_id) "
+                    "VALUES(?,?,?,?,?,?,?,?,?)",
                     config_values,
                 )
                 row = connection.execute(
                     "SELECT configuration_id,workspace_id,slot_id,ordinal,question_revision_id,"
-                    "family_id,blueprint_id,objective_id FROM assessment_configuration_questions "
+                    "family_id,blueprint_id,objective_id,primary_point_id "
+                    "FROM assessment_configuration_questions "
                     "WHERE configuration_id=? AND slot_id=?",
                     (preparation_key, slot.slot_key),
                 ).fetchone()
@@ -2490,7 +2542,10 @@ class QuestionEngineRuntime:
                         "ASSESSMENT_POINT_SLOT_MISMATCH",
                         "Point and legacy slots cannot be mixed in one frozen configuration.",
                     )
-                if self.deterministic_point_publisher is None:
+                if (
+                    self.deterministic_point_publisher is None
+                    and not self.source_bound_student_entry
+                ):
                     raise QuestionEngineRuntimeError(
                         "ASSESSMENT_POINT_METHOD_NOT_QUALIFIED",
                         "The source-bound point preparation method is unavailable.",
@@ -2524,21 +2579,75 @@ class QuestionEngineRuntime:
                         content_language=point_input.content_language,
                         verify=lambda: self._check_cancelled(should_cancel),
                     )
-                    result = self.deterministic_point_publisher.prepare_or_read(
-                        claim,
-                        point_input,
-                        operation_id=operation_id,
+                    result = (
+                        self.deterministic_point_publisher.prepare_or_read(
+                            claim, point_input, operation_id=operation_id
+                        )
+                        if self.deterministic_point_publisher is not None
+                        else None
                     )
+                    candidate = None
                     if result is None:
-                        raise QuestionEngineRuntimeError(
-                            "ASSESSMENT_POINT_METHOD_NOT_QUALIFIED",
-                            "This point requires the qualified reviewed generation method.",
+                        if not self.source_bound_student_entry:
+                            raise QuestionEngineRuntimeError(
+                                "ASSESSMENT_POINT_METHOD_NOT_QUALIFIED",
+                                "This point requires the configured generation method.",
+                            )
+                        if progress is not None:
+                            progress(
+                                {
+                                    "ordinal": point_input.point_slot.ordinal,
+                                    "stage": "AUTHORING_COMPLETE_QUESTION",
+                                    "prepared_slots": len(prepared_points),
+                                }
+                            )
+                        target = point_input.targets[0]
+                        objective = TeachingObjective(
+                            node_id=point_input.node_id,
+                            spec_version=point_input.spec_version,
+                            spec_content_hash=point_input.spec_content_hash,
+                            item_id=target.item_id,
+                            requirement=target.requirement,
+                            objective=target.objective,
+                            acceptance=target.acceptance,
+                            evidence_ids=tuple(target.evidence.evidence_ids),
+                        )
+                        blueprint = self._assessment_blueprint(
+                            course_id=course_id,
+                            objective=objective,
+                            evidence=target.evidence,
+                            slot=point_input.point_slot,
+                            preparation_key=preparation_key,
+                        )
+                        result, candidate = self._execute_source_bound_author(
+                            owner_user_id=owner_user_id,
+                            workspace_id=workspace_id,
+                            course_id=course_id,
+                            node_id=node_id,
+                            objective=objective,
+                            evidence=target.evidence,
+                            blueprint=blueprint,
+                            should_cancel=should_cancel,
+                            model_operation_id=operation_id,
+                            blueprint_payload={
+                                **blueprint.model_dump(mode="json"),
+                                "point_input": point_input.model_dump(mode="json"),
+                            },
                         )
                     with self.database.connect() as connection:
                         question = connection.execute(
                             "SELECT family_id FROM assessment_question_revisions WHERE id=?",
                             (result.question_revision_id,),
                         ).fetchone()
+                    if candidate is not None:
+                        self._record_assessment_slot(
+                            preparation_key=preparation_key,
+                            workspace_id=workspace_id,
+                            slot=point_input.point_slot,
+                            objective=objective,
+                            blueprint=blueprint,
+                            question_revision_id=result.question_revision_id,
+                        )
                     prepared_points.append(
                         {
                             "slot_key": point_input.point_slot.slot_key,
@@ -2548,7 +2657,11 @@ class QuestionEngineRuntime:
                             "family_id": str(question["family_id"]),
                             "question_revision_id": result.question_revision_id,
                             "verification_status": result.verification_method,
-                            "usage": [],
+                            "usage": (
+                                []
+                                if candidate is None
+                                else [_public_run(candidate.provider_run)]
+                            ),
                         }
                     )
                     if progress is not None:
@@ -2895,17 +3008,31 @@ class QuestionEngineRuntime:
                     operation_id=operation_id,
                 )
             )
-            persisted, candidate, blind, report = self._execute_pipeline(
-                owner_user_id=owner_user_id,
-                workspace_id=workspace_id,
-                course_id=course_id,
-                node_id=node_id,
-                objective=objective,
-                evidence=evidence,
-                blueprint=blueprint,
-                should_cancel=should_cancel,
-                model_operation_id=operation_id,
-            )
+            if self.source_bound_student_entry:
+                persisted, candidate = self._execute_source_bound_author(
+                    owner_user_id=owner_user_id,
+                    workspace_id=workspace_id,
+                    course_id=course_id,
+                    node_id=node_id,
+                    objective=objective,
+                    evidence=evidence,
+                    blueprint=blueprint,
+                    should_cancel=should_cancel,
+                    model_operation_id=operation_id,
+                )
+                blind = report = None
+            else:
+                persisted, candidate, blind, report = self._execute_pipeline(
+                    owner_user_id=owner_user_id,
+                    workspace_id=workspace_id,
+                    course_id=course_id,
+                    node_id=node_id,
+                    objective=objective,
+                    evidence=evidence,
+                    blueprint=blueprint,
+                    should_cancel=should_cancel,
+                    model_operation_id=operation_id,
+                )
         except QuestionEngineRuntimeError:
             if operation_claimed:
                 self._fail_generation_operation(
@@ -2949,23 +3076,39 @@ class QuestionEngineRuntime:
                 "state was preserved and will not be replayed automatically.",
             ) from error
 
-        usage = [
-            _public_run(candidate.provider_run),
-            _public_run(blind.provider_run),
-            {
-                "role": "QUESTION_VALIDATOR",
-                "semantic_receipts": [
-                    signal.receipt_id
-                    for signal in report.semantic_signals
-                    if signal.receipt_id is not None
-                ],
-            },
-        ]
+        usage = [_public_run(candidate.provider_run)]
+        if blind is not None and report is not None:
+            usage.extend(
+                [
+                    _public_run(blind.provider_run),
+                    {
+                        "role": "QUESTION_VALIDATOR",
+                        "semantic_receipts": [
+                            signal.receipt_id
+                            for signal in report.semantic_signals
+                            if signal.receipt_id is not None
+                        ],
+                    },
+                ]
+            )
+        else:
+            usage.extend(
+                [
+                    {
+                        "role": "QUESTION_BLIND_SOLVER",
+                        "status": "NOT_CALLED_STUDENT_ENTRY_POLICY",
+                    },
+                    {
+                        "role": "QUESTION_VALIDATOR",
+                        "status": "HOST_SOURCE_AND_STRUCTURE_VALIDATED",
+                    },
+                ]
+            )
         generated = GeneratedExercise(
             question_revision_id=persisted.question_revision_id,
             blueprint_id=blueprint.blueprint_id,
             status="READY",
-            verification_status="AI_REVIEWED",
+            verification_status=persisted.verification_method,
             generation_version=GENERATION_VERSION,
             prototype_id=prototype.prototype_id,
             public=candidate.public_payload(),

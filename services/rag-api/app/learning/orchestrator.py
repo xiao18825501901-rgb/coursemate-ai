@@ -144,6 +144,7 @@ class LearningOrchestrator:
             learning_loop=self.learning_loop,
             hybrid_reviewer=hybrid_reviewer,
             point_store=self.assessments.point_store,
+            source_bound_student_entry=settings.assessment_point_policy_enabled,
         )
         if self.assessments.point_store is not None:
             self.assessments.point_ready_verifier = self.question_engine.point_ready_for

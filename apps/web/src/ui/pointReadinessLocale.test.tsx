@@ -35,19 +35,22 @@ function view(nextAction: string) {
   return { prepare, setup };
 }
 
-it('explains missing qualification in both UI languages without changing content language', () => {
+it('does not preserve the retired formal-qualification gate in either UI language', () => {
   const { prepare, setup } = view('release_qualification_required');
-  expect(screen.getByRole('status').textContent).toContain('质量验证尚未完成');
+  expect(screen.getByRole('status').textContent).toContain('依据当前课程资料准备');
+  expect(screen.getByRole('status').textContent).not.toContain('质量验证');
   expect(screen.getByText('考点数待确认')).toBeInTheDocument();
   expect(screen.getByText('4 项待确认目标')).toBeInTheDocument();
   expect(screen.queryByText('0 个考点')).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '准备考点' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '准备考点' })).toBeEnabled();
   fireEvent.click(screen.getByRole('button', { name: 'English' }));
-  expect(screen.getByRole('status').textContent).toContain('quality verification is not complete');
+  expect(screen.getByRole('status').textContent).toContain('current course sources');
+  expect(screen.getByRole('status').textContent).not.toContain('quality verification');
   expect(screen.getByText('Assessable point count: pending confirmation')).toBeInTheDocument();
   expect(screen.getByText('4 targets awaiting confirmation')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Prepare assessable points' })).toBeDisabled();
-  expect(prepare).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Prepare assessable points' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare assessable points' }));
+  expect(prepare).toHaveBeenCalledTimes(1);
   expect(setup.content_language).toBe('en');
 });
 
