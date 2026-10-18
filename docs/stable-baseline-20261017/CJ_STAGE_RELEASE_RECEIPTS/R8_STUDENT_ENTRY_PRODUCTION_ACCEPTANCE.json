@@ -112,6 +112,7 @@
   },
   "verification": {
     "backend_relevant_tests": "32 passed, 1 warning",
+    "source_bound_cold_start_tests": "4 passed, 1 warning",
     "frontend_assessment_workspace_tests": "16 passed",
     "frontend_typecheck": "PASS",
     "production_build_preflight": "PASS",
@@ -120,6 +121,15 @@
   "remaining_acceptance": {
     "graded_history_visible_readback_after_patch": "PENDING",
     "second_cold_start_course_without_preapproved_question_bank": "PENDING",
+    "selected_cold_start_path": {
+      "course_id": "ge2324",
+      "node_id": "official-node-6ee1bdd50275f18f575bc852",
+      "node_title": "Clustering Analysis",
+      "teaching_spec_version": 1,
+      "source_evidence_count": 3,
+      "independent_point_count": 1,
+      "ready_question_count_before_run": 0
+    },
     "reason": "The authenticated production page remained readable, but the current browser automation session focused controls without activating their click handlers. No bypass, token extraction, fake identity, or direct database mutation was used."
   },
   "rollback": {
