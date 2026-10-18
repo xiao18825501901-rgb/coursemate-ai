@@ -2408,7 +2408,9 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
 
     def pick_exercise_node(pair,knowledge,explicit_node=None):
         nodes=flatten_nodes(knowledge)
-        target=pair.get('bound_node') or explicit_node
+        # The student's explicit current-node action is newer and more precise
+        # than the Pair's persisted fallback binding.
+        target=explicit_node or pair.get('bound_node')
         if target:
             node=next((n for n in nodes if n.get('id')==target),None)
             if node is None: raise HTTPException(404,'知识点不存在')

@@ -178,7 +178,10 @@ class GeneratedExercise(Contract):
     verification_status: Literal["AI_REVIEWED", "MODEL_ONLY"]
     generation_version: Literal["exercise.v2+question-engine.v1"]
     prototype_id: Literal[
-        "worked_application", "concept_short_answer", "rule_violation_analysis"
+        "worked_application",
+        "concept_short_answer",
+        "rule_violation_analysis",
+        "assessment_ready",
     ]
     public: PublicExerciseProjection
     private: PrivateExerciseProjection
@@ -589,7 +592,12 @@ class QuestionEngineRuntime:
     @staticmethod
     def _prototype_id_for_blueprint(
         blueprint: dict[str, Any],
-    ) -> Literal["worked_application", "concept_short_answer", "rule_violation_analysis"]:
+    ) -> Literal[
+        "worked_application",
+        "concept_short_answer",
+        "rule_violation_analysis",
+        "assessment_ready",
+    ]:
         for prototype in _PROTOTYPES.values():
             if (
                 blueprint.get("generation_policy_version")
@@ -603,10 +611,11 @@ class QuestionEngineRuntime:
                 return prototype.prototype_id
         # A configured assessment question can also be a safe practice item: it
         # has the same READY, rubric, hidden-answer and evidence guarantees, but
-        # its generation-policy label belongs to the assessment pipeline.  Map
-        # only an explicitly assessment-authored blueprint whose observable
-        # shape exactly matches a supported practice renderer.  Unsupported
-        # shapes (for example the assessment MCQ slot) remain ineligible.
+        # its generation-policy label belongs to the assessment pipeline. Map
+        # short-answer shapes to their equivalent practice renderer. A validated
+        # single-choice assessment item is also directly renderable by the
+        # practice UI, so keep its honest assessment identity instead of forcing
+        # a second paid authoring call merely to change its shape.
         if str(blueprint.get("blueprint_id") or "").startswith("assessment_"):
             for prototype in _PROTOTYPES.values():
                 if (
@@ -618,6 +627,14 @@ class QuestionEngineRuntime:
                     == prototype.target_difficulty
                 ):
                     return prototype.prototype_id
+            if (
+                blueprint.get("question_type") == "MCQ_SINGLE"
+                and blueprint.get("expected_answer_form") == "SINGLE_CHOICE"
+                and int(blueprint.get("target_difficulty") or 0) in range(1, 6)
+                and blueprint.get("bloom_target")
+                in {"REMEMBER", "UNDERSTAND", "APPLY", "ANALYZE"}
+            ):
+                return "assessment_ready"
         raise QuestionEngineRuntimeError(
             "READY_QUESTION_BLUEPRINT_UNSUPPORTED",
             "The compatible READY question uses an unsupported practice blueprint.",

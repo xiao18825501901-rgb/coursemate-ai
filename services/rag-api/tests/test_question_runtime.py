@@ -512,17 +512,109 @@ def test_compatible_assessment_ready_blueprint_projects_as_practice() -> None:
         == "concept_short_answer"
     )
 
-    unsupported = {
+    assessment_mcq = {
         **compatible,
-        "blueprint_id": "assessment_unsupported_mcq",
+        "blueprint_id": "assessment_ready_mcq",
         "bloom_target": "REMEMBER",
         "target_difficulty": 1,
         "question_type": "MCQ_SINGLE",
         "expected_answer_form": "SINGLE_CHOICE",
     }
-    with pytest.raises(QuestionEngineRuntimeError) as refusal:
-        QuestionEngineRuntime._prototype_id_for_blueprint(unsupported)
-    assert refusal.value.code == "READY_QUESTION_BLUEPRINT_UNSUPPORTED"
+    assert (
+        QuestionEngineRuntime._prototype_id_for_blueprint(assessment_mcq)
+        == "assessment_ready"
+    )
+
+
+def test_validated_assessment_mcq_is_reused_as_practice_without_authoring(
+    tmp_path: Path,
+) -> None:
+    database, config = database_with_objective(tmp_path)
+    provider = LearningProvider(config)
+    calls: list[str] = []
+
+    def metered_generate(
+        _workspace_id: str,
+        _operation_id: str,
+        schema: type[Any],
+        **kwargs: Any,
+    ) -> tuple[Any, dict[str, Any]]:
+        calls.append(str(kwargs["role"]))
+        return provider.generate(schema, **kwargs)
+
+    semantic_decisions = decisions(database)
+    semantic_decisions.gateway.modes["exercise.prototype.v1"] = "off"
+    runtime = QuestionEngineRuntime(
+        database=database,
+        provider=provider,
+        semantic_decisions=semantic_decisions,
+        metered_generate=metered_generate,
+    )
+    seeded = runtime.generate_one(
+        owner_user_id=OWNER,
+        workspace_id=WORKSPACE,
+        course_id=COURSE,
+        private_course_id=PRIVATE_COURSE,
+        node_id=NODE,
+        operation_id="seed-assessment-mcq-0001",
+    )
+    with database.connect() as connection:
+        # Build an assessment-shaped immutable fixture from the generated row.
+        # Production never mutates these records; this isolated database drops
+        # only the two update guards needed to avoid duplicating the full
+        # assessment authoring setup in a projection unit test.
+        connection.execute("DROP TRIGGER immutable_question_engine_provenance_update")
+        connection.execute("DROP TRIGGER immutable_assessment_question_content")
+        row = connection.execute(
+            "SELECT blueprint_json FROM question_engine_provenance "
+            "WHERE question_revision_id=?",
+            (seeded["question_revision_id"],),
+        ).fetchone()
+        blueprint = json.loads(row["blueprint_json"])
+        blueprint.update(
+            {
+                "blueprint_id": "assessment_ready_mcq",
+                "generation_policy_version": "assessment-generation.v1",
+                "bloom_target": "REMEMBER",
+                "target_difficulty": 1,
+                "question_type": "MCQ_SINGLE",
+                "expected_answer_form": "SINGLE_CHOICE",
+            }
+        )
+        connection.execute(
+            "UPDATE question_engine_provenance SET blueprint_id=?,blueprint_json=? "
+            "WHERE question_revision_id=?",
+            (
+                "assessment_ready_mcq",
+                json.dumps(blueprint, ensure_ascii=False, sort_keys=True),
+                seeded["question_revision_id"],
+            ),
+        )
+        connection.execute(
+            "UPDATE assessment_question_revisions SET question_type='MCQ_SINGLE',"
+            "options_json=? WHERE id=?",
+            (json.dumps(["Correct", "Distractor"]), seeded["question_revision_id"]),
+        )
+        connection.execute(
+            "UPDATE assessment_reference_solutions SET answer_json=? "
+            "WHERE question_revision_id=?",
+            (json.dumps("Correct"), seeded["question_revision_id"]),
+        )
+
+    reused = runtime.reuse_ready_or_generate(
+        owner_user_id=OWNER,
+        workspace_id=WORKSPACE,
+        course_id=COURSE,
+        private_course_id=PRIVATE_COURSE,
+        node_id=NODE,
+        operation_id="reuse-assessment-mcq-0001",
+    )
+
+    assert reused["question_revision_id"] == seeded["question_revision_id"]
+    assert reused["prototype_id"] == "assessment_ready"
+    assert reused["public"]["question_type"] == "MCQ_SINGLE"
+    assert reused["public"]["options"] == ["Correct", "Distractor"]
+    assert calls == ["QUESTION_AUTHOR", "QUESTION_BLIND_SOLVER"]
 
 
 def test_exposed_ready_family_falls_back_to_one_new_generation(tmp_path: Path) -> None:

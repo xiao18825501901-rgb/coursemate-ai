@@ -138,6 +138,20 @@ it('renders accessible attempt, hint, reveal controls and re-practices the same 
   expect(api.createExercise).toHaveBeenLastCalledWith('course-1', 'node-1', 'pair-1', null, null);
 });
 
+it('starts an implicit footer exercise for the currently selected knowledge node', async () => {
+  const instance = page();
+  instance.state.activeNode = 'node-selected';
+  instance.state.busy.problem = false;
+  api.createExercise.mockResolvedValue({ id: 'run-current-node' });
+  instance.watchExercise = vi.fn();
+
+  await instance.doExercise();
+
+  expect(api.createExercise).toHaveBeenCalledWith(
+    'course-1', 'node-selected', 'pair-1', null, null,
+  );
+});
+
 it('offers a skippable three-item diagnostic and records unsure without a formal grade', async () => {
   const instance = page();
   const base: any = {

@@ -501,6 +501,88 @@ def test_mounted_do_one_reuses_an_unexposed_ready_revision_without_model_calls(
         ).fetchone()[0] == 0
 
 
+def test_mounted_do_one_explicit_node_overrides_stale_pair_binding(
+    client: tuple[TestClient, ForbiddenLegacyExerciseProvider],
+) -> None:
+    test_client, legacy = client
+    created = test_client.post(
+        f"{UI}/courses",
+        headers=auth(),
+        json={"name": "Explicit target course", "description": "offline fixture"},
+    )
+    course_id = created.json()["id"]
+    stale_node_id = seed_objective(test_client, course_id)
+    target_node_id = "node-explicit-ready"
+    database = test_client.app.state.database
+    item = {
+        "item_id": "objective-explicit-ready",
+        "requirement": "REQUIRED",
+        "objective": "判断给定点是否满足密度聚类的核心点条件",
+        "acceptance": "结论和邻域计数均有课程规则支持",
+        "evidence_ids": ["chunk-density-practice"],
+    }
+    spec_json = json.dumps([item], ensure_ascii=False, sort_keys=True)
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO knowledge_nodes(id,course_id,owner_user_id,title,description,"
+            "major,kind,status) VALUES(?,?,?,'Explicit target','Synthetic','CS',"
+            "'ATOMIC','PRIVATE')",
+            (target_node_id, course_id, SUBJECT),
+        )
+        connection.execute(
+            "INSERT INTO teaching_specs(node_id,version,content_json,content_hash) "
+            "VALUES(?,1,?,?)",
+            (
+                target_node_id,
+                spec_json,
+                hashlib.sha256(spec_json.encode()).hexdigest(),
+            ),
+        )
+        workspace = connection.execute(
+            "SELECT id,private_course_id FROM learning_workspaces "
+            "WHERE course_id=? AND owner_user_id=?",
+            (course_id, SUBJECT),
+        ).fetchone()
+    engine = test_client.app.state.ui_extension_adapter.question_engine
+    seeded = engine.generate_one(
+        owner_user_id=SUBJECT,
+        workspace_id=workspace["id"],
+        course_id=course_id,
+        private_course_id=workspace["private_course_id"],
+        node_id=target_node_id,
+        operation_id="seed-explicit-ready-0001",
+    )
+    pair = test_client.post(
+        f"{UI}/pairs", headers=auth(), json={"course": course_id}
+    ).json()
+    bound = test_client.post(
+        f"{UI}/pairs/{pair['id']}/bind",
+        headers=auth(),
+        json={"node": stale_node_id},
+    )
+    assert bound.status_code == 200, bound.text
+
+    started = test_client.post(
+        f"{UI}/courses/{course_id}/exercises",
+        headers=auth(),
+        json={
+            "pair_id": pair["id"],
+            "node": target_node_id,
+            "request_id": "explicit-ready-target-0001",
+        },
+    )
+    assert started.status_code == 202, started.text
+    run = wait_terminal(test_client, started.json()["id"])
+    assert run["status"] == "completed", run
+    exercise = test_client.app.state.ui_extension_app.state.db.one(
+        "SELECT question_revision_id,target_node FROM cmui_exercises WHERE run=?",
+        (started.json()["id"],),
+    )
+    assert exercise["question_revision_id"] == seeded["question_revision_id"]
+    assert exercise["target_node"] == "Explicit target"
+    assert legacy.exercise_calls == 0
+
+
 def test_mounted_do_one_ready_reuse_does_not_require_billable_authorization(
     client: tuple[TestClient, ForbiddenLegacyExerciseProvider],
 ) -> None:

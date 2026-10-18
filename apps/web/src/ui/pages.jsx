@@ -894,7 +894,7 @@ export class Learn extends React.Component {
         return !this.unmounted && this.props.course.id === context.courseId &&
             this.currentPairId() === context.pairId && this.state.run.problem === rid;
     }
-    async doExercise(explicitNode = null, cycleId = null, purpose = null) { const lane = 'problem'; if (this.state.busy.problem)
+    async doExercise(explicitNode = null, cycleId = null, purpose = null) { const lane = 'problem'; if (explicitNode === null) explicitNode = this.state.activeNode; if (this.state.busy.problem)
         return; this.follow.problem = true; this.setLane('busy', lane, true); this.setLane('partial', lane, ''); this.setLaneUiStatus(lane, 'questionGenerating'); try {
         const context = { courseId: this.props.course.id, pairId: this.currentPairId() };
         const run = await createExercise(context.courseId, explicitNode, context.pairId, cycleId, purpose);
