@@ -24,3 +24,5 @@
 - 后端：切回 `/srv/coursemate/releases/r8-mcq-hotfix-827fb94/services/rag-api`。
 - 前端：恢复 Netlify deploy `6ad450265760f7f94d548e50`。
 - 本次没有 Schema 迁移或历史成绩重算，正常代码回滚不需要覆盖生产数据库。
+
+生产发布锁 `/run/lock/coursejesus-production-publish.lock` 已释放，并通过非阻塞探测确认可用。

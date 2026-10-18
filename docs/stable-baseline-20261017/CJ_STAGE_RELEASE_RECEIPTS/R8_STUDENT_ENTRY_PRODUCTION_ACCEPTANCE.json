@@ -127,5 +127,10 @@
     "frontend_previous_deploy": "6ad450265760f7f94d548e50",
     "database_restore_required": false,
     "historical_scores_recomputed": false
+  },
+  "release_lock": {
+    "path": "/run/lock/coursejesus-production-publish.lock",
+    "released": true,
+    "post_release_probe": "LOCK_FREE"
   }
 }
