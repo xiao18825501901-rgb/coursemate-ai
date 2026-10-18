@@ -134,6 +134,33 @@ describe('AssessmentWorkspace', () => {
     expect(await screen.findByText('原始分：78 / 100')).toBeVisible();
   });
 
+  it('opens the latest graded result from history even when a newer attempt is active', async () => {
+    vi.mocked(getAssessment).mockResolvedValue({
+      status: 'IN_PROGRESS',
+      session: 'active-session',
+      latest_result: { session_id: 'graded-session', raw_score: 100 },
+    });
+    vi.mocked(getAssessmentSession).mockResolvedValue({
+      id: 'graded-session',
+      status: 'GRADED',
+      questions,
+      raw_score: 100,
+      grade: { label: null },
+      node_id: 'n1',
+    });
+
+    render(<AssessmentWorkspace mode="history" course={{ id: 'cs3481', code: 'CS3481' }} node={{ id: 'n1', title: 'DBSCAN' }} toast={vi.fn()} onExit={vi.fn()} />);
+
+    expect(await screen.findByText('原始分：100 / 100')).toBeVisible();
+    expect(getAssessmentSession).toHaveBeenCalledWith('cs3481', 'graded-session');
+    expect(startAssessment).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '返回历史列表' }));
+    await vi.waitFor(() => expect(getAssessment).toHaveBeenCalledTimes(2));
+    expect(getAssessmentSession).toHaveBeenLastCalledWith('cs3481', 'graded-session');
+    expect(startAssessment).not.toHaveBeenCalled();
+  });
+
   it('shows a clearly provisional total when question grading awaits review', async () => {
     vi.mocked(getAssessment).mockResolvedValue({ status: 'NEEDS_REVIEW', session: 's1' });
     vi.mocked(getAssessmentSession).mockResolvedValue({

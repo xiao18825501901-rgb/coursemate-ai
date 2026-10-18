@@ -1642,6 +1642,11 @@ class V3DomainAdapter:
                     "session": assessment.get("session_id"),
                     "mode": assessment.get("mode"),
                     "assistance": assessment.get("assistance_status"),
+                    "active_session": assessment.get("active_session"),
+                    "latest_result": assessment.get("latest_result"),
+                    "latest_independent_result": assessment.get(
+                        "latest_independent_result"
+                    ),
                     "source": "V3 assessment engine",
                 }
         raise ApiError(404, "NODE_NOT_FOUND", "The knowledge node was not found.")

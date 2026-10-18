@@ -294,6 +294,20 @@ def test_assessment_lifecycle_from_start_to_grade(client: TestClient) -> None:
         f"{UI}/courses/cs3481/knowledge/{node_id}/assessment", headers=auth("Bearer token-a")
     ).json()
     assert after["status"] == "GRADED"
+    assert after["latest_result"]["session_id"] == session_id
+
+    restarted = client.post(
+        f"{UI}/courses/cs3481/knowledge/{node_id}/assessment/session",
+        headers=auth("Bearer token-a"),
+        json={"request_id": "closure-assessment-000003"},
+    )
+    assert restarted.status_code == 201, restarted.text
+    mixed = client.get(
+        f"{UI}/courses/cs3481/knowledge/{node_id}/assessment", headers=auth("Bearer token-a")
+    ).json()
+    assert mixed["status"] == "IN_PROGRESS"
+    assert mixed["session"] == restarted.json()["id"]
+    assert mixed["latest_result"]["session_id"] == session_id
     tree = client.get(f"{UI}/courses/cs3481/knowledge", headers=auth("Bearer token-a")).json()
     node = next(row for row in tree if row["id"] == node_id)
     assert node["progress"] == "NOT_STARTED"
