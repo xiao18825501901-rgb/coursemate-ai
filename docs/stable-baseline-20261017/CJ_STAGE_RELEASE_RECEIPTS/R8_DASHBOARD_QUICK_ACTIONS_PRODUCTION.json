@@ -1,7 +1,7 @@
 {
   "receipt_version": "coursejesus.r8.dashboard-quick-actions.production.v1",
-  "recorded_at_utc": "2026-10-17T18:19:04.6589227Z",
-  "result": "PASS_WITH_MOBILE_PRODUCTION_VIEWPORT_RECHECK_PENDING",
+  "recorded_at_utc": "2026-10-18T06:15:30.2621466Z",
+  "result": "PASS_PRODUCTION_DESKTOP_AND_MOBILE",
   "source": {
     "feature_sha": "7a8fe2cda5bb72c57fdeeabe385ce6a25adc7ffe",
     "parent_sha": "2df6f0a392166ba487962e34e1084983026e9866"
@@ -59,8 +59,21 @@
     "all_courses_navigation": "PASS",
     "dark_theme": "PASS",
     "light_theme_restored": true,
-    "mobile_production_viewport": "PENDING_BROWSER_VIEWPORT_OVERRIDE_DID_NOT_APPLY",
-    "mobile_reference_fixture": "16_OF_16_PASS_NOT_COUNTED_AS_PRODUCTION_ACCEPTANCE"
+    "mobile_production_viewport": {
+      "result": "PASS_AUTHENTICATED_390x844",
+      "viewport": "390x844",
+      "card_count": 3,
+      "grid_columns_px": [90, 90, 90],
+      "same_row": true,
+      "ordered_left_to_right": true,
+      "equal_widths": true,
+      "document_scroll_width_px": 390,
+      "horizontal_overflow": false,
+      "labels_wrapped_without_clipping": true,
+      "evidence": "CJ_STAGE_RELEASE_RECEIPTS/evidence/R8_DASHBOARD_MOBILE_390x844.png",
+      "metrics": "CJ_STAGE_RELEASE_RECEIPTS/evidence/R8_DASHBOARD_MOBILE_390x844.json"
+    },
+    "mobile_reference_fixture": "16_OF_16_PASS"
   },
   "release_lock": {
     "path": "/run/lock/coursejesus-production-publish.lock",

@@ -28,7 +28,7 @@
     "release_lock": "FREE"
   },
   "student_entry_acceptance": {
-    "dashboard_quick_actions": "PASS_PRODUCTION",
+    "dashboard_quick_actions": "PASS_PRODUCTION_DESKTOP_AND_AUTHENTICATED_390x844",
     "do_one": "PASS_PRODUCTION_CLERK",
     "dynamic_k_assessment": "PASS_PRODUCTION_CLERK",
     "cold_start_assessment": "PASS_PRODUCTION_CLERK_ZERO_READY_BEFORE_RUN",

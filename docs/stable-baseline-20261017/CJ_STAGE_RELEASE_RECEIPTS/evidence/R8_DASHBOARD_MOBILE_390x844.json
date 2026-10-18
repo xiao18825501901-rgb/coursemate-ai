@@ -1,0 +1,43 @@
+{
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "authenticated_dashboard": true,
+  "card_count": 3,
+  "labels": [
+    "从 Canvas 导入",
+    "创建自己的课程",
+    "进入所有课程"
+  ],
+  "grid_template_columns": "90px 90px 90px",
+  "document_scroll_width": 390,
+  "body_scroll_width": 390,
+  "horizontal_overflow": false,
+  "one_row": true,
+  "ordered_left_to_right": true,
+  "equal_widths": true,
+  "card_rects": [
+    {
+      "left": 82,
+      "right": 172,
+      "top": 194.890625,
+      "bottom": 270.890625,
+      "width": 90
+    },
+    {
+      "left": 180,
+      "right": 270,
+      "top": 194.890625,
+      "bottom": 270.890625,
+      "width": 90
+    },
+    {
+      "left": 278,
+      "right": 368,
+      "top": 194.890625,
+      "bottom": 270.890625,
+      "width": 90
+    }
+  ]
+}
