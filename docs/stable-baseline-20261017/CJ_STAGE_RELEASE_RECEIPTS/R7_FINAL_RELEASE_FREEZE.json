@@ -1,0 +1,58 @@
+{
+  "receipt_version": "coursejesus.r7.final-freeze.v1",
+  "recorded_at_utc": "2026-10-18T06:04:07.9785379Z",
+  "result": "PASS_ZERO_DELETION",
+  "candidate": {
+    "production_code_sha": "13ee6793be257d15c11df6f5f8c5481520f4867d",
+    "evidence_head_before_r7_receipt": "2a5b2b9fad83c2fa535bb69fdd3dea32c94270f5",
+    "backend_release": "/srv/coursemate/releases/r8-history-fix-13ee679/services/rag-api",
+    "frontend_deploy_id": "6ad4593cb08dc21cb3548538",
+    "frontend_site_id": "166afb5a-4103-4236-9f13-4be34dc68cd2",
+    "schema_version": 85
+  },
+  "pruning": {
+    "runtime_files_deleted": 0,
+    "production_files_deleted": 0,
+    "database_rows_deleted": 0,
+    "reason": "No candidate satisfied no-reference, replacement, independent recovery, and ownership-boundary evidence together."
+  },
+  "production_readback": {
+    "backend_health": "PASS",
+    "backend_pid": 314653,
+    "database_integrity": "ok",
+    "foreign_key_violations": 0,
+    "frontend_build_info": "PASS",
+    "frontend_release_sha": "13ee6793be257d15c11df6f5f8c5481520f4867d",
+    "clerk_key_class": "pk_live",
+    "test_token_present": false,
+    "release_lock": "FREE"
+  },
+  "student_entry_acceptance": {
+    "dashboard_quick_actions": "PASS_PRODUCTION",
+    "do_one": "PASS_PRODUCTION_CLERK",
+    "dynamic_k_assessment": "PASS_PRODUCTION_CLERK",
+    "cold_start_assessment": "PASS_PRODUCTION_CLERK_ZERO_READY_BEFORE_RUN",
+    "graded_history_readback": "PASS_PRODUCTION_CLERK"
+  },
+  "data_protection": {
+    "historical_scores_recomputed": false,
+    "unknown_requests_replayed": 0,
+    "schema_changed_by_r7": false,
+    "backup": "/srv/coursemate/backups/r8-predeploy-20261018T042006Z.sqlite3.gz",
+    "backup_sha256": "b28401f91a53a31e6d93d851b93bd05e846ad37f65e46af33a81b19bac4f71af"
+  },
+  "capacity_warning": {
+    "root_usage_percent": 97,
+    "root_available_gib_approx": 3.5,
+    "release_directories": 61,
+    "release_total_gib_approx": 7.9,
+    "backup_objects": 78,
+    "backup_total_gib_approx": 59,
+    "action": "DEFER_DELETION_UNTIL_OWNER_AND_RECOVERY_PROOF_EXIST"
+  },
+  "rollback": {
+    "backend_previous_release": "/srv/coursemate/releases/r8-mcq-hotfix-827fb94/services/rag-api",
+    "frontend_previous_deploy": "6ad450265760f7f94d548e50",
+    "database_restore_required_for_code_rollback": false
+  }
+}
