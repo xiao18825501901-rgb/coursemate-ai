@@ -1,7 +1,7 @@
 {
   "receipt_version": "coursejesus.r8.student-entry.production.v1",
-  "recorded_at_utc": "2026-10-18T05:44:14.2786742Z",
-  "result": "CORE_PATHS_PASS_HISTORY_PATCH_DEPLOYED_FINAL_UI_READBACK_PENDING",
+  "recorded_at_utc": "2026-10-18T06:04:07.9785379Z",
+  "result": "PASS_PRODUCTION_CLERK",
   "source": {
     "release_sha": "13ee6793be257d15c11df6f5f8c5481520f4867d",
     "practice_grade_sha": "827fb945f4e8a7027b7759c52977edf9c8a1d7df",
@@ -102,7 +102,52 @@
     "production_node_session_count_before_final_ui_readback": 2,
     "production_node_session_count_after_nonmutating_browser_attempts": 2,
     "new_session_created_by_final_readback_attempts": false,
-    "final_visible_history_readback": "PENDING_BROWSER_AUTOMATION_INPUT_DID_NOT_ACTIVATE_CONTROLS"
+    "final_visible_history_readback": "PASS_100_OF_100_GRADED_SESSION_VISIBLE_DESPITE_NEWER_IN_PROGRESS_SESSION"
+  },
+  "cold_start_assessment": {
+    "result": "PASS_PRODUCTION_CLERK_ZERO_READY_BEFORE_RUN",
+    "course_id": "ge2324",
+    "node_id": "official-node-6ee1bdd50275f18f575bc852",
+    "node_title": "Clustering Analysis",
+    "teaching_spec_version": 1,
+    "source_evidence_count": 3,
+    "independent_point_count": 1,
+    "ready_question_count_before_run": 0,
+    "policy_version": "cj.assessment.points.v1",
+    "k": 1,
+    "default_n": 1,
+    "minimum_n": 1,
+    "maximum_n": 2,
+    "configuration_id": "assessment-config-2cb4f6b3139f7fa8f86af7995a31f108",
+    "preparation_id": "assessment-config-prep-2cb4f6b3139f7fa8f86af7995a31f108",
+    "operation_id": "assessment-prep-7fa8f86af7995a31f108-1",
+    "question_revision_id": "qe_ce81d435a33f484e8da1079d58085276",
+    "slot_id": "point-item-aa89577368367762fc3130f8",
+    "author_run": {
+      "status": "COMPLETED",
+      "provider": "ALIBABA_MODEL_STUDIO_COMPATIBLE",
+      "model": "qwen3.8-max",
+      "provider_response_id": "chatcmpl-dc54cc2c-648d-90ac-9829-847d1a277ab9",
+      "input_tokens": 6266,
+      "output_tokens": 12120,
+      "latency_ms": 263532,
+      "replayed_after_sse_disconnect": false
+    },
+    "graded_session_id": "21ca4373956f477f8c1d2ca23b7f21bd",
+    "grading_receipt_id": "c3efe37d7bbc4c64a53e87b8cd95f15c",
+    "raw_score": 90,
+    "max_score": 100,
+    "student_visible_proof": [
+      "dynamic K setup",
+      "source-bound cold question preparation",
+      "frozen paper",
+      "answer submission",
+      "90/100 grading",
+      "rubric feedback",
+      "reference solution",
+      "three source identifiers",
+      "history readback"
+    ]
   },
   "unknown_preservation": {
     "operation_id": "run_90c00...",
@@ -119,18 +164,10 @@
     "production_build_info_online": "PASS"
   },
   "remaining_acceptance": {
-    "graded_history_visible_readback_after_patch": "PENDING",
-    "second_cold_start_course_without_preapproved_question_bank": "PENDING",
-    "selected_cold_start_path": {
-      "course_id": "ge2324",
-      "node_id": "official-node-6ee1bdd50275f18f575bc852",
-      "node_title": "Clustering Analysis",
-      "teaching_spec_version": 1,
-      "source_evidence_count": 3,
-      "independent_point_count": 1,
-      "ready_question_count_before_run": 0
-    },
-    "reason": "The authenticated production page remained readable, but the current browser automation session focused controls without activating their click handlers. No bypass, token extraction, fake identity, or direct database mutation was used."
+    "graded_history_visible_readback_after_patch": "PASS",
+    "second_cold_start_course_without_preapproved_question_bank": "PASS",
+    "student_entry_recovery_remaining": "NONE",
+    "broader_stable_baseline_work": "R7_SAFE_PRUNING_AUDIT_PENDING"
   },
   "rollback": {
     "backend_previous_release": "/srv/coursemate/releases/r8-mcq-hotfix-827fb94/services/rag-api",
