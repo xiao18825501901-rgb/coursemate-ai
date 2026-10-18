@@ -102,6 +102,8 @@ describe("Canvas import actions", () => {
     expect(grid?.querySelector(".add-course-card")).not.toBeInTheDocument();
     expect(view.container.querySelector(".dashboard-guide")).not.toBeInTheDocument();
 
+    fireEvent.pointerDown(buttons[0]!);
+    expect(app.canvasImport).not.toHaveBeenCalled();
     fireEvent.click(buttons[0]!);
     expect(app.canvasImport).toHaveBeenCalledTimes(1);
     expect(app.createCourse).not.toHaveBeenCalled();
