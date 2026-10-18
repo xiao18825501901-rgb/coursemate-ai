@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Final, Literal, cast
@@ -50,6 +51,8 @@ from app.learning.hybrid_quality import HybridReviewUnavailable
 from app.learning.learning_loop import LearningLoopError, LearningLoopService
 from app.learning.models import Contract, Identifier, Text
 from app.learning.practice_feedback import (
+    CriterionFeedback,
+    PracticeFeedbackOutput,
     PracticeInteractionError,
     generate_practice_feedback,
     generate_practice_hint,
@@ -271,6 +274,104 @@ def _public_run(run: object) -> dict[str, Any]:
         "error_class",
     }
     return {key: value[key] for key in allowed if key in value}
+
+
+def _normalized_choice(value: object) -> str:
+    return " ".join(unicodedata.normalize("NFKC", str(value)).split()).casefold()
+
+
+def _render_public_question(
+    prompt: str, question_type: str, options: list[str]
+) -> str:
+    """Render answer-free single-choice options for the existing practice pane."""
+
+    if question_type != "MCQ_SINGLE" or not options:
+        return prompt
+    labels = [f"{chr(65 + index)}. {option}" for index, option in enumerate(options)]
+    return f"{prompt.rstrip()}\n\n" + "\n".join(labels)
+
+
+def _deterministic_single_choice_feedback(
+    context: dict[str, Any], submitted_answer: str
+) -> tuple[PracticeFeedbackOutput, dict[str, Any]] | None:
+    """Grade a frozen single-choice key locally; other answer forms still use Qwen."""
+
+    question = context["question"]
+    if question.get("question_type") != "MCQ_SINGLE":
+        return None
+    options = [str(value) for value in question.get("options") or []]
+    answer = str(context["reference_solution"]["answer"])
+    answer_key = _normalized_choice(answer)
+    matching = [index for index, option in enumerate(options) if _normalized_choice(option) == answer_key]
+    if len(options) < 2 or len(matching) != 1:
+        raise QuestionEngineRuntimeError(
+            "PRACTICE_REFERENCE_INVALID",
+            "The immutable single-choice key could not be verified.",
+        )
+    submitted_key = _normalized_choice(submitted_answer)
+    selected_index: int | None = None
+    for index, option in enumerate(options):
+        if submitted_key == _normalized_choice(option):
+            selected_index = index
+            break
+    if selected_index is None and len(submitted_key) == 1 and "a" <= submitted_key <= "z":
+        candidate = ord(submitted_key) - ord("a")
+        if candidate < len(options):
+            selected_index = candidate
+    if selected_index is None and submitted_key.isdigit():
+        candidate = int(submitted_key) - 1
+        if 0 <= candidate < len(options):
+            selected_index = candidate
+    correct = selected_index == matching[0]
+    criteria = [
+        CriterionFeedback(
+            criterion_id=str(item["criterion_id"]),
+            met=correct,
+            feedback=(
+                "The selected option matches the frozen single-choice answer key."
+                if correct
+                else "The selected option does not match the frozen single-choice answer key."
+            ),
+        )
+        for item in context["rubric"]
+    ]
+    output = PracticeFeedbackOutput(
+        verdict="CORRECT" if correct else "INCORRECT",
+        feedback=(
+            "Your selected option is correct."
+            if correct
+            else "Your selected option is not correct; review the question conditions and try again."
+        ),
+        strengths=["Selected the option that matches the verified answer key."] if correct else [],
+        gaps=[] if correct else ["The selected option did not match the verified answer key."],
+        next_step=(
+            "Reveal the stored solution when you are ready to review the reasoning."
+            if correct
+            else "Re-read the options and submit the option best supported by the course source."
+        ),
+        criteria=criteria,
+    )
+    receipt = {
+        "model": "NONE",
+        "provider": "HOST_DETERMINISTIC",
+        "protocol": "local_exact_match",
+        "region": "SERVER",
+        "role": "PRACTICE_FEEDBACK",
+        "template_version": "practice-feedback.v1",
+        "schema_version": "practice-feedback-output.v1",
+        "input_hash": _hash(
+            "MCQ_SINGLE_EXACT_MATCH",
+            context["question_revision_id"],
+            submitted_key,
+            answer_key,
+        ),
+        "latency_ms": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "status": "COMPLETED",
+        "error_class": None,
+    }
+    return output, receipt
 
 
 class QuestionEngineRuntime:
@@ -530,7 +631,7 @@ class QuestionEngineRuntime:
         workspace_for(self.database, workspace_id, owner_user_id)
         with self.database.connect() as connection:
             row = connection.execute(
-                "SELECT question.prompt_text,question.options_json,"
+                "SELECT question.prompt_text,question.question_type,question.options_json,"
                 "provenance.node_id,provenance.spec_version,provenance.objective_id,"
                 "provenance.blueprint_json,reference.steps_json,reference.answer_json "
                 "FROM question_engine_provenance AS provenance "
@@ -578,7 +679,11 @@ class QuestionEngineRuntime:
             )
         return {
             "question_revision_id": question_revision_id,
-            "question": {"text": row["prompt_text"], "options": options},
+            "question": {
+                "text": row["prompt_text"],
+                "question_type": row["question_type"],
+                "options": options,
+            },
             "objective": {
                 "node_id": row["node_id"],
                 "spec_version": row["spec_version"],
@@ -764,7 +869,11 @@ class QuestionEngineRuntime:
                     question_revision=str(row["question_revision_hash"]),
                     question_type=str(row["question_type"]),
                     marks=int(blueprint["marks"]),
-                    question_text=str(row["prompt_text"]),
+                    question_text=_render_public_question(
+                        str(row["prompt_text"]),
+                        str(row["question_type"]),
+                        [str(value) for value in options],
+                    ),
                     options=[str(value) for value in options],
                     source_refs=[str(value) for value in source_refs],
                     answer_policy=str(blueprint["answer_policy"]),
@@ -1338,13 +1447,19 @@ class QuestionEngineRuntime:
             "assistance": str(submission["assistance"]),
         }
         try:
-            output, run = generate_practice_feedback(
-                self._provider_for_operation(
-                    workspace_id=workspace_id,
-                    operation_id=operation_id,
-                ),
-                context=provider_context,
+            deterministic = _deterministic_single_choice_feedback(
+                context, str(submission["submitted_answer"])
             )
+            if deterministic is not None:
+                output, run = deterministic
+            else:
+                output, run = generate_practice_feedback(
+                    self._provider_for_operation(
+                        workspace_id=workspace_id,
+                        operation_id=operation_id,
+                    ),
+                    context=provider_context,
+                )
             expected = {str(item["criterion_id"]) for item in context["rubric"]}
             actual = {item.criterion_id for item in output.criteria}
             if actual != expected:
@@ -1397,7 +1512,12 @@ class QuestionEngineRuntime:
                         operation_id, input_hash, submission["submitted_answer"],
                         submission["assistance"], status,
                         json.dumps(output.model_dump(mode="json"), ensure_ascii=False),
-                        json.dumps(run.model_dump(mode="json"), ensure_ascii=False),
+                        json.dumps(
+                            run.model_dump(mode="json")
+                            if hasattr(run, "model_dump")
+                            else run,
+                            ensure_ascii=False,
+                        ),
                     ),
                 )
                 updated = connection.execute(

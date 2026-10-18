@@ -614,6 +614,29 @@ def test_validated_assessment_mcq_is_reused_as_practice_without_authoring(
     assert reused["prototype_id"] == "assessment_ready"
     assert reused["public"]["question_type"] == "MCQ_SINGLE"
     assert reused["public"]["options"] == ["Correct", "Distractor"]
+    assert "A. Correct" in reused["public"]["question_text"]
+    assert "B. Distractor" in reused["public"]["question_text"]
+
+    correct = runtime.grade_practice_attempt(
+        owner_user_id=OWNER,
+        workspace_id=WORKSPACE,
+        question_revision_id=seeded["question_revision_id"],
+        operation_id="grade-assessment-mcq-correct-0001",
+        submitted_answer="A",
+    )
+    incorrect = runtime.grade_practice_attempt(
+        owner_user_id=OWNER,
+        workspace_id=WORKSPACE,
+        question_revision_id=seeded["question_revision_id"],
+        operation_id="grade-assessment-mcq-incorrect-0001",
+        submitted_answer="B",
+    )
+
+    assert correct["verdict"] == "CORRECT"
+    assert incorrect["verdict"] == "INCORRECT"
+    assert correct["usage"]["provider"] == "HOST_DETERMINISTIC"
+    assert correct["usage"]["input_tokens"] == 0
+    assert correct["usage"]["output_tokens"] == 0
     assert calls == ["QUESTION_AUTHOR", "QUESTION_BLIND_SOLVER"]
 
 
