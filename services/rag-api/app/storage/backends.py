@@ -197,11 +197,14 @@ class LocalStorageBackend:
 class AliyunOssStorageBackend:
     """Small OSS V2 adapter whose integrity boundary is SHA-256, never ETag."""
 
-    def __init__(self, *, bucket: str, client: Any, prefix: str = "") -> None:
+    def __init__(
+        self, *, bucket: str, client: Any, prefix: str = "", presign_client: Any | None = None
+    ) -> None:
         if not bucket:
             raise ValueError("OSS bucket is required")
         self.bucket = bucket
         self.client = client
+        self.presign_client = client if presign_client is None else presign_client
         self.prefix = prefix.strip("/")
 
     def _key(self, key: str) -> str:
@@ -378,7 +381,7 @@ class AliyunOssStorageBackend:
             raise ValueError("Direct upload signatures must expire in 60-900 seconds")
         if not _safe_key(key).startswith("quarantine/"):
             raise ValueError("Direct upload signatures are restricted to quarantine objects")
-        result = self.client.presign(
+        result = self.presign_client.presign(
             PutObjectRequest(
                 bucket=self.bucket,
                 key=self._key(key),

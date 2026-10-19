@@ -32,6 +32,7 @@ def storage_backend_from_settings(
 ) -> StorageBackend:
     if settings.storage_backend == "local":
         return LocalStorageBackend(settings.upload_dir / "objects")
+    presign_client = None
     if oss_client is None:
         import alibabacloud_oss_v2 as oss
 
@@ -44,8 +45,18 @@ def storage_backend_from_settings(
             enabled_redirect=False,
         )
         oss_client = oss.Client(config)
+        if settings.oss_public_endpoint and settings.oss_public_endpoint != settings.oss_endpoint:
+            presign_client = oss.Client(oss.Config(
+                region=settings.oss_region,
+                endpoint=settings.oss_public_endpoint,
+                credentials_provider=config.credentials_provider,
+                disable_ssl=False,
+                insecure_skip_verify=False,
+                enabled_redirect=False,
+            ))
     return AliyunOssStorageBackend(
         bucket=settings.oss_bucket,
         client=oss_client,
         prefix=settings.oss_object_prefix,
+        presign_client=presign_client,
     )

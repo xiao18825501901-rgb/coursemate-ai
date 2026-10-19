@@ -59,9 +59,12 @@ RAM action names in the policy editor rather than copying an unverified policy.
 - Multipart: incomplete parts need a lifecycle rule; see
   <https://www.alibabacloud.com/help/en/oss/user-guide/multipart-upload> and
   <https://www.alibabacloud.com/help/en/oss/user-guide/overview-54/>.
-- Public endpoint: leave unset unless a later reviewed feature explicitly needs
-  it. Downloads and previews remain authorized backend reads or short-lived
-  scoped URLs.
+- Public endpoint: set `OSS_PUBLIC_ENDPOINT` for direct uploads from outside
+  the ECS VPC. Only quarantine PUT signing uses this client; backend reads,
+  verification and promotion continue through `OSS_ENDPOINT`. Both clients
+  share the same temporary credential provider, bucket and scoped prefix.
+  Leaving it unset retains the previous single-endpoint behavior. Never
+  expose static access keys or make the bucket public for direct uploads.
 
 ## Runtime configuration
 
@@ -70,11 +73,12 @@ coordinates in the root-owned application environment:
 
 ```text
 STORAGE_BACKEND=aliyun_oss
-STORAGE_CACHE_DIR=/srv/coursemate/cache/storage
+STORAGE_CACHE_DIR=/srv/coursemate/data/storage-cache
 STORAGE_CACHE_MAX_BYTES=10737418240
 OSS_REGION=cn-hangzhou
 OSS_BUCKET=<private-bucket>
 OSS_ENDPOINT=<cn-hangzhou-internal-endpoint>
+OSS_PUBLIC_ENDPOINT=https://oss-cn-hangzhou.aliyuncs.com
 OSS_OBJECT_PREFIX=coursejesus/production
 ```
 
