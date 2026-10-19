@@ -9,6 +9,7 @@ import { citationVerdict } from './citationSupport.js';
 import { referenceVerificationNote } from './referenceVerification.js';
 import { Icon, IconButton, Avatar } from './icons.jsx';
 import { FileUploadQueue, runUploadBatch, uploadItemsFrom } from './FileUploadQueue.jsx';
+import { uploadCourseFile } from './courseUpload';
 import { VisualControls } from './VisualControls.jsx';
 import { VisualAssistanceConsent, VisualAssistanceToggle } from './VisualAssistanceToggle.jsx';
 export class CourseFiles extends React.Component {
@@ -36,14 +37,8 @@ export class CourseFiles extends React.Component {
         if (!items.length || this.state.uploading) return;
         this.setState({ uploading: true, error: '' });
         try {
-            const outcome = await runUploadBatch(this.props.course.id, items, async (item, batchId) => {
-                const body = new FormData();
-                body.append('file', item.file);
-                body.append('folder', this.state.folder);
-                body.append('batch_id', batchId);
-                body.append('batch_item_id', item.clientItemId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100));
-                return request(`/courses/${this.props.course.id}/files`, { method: 'POST', body });
-            }, this.updateUpload, 2);
+            const outcome = await runUploadBatch(this.props.course.id, items,
+                (item, batchId) => uploadCourseFile(this.props.course.id, item, batchId, this.state.folder), this.updateUpload, 2);
             await this.load();
             this.props.toast(this.context.t(outcome.failed ? 'courses.uploadBatchFailed' : 'courses.uploadBatchComplete'));
         }

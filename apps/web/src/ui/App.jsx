@@ -6,6 +6,7 @@ import { Icon, IconButton, Avatar } from './icons.jsx';
 import { CourseFiles, Discussion, Inbox, Calendar, Learn } from './pages.jsx';
 import { CanvasImport } from './CanvasImport.jsx';
 import { FileUploadQueue, runUploadBatch, uploadItemsFrom } from './FileUploadQueue.jsx';
+import { uploadCourseFile } from './courseUpload';
 import { UiLocaleContext, LanguageControl, defaultUiTranslate } from './UiLocale';
 import { ProfileForm } from './ProfileForm.jsx';
 import { DashboardQuickActions } from './DashboardQuickActions';
@@ -248,7 +249,7 @@ class CourseForm extends React.Component {
         if (!items.length) return;
         this.setState({ busy: true, error: '' });
         try {
-            await runUploadBatch(course.id, items, async (item, batchId) => { const body = new FormData(); body.append('file', item.file); body.append('folder', ''); body.append('batch_id', batchId); body.append('batch_item_id', item.clientItemId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100)); return request(`/courses/${course.id}/files`, { method: 'POST', body }); }, this.updateUpload, 2);
+            await runUploadBatch(course.id, items, (item, batchId) => uploadCourseFile(course.id, item, batchId), this.updateUpload, 2);
         }
         catch (error) {
             this.setState({ error: error instanceof Error ? error.message : String(error) });

@@ -53,7 +53,9 @@ export async function runUploadItems(items, upload, onChange, concurrency = 2) {
             try {
                 const result = await upload(item);
                 completed.push({ item, result, error: null });
-                onChange(item.clientItemId, { status: 'succeeded', error: '', result });
+                const needsConfirmation = ['processing', 'failed', 'unavailable'].includes(result?.status);
+                if (needsConfirmation) failed += 1;
+                onChange(item.clientItemId, { status: needsConfirmation ? 'failed' : 'succeeded', error: '', result });
             }
             catch (error) {
                 failed += 1;
@@ -92,9 +94,9 @@ export async function runUploadBatch(courseId, items, upload, onChange, concurre
     );
     const manifest = outcome.completed.map(({ item, result, error }) => ({
         item_key: item.clientItemId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100),
-        status: error || result?.status === 'failed' ? 'FAILED' : 'INDEXED',
+        status: !error && result?.status === 'indexed' ? 'INDEXED' : 'FAILED',
         document_id: result?.id || null,
-        error_code: error ? (error.code || 'UPLOAD_FAILED') : (result?.status === 'failed' ? 'INGESTION_FAILED' : null),
+        error_code: error ? (error.code || 'UPLOAD_FAILED') : (result?.status === 'indexed' ? null : result?.status === 'processing' ? 'INGESTION_PENDING' : 'INGESTION_FAILED'),
     }));
     await request(`/courses/${encodeURIComponent(courseId)}/file-batches/${encodeURIComponent(batchId)}/seal`, {
         method: 'POST',

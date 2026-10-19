@@ -2520,6 +2520,8 @@ class V3DomainAdapter:
             "course.delete",
             "file.list",
             "file.upload",
+            "file.direct.begin",
+            "file.direct.complete",
             "file.batch.begin",
             "file.batch.seal",
             "file.content",
@@ -2611,6 +2613,10 @@ class V3DomainAdapter:
             # Keep them off the ASGI event loop so an upload cannot pause teaching,
             # retrieval, practice or the existing-tree read path for every student.
             return await asyncio.to_thread(self._file_upload, subject, payload)
+        if operation in {"file.direct.begin", "file.direct.complete"}:
+            from .direct_upload import begin_upload, complete_upload
+            handler = begin_upload if operation == "file.direct.begin" else complete_upload
+            return await asyncio.to_thread(handler, self, subject, payload)
         if operation == "file.batch.begin":
             return self._file_batch_begin(subject, payload)
         if operation == "file.batch.seal":

@@ -823,6 +823,32 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
             'course':cid,'batch_id':batch_id,'items':list(body.get('items') or [])
         },request)
 
+    @r.post('/courses/{cid}/direct-uploads',status_code=201)
+    async def begin_course_direct_upload(cid:str,user:User,request:Request,body:dict):
+        course_data=await course(user,cid,request)
+        course_gate(course_data,user)
+        # A LOCAL_STORAGE fallback is counted by the multipart route, not twice.
+        rate(user,'direct-upload-grant',15)
+        if not domain: return {'method':'FALLBACK','reason':'LOCAL_STORAGE'}
+        from app.models import DirectUploadCreate
+        from pydantic import ValidationError
+        try:
+            payload=DirectUploadCreate.model_validate(body).model_dump(mode='json',by_alias=True)
+        except ValidationError:
+            raise HTTPException(422,'Invalid direct upload metadata') from None
+        return await remote('file.direct.begin',user,{**payload,'course':cid},request)
+
+    @r.post('/courses/{cid}/direct-uploads/{upload_id}/complete',status_code=201)
+    async def complete_course_direct_upload(cid:str,upload_id:str,user:User,request:Request,body:dict):
+        course_data=await course(user,cid,request)
+        course_gate(course_data,user)
+        if not domain: raise HTTPException(409,'Direct upload is unavailable')
+        return await remote('file.direct.complete',user,{
+            'course':cid,'upload_id':upload_id,
+            'batch_id':str(body.get('batch_id') or ''),
+            'batch_item_id':str(body.get('batch_item_id') or '')
+        },request)
+
     @r.post('/courses/{cid}/files',status_code=201)
     async def upload(cid:str,user:User,request:Request,file:UploadFile=File(...),
                      folder:str=Form(default=''),batch_id:str=Form(default=''),

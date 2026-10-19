@@ -2,7 +2,7 @@ import type { GetSessionToken } from "../auth/AuthProvider";
 import type { UploadAccepted } from "../types/api";
 import { ApiError, requestJson } from "./http";
 
-interface DirectUploadGrant {
+export interface DirectUploadGrant {
   uploadId: string;
   method: "PUT";
   url: string;
@@ -15,7 +15,7 @@ interface DirectUploadFallback {
   reason: "LOCAL_STORAGE";
 }
 
-async function sha256(file: File): Promise<string> {
+export async function sha256(file: File): Promise<string> {
   const bytes = await file.arrayBuffer();
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
@@ -47,8 +47,14 @@ export async function uploadDirectOrFallback(
     throw error;
   }
   if (result.method === "FALLBACK") return fallback();
-  const grant = result;
+  await putSignedObject(result, file);
+  return requestJson<UploadAccepted>(getToken, completeUrl(result.uploadId), {
+    method: "POST",
+  });
+}
 
+/** Only signed storage headers: never forward the app's Clerk bearer token. */
+export async function putSignedObject(grant: DirectUploadGrant, file: File): Promise<void> {
   const headers = new Headers();
   for (const [name, value] of Object.entries(grant.headers)) {
     if (name.toLowerCase() !== "content-length") headers.set(name, value);
@@ -56,7 +62,7 @@ export async function uploadDirectOrFallback(
   if (!headers.has("content-type")) {
     headers.set("Content-Type", file.type || "application/octet-stream");
   }
-  const uploaded = await fetch(grant.url, { method: grant.method, headers, body: file });
+  const uploaded = await fetch(grant.url, { method: grant.method, headers, body: file, credentials: 'omit' });
   if (!uploaded.ok) {
     throw new ApiError(
       uploaded.status,
@@ -64,7 +70,4 @@ export async function uploadDirectOrFallback(
       `Object upload failed (${uploaded.status}).`,
     );
   }
-  return requestJson<UploadAccepted>(getToken, completeUrl(grant.uploadId), {
-    method: "POST",
-  });
 }

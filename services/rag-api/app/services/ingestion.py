@@ -805,6 +805,7 @@ class IngestionService:
         owner_user_id: str | None = None,
         is_admin: bool = True,
         publication_status: PublicationStatus | None = None,
+        open_resource: bool = False,
     ) -> Course:
         """Create a course, optionally with an explicit publication state.
 
@@ -815,6 +816,10 @@ class IngestionService:
         A non-administrator cannot use this to publish anything.
         """
         course_type = "official" if is_admin else "user"
+        # Internal curated-import option, not a student-supplied API field.
+        # Reuse the canonical shared corpus, without claiming a school affiliation.
+        if open_resource and not is_admin:
+            raise ApiError(403, "PUBLICATION_NOT_ALLOWED", "Only an administrator can register an open resource.")
         if self.settings.v3_enabled and payload.id.startswith("ws-"):
             raise ApiError(422, "RESERVED_COURSE_ID", "This course ID namespace is reserved.")
         if not is_admin and not owner_user_id:
@@ -900,7 +905,8 @@ class IngestionService:
                     # flag with `display_type == 'campus'` and `course_type == 'official'`, so
                     # nothing was ever let through; what was wrong was the column disagreeing with
                     # the policy, which a future reader of the flag alone would inherit.
-                    values.extend(["campus" if is_admin else "private", 1 if is_admin else 0])
+                    values.extend(["shared" if open_resource else "campus" if is_admin else "private",
+                                   1 if is_admin and not open_resource else 0])
                 connection.execute(
                     f"""
                     INSERT INTO courses (

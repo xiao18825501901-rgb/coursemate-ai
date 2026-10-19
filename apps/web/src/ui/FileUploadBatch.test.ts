@@ -7,6 +7,21 @@ describe('durable multi-file corpus batch', () => {
     vi.unstubAllGlobals();
   });
 
+  it('does not seal a processing document as indexed', async () => {
+    window.COURSEMATE_CONFIG = { apiBase: '/api/ui/v1' };
+    const fetcher = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetcher);
+    const changed = vi.fn();
+    const outcome = await runUploadBatch('c', [{ clientItemId: 'i', file: {} }],
+      async () => ({ id: 'doc', status: 'processing' }), changed);
+    expect(outcome.failed).toBe(1);
+    expect(changed).toHaveBeenLastCalledWith('i', expect.objectContaining({ status: 'failed', result: { id: 'doc', status: 'processing' } }));
+    const calls = fetcher.mock.calls as unknown as Array<[string, RequestInit]>;
+    expect(JSON.parse(String(calls[1]?.[1].body)).items[0]).toMatchObject({
+      status: 'FAILED', document_id: 'doc', error_code: 'INGESTION_PENDING',
+    });
+  });
+
   it('opens once, uploads each item, and seals every terminal result', async () => {
     window.COURSEMATE_CONFIG = { apiBase: '/api/ui/v1' };
     const requests: Array<{ url: string; init: RequestInit }> = [];
