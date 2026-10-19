@@ -836,7 +836,9 @@ def create_app(settings: Settings|None=None, *, provider=None, domain=None, subj
         try:
             name=valid_filename(file.filename or '')
             folder=valid_folder(folder)
-            mime,parts,parse_error=await asyncio.to_thread(parse_document,name,content)
+            mime,parts,parse_error=await asyncio.to_thread(
+                parse_document,name,content,pdf_preview_pages=6 if domain else None
+            )
         except ValueError as e: raise HTTPException(422,str(e)) from None
         # corpus.quality.v1: mark-only parse-quality flag for missing pages/stems/
         # parameters/weak sourcing/duplicates. It never auto-deletes the user's

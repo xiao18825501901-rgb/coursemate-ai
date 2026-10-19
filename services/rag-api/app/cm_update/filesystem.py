@@ -14,7 +14,11 @@ MIME={'.pdf':'application/pdf','.txt':'text/plain','.md':'text/plain','.csv':'te
       '.pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation'}
 
 
-def parse_document(name: str, content: bytes) -> tuple[str,list[tuple[int,str]],str|None]:
+def parse_document(name: str, content: bytes, *, pdf_preview_pages: int | None = None) -> tuple[str,list[tuple[int,str]],str|None]:
+    # Integrated uploads retain the complete bytes for the authoritative RAG
+    # parser. This optional sample is only for the UI's advisory quality hint.
+    if pdf_preview_pages is not None and not 1 <= pdf_preview_pages <= 250:
+        raise ValueError('PDF preview must be bounded to 1-250 pages')
     suffix=Path(name).suffix.lower()
     if suffix not in MIME: raise ValueError('支持 PDF、TXT、Markdown、CSV、Notebook、PNG/JPEG/WebP、DOCX、PPTX')
     chunks: list[tuple[int,str]]=[]
@@ -24,8 +28,9 @@ def parse_document(name: str, content: bytes) -> tuple[str,list[tuple[int,str]],
         try:
             doc=PdfReader(io.BytesIO(content))
             if doc.is_encrypted: raise ValueError('暂不支持加密 PDF')
-            if len(doc.pages)>250: raise ValueError('单文件最多 250 页，请拆分上传')
-            chunks=[(i+1,(page.extract_text() or '')[:60000]) for i,page in enumerate(doc.pages)]
+            if pdf_preview_pages is None and len(doc.pages)>250: raise ValueError('单文件最多 250 页，请拆分上传')
+            pages=doc.pages if pdf_preview_pages is None else doc.pages[:pdf_preview_pages]
+            chunks=[(i+1,(page.extract_text() or '')[:60000]) for i,page in enumerate(pages)]
             if not any(t.strip() for _,t in chunks): error='可预览；未提取到文字。图像题需接入现有 V3 视觉接口。'
         except ValueError: raise
         except Exception: raise ValueError('PDF 无法解析，请检查文件是否损坏') from None
