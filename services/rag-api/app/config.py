@@ -132,7 +132,7 @@ class Settings(BaseSettings):
     # governing plan starts from "at most 40 candidates" as an untested default,
     # so it is configurable rather than a magic number inside the adapter.
     retrieval_candidates: int = Field(default=40, ge=1, le=200)
-    max_upload_bytes: int = Field(default=20 * 1024 * 1024, ge=1_024, le=100 * 1024 * 1024)
+    max_upload_bytes: int = Field(default=20 * 1024 * 1024, ge=1_024, le=500_000_000)
     user_course_max_courses: int = Field(default=10, ge=1, le=1_000)
     user_course_max_files: int = Field(default=50, ge=1, le=10_000)
     user_course_max_total_upload_bytes: int = Field(

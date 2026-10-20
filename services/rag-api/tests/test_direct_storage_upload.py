@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.errors import ApiError
 from app.main import create_app
+from app.models import DirectUploadCreate
 from app.storage.backends import AliyunOssStorageBackend
 
 
@@ -93,6 +94,62 @@ class _OssClient:
         body = request.body  # type: ignore[attr-defined]
         self.objects[request.key] = body.read() if hasattr(body, "read") else bytes(body)
         return _Result(content_length=len(self.objects[request.key]))  # type: ignore[attr-defined]
+
+
+def test_trusted_batch_size_can_expand_without_changing_ordinary_runtime_limit(
+    tmp_path: Path,
+) -> None:
+    trusted_size = 201_039_307
+    trusted = Settings(
+        database_path=tmp_path / "trusted.sqlite3",
+        upload_dir=tmp_path / "trusted-uploads",
+        storage_cache_dir=tmp_path / "trusted-cache",
+        max_upload_bytes=trusted_size,
+    )
+    payload = DirectUploadCreate(
+        filename="world-history.pdf",
+        media_type="application/pdf",
+        byte_size=trusted_size,
+        sha256="0" * 64,
+    )
+
+    assert trusted.max_upload_bytes == trusted_size
+    assert payload.byte_size == trusted_size
+    assert Settings().max_upload_bytes == 20 * 1024 * 1024
+
+    ordinary = Settings(
+        database_path=tmp_path / "ordinary.sqlite3",
+        upload_dir=tmp_path / "ordinary-uploads",
+        storage_cache_dir=tmp_path / "ordinary-cache",
+        storage_reserve_min_bytes=0,
+        storage_reserve_fraction=0,
+        app_env="test",
+        rag_provider_mode="deterministic",
+        v3_enabled=True,
+    )
+    app = create_app(
+        settings=ordinary, embedding_provider=_Embedding(), auth_verifier=_Auth()
+    )
+    app.state.ingestion_service.storage_backend = AliyunOssStorageBackend(
+        bucket="private-bucket", client=_OssClient(), prefix="coursejesus"
+    )
+    with TestClient(app) as client:
+        client.headers["Authorization"] = "Bearer owner"
+        assert client.post(
+            "/api/courses",
+            json={"id": "ordinary-limit", "name": "Ordinary", "description": ""},
+        ).status_code == 201
+        rejected = client.post(
+            "/api/courses/ordinary-limit/direct-uploads",
+            json={
+                "filename": "large.pdf",
+                "mediaType": "application/pdf",
+                "byteSize": 20 * 1024 * 1024 + 1,
+                "sha256": "0" * 64,
+            },
+        )
+    assert rejected.status_code == 400
+    assert rejected.json()["error"]["code"] == "FILE_TOO_LARGE"
 
 
 def test_local_storage_advertises_clean_upload_fallback(tmp_path: Path) -> None:

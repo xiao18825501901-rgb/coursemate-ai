@@ -205,7 +205,7 @@ class UploadAccepted(ApiModel):
 class DirectUploadCreate(ApiModel):
     filename: str = Field(min_length=1, max_length=255)
     media_type: str = Field(min_length=1, max_length=200)
-    byte_size: int = Field(gt=0, le=100 * 1024 * 1024)
+    byte_size: int = Field(gt=0, le=500_000_000)
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
 
     @field_validator("filename")
