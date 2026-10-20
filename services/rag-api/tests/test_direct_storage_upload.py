@@ -294,6 +294,14 @@ def test_large_pdf_direct_upload_verification_reads_bounded_ranges(tmp_path: Pat
     assert accepted.document.sha256 == digest
     assert len(fake.requested_ranges) >= 3
     assert max(end - start + 1 for start, end in fake.requested_ranges) <= 1024 * 1024
+    with app.state.database.connect() as connection:
+        stored_path = Path(
+            connection.execute(
+                "SELECT stored_path FROM documents WHERE id=?", (accepted.document.id,)
+            ).fetchone()["stored_path"]
+        )
+    assert not stored_path.exists(), "A verified range must never be cached as the whole PDF"
+    assert accepted.job.error_message == "WAITING_CAPACITY"
 
 
 def test_low_capacity_keeps_remote_object_and_resumes_after_space_recovers(

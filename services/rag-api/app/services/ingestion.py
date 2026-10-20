@@ -338,7 +338,15 @@ class IngestionService:
             promoted_object = stored
             canonical_id = f"obj_{uuid4().hex}"
             cache_path = self.settings.storage_cache_dir / key
-            cache_available = self._cache_if_capacity_allows(key, content, cache_path)
+            # A ranged PDF verification deliberately never materializes the
+            # final range as though it were the whole object. The ingestion
+            # worker hydrates the verified canonical object under its normal
+            # capacity reservation before parsing it.
+            cache_available = (
+                False
+                if extension == ".pdf"
+                else self._cache_if_capacity_allows(key, content, cache_path)
+            )
             with self.database.connect() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 self._check_document_admission_sql(
