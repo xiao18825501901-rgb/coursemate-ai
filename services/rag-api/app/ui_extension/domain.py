@@ -81,6 +81,7 @@ from app.learning.workspaces import (
     document_for,
     join_course,
     original_path,
+    stored_file_available,
 )
 from app.rag.answers import evidence_bundle_support
 from app.rag.retrieval import HybridRetriever
@@ -535,9 +536,11 @@ class V3DomainAdapter:
             ).fetchall()
         items: list[dict[str, Any]] = []
         for row in rows:
-            path = original_path(
+            version = self._version_row(row["version_id"]) or row
+            original_available = stored_file_available(
                 self.database,
-                self._version_row(row["version_id"]) or row,
+                version["stored_path"],
+                version["byte_size"],
             )
             items.append(
                 {
@@ -547,10 +550,10 @@ class V3DomainAdapter:
                     "size": row["byte_size"],
                     "mime": _media_type(row["extension"]),
                     "scope": "private" if row["source_scope"] == "WORKSPACE_PRIVATE" else "public",
-                    "status": _file_status(row["status"], path is not None),
+                    "status": _file_status(row["status"], original_available),
                     "version_id": row["version_id"],
                     "sha256": row["sha256"],
-                    "error": None if path is not None else "原件暂不可用",
+                    "error": None if original_available else "原件暂不可用",
                 }
             )
         return items
@@ -711,7 +714,11 @@ class V3DomainAdapter:
             raise ApiError(404,'DOCUMENT_NOT_FOUND','Document not found in this course.')
         version = current_document_version(self.database, str(payload["id"]), subject)
         stored = str(version["stored_path"])
-        if not Path(stored).is_file() and self.ingestion.has_stored_object(
+        try:
+            local_original = Path(stored).is_file()
+        except OSError:
+            local_original = False
+        if not local_original and self.ingestion.has_stored_object(
             stored, int(version["byte_size"])
         ):
             size = int(version["byte_size"])

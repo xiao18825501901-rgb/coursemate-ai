@@ -132,6 +132,36 @@ def test_public_file_listing_does_not_create_a_learning_workspace(client: TestCl
     assert after == before
 
 
+def test_public_file_listing_accepts_verified_durable_original_without_local_cache(
+    immutable_corpus: TestClient,
+) -> None:
+    """An evicted local cache must not hide an intact durable corpus original."""
+
+    client = immutable_corpus
+    create_official_course(client)
+    upload_shared_document(client)
+    with client.app.state.database.connect() as connection:
+        version = connection.execute(
+            "SELECT version.stored_path,version.byte_size FROM document_versions AS version "
+            "JOIN documents ON documents.id=version.document_id "
+            "WHERE documents.course_id='cs3481' ORDER BY version.version DESC LIMIT 1"
+        ).fetchone()
+    stored_path = Path(version["stored_path"])
+    stored_path.unlink()
+    client.app.state.database.storage_object_probe = (
+        lambda candidate, byte_size: candidate == str(stored_path.resolve())
+        and byte_size == int(version["byte_size"])
+    )
+
+    response = client.get(
+        f"{UI}/courses/cs3481/files", headers=auth("Bearer token-a")
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()[0]["status"] == "indexed"
+    assert response.json()[0]["error"] is None
+
+
 def upload_shared_document(
     client: TestClient,
     course_id: str = "cs3481",

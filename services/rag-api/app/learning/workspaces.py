@@ -190,16 +190,29 @@ def artifact_for(database: Database, artifact_id: str, owner: str) -> sqlite3.Ro
 def stored_file_path(database: Database, stored_path: str) -> Path | None:
     path = Path(stored_path)
     roots = (database.upload_dir.resolve(), database.storage_cache_dir.resolve())
-    resolved = path.resolve()
-    # No client paths and no symlinks escaping either trusted storage root.
-    if path.is_symlink() or not any(resolved.is_relative_to(root) for root in roots):
+    try:
+        resolved = path.resolve()
+    except OSError:
         return None
-    if not resolved.is_file() and database.storage_path_resolver is not None:
+    # No client paths and no symlinks escaping either trusted storage root.
+    try:
+        unsafe_link = path.is_symlink()
+    except OSError:
+        return None
+    if unsafe_link or not any(resolved.is_relative_to(root) for root in roots):
+        return None
+    try:
+        local_file = resolved.is_file()
+    except OSError:
+        local_file = False
+    if not local_file and database.storage_path_resolver is not None:
         hydrated = database.storage_path_resolver(str(resolved))
         resolved = Path(hydrated).resolve() if hydrated is not None else resolved
-    if not resolved.is_file() or resolved.is_symlink() or not any(
-        resolved.is_relative_to(root) for root in roots
-    ):
+    try:
+        usable = resolved.is_file() and not resolved.is_symlink()
+    except OSError:
+        usable = False
+    if not usable or not any(resolved.is_relative_to(root) for root in roots):
         return None
     return resolved
 
@@ -220,12 +233,18 @@ def stored_file_available(
 
     if stored_path is None or byte_size is None:
         return False
-    path = Path(stored_path).resolve()
+    try:
+        path = Path(stored_path).resolve()
+    except OSError:
+        return False
     roots = (database.upload_dir.resolve(), database.storage_cache_dir.resolve())
     if not any(path.is_relative_to(root) for root in roots):
         return False
-    if path.is_file() and not path.is_symlink():
-        return path.stat().st_size == byte_size
+    try:
+        if path.is_file() and not path.is_symlink():
+            return path.stat().st_size == byte_size
+    except OSError:
+        pass
     probe = database.storage_object_probe
     return bool(probe and probe(str(path), int(byte_size)))
 
