@@ -302,7 +302,9 @@ def test_direct_upload_is_verified_promoted_and_ingested(tmp_path: Path) -> None
         ).fetchone()[0] == 2
 
 
-def test_large_pdf_direct_upload_verification_reads_bounded_ranges(tmp_path: Path) -> None:
+def test_large_pdf_direct_upload_verification_reads_bounded_ranges(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     settings = Settings(
         database_path=tmp_path / "rag.sqlite3",
         upload_dir=tmp_path / "uploads",
@@ -359,6 +361,15 @@ def test_large_pdf_direct_upload_verification_reads_bounded_ranges(tmp_path: Pat
         )
     assert not stored_path.exists(), "A verified range must never be cached as the whole PDF"
     assert accepted.job.error_message == "WAITING_CAPACITY"
+    native_is_file = Path.is_file
+
+    def inaccessible_cache(path: Path) -> bool:
+        if path == stored_path.resolve():
+            raise PermissionError("simulated importer-owned cache directory")
+        return native_is_file(path)
+
+    monkeypatch.setattr(Path, "is_file", inaccessible_cache)
+    assert app.state.ingestion_service.has_stored_object(stored_path, len(content))
 
 
 def test_low_capacity_keeps_remote_object_and_resumes_after_space_recovers(

@@ -668,9 +668,19 @@ class IngestionService:
             self._release_capacity(reservation_id)
 
     def has_stored_object(self, stored_path: str, byte_size: int) -> bool:
-        destination = Path(stored_path).resolve()
-        if destination.is_file():
-            return destination.stat().st_size == byte_size
+        try:
+            destination = Path(stored_path).resolve()
+        except OSError:
+            return False
+        try:
+            if destination.is_file():
+                return destination.stat().st_size == byte_size
+        except OSError:
+            # An offline importer may leave an unreadable local cache entry.
+            # The canonical database row remains authoritative for the durable
+            # OSS object, so continue to the scoped lookup instead of failing
+            # an otherwise authorized public read.
+            pass
         if not any(
             _is_relative_to(destination, root)
             for root in (
