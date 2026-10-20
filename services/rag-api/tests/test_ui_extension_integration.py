@@ -114,6 +114,24 @@ def test_knowledge_build_status_is_read_only_and_never_enqueues(client: TestClie
         )
 
 
+def test_public_file_listing_does_not_create_a_learning_workspace(client: TestClient) -> None:
+    """Browsing shared originals must not consume a student's enrollment quota."""
+    create_official_course(client)
+    with client.app.state.database.connect() as connection:
+        before = connection.execute(
+            "SELECT COUNT(*) FROM learning_workspaces WHERE owner_user_id='user-a'"
+        ).fetchone()[0]
+    response = client.get(
+        f"{UI}/courses/cs3481/files", headers=auth("Bearer token-a")
+    )
+    assert response.status_code == 200, response.text
+    with client.app.state.database.connect() as connection:
+        after = connection.execute(
+            "SELECT COUNT(*) FROM learning_workspaces WHERE owner_user_id='user-a'"
+        ).fetchone()[0]
+    assert after == before
+
+
 def upload_shared_document(
     client: TestClient,
     course_id: str = "cs3481",
@@ -367,6 +385,44 @@ def test_ui_multi_file_batch_releases_one_frozen_revision_after_seal(
             "SELECT target_kind,status FROM auto_knowledge_jobs ORDER BY id"
         ).fetchall()
     assert [dict(row) for row in jobs] == [{"target_kind": "SUPPLEMENT", "status": "QUEUED"}]
+
+
+def test_public_original_readable_at_workspace_cap_without_enrolling(
+    immutable_corpus: TestClient,
+) -> None:
+    from app.errors import ApiError
+    from app.learning.workspaces import join_course
+
+    client = immutable_corpus
+    database = client.app.state.database
+    for index in range(10):
+        course_id = f"enrolled-{index}"
+        create_official_course(client, course_id)
+        join_course(database, course_id, "user-a", 10)
+    create_official_course(client)
+    upload_shared_document(client)
+    # The normal enrollment limit remains effective for this same target.
+    with pytest.raises(ApiError) as caught:
+        join_course(database, "cs3481", "user-a", 10)
+    assert caught.value.code == "WORKSPACE_QUOTA"
+    listing = client.get(f"{UI}/courses/cs3481/files", headers=auth("Bearer token-a"))
+    assert listing.status_code == 200, listing.text
+    assert len(listing.json()) == 1
+    file_id = listing.json()[0]["id"]
+    original = client.get(
+        f"{UI}/courses/cs3481/files/{file_id}/content",
+        headers=auth("Bearer token-a"),
+    )
+    assert original.status_code == 200, original.text
+    assert original.content == _markdown()
+    with database.connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM learning_workspaces WHERE owner_user_id='user-a'"
+        ).fetchone()[0] == 10
+        assert connection.execute(
+            "SELECT COUNT(*) FROM learning_workspaces WHERE owner_user_id='user-a' "
+            "AND course_id='cs3481'"
+        ).fetchone()[0] == 0
 
 
 def test_file_content_is_the_authorised_original_with_range_and_head(

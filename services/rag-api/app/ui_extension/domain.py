@@ -493,7 +493,15 @@ class V3DomainAdapter:
         are unioned here. No `stored_path` ever leaves the server.
         """
 
-        workspace = self._workspace_row(course_id, subject)
+        # Listing existing originals is read-only, not enrollment. Joining here
+        # consumed a workspace slot and blocked public files at the user's cap.
+        # Upload/learning paths still use _workspace_row and enforce that cap.
+        self._course_row(course_id, subject)
+        with self.database.connect() as connection:
+            workspace = connection.execute(
+                "SELECT * FROM learning_workspaces WHERE course_id=? AND owner_user_id=?",
+                (course_id, subject),
+            ).fetchone()
         private_course = workspace["private_course_id"] if workspace is not None else None
         official = (
             "(version.course_id=? AND (version.source_scope='OFFICIAL' OR "
