@@ -62,6 +62,7 @@ class _OssClient:
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
         self.presigned_key = ""
+        self.requested_ranges: list[tuple[int, int]] = []
 
     def presign(self, request: object, **_: object) -> _Presign:
         self.presigned_key = request.key  # type: ignore[attr-defined]
@@ -80,6 +81,7 @@ class _OssClient:
         byte_range = getattr(request, "range_header", None)
         if byte_range:
             start_text, end_text = str(byte_range)[6:].split("-", 1)
+            self.requested_ranges.append((int(start_text), int(end_text)))
             content = content[int(start_text) : int(end_text) + 1]
         return _Result(content_length=len(content), body=_Body(content))
 
@@ -241,6 +243,57 @@ def test_direct_upload_is_verified_promoted_and_ingested(tmp_path: Path) -> None
         assert connection.execute(
             "SELECT COUNT(*) FROM documents WHERE storage_object_id IS NOT NULL"
         ).fetchone()[0] == 2
+
+
+def test_large_pdf_direct_upload_verification_reads_bounded_ranges(tmp_path: Path) -> None:
+    settings = Settings(
+        database_path=tmp_path / "rag.sqlite3",
+        upload_dir=tmp_path / "uploads",
+        storage_cache_dir=tmp_path / "cache",
+        storage_reserve_min_bytes=0,
+        storage_reserve_fraction=0,
+        app_env="test",
+        rag_provider_mode="deterministic",
+        v3_enabled=True,
+        max_upload_bytes=4 * 1024 * 1024,
+    )
+    app = create_app(
+        settings=settings,
+        embedding_provider=_Embedding(),
+        auth_verifier=_Auth(),
+    )
+    fake = _OssClient()
+    app.state.ingestion_service.storage_backend = AliyunOssStorageBackend(
+        bucket="private-bucket", client=fake, prefix="coursejesus"
+    )
+    content = b"%PDF-1.7\n" + b"0" * (2 * 1024 * 1024 + 17)
+    digest = hashlib.sha256(content).hexdigest()
+
+    with TestClient(app) as client:
+        client.headers["Authorization"] = "Bearer owner"
+        assert client.post(
+            "/api/courses",
+            json={"id": "large-pdf", "name": "Large PDF", "description": ""},
+        ).status_code == 201
+        started = client.post(
+            "/api/courses/large-pdf/direct-uploads",
+            json={
+                "filename": "large.pdf",
+                "mediaType": "application/pdf",
+                "byteSize": len(content),
+                "sha256": digest,
+            },
+        )
+        assert started.status_code == 201
+        fake.objects[fake.presigned_key] = content
+
+        accepted = app.state.ingestion_service.finalize_direct_upload(
+            upload_id=started.json()["uploadId"], owner_user_id="owner-a", is_admin=False
+        )
+
+    assert accepted.document.sha256 == digest
+    assert len(fake.requested_ranges) >= 3
+    assert max(end - start + 1 for start, end in fake.requested_ranges) <= 1024 * 1024
 
 
 def test_low_capacity_keeps_remote_object_and_resumes_after_space_recovers(

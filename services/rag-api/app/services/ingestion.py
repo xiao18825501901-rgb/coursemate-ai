@@ -38,6 +38,7 @@ from app.storage.keys import canonical_object_key, quarantine_object_key
 
 LOGGER = logging.getLogger(__name__)
 EMBEDDING_BATCH_SIZE = 10
+DIRECT_UPLOAD_VERIFY_CHUNK_BYTES = 1024 * 1024
 
 
 def _storage_owner_segment(owner_user_id: str) -> str:
@@ -281,11 +282,39 @@ class IngestionService:
         canonical_id: str | None = None
         canonical_key: str | None = None
         try:
-            content = self.storage_backend.read_range(
-                session["object_key"], start=0, end=session["expected_size"] - 1
-            )
-            self._validate_upload(session["filename"], session["media_type"], content)
-            if hashlib.sha256(content).hexdigest() != session["expected_sha256"]:
+            expected_size = int(session["expected_size"])
+            extension = Path(session["filename"]).suffix.casefold()
+            if expected_size > self.settings.max_upload_bytes:
+                raise ApiError(
+                    400, "FILE_TOO_LARGE", "The uploaded file exceeds the size limit."
+                )
+            digest = hashlib.sha256()
+            if extension == ".pdf":
+                first_chunk = b""
+                for start in range(0, expected_size, DIRECT_UPLOAD_VERIFY_CHUNK_BYTES):
+                    end = min(start + DIRECT_UPLOAD_VERIFY_CHUNK_BYTES, expected_size) - 1
+                    content = self.storage_backend.read_range(
+                        session["object_key"], start=start, end=end
+                    )
+                    if len(content) != end - start + 1:
+                        raise ApiError(
+                            409,
+                            "UPLOAD_SIZE_MISMATCH",
+                            "The uploaded object size does not match the upload grant.",
+                        )
+                    if start == 0:
+                        first_chunk = content
+                    digest.update(content)
+                self._validate_upload(
+                    session["filename"], session["media_type"], first_chunk
+                )
+            else:
+                content = self.storage_backend.read_range(
+                    session["object_key"], start=0, end=expected_size - 1
+                )
+                self._validate_upload(session["filename"], session["media_type"], content)
+                digest.update(content)
+            if digest.hexdigest() != session["expected_sha256"]:
                 raise ApiError(
                     409, "UPLOAD_HASH_MISMATCH", "The uploaded object failed verification."
                 )
