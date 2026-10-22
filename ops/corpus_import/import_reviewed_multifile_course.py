@@ -44,10 +44,27 @@ def load_manifest(root: Path, manifest_path: Path) -> dict[str, Any]:
     assert sha256_file(review_path) == manifest["review_sha256"]
     review = json.loads(review_path.read_text(encoding="utf-8"))
     assert review["course_id"] == manifest["course_id"]
-    assert review["status"].startswith("OFFLINE_DOCUMENT_SUBSET_QUALIFIED")
-    assert review["license_url"] == manifest["license_url"]
-    assert review["qualified_pdf_subset"]["files"] == manifest["expected_files"]
-    assert review["qualified_pdf_subset"]["bytes"] == manifest["expected_bytes"]
+    review_contract = manifest.get("review_contract", "mit_ocw_review_v1")
+    if review_contract == "mit_ocw_review_v1":
+        assert review["status"].startswith("OFFLINE_DOCUMENT_SUBSET_QUALIFIED")
+        assert review["license_url"] == manifest["license_url"]
+        assert review["qualified_pdf_subset"]["files"] == manifest["expected_files"]
+        assert review["qualified_pdf_subset"]["bytes"] == manifest["expected_bytes"]
+    elif review_contract == "source_receipt_v1":
+        assert review["decision"].startswith("OFFLINE_QUALIFIED_LOADER_VALIDATED")
+        assert len(review["files"]) == manifest["expected_files"]
+        assert review["total_bytes"] == manifest["expected_bytes"]
+        receipt_identities = {
+            (item["path"], int(item["bytes"]), item["sha256"])
+            for item in review["files"]
+        }
+        manifest_identities = {
+            (item["filename"], int(item["bytes"]), item["sha256"])
+            for item in manifest["documents"]
+        }
+        assert receipt_identities == manifest_identities
+    else:
+        raise AssertionError(f"Unsupported review contract: {review_contract}")
     seen_paths: set[str] = set()
     seen_hashes: set[str] = set()
     for document in manifest["documents"]:

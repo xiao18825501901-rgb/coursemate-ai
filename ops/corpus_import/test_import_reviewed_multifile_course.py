@@ -91,3 +91,28 @@ def test_publish_is_refused_until_every_document_is_ready(tmp_path: Path) -> Non
         assert_publishable(state)
     state["documents"][1]["status"] = "READY"
     assert_publishable(state)
+
+
+def test_source_receipt_contract_binds_all_document_identities(tmp_path: Path) -> None:
+    root, manifest_path = _fixture(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["review_contract"] = "source_receipt_v1"
+    review_path = root / "review.json"
+    review = {
+        "course_id": manifest["course_id"],
+        "decision": "OFFLINE_QUALIFIED_LOADER_VALIDATED_CAPACITY_BLOCKED_NOT_PUBLISHED_NOT_COUNTED",
+        "total_bytes": manifest["expected_bytes"],
+        "files": [
+            {
+                "path": item["filename"],
+                "bytes": item["bytes"],
+                "sha256": item["sha256"],
+            }
+            for item in manifest["documents"]
+        ],
+    }
+    review_path.write_text(json.dumps(review), encoding="utf-8")
+    manifest["review_sha256"] = _sha(review_path.read_bytes())
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    loaded = load_manifest(root, manifest_path)
+    assert loaded["review_contract"] == "source_receipt_v1"
