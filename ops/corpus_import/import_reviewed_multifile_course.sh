@@ -27,7 +27,8 @@ fi
 umask 077
 
 if [[ ! -e "${state}" ]]; then
-  backup_dir=/srv/coursemate/data-volume/release-backups/multifile-15s12-preimport-$(date -u +%Y%m%dT%H%M%SZ)
+  backup_slug=$(basename "$REMOTE_STAGE" | tr -cd 'A-Za-z0-9._-')
+  backup_dir=/srv/coursemate/data-volume/release-backups/${backup_slug}-preimport-$(date -u +%Y%m%dT%H%M%SZ)
   mkdir -p "${backup_dir}"
   "${python_runtime}" - "${backup_dir}" <<'PY'
 import hashlib, json, sqlite3, sys, time
