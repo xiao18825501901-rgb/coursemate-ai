@@ -27,7 +27,7 @@ fi
 umask 077
 
 if [[ ! -e "${state}" ]]; then
-  backup_slug=$(basename "$REMOTE_STAGE" | tr -cd 'A-Za-z0-9._-')
+  backup_slug=$(basename "$root" | tr -cd 'A-Za-z0-9._-')
   backup_dir=/srv/coursemate/data-volume/release-backups/${backup_slug}-preimport-$(date -u +%Y%m%dT%H%M%SZ)
   mkdir -p "${backup_dir}"
   "${python_runtime}" - "${backup_dir}" <<'PY'
