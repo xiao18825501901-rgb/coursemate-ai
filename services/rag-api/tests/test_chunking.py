@@ -72,6 +72,19 @@ def test_empty_sections_do_not_create_empty_chunks() -> None:
     assert [chunk.content for chunk in chunks] == ["Useful content"]
 
 
+def test_pdf_null_bytes_are_removed_before_chunks_reach_sqlite() -> None:
+    chunks = chunk_sections(
+        [section("\x00(0.00) = 0.50. The quantile is defined by the distribution.")],
+        chunk_size=200,
+        overlap=10,
+    )
+
+    assert [chunk.content for chunk in chunks] == [
+        "(0.00) = 0.50. The quantile is defined by the distribution."
+    ]
+    assert all("\x00" not in chunk.content for chunk in chunks)
+
+
 def test_assignment_question_structure_is_split_with_parent_and_part_metadata() -> None:
     source = SourceSection(
         text=(
