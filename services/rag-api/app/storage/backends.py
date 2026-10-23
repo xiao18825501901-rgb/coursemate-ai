@@ -377,8 +377,8 @@ class AliyunOssStorageBackend:
     ) -> tuple[str, dict[str, str], str]:
         from alibabacloud_oss_v2 import PutObjectRequest
 
-        if ttl_seconds < 60 or ttl_seconds > 900:
-            raise ValueError("Direct upload signatures must expire in 60-900 seconds")
+        if ttl_seconds < 60 or ttl_seconds > 3600:
+            raise ValueError("Direct upload signatures must expire in 60-3600 seconds")
         if not _safe_key(key).startswith("quarantine/"):
             raise ValueError("Direct upload signatures are restricted to quarantine objects")
         result = self.presign_client.presign(

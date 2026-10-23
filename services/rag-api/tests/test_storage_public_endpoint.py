@@ -51,3 +51,47 @@ def test_public_upload_signer_keeps_internal_data_client(monkeypatch, public_end
     assert len(clients) == (2 if public_endpoint else 1)
     if public_endpoint:
         assert clients[0].config.credentials_provider is clients[1].config.credentials_provider
+
+
+def test_reviewed_large_import_can_request_one_hour_upload_window(monkeypatch):
+    import alibabacloud_oss_v2 as oss
+
+    from app.storage import factory
+
+    observed = {}
+
+    class Client:
+        def __init__(self, config):
+            self.config = config
+
+        def presign(self, request, **kwargs):
+            observed.update(kwargs)
+            return SimpleNamespace(
+                url=f"{self.config.endpoint}/{request.bucket}/{request.key}",
+                signed_headers={"content-type": request.content_type},
+                expiration=datetime.now(UTC),
+            )
+
+    monkeypatch.setattr(oss, "Client", Client)
+    monkeypatch.setattr(factory, "AlibabaCloudCredentialAdapter", lambda: object())
+    settings = Settings(
+        _env_file=None,
+        v3_enabled=True,
+        storage_backend="aliyun_oss",
+        oss_region="cn-hangzhou",
+        oss_bucket="private-course-bucket",
+        oss_endpoint="https://oss-cn-hangzhou-internal.aliyuncs.com",
+        oss_object_prefix="coursejesus/production",
+        oss_presign_ttl_seconds=3600,
+    )
+    backend = storage_backend_from_settings(settings)
+    backend.presign_quarantine_put(
+        "quarantine/owner/large.pdf",
+        size=172_023_277,
+        sha256="b" * 64,
+        content_type="application/pdf",
+        ttl_seconds=settings.oss_presign_ttl_seconds,
+    )
+
+    assert observed["expires"].total_seconds() == 3600
+    assert Settings(_env_file=None).oss_presign_ttl_seconds == 600

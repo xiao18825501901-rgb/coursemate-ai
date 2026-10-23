@@ -124,7 +124,10 @@ class Settings(BaseSettings):
     oss_object_prefix: str = Field(
         default="coursejesus", validation_alias=AliasChoices("OSS_OBJECT_PREFIX")
     )
-    oss_presign_ttl_seconds: int = Field(default=600, ge=60, le=900)
+    # Ordinary uploads keep the ten-minute default. Reviewed large-import
+    # processes may explicitly request up to one hour so a PUT that starts
+    # before signature expiry can also reach the finalize gate in time.
+    oss_presign_ttl_seconds: int = Field(default=600, ge=60, le=3600)
     chunk_size: int = Field(default=1_200, ge=200, le=12_000)
     chunk_overlap: int = Field(default=200, ge=0, le=4_000)
     top_k: int = Field(default=6, ge=1, le=30)
