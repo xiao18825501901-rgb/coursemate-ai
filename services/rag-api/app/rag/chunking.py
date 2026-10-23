@@ -9,6 +9,7 @@ ChunkInput: TypeAlias = tuple[str, dict[str, str | int | None], str | None]
 
 def _normalize_paragraphs(text: str) -> list[str]:
     text = text.replace("\x00", " ")
+    text = re.sub(r"[\ud800-\udfff]", "\ufffd", text)
     paragraphs = re.split(r"\n\s*\n+", text.strip())
     return [re.sub(r"\s+", " ", paragraph).strip() for paragraph in paragraphs if paragraph.strip()]
 

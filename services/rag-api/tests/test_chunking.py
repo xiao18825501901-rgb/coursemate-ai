@@ -85,6 +85,19 @@ def test_pdf_null_bytes_are_removed_before_chunks_reach_sqlite() -> None:
     assert all("\x00" not in chunk.content for chunk in chunks)
 
 
+def test_unpaired_pdf_surrogates_are_replaced_before_embedding() -> None:
+    chunks = chunk_sections(
+        [section("Bessel expression \ud835! with readable surrounding text.")],
+        chunk_size=200,
+        overlap=10,
+    )
+
+    assert [chunk.content for chunk in chunks] == [
+        "Bessel expression \ufffd! with readable surrounding text."
+    ]
+    assert chunks[0].content.encode("utf-8")
+
+
 def test_assignment_question_structure_is_split_with_parent_and_part_metadata() -> None:
     source = SourceSection(
         text=(
