@@ -2,11 +2,127 @@
   "registry_version": "1",
   "workflows": [
     {
-      "workflow_id": "coursejesus-comfy-image-v1",
+      "workflow_id": "coursejesus-flux2-klein-image-v1",
       "version": "1",
       "renderer_type": "COMFY_IMAGE",
       "provider": "aliyun_eas",
       "enabled": true,
+      "allowed_inputs": [
+        "positive_prompt",
+        "seed",
+        "width",
+        "height",
+        "steps",
+        "cfg",
+        "output_prefix"
+      ],
+      "outputs": [
+        "image"
+      ],
+      "model_version": "FLUX.2-klein-4b-fp8@5b4408e59397a4a37ccb46afe426d8ed86379441",
+      "workflow_file": "coursejesus-flux2-klein-image-v1.json",
+      "workflow_sha256": "2d298f970857e36c59af2233c123b260005b68b302fe65ffe9253ad174e31faf",
+      "output_node_id": "output_save",
+      "input_bindings": {
+        "positive_prompt": {
+          "node_id": "top_76",
+          "input": "value"
+        },
+        "seed": {
+          "node_id": "sg_73",
+          "input": "noise_seed"
+        },
+        "steps": {
+          "node_id": "sg_62",
+          "input": "steps"
+        },
+        "cfg": {
+          "node_id": "sg_63",
+          "input": "cfg"
+        },
+        "width": {
+          "node_id": "sg_68",
+          "input": "value"
+        },
+        "height": {
+          "node_id": "sg_69",
+          "input": "value"
+        },
+        "output_prefix": {
+          "node_id": "output_save",
+          "input": "filename_prefix"
+        }
+      }
+    },
+    {
+      "workflow_id": "coursejesus-wan22-ti2v-5b-video-v1",
+      "version": "1",
+      "renderer_type": "COMFY_VIDEO",
+      "provider": "aliyun_eas",
+      "enabled": true,
+      "allowed_inputs": [
+        "positive_prompt",
+        "negative_prompt",
+        "seed",
+        "width",
+        "height",
+        "frames",
+        "steps",
+        "cfg",
+        "output_prefix"
+      ],
+      "outputs": [
+        "video"
+      ],
+      "model_version": "Wan2.2-TI2V-5B@ee6f4a40737a995bf5818954cfce6d59443b0f04",
+      "workflow_file": "coursejesus-wan22-ti2v-5b-video-v1.json",
+      "workflow_sha256": "79123bf9518395638afda71868c42d2243f579b2d0e65f813ab917976f26bb21",
+      "output_node_id": "58",
+      "input_bindings": {
+        "positive_prompt": {
+          "node_id": "6",
+          "input": "text"
+        },
+        "negative_prompt": {
+          "node_id": "7",
+          "input": "text"
+        },
+        "seed": {
+          "node_id": "3",
+          "input": "seed"
+        },
+        "steps": {
+          "node_id": "3",
+          "input": "steps"
+        },
+        "cfg": {
+          "node_id": "3",
+          "input": "cfg"
+        },
+        "width": {
+          "node_id": "55",
+          "input": "width"
+        },
+        "height": {
+          "node_id": "55",
+          "input": "height"
+        },
+        "frames": {
+          "node_id": "55",
+          "input": "length"
+        },
+        "output_prefix": {
+          "node_id": "58",
+          "input": "filename_prefix"
+        }
+      }
+    },
+    {
+      "workflow_id": "coursejesus-comfy-image-v1",
+      "version": "1",
+      "renderer_type": "COMFY_IMAGE",
+      "provider": "aliyun_eas",
+      "enabled": false,
       "allowed_inputs": ["positive_prompt", "negative_prompt", "seed", "width", "height", "steps", "cfg"],
       "outputs": ["image"],
       "model_version": "Anything-v5.0-PRT-RE.safetensors",

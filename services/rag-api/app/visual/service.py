@@ -9,9 +9,16 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from app.config import Settings
+from app.course_access import require_course_access
 from app.storage.backends import StorageBackend
 from app.visual.compiler import CompiledVisual, compile_visual_spec
+from app.visual.media import MediaValidationError, inspect_video
 from app.visual.planner import VisualPlannerProvider
+from app.visual.providers.aliyun_eas import (
+    AlibabaEASComfyProvider,
+    ProviderAuthenticationError,
+    ProviderNotConfigured,
+)
 from app.visual.providers.base import (
     ProviderState,
     RendererTemporarilyUnavailable,
@@ -100,9 +107,10 @@ class VisualService:
             raise RuntimeError("VISUAL_ENGINE_DISABLED")
         if value.action == "auto" and not self.settings.visual_auto_enabled:
             raise RuntimeError("AUTO_VISUAL_DISABLED")
-        if value.action == "auto" and not self.store.get_assistance_preference(
-            value.user_id, value.course_id
-        )["enabled"]:
+        if (
+            value.action == "auto"
+            and not self.store.get_assistance_preference(value.user_id, value.course_id)["enabled"]
+        ):
             raise VisualAssistanceNotEnabled("VISUAL_ASSISTANCE_NOT_ENABLED")
         existing = self.store.get_by_request(value.user_id, value.request_id)
         frozen = asdict(value)
@@ -210,6 +218,8 @@ class VisualService:
             raise KeyError(job_id)
         if parent["status"] != "FAILED":
             raise VisualStateConflict("only failed visual jobs can be retried")
+        if parent.get("error_code") in {"PROVIDER_UNKNOWN", "PROVIDER_TIMEOUT"}:
+            raise VisualStateConflict("uncertain provider requests cannot be resubmitted")
         retry_count = int(str(parent["retry_count"])) + 1
         if retry_count > self.settings.visual_max_retries:
             raise VisualStateConflict("visual retry limit reached")
@@ -406,7 +416,9 @@ class VisualService:
                     current = self.store.transition(job_id, "RENDERING", expected={"PLANNING"})
                 elif current["status"] not in {"RENDERING", "VALIDATING"}:
                     raise RuntimeError("PROVIDER_UNKNOWN")
-                result = self._render_provider(job_id, compiled, worker_id=worker_id)
+                result = self._render_provider(
+                    job_id, compiled, worker_id=worker_id, workflow=workflow
+                )
                 current = self.store.get(job_id) or current
                 if current["status"] == "CANCELLED" or current["cancel_requested"]:
                     return current
@@ -420,22 +432,34 @@ class VisualService:
                     raise InvalidVisualOutput("provider GPU receipt is invalid")
                 if result.actual_cost_micros is not None and result.actual_cost_micros < 0:
                     raise InvalidVisualOutput("provider cost receipt is invalid")
-                width, height = validate_output(
-                    content,
-                    mime_type=mime_type,
-                    width=result.width,
-                    height=result.height,
-                    duration_seconds=result.duration_seconds,
-                    max_bytes=self.settings.visual_max_output_bytes,
-                    max_width=self.settings.visual_max_width,
-                    max_height=self.settings.visual_max_height,
-                    max_duration_seconds=self.settings.visual_max_duration_seconds,
-                )
+                if spec.renderer is Renderer.COMFY_VIDEO:
+                    inspection = inspect_video(
+                        content,
+                        mime_type=mime_type,
+                        max_bytes=self.settings.visual_max_output_bytes,
+                        max_width=self.settings.visual_max_width,
+                        max_height=self.settings.visual_max_height,
+                        max_duration=self.settings.visual_max_duration_seconds,
+                    )
+                    width, height = inspection.width, inspection.height
+                    duration = inspection.duration_seconds
+                else:
+                    width, height = validate_output(
+                        content,
+                        mime_type=mime_type,
+                        width=result.width,
+                        height=result.height,
+                        duration_seconds=result.duration_seconds,
+                        max_bytes=self.settings.visual_max_output_bytes,
+                        max_width=self.settings.visual_max_width,
+                        max_height=self.settings.visual_max_height,
+                        max_duration_seconds=self.settings.visual_max_duration_seconds,
+                    )
+                    duration = result.duration_seconds
                 semantic_validation = result.semantic_validation
                 gpu_seconds = result.gpu_seconds
                 actual_cost = result.actual_cost_micros
                 model_version = result.model_version
-                duration = result.duration_seconds
             else:
                 if current["status"] == "PLANNING":
                     self.store.transition(job_id, "VALIDATING", expected={"PLANNING"})
@@ -505,7 +529,7 @@ class VisualService:
             current = self.store.get(job_id)
             if current is None or current["status"] in TERMINAL:
                 return current or claimed
-            if isinstance(error, InvalidVisualOutput):
+            if isinstance(error, (InvalidVisualOutput, MediaValidationError)):
                 code = "INVALID_PROVIDER_OUTPUT"
             elif isinstance(error, VisualQuotaExceeded):
                 code = "QUOTA_EXCEEDED"
@@ -580,7 +604,12 @@ class VisualService:
             language=spec.language,
         )
 
-    def _render_provider(self, job_id: str, compiled: CompiledVisual, *, worker_id: str):
+    def _render_provider(
+        self, job_id: str, compiled: CompiledVisual, *, worker_id: str, workflow: Workflow
+    ):
+        provider = self.provider
+        if isinstance(provider, AlibabaEASComfyProvider):
+            provider = provider.for_workflow(workflow)
         current = self.store.get(job_id)
         if current is None:
             raise KeyError(job_id)
@@ -588,7 +617,7 @@ class VisualService:
         if provider_job_id:
             submitted_id = str(provider_job_id)
         else:
-            submitted_id = self.provider.job_id_for(job_id)
+            submitted_id = provider.job_id_for(job_id)
             wait_started_at = _now()
             self.store.patch(
                 job_id,
@@ -601,9 +630,7 @@ class VisualService:
             # minutes. Reserve the deterministic provider id and a lease that
             # spans the cold-start boundary before making any network call.
             wait_started = time.monotonic()
-            submission_deadline = (
-                wait_started + self.settings.visual_image_render_deadline_seconds
-            )
+            submission_deadline = wait_started + self.settings.visual_image_render_deadline_seconds
             if not self.store.renew_lease(
                 job_id,
                 worker_id,
@@ -615,8 +642,25 @@ class VisualService:
                 raise RuntimeError("PROVIDER_UNKNOWN")
             delay = self.settings.visual_worker_poll_seconds
             while True:
+                current = self.store.get(job_id)
+                if (
+                    current is None
+                    or current["cancel_requested"]
+                    or current["status"] == "CANCELLED"
+                ):
+                    raise RuntimeError("CANCELLED")
+                require_course_access(
+                    self.store.database,
+                    str(current["course_id"]),
+                    owner_user_id=str(current["user_id"]),
+                    is_admin=str(current["user_id"]) in self.settings.admin_user_id_set,
+                )
+                if not self.store.get_assistance_preference(
+                    str(current["user_id"]), str(current["course_id"])
+                )["enabled"]:
+                    raise VisualAssistanceNotEnabled("VISUAL_ASSISTANCE_NOT_ENABLED")
                 try:
-                    submitted = self.provider.submit(
+                    submitted = provider.submit(
                         compiled.model_dump(mode="json"), idempotency_key=job_id
                     )
                 except RendererTemporarilyUnavailable as error:
@@ -633,6 +677,12 @@ class VisualService:
                     time.sleep(delay)
                     delay = min(delay * 2, self.settings.visual_renderer_poll_max_seconds)
                     continue
+                except (ProviderAuthenticationError, ProviderNotConfigured):
+                    raise
+                except Exception as error:
+                    # Once dispatch starts, an absent/malformed reply cannot
+                    # prove non-execution. Keep the reserved ID, never repost.
+                    raise RuntimeError("PROVIDER_UNKNOWN") from error
                 if submitted.id != submitted_id:
                     raise RuntimeError("PROVIDER_UNKNOWN")
                 wait_seconds = max(0.0, time.monotonic() - wait_started)
@@ -649,10 +699,10 @@ class VisualService:
         while time.monotonic() < deadline:
             current = self.store.get(job_id)
             if current is None or current["status"] == "CANCELLED" or current["cancel_requested"]:
-                self.provider.cancel(submitted_id)
+                provider.cancel(submitted_id)
                 raise RuntimeError("CANCELLED")
             try:
-                status = self.provider.get_status(submitted_id)
+                status = provider.get_status(submitted_id)
             except RendererTemporarilyUnavailable as error:
                 if not error.safe_to_retry:
                     raise
@@ -664,7 +714,7 @@ class VisualService:
                     expires_at=time.time() + self.settings.visual_worker_lease_seconds,
                 ):
                     raise RuntimeError("PROVIDER_UNKNOWN")
-                if self.provider.name != "mock":
+                if provider.name != "mock":
                     time.sleep(delay)
                     delay = min(delay * 2, self.settings.visual_renderer_poll_max_seconds)
                 continue
@@ -684,7 +734,7 @@ class VisualService:
                 )
             if status.state is ProviderState.COMPLETED:
                 try:
-                    return self.provider.get_result(submitted_id)
+                    return provider.get_result(submitted_id)
                 except RendererTemporarilyUnavailable as error:
                     if not error.safe_to_retry:
                         raise
@@ -694,7 +744,7 @@ class VisualService:
                         expires_at=time.time() + self.settings.visual_worker_lease_seconds,
                     ):
                         raise RuntimeError("PROVIDER_UNKNOWN") from error
-                    if self.provider.name != "mock":
+                    if provider.name != "mock":
                         time.sleep(delay)
                         delay = min(delay * 2, self.settings.visual_renderer_poll_max_seconds)
                     continue
@@ -710,7 +760,7 @@ class VisualService:
                 expires_at=time.time() + self.settings.visual_worker_lease_seconds,
             ):
                 raise RuntimeError("PROVIDER_UNKNOWN")
-            if self.provider.name != "mock":
+            if provider.name != "mock":
                 time.sleep(delay)
                 delay = min(delay * 2, self.settings.visual_renderer_poll_max_seconds)
         raise RuntimeError("PROVIDER_TIMEOUT")
@@ -743,7 +793,7 @@ class VisualService:
     ) -> dict[str, object]:
         digest = _sha(content)
         asset_id = "visual-asset-" + _sha(str(job["id"]))[:32]
-        suffix = "svg" if mime_type == "image/svg+xml" else "png"
+        suffix = {"image/svg+xml": "svg", "image/png": "png", "video/mp4": "mp4"}[mime_type]
         key = f"visual-assets/{job['course_id']}/{asset_id}/{digest}.{suffix}"
         stored = self.storage.put_bytes(
             key, content, expected_sha256=digest, content_type=mime_type

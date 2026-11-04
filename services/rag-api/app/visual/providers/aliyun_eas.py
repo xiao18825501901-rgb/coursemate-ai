@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import hmac
 import json
+from pathlib import PurePosixPath
 from typing import Any, cast
 from uuid import NAMESPACE_URL, uuid5
 
@@ -133,6 +135,11 @@ class AlibabaEASComfyProvider:
     def job_id_for(self, idempotency_key: str) -> str:
         return str(uuid5(NAMESPACE_URL, idempotency_key))
 
+    def for_workflow(self, workflow: Workflow) -> AlibabaEASComfyProvider:
+        provider = copy.copy(self)
+        provider.workflow = workflow
+        return provider
+
     def submit(self, compiled: dict[str, object], *, idempotency_key: str) -> ProviderJob:
         provider_id = self.job_id_for(idempotency_key)
         response = self._request(
@@ -195,12 +202,35 @@ class AlibabaEASComfyProvider:
         try:
             outputs = cast(dict[str, Any], item["outputs"])
             output = cast(dict[str, Any], outputs[output_node_id])
-            image = output["images"][0]
+            values = output["images"]
+            if not isinstance(values, list) or len(values) != 1:
+                raise ProviderProtocolError("AMBIGUOUS_WORKFLOW_OUTPUT")
+            image = values[0]
             filename = image["filename"]
             subfolder = image.get("subfolder", "")
             output_type = image.get("type", "output")
         except (KeyError, IndexError, TypeError) as error:
             raise ProviderProtocolError("MISSING_WORKFLOW_OUTPUT") from error
+        if (
+            not isinstance(filename, str)
+            or not filename
+            or len(filename) > 255
+            or any(char in filename for char in "/\\:\x00%")
+            or not isinstance(subfolder, str)
+            or len(subfolder) > 500
+            or any(char in subfolder for char in "\\:\x00%")
+            or subfolder.startswith("/")
+            or ".." in PurePosixPath(subfolder).parts
+            or output_type != "output"
+        ):
+            raise ProviderProtocolError("INVALID_OUTPUT_REFERENCE")
+        # Native Wan SaveVideo reports MP4 files in its `images` collection.
+        # The pinned renderer, filename and HTTP MIME must agree.
+        video = workflow.renderer_type.value == "COMFY_VIDEO"
+        expected_mime = "video/mp4" if video else "image/png"
+        expected_suffix = ".mp4" if video else ".png"
+        if PurePosixPath(filename).suffix.lower() != expected_suffix:
+            raise ProviderProtocolError("INVALID_OUTPUT_TYPE")
         response = self._request(
             "GET",
             "/view",
@@ -211,7 +241,7 @@ class AlibabaEASComfyProvider:
             },
         )
         mime_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
-        if mime_type != "image/png":
+        if mime_type != expected_mime:
             raise ProviderProtocolError("INVALID_OUTPUT_TYPE")
         content = response.content
         if len(content) > self.max_output_bytes:

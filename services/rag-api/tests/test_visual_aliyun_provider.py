@@ -15,14 +15,83 @@ from app.visual.providers.aliyun_eas import (
     ProviderProtocolError,
 )
 from app.visual.providers.base import ProviderState
+from app.visual.spec import Renderer
 from app.visual.workflows import WorkflowRegistry
 
 REGISTRY = Path(__file__).parents[1] / "app" / "visual" / "workflows" / "registry.example.json"
 
 
+def test_native_wan_savevideo_downloads_mp4_from_images_collection() -> None:
+    video_bytes = b"\x00\x00\x00\x18ftypisom" + b"transport-fixture"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/history/wan-job":
+            return httpx.Response(
+                200,
+                json={
+                    "wan-job": {
+                        "status": {"completed": True},
+                        "outputs": {
+                            "9": {
+                                "images": [
+                                    {
+                                        "filename": "wan_00001.mp4",
+                                        "subfolder": "coursejesus/video",
+                                        "type": "output",
+                                    }
+                                ],
+                                "animated": [True],
+                            }
+                        },
+                    }
+                },
+            )
+        assert request.url.path == "/view"
+        assert request.url.params["filename"] == "wan_00001.mp4"
+        return httpx.Response(200, content=video_bytes, headers={"content-type": "video/mp4"})
+
+    provider = _provider(handler)
+    provider.workflow = replace(provider.workflow, renderer_type=Renderer.COMFY_VIDEO)
+    result = provider.get_result("wan-job")
+    assert result.content == video_bytes
+    assert result.mime_type == "video/mp4"
+
+
+@pytest.mark.parametrize(
+    "filename,mime",
+    [("image.png", "image/png"), ("../wan.mp4", "video/mp4"), ("wan.mp4", "text/html")],
+)
+def test_video_output_rejects_wrong_media_and_unsafe_references(filename, mime) -> None:
+    view_calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/history/"):
+            return httpx.Response(
+                200,
+                json={
+                    "wan-job": {
+                        "status": {"completed": True},
+                        "outputs": {"9": {"images": [{"filename": filename, "type": "output"}]}},
+                    }
+                },
+            )
+        view_calls.append(request.url)
+        return httpx.Response(200, content=b"fixture", headers={"content-type": mime})
+
+    provider = _provider(handler)
+    provider.workflow = replace(provider.workflow, renderer_type=Renderer.COMFY_VIDEO)
+    with pytest.raises(ProviderProtocolError):
+        provider.get_result("wan-job")
+    if filename.startswith("../"):
+        assert not view_calls
+
+
 def _provider(handler) -> AlibabaEASComfyProvider:
     registry = WorkflowRegistry.load(REGISTRY)
-    workflow = registry.select_by_id("coursejesus-comfy-image-v1", "1")
+    # Keep the legacy transport fixture without enabling it for production.
+    workflow = next(
+        item for item in registry._workflows if item.workflow_id == "coursejesus-comfy-image-v1"
+    )
     return AlibabaEASComfyProvider(
         endpoint="https://eas.example.invalid",
         token="secret-token-must-not-leak",
@@ -46,9 +115,7 @@ def _compiled() -> dict[str, object]:
 
 
 def test_submit_uses_raw_eas_authorization_and_only_allowlisted_bindings() -> None:
-    expected_prompt_id = _provider(lambda _request: httpx.Response(500)).job_id_for(
-        "visual-job-1"
-    )
+    expected_prompt_id = _provider(lambda _request: httpx.Response(500)).job_id_for("visual-job-1")
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST" and request.url.path == "/prompt"
@@ -189,7 +256,7 @@ def test_cancel_is_local_only_and_makes_no_network_request() -> None:
 
 def test_submit_refuses_a_workflow_changed_after_registry_load(tmp_path: Path) -> None:
     registry = WorkflowRegistry.load(REGISTRY)
-    workflow = registry.select_by_id("coursejesus-comfy-image-v1", "1")
+    workflow = registry.select_by_id("coursejesus-flux2-klein-image-v1", "1")
     assert workflow.workflow_file is not None
     copied = tmp_path / "workflow.json"
     copied.write_bytes(workflow.workflow_file.read_bytes())
@@ -209,11 +276,30 @@ def test_submit_refuses_a_workflow_changed_after_registry_load(tmp_path: Path) -
         provider.submit(_compiled(), idempotency_key="visual-job-1")
 
 
-def test_settings_allow_only_the_official_eas_shared_gateway_over_http() -> None:
-    endpoint = (
-        "http://synthetic-visual-service.1234567890123456."
-        "cn-hangzhou.pai-eas.aliyuncs.com"
+def test_image_and_video_jobs_keep_their_own_pinned_workflow() -> None:
+    registry = WorkflowRegistry.load(REGISTRY)
+    submitted = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        submitted.append(body["prompt"])
+        return httpx.Response(200, json={"prompt_id": body["prompt_id"]})
+
+    image = AlibabaEASComfyProvider(
+        endpoint="https://eas.example.invalid",
+        token="fixture-token",
+        workflow=registry.select(Renderer.COMFY_IMAGE, "aliyun_eas"),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
     )
+    video = image.for_workflow(registry.select(Renderer.COMFY_VIDEO, "aliyun_eas"))
+    video.submit(_compiled(), idempotency_key="video-job")
+    image.submit(_compiled(), idempotency_key="image-job")
+    assert submitted[0]["58"]["class_type"] == "SaveVideo"
+    assert submitted[1]["output_save"]["class_type"] == "SaveImage"
+
+
+def test_settings_allow_only_the_official_eas_shared_gateway_over_http() -> None:
+    endpoint = "http://synthetic-visual-service.1234567890123456.cn-hangzhou.pai-eas.aliyuncs.com"
     settings = Settings(
         v3_enabled=True,
         visual_engine_enabled=True,

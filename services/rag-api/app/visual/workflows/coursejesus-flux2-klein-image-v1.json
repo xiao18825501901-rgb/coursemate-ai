@@ -1,0 +1,169 @@
+{
+  "output_save": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "coursejesus-visual/image/unbound",
+      "images": [
+        "sg_65",
+        0
+      ]
+    }
+  },
+  "sg_61": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler"
+    }
+  },
+  "sg_62": {
+    "class_type": "Flux2Scheduler",
+    "inputs": {
+      "height": [
+        "sg_69",
+        0
+      ],
+      "steps": 4,
+      "width": [
+        "sg_68",
+        0
+      ]
+    }
+  },
+  "sg_63": {
+    "class_type": "CFGGuider",
+    "inputs": {
+      "cfg": 1,
+      "model": [
+        "sg_70",
+        0
+      ],
+      "negative": [
+        "sg_76",
+        0
+      ],
+      "positive": [
+        "sg_74",
+        0
+      ]
+    }
+  },
+  "sg_64": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "guider": [
+        "sg_63",
+        0
+      ],
+      "latent_image": [
+        "sg_66",
+        0
+      ],
+      "noise": [
+        "sg_73",
+        0
+      ],
+      "sampler": [
+        "sg_61",
+        0
+      ],
+      "sigmas": [
+        "sg_62",
+        0
+      ]
+    }
+  },
+  "sg_65": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "sg_64",
+        0
+      ],
+      "vae": [
+        "sg_72",
+        0
+      ]
+    }
+  },
+  "sg_66": {
+    "class_type": "EmptyFlux2LatentImage",
+    "inputs": {
+      "batch_size": 1,
+      "height": [
+        "sg_69",
+        0
+      ],
+      "width": [
+        "sg_68",
+        0
+      ]
+    }
+  },
+  "sg_68": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 256
+    }
+  },
+  "sg_69": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 256
+    }
+  },
+  "sg_70": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "flux-2-klein-4b-fp8.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "sg_71": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "device": "default",
+      "type": "flux2"
+    }
+  },
+  "sg_72": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    }
+  },
+  "sg_73": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": 432262096973490
+    }
+  },
+  "sg_74": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "sg_71",
+        0
+      ],
+      "text": [
+        "top_76",
+        0
+      ]
+    }
+  },
+  "sg_76": {
+    "class_type": "ConditioningZeroOut",
+    "inputs": {
+      "conditioning": [
+        "sg_74",
+        0
+      ]
+    }
+  },
+  "top_76": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": {
+      "value": "CourseJesus FLUX.2 capability validation only"
+    }
+  }
+}

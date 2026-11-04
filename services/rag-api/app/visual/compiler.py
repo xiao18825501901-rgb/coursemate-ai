@@ -5,6 +5,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.visual.media import wan_frames
 from app.visual.spec import Renderer, VisualSpec
 
 
@@ -114,7 +115,12 @@ def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
             positive_prompt=positive,
             negative_prompt=", ".join(spec.must_not_include),
             duration_seconds=spec.duration_seconds,
-            frames=int(spec.duration_seconds * 8) if spec.duration_seconds else None,
+            frames=wan_frames(spec.duration_seconds)
+            if spec.renderer is Renderer.COMFY_VIDEO and spec.duration_seconds
+            else None,
+            width=512 if spec.renderer is Renderer.COMFY_VIDEO else 1024,
+            height=288 if spec.renderer is Renderer.COMFY_VIDEO else 576,
+            cfg=5 if spec.renderer is Renderer.COMFY_VIDEO else 8,
             seed=int.from_bytes(spec.model_dump_json().encode()[:4].ljust(4, b"0"), "big"),
             overlays=[Overlay(text=value) for value in exact],
         )

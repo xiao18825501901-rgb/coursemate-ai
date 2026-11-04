@@ -223,7 +223,9 @@ def test_failed_generative_job_can_create_a_linked_deterministic_fallback(
     assert provider.submit_count == 1
 
 
-def test_provider_unknown_is_preserved_and_safe_retry_has_lineage(tmp_path: Path) -> None:
+def test_provider_unknown_is_preserved_and_cannot_create_another_paid_attempt(
+    tmp_path: Path,
+) -> None:
     service, provider = make_service(tmp_path)
     original, _ = service.create_job(request())
     provider.set_mode(str(original["id"]), "unknown")
@@ -232,17 +234,47 @@ def test_provider_unknown_is_preserved_and_safe_retry_has_lineage(tmp_path: Path
     assert failed["error_code"] == "PROVIDER_UNKNOWN"
     assert failed["actual_cost_micros"] is None
 
-    retry, created = service.retry_job(str(original["id"]), "user-1", request_id="request-retry-1")
-    assert created is True
-    assert retry["parent_job_id"] == original["id"]
-    assert retry["retry_count"] == 1
-    provider.set_mode(str(retry["id"]), "unknown")
-    completed = service.run_once("worker-1")
-    assert completed is not None and completed["id"] == retry["id"]
-    assert completed["status"] == "FAILED"
+    with pytest.raises(VisualStateConflict, match="uncertain"):
+        service.retry_job(str(original["id"]), "user-1", request_id="request-retry-1")
     assert service.store.get(str(original["id"]))["status"] == "FAILED"
-    with pytest.raises(VisualStateConflict, match="retry limit"):
-        service.retry_job(str(retry["id"]), "user-1", request_id="request-retry-2")
+    assert provider.submit_count == 1
+    assert _project(service, failed, user_id="user-1")["status"] == "UNKNOWN"
+
+
+def test_renderer_retry_rechecks_consent_before_another_submission(tmp_path: Path) -> None:
+    service, provider = make_service(tmp_path)
+    service.create_job(request())
+    original_submit = provider.submit
+    attempts = []
+
+    def submit(compiled, *, idempotency_key):
+        attempts.append(idempotency_key)
+        if len(attempts) == 1:
+            service.store.set_assistance_preference(
+                "user-1",
+                "course-1",
+                enabled=False,
+                consent_version="visual-assistance-v1",
+                request_id="withdraw-during-warmup",
+            )
+            raise ProviderRendererUnavailable("EAS_HTTP_503", status_code=503, safe_to_retry=True)
+        return original_submit(compiled, idempotency_key=idempotency_key)
+
+    provider.submit = submit
+    result = service.run_once("worker-1")
+    assert result["status"] == "FAILED"
+    assert len(attempts) == 1
+    assert provider.submit_count == 0
+
+
+def test_course_access_is_rechecked_at_provider_dispatch(tmp_path: Path) -> None:
+    service, provider = make_service(tmp_path)
+    service.create_job(request())
+    with service.store.database.connect() as connection:
+        connection.execute("UPDATE courses SET owner_user_id='user-2' WHERE id='course-1'")
+    result = service.run_once("worker-1")
+    assert result["status"] == "FAILED"
+    assert provider.submit_count == 0
 
 
 def test_cancelled_job_cannot_publish_late_provider_result(tmp_path: Path) -> None:
@@ -330,9 +362,7 @@ def test_safe_gateway_rejection_retries_same_reserved_prompt_with_bounded_backof
     def transient_once(compiled, *, idempotency_key):
         calls.append(provider.job_id_for(idempotency_key))
         if len(calls) == 1:
-            raise ProviderRendererUnavailable(
-                "EAS_HTTP_503", status_code=503, safe_to_retry=True
-            )
+            raise ProviderRendererUnavailable("EAS_HTTP_503", status_code=503, safe_to_retry=True)
         return real_submit(compiled, idempotency_key=idempotency_key)
 
     monkeypatch.setattr(provider, "submit", transient_once)
@@ -355,9 +385,7 @@ def test_completed_prompt_retries_safe_view_rejection_without_resubmitting(
         nonlocal result_calls
         result_calls += 1
         if result_calls == 1:
-            raise ProviderRendererUnavailable(
-                "EAS_HTTP_503", status_code=503, safe_to_retry=True
-            )
+            raise ProviderRendererUnavailable("EAS_HTTP_503", status_code=503, safe_to_retry=True)
         return real_result(provider_job_id)
 
     monkeypatch.setattr(provider, "get_result", transient_result)
@@ -383,6 +411,7 @@ def test_renderer_wait_projects_nonterminal_waiting_state(tmp_path: Path) -> Non
     projected = _project(service, waiting, user_id="user-1")
     assert projected["status"] == "WAITING_FOR_RENDERER"
     assert projected["renderer_ready_at"] is None
+
 
 def test_restart_after_asset_link_reuses_same_immutable_asset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

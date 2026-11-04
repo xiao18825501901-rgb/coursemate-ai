@@ -73,6 +73,7 @@ describe('Visual Learning controls', () => {
     ['RENDERING', '正在生成'],
     ['VALIDATING', '正在校验'],
     ['COMPLETED', '已完成'],
+    ['UNKNOWN', '结果待确认'],
     ['CANCELLED', '已取消'],
     ['RETRYING', '正在重试'],
   ])('projects the %s state accessibly', (status, label) => {

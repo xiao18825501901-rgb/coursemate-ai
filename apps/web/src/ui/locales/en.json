@@ -653,6 +653,7 @@
     "status": {
       "QUEUED": "Waiting", "PLANNING": "Planning", "RENDERING": "Generating",
       "WAITING_FOR_RENDERER": "Starting the image service", "VALIDATING": "Validating",
+      "UNKNOWN": "Result awaiting confirmation",
       "COMPLETED": "Completed", "FAILED": "Generation failed", "CANCELLED": "Cancelled", "RETRYING": "Retrying"
     }
   },

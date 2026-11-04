@@ -653,6 +653,7 @@
     "status": {
       "QUEUED": "等待生成", "PLANNING": "正在规划", "RENDERING": "正在生成",
       "WAITING_FOR_RENDERER": "正在唤醒图片生成服务", "VALIDATING": "正在校验",
+      "UNKNOWN": "结果待确认",
       "COMPLETED": "已完成", "FAILED": "生成失败", "CANCELLED": "已取消", "RETRYING": "正在重试"
     }
   },

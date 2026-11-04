@@ -3,7 +3,7 @@ import { cancelVisualJob, createVisual, fallbackVisualJob, getVisualJob, listMes
 import { VisualJobStatus } from './VisualJobStatus.jsx';
 import { defaultUiTranslate } from './UiLocale';
 
-const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
+const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN']);
 
 export class VisualControls extends React.Component {
     state = { jobs: [], busy: false, error: '' };

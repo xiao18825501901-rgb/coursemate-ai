@@ -13,7 +13,7 @@ export function VisualJobStatus({ job, onCancel, onRetry, onFallback, t = defaul
             {job.status === 'FAILED' && job.retry_count < 1 && <button type="button" onClick={() => onRetry(job.id)}>{t('visual.retry')}</button>}
             {job.status === 'FAILED' && job.fallback_available && <button type="button" onClick={() => onFallback(job.id)}>{t('visual.fallback')}</button>}
         </div>
-        {job.status === 'FAILED' && <p className="visual-error">{t('visual.failure', { code: job.error_code || t('visual.diagnosticSaved') })}</p>}
+        {['FAILED', 'UNKNOWN'].includes(job.status) && <p className="visual-error">{t('visual.failure', { code: job.error_code || t('visual.diagnosticSaved') })}</p>}
         {job.assets?.map(asset => <VisualAssetCard key={asset.id} asset={asset} t={t}/>)}
     </section>;
 }

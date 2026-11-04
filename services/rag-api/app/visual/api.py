@@ -127,6 +127,11 @@ def _evidence(message: dict) -> tuple[dict[str, str], ...]:
 def _project(service: VisualService, job: dict[str, object], *, user_id: str) -> dict[str, object]:
     assets = service.store.assets_for_job(str(job["id"]), user_id=user_id)
     projected_status = job["status"]
+    if projected_status == "FAILED" and job.get("error_code") in {
+        "PROVIDER_UNKNOWN",
+        "PROVIDER_TIMEOUT",
+    }:
+        projected_status = "UNKNOWN"
     if (
         projected_status == "RENDERING"
         and job.get("renderer_wait_started_at")

@@ -9,8 +9,37 @@ from pydantic import ValidationError
 from app.visual.compiler import compile_visual_spec
 from app.visual.planner import MockVisualPlannerProvider, load_runtime_prompt
 from app.visual.spec import Renderer, VisualSpec, validate_source_grounding
+from app.visual.workflows import WorkflowRegistry
 
 FIXTURES = Path(__file__).parent / "fixtures" / "visual_router_cases_v1.json"
+
+
+def test_production_registry_uses_frozen_flux_and_wan_workflows() -> None:
+    registry = WorkflowRegistry.load()
+    assert (
+        registry.select(Renderer.COMFY_IMAGE, "aliyun_eas").workflow_id
+        == "coursejesus-flux2-klein-image-v1"
+    )
+    assert (
+        registry.select(Renderer.COMFY_VIDEO, "aliyun_eas").workflow_id
+        == "coursejesus-wan22-ti2v-5b-video-v1"
+    )
+
+
+def test_wan_compilation_uses_native_24fps_and_bounded_single_gpu_geometry() -> None:
+    spec = VisualSpec.model_validate(
+        valid_spec(
+            visual_type="VIDEO",
+            renderer="COMFY_VIDEO",
+            duration_seconds=3,
+            motion_is_essential=True,
+            semantic_precision="ILLUSTRATIVE",
+            diagram=None,
+        )
+    )
+    compiled = compile_visual_spec(spec)
+    assert (compiled.frames, compiled.width, compiled.height) == (73, 512, 288)
+    assert compiled.cfg == 5
 
 
 def valid_spec(**changes: object) -> dict[str, object]:

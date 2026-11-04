@@ -209,7 +209,7 @@ class GroundedPolicyVisualPlannerProvider:
                 "code_elements": [],
                 "reference_assets": [],
                 "style": {"tone": "CONCEPTUAL" if natural else "CLEAN_TECHNICAL"},
-                "duration_seconds": 6 if renderer == "COMFY_VIDEO" else None,
+                "duration_seconds": 3 if renderer == "COMFY_VIDEO" else None,
                 "aspect_ratio": "16:9",
                 "cost_tier": "EXPENSIVE"
                 if renderer == "COMFY_VIDEO"
