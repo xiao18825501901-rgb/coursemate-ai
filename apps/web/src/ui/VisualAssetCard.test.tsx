@@ -5,10 +5,26 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const api = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock('./api.js', () => api);
 import { VisualAssetCard } from './VisualAssetCard.jsx';
+import { VisualJobStatus } from './VisualJobStatus.jsx';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe('private video asset', () => {
+  it('keeps trusted diagrams distinct for readable mobile sizing', async () => {
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = vi.fn(() => 'blob:private-svg');
+      static revokeObjectURL = vi.fn();
+    });
+    api.request.mockResolvedValue({ blob: async () => new Blob(['<svg/>'], { type: 'image/svg+xml' }) });
+    const {unmount} = render(<VisualAssetCard asset={{ id:'diagram', content_url:'/visual-assets/diagram/content', mime_type:'image/svg+xml', alt_text:'K-means worked example' } as any}/>);
+    expect(await screen.findByAltText('K-means worked example')).toHaveClass('visual-diagram');
+    unmount();
+  });
+  it('explains a text-only completion without showing an empty asset', () => {
+    const {unmount} = render(<VisualJobStatus job={{id:'no-structure', status:'COMPLETED', renderer:'NONE', assets:[]}} t={key => key} onCancel={vi.fn()} onRetry={vi.fn()} onFallback={vi.fn()}/>);
+    expect(screen.getByText('visual.insufficientStructure')).toBeInTheDocument();
+    unmount();
+  });
   it('renders authenticated video bytes with native playback controls and no autoplay', async () => {
     const revoke = vi.fn();
     vi.stubGlobal('URL', class extends URL {

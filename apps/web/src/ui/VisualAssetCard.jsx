@@ -32,7 +32,7 @@ export class VisualAssetCard extends React.Component {
         return <figure className="visual-asset-card">
             {this.state.error && <p className="visual-error">{this.state.error}</p>}
             {!this.state.url && !this.state.error && <div className="visual-placeholder" aria-busy="true">{t('visual.loadingAsset')}</div>}
-            {this.state.url && asset.mime_type.startsWith('image/') && <img src={this.state.url} alt={asset.alt_text}/>}
+            {this.state.url && asset.mime_type.startsWith('image/') && <img className={asset.mime_type === 'image/svg+xml' ? 'visual-diagram' : undefined} src={this.state.url} alt={asset.alt_text}/>}
             {this.state.url && asset.mime_type === 'video/mp4' && <video src={this.state.url} aria-label={asset.alt_text} controls playsInline preload="metadata"/>}
             <figcaption><span>{asset.alt_text}</span><button type="button" onClick={this.download} disabled={!this.state.url}>{t('visual.download')}</button></figcaption>
             {asset.semantic_validation === 'LIMITED' && <small>{t('visual.limitedNotice')}</small>}

@@ -124,6 +124,19 @@ def test_deterministic_diagram_never_invokes_provider(tmp_path: Path) -> None:
     assert asset["semantic_validation"] == "PASS"
 
 
+def test_kmeans_worked_example_persists_correct_geometry_without_provider(tmp_path: Path) -> None:
+    from test_visual_kmeans_quality import ANSWER
+    service, provider = make_service(tmp_path)
+    value = request(question='Teach K-means clustering')
+    value = FrozenVisualInput(**{**value.__dict__, 'action':'diagram', 'answer':ANSWER})
+    service.create_job(value)
+    result = service.run_once('worker-kmeans')
+    assert result['status'] == 'COMPLETED'
+    asset = service.store.assets_for_job(str(result['id']),user_id='user-1')[0]
+    assert (asset['width'],asset['height']) == (340,510)
+    assert provider.submit_count == 0
+
+
 def test_disabled_assistance_blocks_generative_provider_but_not_diagram(tmp_path: Path) -> None:
     service, provider = make_service(tmp_path)
     service.store.set_assistance_preference(

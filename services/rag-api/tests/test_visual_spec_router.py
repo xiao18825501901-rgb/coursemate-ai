@@ -149,7 +149,7 @@ def test_unverified_reference_asset_is_rejected() -> None:
 
 def test_runtime_prompt_is_loaded_from_versioned_file_with_hash() -> None:
     loaded = load_runtime_prompt()
-    assert loaded.version == "visual-router-planner-v1"
+    assert loaded.version == "visual-router-planner-v2"
     assert len(loaded.sha256) == 64
     assert "VisualSpec version 1.0" in loaded.text
 

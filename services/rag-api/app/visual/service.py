@@ -470,8 +470,8 @@ class VisualService:
                 width, height = validate_output(
                     content,
                     mime_type=mime_type,
-                    width=1024,
-                    height=576,
+                    width=compiled.width,
+                    height=compiled.height,
                     duration_seconds=None,
                     max_bytes=self.settings.visual_max_output_bytes,
                     max_width=self.settings.visual_max_width,

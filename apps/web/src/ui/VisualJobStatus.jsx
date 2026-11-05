@@ -14,6 +14,7 @@ export function VisualJobStatus({ job, onCancel, onRetry, onFallback, t = defaul
             {job.status === 'FAILED' && job.fallback_available && <button type="button" onClick={() => onFallback(job.id)}>{t('visual.fallback')}</button>}
         </div>
         {['FAILED', 'UNKNOWN'].includes(job.status) && <p className="visual-error">{t('visual.failure', { code: job.error_code || t('visual.diagnosticSaved') })}</p>}
+        {job.status === 'COMPLETED' && job.renderer === 'NONE' && !job.assets?.length && <p>{t('visual.insufficientStructure')}</p>}
         {job.assets?.map(asset => <VisualAssetCard key={asset.id} asset={asset} t={t}/>)}
     </section>;
 }

@@ -229,6 +229,11 @@
 .help-art .brand-mark{width:72px;height:72px;border-radius:16px}
 
 /* 2026-09-27 minimal signed-out entry and first-class Canvas actions. */
+.visual-asset-card{min-width:0;max-width:100%}
+.visual-asset-card img.visual-diagram{height:auto;max-height:none;max-width:100%}
+.visual-asset-card img.visual-diagram+figcaption{font-size:16px;line-height:1.5}
+.visual-asset-card figcaption{flex-wrap:wrap;overflow-wrap:anywhere}
+.visual-asset-card figcaption span{min-width:0}
 .login-page{background:var(--surface);padding:20px}
 .login-card{width:min(520px,calc(100vw - 40px));padding:40px;background:var(--bg);display:flex;flex-direction:column;align-items:center;text-align:center;gap:28px}
 .login-brand{margin:0;justify-content:center}

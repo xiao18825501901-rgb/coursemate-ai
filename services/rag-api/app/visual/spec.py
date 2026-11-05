@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 ShortText = Annotated[str, Field(min_length=1, max_length=200)]
 FactText = Annotated[str, Field(min_length=1, max_length=800)]
@@ -67,10 +67,36 @@ class DiagramEdge(StrictModel):
     kind: str = Field(default="relationship", max_length=80)
 
 
+class CoordinatePoint(StrictModel):
+    label: ShortText
+    x: float = Field(ge=-1000000, le=1000000, allow_inf_nan=False)
+    y: float = Field(ge=-1000000, le=1000000, allow_inf_nan=False)
+
+
+class KMeansExample(StrictModel):
+    points: list[CoordinatePoint] = Field(min_length=2, max_length=12)
+    initial_centroids: list[CoordinatePoint] = Field(min_length=2, max_length=2)
+    provenance: Literal["DELIVERED_WORKED_EXAMPLE"]
+
+    @model_validator(mode="after")
+    def unique_labels(self) -> KMeansExample:
+        if len({p.label for p in self.points}) != len(self.points):
+            raise ValueError("point labels must be unique")
+        return self
+
+
 class Diagram(StrictModel):
     layout: Literal["AUTO", "LEFT_RIGHT", "TOP_DOWN", "RADIAL", "TIMELINE", "COORDINATE"]
     nodes: list[DiagramNode] = Field(max_length=60)
     edges: list[DiagramEdge] = Field(max_length=120)
+    kmeans: KMeansExample | None = None
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_identity(self, handler):
+        value = handler(self)
+        if self.kmeans is None:
+            value.pop("kmeans", None)
+        return value
 
 
 class AnimationStep(StrictModel):

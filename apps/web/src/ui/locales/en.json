@@ -642,6 +642,7 @@
     "image": "Generate image",
     "animation": "Show animation",
     "loadingAsset": "Loading visual resource…",
+    "insufficientStructure": "The current explanation lacks a supported visual structure. Continue with the text lesson.",
     "download": "Download",
     "limitedNotice": "This generated image is a teaching aid; text and structure are validated separately.",
     "cacheHit": "Restored from the safe cache",

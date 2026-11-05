@@ -33,6 +33,9 @@ class CompiledVisual(BaseModel):
 
 def _svg(spec: VisualSpec) -> str:
     diagram = spec.diagram
+    if diagram is not None and diagram.kmeans is not None:
+        from app.visual.kmeans import render
+        return render(diagram.kmeans, spec.language)
     if diagram is None:
         return '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="576"/>'
     node_width = 150
@@ -140,6 +143,8 @@ def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
         )
     return CompiledVisual(
         renderer=spec.renderer,
+        width=340 if spec.diagram and spec.diagram.kmeans else 1024,
+        height=510 if spec.diagram and spec.diagram.kmeans else 576,
         deterministic_source=source,
         overlays=[Overlay(text=value) for value in exact],
     )

@@ -642,6 +642,7 @@
     "image": "生成图片",
     "animation": "动画展示",
     "loadingAsset": "正在读取视觉资源…",
+    "insufficientStructure": "当前正文缺少可核对的图解结构，请先继续文字学习。",
     "download": "下载",
     "limitedNotice": "生成图像为教学示意；文字与结构由系统单独校验。",
     "cacheHit": "已从安全缓存恢复",

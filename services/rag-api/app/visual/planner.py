@@ -6,9 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
 
+from app.visual.kmeans import assignment, delivered_example
 from app.visual.spec import VisualSpec
 
-PROMPT_VERSION = "visual-router-planner-v1"
+PROMPT_VERSION = "visual-router-planner-v2"
 PROMPT_PATH = Path(__file__).with_name("prompts") / "visual_router_planner_v1.system.md"
 
 
@@ -112,7 +113,7 @@ class GroundedPolicyVisualPlannerProvider:
             r"acid and base",
         ):
             return "DIAGRAM", "SVG", ["exact relationships"]
-        return "DIAGRAM", "SVG", ["main concept"]
+        return "NONE", "NONE", []
 
     def plan(
         self,
@@ -124,11 +125,25 @@ class GroundedPolicyVisualPlannerProvider:
         language: str,
     ) -> VisualSpec:
         visual_type, renderer, includes = self._decision(question)
-        if action == "diagram":
+        kmeans = None
+        is_kmeans = _contains(question, r"k[-\s]?means", r"K均值")
+        if is_kmeans:
+            kmeans = delivered_example(answer)
+            if kmeans is not None:
+                try:
+                    assignment(kmeans)
+                except ValueError:
+                    kmeans = None
+            if kmeans is not None:
+                visual_type, renderer = "DIAGRAM", "SVG"
+                includes = [p.label for p in kmeans.points]
+            else:
+                visual_type, renderer, includes = "NONE", "NONE", []
+        if action == "diagram" and renderer != "NONE":
             visual_type, renderer = "DIAGRAM", "SVG"
-        elif action == "visual" and renderer == "NONE":
-            visual_type, renderer, includes = "IMAGE", "COMFY_IMAGE", ["main concept"]
-        elif action == "animate" and renderer == "NONE":
+        elif action == "visual" and renderer == "NONE" and answer.strip() and not is_kmeans:
+            visual_type, renderer, includes = "IMAGE", "COMFY_IMAGE", []
+        elif action == "animate" and renderer == "NONE" and not is_kmeans and includes:
             visual_type, renderer, includes = "ANIMATION", "MANIM", ["ordered states"]
         should_generate = renderer != "NONE"
         natural = renderer in {"COMFY_IMAGE", "COMFY_VIDEO"}
@@ -161,6 +176,10 @@ class GroundedPolicyVisualPlannerProvider:
                 "edges": edges,
             }
         )
+        if kmeans is not None and diagram is not None:
+            diagram["edges"] = []
+            diagram["kmeans"] = kmeans.model_dump()
+            labels = []
         animation_steps = []
         if renderer == "MANIM":
             animation_steps = [
@@ -182,11 +201,20 @@ class GroundedPolicyVisualPlannerProvider:
                 "should_generate": should_generate,
                 "pedagogical_reason": "A visual is useful."
                 if should_generate
-                else "The answer is clearer as text.",
+                else "Insufficient supported visual structure; continue with the delivered text.",
                 "visual_goal": (
                     f"Create a clear educational conceptual illustration of: {subject}"
                     if natural
-                    else ("Show the supported concept." if should_generate else "")
+                    else (
+                        "K-means：最近质心分配、坐标均值更新与 SSE（一轮教学例）"
+                        if kmeans is not None
+                        else (
+                            "Explain the supported relationships in: "
+                            f"{_prompt_fragment(question, limit=400)}"
+                            if should_generate
+                            else ""
+                        )
+                    )
                 ),
                 "visual_type": visual_type,
                 "renderer": renderer,
