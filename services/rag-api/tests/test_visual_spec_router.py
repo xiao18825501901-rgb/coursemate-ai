@@ -223,6 +223,87 @@ def test_conceptual_image_prompt_contains_question_and_grounded_claim() -> None:
     assert "conceptual scene" not in prompt
 
 
+def test_generative_prompt_uses_structured_course_grounded_sections() -> None:
+    spec = VisualSpec.model_validate(
+        valid_spec(
+            visual_type="IMAGE",
+            renderer="COMFY_IMAGE",
+            semantic_precision="BOUNDED",
+            visual_goal="Show a massive foreground object bending light from a distant galaxy.",
+            pedagogical_reason="The learner must see why the observer detects an arc.",
+            must_include=["massive foreground object", "distant galaxy"],
+            must_not_include=["extra planets", "watermark"],
+            exact_labels=[],
+            diagram=None,
+            style={
+                "tone": "CONCEPTUAL",
+                "background": "dark space",
+                "composition": "single clear focal path",
+                "camera": "distant scientific observation",
+            },
+        )
+    )
+    compiled = compile_visual_spec(spec)
+    prompt = compiled.positive_prompt
+
+    assert "Subject:" in prompt
+    assert "Required elements:" in prompt
+    assert "Spatial relationships and course facts:" in prompt
+    assert "View and composition:" in prompt
+    assert "Lighting and background:" in prompt
+    assert "Forbidden elements:" in prompt
+    assert "Educational purpose:" in prompt
+    assert "massive foreground object" in prompt
+    assert "distant galaxy" in prompt
+    assert "A relates to B." in prompt
+    assert "extra planets" in prompt
+    assert "The learner must see why the observer detects an arc." in prompt
+
+
+def test_flux_image_uses_the_frozen_klein_sampler_and_does_not_claim_negative_conditioning() -> None:
+    spec = VisualSpec.model_validate(
+        valid_spec(
+            visual_type="IMAGE",
+            renderer="COMFY_IMAGE",
+            semantic_precision="BOUNDED",
+            must_not_include=["watermark"],
+            diagram=None,
+        )
+    )
+    compiled = compile_visual_spec(spec)
+
+    assert (compiled.steps, compiled.cfg) == (4, 1)
+    assert compiled.negative_prompt == ""
+    assert "watermark" in compiled.positive_prompt
+
+
+def test_wan_keeps_negative_conditioning_and_steps_its_teaching_prompt() -> None:
+    spec = VisualSpec.model_validate(
+        valid_spec(
+            visual_type="VIDEO",
+            renderer="COMFY_VIDEO",
+            semantic_precision="ILLUSTRATIVE",
+            motion_is_essential=True,
+            duration_seconds=3,
+            must_include=["the left gear pushes the right gear"],
+            must_not_include=["extra gears", "watermark"],
+            diagram=None,
+            style={
+                "tone": "REALISTIC",
+                "background": "plain workshop",
+                "composition": "gears fill the frame",
+                "camera": "fixed front view",
+            },
+        )
+    )
+    compiled = compile_visual_spec(spec)
+
+    assert "watermark" in compiled.positive_prompt
+    assert "the left gear pushes the right gear" in compiled.positive_prompt
+    assert compiled.negative_prompt == "extra gears, watermark"
+    assert (compiled.steps, compiled.cfg) == (20, 5)
+
+
 def test_svg_compiler_renders_validated_nodes_edges_and_edge_labels() -> None:
     spec = VisualSpec.model_validate(valid_spec())
     compiled = compile_visual_spec(spec)

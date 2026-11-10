@@ -31,6 +31,48 @@ class CompiledVisual(BaseModel):
     deterministic_source: str = ""
 
 
+def _bullet_lines(values: list[str]) -> str:
+    return "\n".join(f"- {value.strip()}" for value in values if value.strip())
+
+
+def _generative_prompt(spec: VisualSpec, exact: list[str]) -> str:
+    """Build a teaching prompt from the existing grounded VisualSpec fields."""
+
+    exact_set = set(exact)
+    required = list(dict.fromkeys(value for value in spec.must_include if value not in exact_set))
+    relationships = list(
+        dict.fromkeys(
+            source.supported_claim
+            for source in spec.source_grounding
+            if source.supported_claim and source.supported_claim not in exact_set
+        )
+    )
+    view = " ".join(value for value in (spec.style.camera, spec.style.composition) if value)
+    background = " ".join(
+        value for value in (spec.style.background, spec.style.color_guidance) if value
+    )
+    sections = [
+        f"Subject:\n{spec.visual_goal.strip()}",
+        "Required elements:\n"
+        + (_bullet_lines(required) or "- Keep only the course-grounded subject."),
+        "Spatial relationships and course facts:\n"
+        + (_bullet_lines(relationships) or "- Preserve the relationships stated by the subject."),
+        f"View and composition:\n{view or 'one clear, unobstructed teaching view'}",
+        "Lighting and background:\n"
+        f"{background or 'even, neutral lighting with a clean observable background'}",
+        "Forbidden elements:\n"
+        + (_bullet_lines(spec.must_not_include) or "- unsupported facts"),
+        f"Educational purpose:\n{spec.pedagogical_reason.strip()}",
+    ]
+    if spec.renderer is Renderer.COMFY_VIDEO:
+        sections.append(
+            "Motion requirement:\n"
+            "Show one continuous, physically plausible teaching action while preserving every "
+            "required element and course relationship."
+        )
+    return "\n\n".join(sections)
+
+
 def _svg(spec: VisualSpec) -> str:
     diagram = spec.diagram
     if diagram is not None and diagram.kmeans is not None:
@@ -106,24 +148,25 @@ def _svg(spec: VisualSpec) -> str:
 def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
     exact = spec.exact_labels + spec.equations + spec.code_elements
     if spec.renderer in {Renderer.COMFY_IMAGE, Renderer.COMFY_VIDEO}:
-        exact_set = set(exact)
-        facts = [value for value in spec.must_include if value not in exact_set]
-        positive = ", ".join(
-            value
-            for value in [spec.visual_goal, *facts, spec.style.composition, spec.style.camera]
-            if value
-        )
+        positive = _generative_prompt(spec, exact)
         return CompiledVisual(
             renderer=spec.renderer,
             positive_prompt=positive,
-            negative_prompt=", ".join(spec.must_not_include),
+            # The pinned FLUX workflow zeroes its negative conditioning, so keeping
+            # must-not-include facts only in the positive prompt is truthful.
+            negative_prompt=(
+                ", ".join(spec.must_not_include)
+                if spec.renderer is Renderer.COMFY_VIDEO
+                else ""
+            ),
             duration_seconds=spec.duration_seconds,
             frames=wan_frames(spec.duration_seconds)
             if spec.renderer is Renderer.COMFY_VIDEO and spec.duration_seconds
             else None,
             width=512 if spec.renderer is Renderer.COMFY_VIDEO else 1024,
             height=288 if spec.renderer is Renderer.COMFY_VIDEO else 576,
-            cfg=5 if spec.renderer is Renderer.COMFY_VIDEO else 8,
+            cfg=5 if spec.renderer is Renderer.COMFY_VIDEO else 1,
+            steps=20 if spec.renderer is Renderer.COMFY_VIDEO else 4,
             seed=int.from_bytes(spec.model_dump_json().encode()[:4].ljust(4, b"0"), "big"),
             overlays=[Overlay(text=value) for value in exact],
         )
