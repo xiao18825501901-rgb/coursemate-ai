@@ -493,9 +493,15 @@ export class Learn extends React.Component {
     componentWillUnmount() { this.unmounted = true; clearTimeout(this.knowledgePoll); window.removeEventListener('keydown', this.keyHandler); Object.values(this.controllers).forEach(c => c.abort()); Object.values(this.explanationControllers).forEach(c => c.abort()); if(this.onMove){window.removeEventListener('mousemove',this.onMove);window.removeEventListener('touchmove',this.onMove);}if(this.onUp){window.removeEventListener('mouseup',this.onUp);window.removeEventListener('touchend',this.onUp);window.removeEventListener('touchcancel',this.onUp);} }
     async load() { const revision=this.pairRevision || 0; try {
         const cid = this.props.course.id;
-        const [nodes, layout, knowledgeBuild, visualAssistance] = await Promise.all([request(`/courses/${cid}/knowledge`), request(`/courses/${cid}/layout`), request(`/courses/${cid}/knowledge-build-status`), this.props.config?.visual_engine_enabled ? getVisualAssistance(cid).catch(() => ({ enabled: false })) : Promise.resolve({ enabled: false })]);
+        const results = await Promise.allSettled([request(`/courses/${cid}/knowledge`), request(`/courses/${cid}/layout`), request(`/courses/${cid}/knowledge-build-status`), this.props.config?.visual_engine_enabled ? getVisualAssistance(cid) : Promise.resolve({ enabled: false })]);
         if (this.unmounted || revision !== (this.pairRevision || 0)) return;
-        this.setState({ nodes, knowledgeBuild, ratio: layout.ratio || .5, activeNode: layout.active_node, visualAssistance: { ...visualAssistance, loading: false } });
+        const value = (index, fallback) => results[index].status === 'fulfilled' ? results[index].value : fallback;
+        const failure = results.find(result => result.status === 'rejected');
+        const nodes = value(0, []);
+        const layout = value(1, {});
+        const knowledgeBuild = value(2, null);
+        const visualAssistance = value(3, { enabled: false });
+        this.setState({ nodes, knowledgeBuild, ratio: layout.ratio || .5, activeNode: layout.active_node, visualAssistance: { ...visualAssistance, loading: false }, error: failure?.reason?.message || '' });
         this.scheduleKnowledgePoll(knowledgeBuild);
         const pairs = await listPairs(cid);
         if (this.unmounted || revision !== (this.pairRevision || 0)) return;
