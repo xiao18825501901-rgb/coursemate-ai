@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
@@ -32,6 +32,13 @@ afterEach(() => {
 });
 
 test("a throttled knowledge index does not disable visual consent or text learning", async () => {
+  let instance: any;
+  vi.spyOn(Learn.prototype, "componentDidMount").mockImplementation(function (
+    this: any,
+  ) {
+    this.unmounted = false;
+    instance = this;
+  });
   api.request.mockImplementation((path: string) => {
     if (path === "/courses/course-1/knowledge") {
       return Promise.reject(new Error("请求失败（429）"));
@@ -54,6 +61,9 @@ test("a throttled knowledge index does not disable visual consent or text learni
   render(
     <UiLocaleProvider>
       <Learn
+        ref={(value) => {
+          instance = value;
+        }}
         course={{ id: "course-1", code: "BIO101", name: "Biology" }}
         user={{ id: "user-1", name: "Student" }}
         config={{
@@ -68,11 +78,13 @@ test("a throttled knowledge index does not disable visual consent or text learni
     </UiLocaleProvider>,
   );
 
-  await waitFor(() => {
-    expect(
-      screen.getByRole("button", { name: /图片\/视频辅助/ }),
-    ).toBeEnabled();
+  await act(async () => {
+    await instance.load();
   });
+
+  expect(
+    screen.getByRole("button", { name: /图片\/视频辅助/ }),
+  ).toBeEnabled();
   expect(screen.getByText("请求失败（429）")).toBeVisible();
   expect(screen.getByRole("heading", { name: "知识学习" })).toBeVisible();
 });
