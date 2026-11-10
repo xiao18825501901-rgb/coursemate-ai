@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from app.visual.compiler import compile_visual_spec
 from app.visual.planner import MockVisualPlannerProvider, load_runtime_prompt
-from app.visual.spec import Renderer, VisualSpec, validate_source_grounding
+from app.visual.spec import Renderer, VisualSpec, VisualType, validate_source_grounding
 from app.visual.workflows import WorkflowRegistry
 
 FIXTURES = Path(__file__).parent / "fixtures" / "visual_router_cases_v1.json"
@@ -221,6 +221,43 @@ def test_conceptual_image_prompt_contains_question_and_grounded_claim() -> None:
     assert "einstein ring" in prompt
     assert "show the supported concept" not in prompt
     assert "conceptual scene" not in prompt
+
+
+def test_endomembrane_protein_transport_routes_to_grounded_generative_video() -> None:
+    planner = MockVisualPlannerProvider()
+    spec = planner.plan(
+        question=(
+            "请用中文讲解内质网、高尔基体和细胞膜之间的蛋白质运输，"
+            "重点展示运输囊泡从粗面内质网出芽、与高尔基体融合、"
+            "再通过囊泡到达细胞膜并成为膜蛋白的过程。"
+            "结合 OpenStax Biology 2e。动画展示。"
+        ),
+        answer="分泌蛋白从粗面内质网进入高尔基体，再由囊泡运到细胞膜。",
+        evidence=[
+            {
+                "source_id": "openstax-biology-2e",
+                "source_version": "2018",
+                "locator": "p.133",
+                "supported_claim": (
+                    "A transport vesicle buds from the rough endoplasmic reticulum, "
+                    "fuses with the Golgi apparatus, and carries membrane proteins "
+                    "to the plasma membrane."
+                ),
+            }
+        ],
+        action="animate",
+        language="zh-CN",
+    )
+    compiled = compile_visual_spec(spec)
+
+    assert spec.visual_type is VisualType.VIDEO
+    assert spec.renderer is Renderer.COMFY_VIDEO
+    assert spec.motion_is_essential is True
+    assert spec.duration_seconds == 3
+    assert "rough endoplasmic reticulum" in compiled.positive_prompt
+    assert "Golgi apparatus" in compiled.positive_prompt
+    assert "plasma membrane" in compiled.positive_prompt
+    assert "two meshed gears" not in compiled.positive_prompt
 
 
 def test_generative_prompt_uses_structured_course_grounded_sections() -> None:

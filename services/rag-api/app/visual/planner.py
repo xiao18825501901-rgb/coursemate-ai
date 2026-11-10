@@ -69,6 +69,20 @@ class GroundedPolicyVisualPlannerProvider:
             r"what does select distinct do",
         ):
             return "NONE", "NONE", []
+        if _contains(
+            q,
+            r"endomembrane.*(?:protein|membrane).*transport",
+            r"endoplasmic reticulum.*golgi",
+            r"rough er.*golgi",
+            r"内质网.*高尔基体.*(?:蛋白质|分泌蛋白|膜蛋白).*运输",
+            r"囊泡.*(?:出芽|融合).*高尔基体",
+        ):
+            return "VIDEO", "COMFY_VIDEO", [
+                "rough endoplasmic reticulum",
+                "transport vesicle budding",
+                "Golgi apparatus",
+                "plasma membrane",
+            ]
         if _contains(q, r"two gears", r"gears transfer motion"):
             return "VIDEO", "COMFY_VIDEO", ["two meshed gears", "opposite rotation"]
         if _contains(
