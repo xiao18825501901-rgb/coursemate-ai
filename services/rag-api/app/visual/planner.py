@@ -199,10 +199,9 @@ class GroundedPolicyVisualPlannerProvider:
             visual_type, renderer, includes = "ANIMATION", "MANIM", ["ordered states"]
         should_generate = renderer != "NONE"
         natural = renderer in {"COMFY_IMAGE", "COMFY_VIDEO"}
-        answer_fact = ""
+        answer_fact = _answer_fragment(answer)
         supported: list[str] = []
         if natural:
-            answer_fact = _answer_fragment(answer)
             supported_claims = [
                 _prompt_fragment(item.get("supported_claim"))
                 for item in evidence[:16]
@@ -282,10 +281,17 @@ class GroundedPolicyVisualPlannerProvider:
                         "K-means：最近质心分配、坐标均值更新与 SSE（一轮教学例）"
                         if kmeans is not None
                         else (
-                            "Explain the supported relationships in: "
-                            f"{_prompt_fragment(question, limit=400)}"
-                            if should_generate
-                            else ""
+                            answer_fact
+                            if should_generate and answer_fact
+                            else (
+                                "流动镶嵌模型：磷脂疏水尾部避开水环境并朝向膜内侧。"
+                                if is_phospholipid_bilayer
+                                else (
+                                    f"课程图解：{_prompt_fragment(question, limit=400)}"
+                                    if should_generate
+                                    else ""
+                                )
+                            )
                         )
                     )
                 ),

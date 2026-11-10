@@ -34,6 +34,19 @@ def test_delivered_kmeans_example_has_computed_centroids_and_sse():
     assert spec.diagram.kmeans.points[0].x == 1
 
 
+def test_phospholipid_diagram_uses_delivered_fact_as_accessible_goal():
+    spec = GroundedPolicyVisualPlannerProvider().plan(
+        question="请用一句中文说明“流动镶嵌模型”中疏水尾部为什么朝向膜的内侧。",
+        answer="因为磷脂的疏水尾部无法与水形成氢键，所以在水环境中朝向膜内侧。[S1]",
+        evidence=[],
+        action="diagram",
+        language="zh-CN",
+    )
+    assert spec.renderer == "SVG"
+    assert spec.visual_goal == "因为磷脂的疏水尾部无法与水形成氢键，所以在水环境中朝向膜内侧。"
+    assert "Explain the supported relationships" not in spec.visual_goal
+
+
 def test_missing_course_structure_is_text_only_not_successful_placeholder():
     spec = plan("")
     assert not spec.should_generate
