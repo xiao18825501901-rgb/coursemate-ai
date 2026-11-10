@@ -315,6 +315,17 @@ def test_endomembrane_protein_transport_routes_to_grounded_generative_video() ->
     assert spec.renderer is Renderer.COMFY_VIDEO
     assert spec.motion_is_essential is True
     assert spec.duration_seconds == 3
+    assert [step.label for step in spec.animation_steps] == [
+        "A transport vesicle starts attached to the rough endoplasmic reticulum.",
+        (
+            "One transport vesicle buds from the rough endoplasmic reticulum and moves "
+            "toward the Golgi apparatus."
+        ),
+        (
+            "The vesicle fuses with the Golgi apparatus, then a membrane-protein vesicle "
+            "reaches the plasma membrane."
+        ),
+    ]
     assert "rough endoplasmic reticulum" in compiled.positive_prompt
     assert "Golgi apparatus" in compiled.positive_prompt
     assert "plasma membrane" in compiled.positive_prompt
@@ -402,6 +413,104 @@ def test_wan_keeps_negative_conditioning_and_steps_its_teaching_prompt() -> None
     assert "the left gear pushes the right gear" in compiled.positive_prompt
     assert compiled.negative_prompt == "extra gears, watermark"
     assert (compiled.steps, compiled.cfg) == (20, 5)
+
+
+def test_wan_prompt_defines_one_continuous_teaching_action_with_fixed_objects() -> None:
+    spec = VisualSpec.model_validate(
+        valid_spec(
+            visual_type="VIDEO",
+            renderer="COMFY_VIDEO",
+            semantic_precision="ILLUSTRATIVE",
+            motion_is_essential=True,
+            duration_seconds=3,
+            visual_goal=(
+                "A transport vesicle buds from the rough endoplasmic reticulum and moves "
+                "to the Golgi apparatus."
+            ),
+            pedagogical_reason=(
+                "The learner must observe the ordered direction of membrane-protein transport."
+            ),
+            must_include=[
+                "rough endoplasmic reticulum",
+                "one transport vesicle",
+                "Golgi apparatus",
+            ],
+            must_not_include=["extra vesicles", "camera cuts", "watermark"],
+            diagram=None,
+            animation_steps=[
+                {
+                    "order": 1,
+                    "label": (
+                        "A transport vesicle starts attached to the rough endoplasmic reticulum."
+                    ),
+                    "highlight_ids": [],
+                },
+                {
+                    "order": 2,
+                    "label": (
+                        "One transport vesicle buds from the rough endoplasmic reticulum "
+                        "and moves toward the Golgi apparatus."
+                    ),
+                    "highlight_ids": [],
+                },
+                {
+                    "order": 3,
+                    "label": "The transport vesicle reaches and fuses with the Golgi apparatus.",
+                    "highlight_ids": [],
+                },
+            ],
+            style={
+                "tone": "TEXTBOOK",
+                "background": "clean microscopic cell environment",
+                "composition": "membrane structures fill the frame",
+                "camera": "fixed side view",
+            },
+        )
+    )
+    compiled = compile_visual_spec(spec)
+    prompt = compiled.positive_prompt
+
+    assert "Initial state:" in prompt
+    assert "Main action:" in prompt
+    assert "Final state:" in prompt
+    assert "Fixed objects:" in prompt
+    assert "Camera and continuity:" in prompt
+    assert "Learning objective:" in prompt
+    assert "A transport vesicle starts attached" in prompt
+    assert "One transport vesicle buds" in prompt
+    assert "reaches and fuses with the Golgi apparatus" in prompt
+    assert "locked fixed camera" in prompt
+    assert "single continuous shot" in prompt
+    assert "no montage" in prompt
+    assert "no camera cuts" in prompt
+    assert "no additional teaching actions" in prompt
+
+
+def test_wan_prompt_rejects_non_video_semantics_without_stage_order() -> None:
+    spec = VisualSpec.model_validate(
+        valid_spec(
+            visual_type="VIDEO",
+            renderer="COMFY_VIDEO",
+            semantic_precision="ILLUSTRATIVE",
+            motion_is_essential=True,
+            duration_seconds=3,
+            visual_goal="Show the supported relationship.",
+            must_include=["A", "B"],
+            exact_labels=[],
+            diagram=None,
+            animation_steps=[
+                {
+                    "order": 1,
+                    "label": "Only a single state is described.",
+                    "highlight_ids": [],
+                }
+            ],
+        )
+    )
+    compiled = compile_visual_spec(spec)
+
+    assert "Initial state:\nOnly a single state is described." in compiled.positive_prompt
+    assert "Final state:\nPreserve A and B at the end" in compiled.positive_prompt
 
 
 def test_svg_compiler_renders_validated_nodes_edges_and_edge_labels() -> None:

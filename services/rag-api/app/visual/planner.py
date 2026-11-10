@@ -69,6 +69,17 @@ def _is_visual_claim(value: str) -> bool:
     return value.casefold() not in {"course evidence", "source", "document"}
 
 
+def _is_endomembrane_transport(question: str) -> bool:
+    q = question.lower()
+    return _contains(
+        q,
+        r"endomembrane.*(?:protein|membrane).*transport",
+        r"endoplasmic reticulum.*golgi",
+        r"rough er.*golgi",
+        r"openstax biology 2e.*(?:vesicle|protein|golgi|endoplasmic)",
+    )
+
+
 class GroundedPolicyVisualPlannerProvider:
     """Deterministic, source-grounded production router with no provider cost."""
 
@@ -160,6 +171,7 @@ class GroundedPolicyVisualPlannerProvider:
         language: str,
     ) -> VisualSpec:
         visual_type, renderer, includes = self._decision(question)
+        is_endomembrane_transport = _is_endomembrane_transport(question)
         kmeans = None
         is_kmeans = _contains(question, r"k[-\s]?means", r"K均值")
         is_phospholipid_bilayer = _contains(
@@ -212,6 +224,10 @@ class GroundedPolicyVisualPlannerProvider:
                 dict.fromkeys(([answer_fact] if answer_fact else []) + supported_claims)
             )
             includes = list(dict.fromkeys(supported))[:4]
+            is_endomembrane_transport = is_endomembrane_transport or _contains(
+                " ".join(includes),
+                r"transport vesicle buds.*endoplasmic reticulum.*golgi",
+            )
         labels = [] if natural else includes
         nodes = [
             {"id": f"n{index + 1}", "label": value}
@@ -239,7 +255,33 @@ class GroundedPolicyVisualPlannerProvider:
             diagram["phospholipid_bilayer"] = {"provenance": "DELIVERED_GROUNDED_EXPLANATION"}
             labels = []
         animation_steps = []
-        if renderer == "MANIM":
+        if renderer == "COMFY_VIDEO" and is_endomembrane_transport:
+            animation_steps = [
+                {
+                    "order": 1,
+                    "label": (
+                        "A transport vesicle starts attached to the rough endoplasmic reticulum."
+                    ),
+                    "highlight_ids": [],
+                },
+                {
+                    "order": 2,
+                    "label": (
+                        "One transport vesicle buds from the rough endoplasmic reticulum "
+                        "and moves toward the Golgi apparatus."
+                    ),
+                    "highlight_ids": [],
+                },
+                {
+                    "order": 3,
+                    "label": (
+                        "The vesicle fuses with the Golgi apparatus, then a membrane-protein "
+                        "vesicle reaches the plasma membrane."
+                    ),
+                    "highlight_ids": [],
+                },
+            ]
+        elif renderer == "MANIM":
             animation_steps = [
                 {"order": index + 1, "label": value, "highlight_ids": [nodes[index]["id"]]}
                 for index, value in enumerate(includes or ["state"])

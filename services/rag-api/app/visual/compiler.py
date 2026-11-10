@@ -35,6 +35,14 @@ def _bullet_lines(values: list[str]) -> str:
     return "\n".join(f"- {value.strip()}" for value in values if value.strip())
 
 
+def _and_list(values: list[str]) -> str:
+    if len(values) <= 1:
+        return values[0] if values else ""
+    if len(values) == 2:
+        return f"{values[0]} and {values[1]}"
+    return f"{', '.join(values[:-1])}, and {values[-1]}"
+
+
 def _generative_prompt(spec: VisualSpec, exact: list[str]) -> str:
     """Build a teaching prompt from the existing grounded VisualSpec fields."""
 
@@ -51,9 +59,14 @@ def _generative_prompt(spec: VisualSpec, exact: list[str]) -> str:
     background = " ".join(
         value for value in (spec.style.background, spec.style.color_guidance) if value
     )
+    subject_kind = (
+        "educational video"
+        if spec.renderer is Renderer.COMFY_VIDEO
+        else "textbook scientific illustration"
+    )
     sections = [
         "Generation contract:\n"
-        "Create one large, edge-to-edge textbook scientific illustration. Fill the frame with "
+        f"Create one large, edge-to-edge {subject_kind}. Fill the frame with "
         "the teaching subject. Use only visible objects, surfaces, positions, proportions, "
         "colors and unlabeled motion/relationship arrows. Do not render any letters, words, "
         "numbers, labels, legends, captions, callouts, watermark or pseudo-text; gibberish "
@@ -70,10 +83,54 @@ def _generative_prompt(spec: VisualSpec, exact: list[str]) -> str:
         f"Educational purpose:\n{spec.pedagogical_reason.strip()}",
     ]
     if spec.renderer is Renderer.COMFY_VIDEO:
+        stage_labels = [step.label.strip() for step in spec.animation_steps if step.label.strip()]
+        fixed = [value for value in required if value]
+        if len(stage_labels) >= 2:
+            initial_state = stage_labels[0]
+            main_action = " Then ".join(stage_labels[1:-1]) or stage_labels[1]
+            final_state = stage_labels[-1]
+        elif len(stage_labels) == 1:
+            initial_state = stage_labels[0]
+            main_action = spec.visual_goal.strip()
+            final_state = (
+                f"Preserve {_and_list(fixed)} at the end while the course relationship "
+                "is established."
+                if fixed
+                else "Preserve the same object identities and course relationship at the end."
+            )
+        else:
+            initial_state = (
+                "Begin with the required objects already visible and separated in the frame: "
+                f"{', '.join(fixed)}."
+                if fixed
+                else "Begin with every required teaching object already visible in one frame."
+            )
+            main_action = spec.visual_goal.strip()
+            final_state = (
+                f"Preserve {_and_list(fixed)} at the end while the course relationship "
+                "is established."
+                if fixed
+                else "Preserve the same object identities and course relationship at the end."
+            )
+        camera = " ".join(value for value in (spec.style.camera, spec.style.composition) if value)
         sections.append(
-            "Motion requirement:\n"
-            "Show one continuous, physically plausible teaching action while preserving every "
-            "required element and course relationship."
+            "Video teaching contract:\n"
+            f"Initial state:\n{initial_state}\n\n"
+            f"Main action:\n{main_action}\n\n"
+            f"Final state:\n{final_state}\n\n"
+            "Fixed objects:\n"
+            f"{_bullet_lines(fixed) or '- Preserve the required teaching objects throughout.'}\n\n"
+            "Camera and continuity:\n"
+            f"{camera or 'fixed teaching view'}. Use a locked fixed camera in a single continuous "
+            "shot. Preserve object identity, scale, relative position and background continuity "
+            "from first frame to last frame.\n\n"
+            "Forbidden motion:\n"
+            "- no montage\n"
+            "- no camera cuts\n"
+            "- no scene changes\n"
+            "- no additional teaching actions\n"
+            "- no object morphing or unexplained disappearance\n\n"
+            f"Learning objective:\n{spec.pedagogical_reason.strip()}"
         )
     return "\n\n".join(sections)
 
