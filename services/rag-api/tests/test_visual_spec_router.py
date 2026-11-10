@@ -623,6 +623,8 @@ def test_generic_desktop_components_route_to_grounded_flux_image() -> None:
     assert "brand logos or model numbers" in prompt
     assert "laptops or server racks" in prompt
     assert "no arrows, leader lines, annotation circles or overlay cards" in prompt
+    assert "unannotated product photograph" in prompt
+    assert "unlabeled motion/relationship arrows" not in prompt
 
 
 def test_svg_compiler_renders_validated_nodes_edges_and_edge_labels() -> None:

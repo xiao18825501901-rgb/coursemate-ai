@@ -65,17 +65,34 @@ def _generative_prompt(spec: VisualSpec, exact: list[str]) -> str:
         subject_kind = "clean educational product photograph"
     else:
         subject_kind = "textbook scientific illustration"
-    sections = [
+    photographic = spec.renderer is Renderer.COMFY_IMAGE and spec.style.tone == "REALISTIC"
+    generation_contract = (
         "Generation contract:\n"
+        f"Create one large, edge-to-edge {subject_kind}. "
+        "This is an unannotated product photograph. Fill the frame with "
+        "only the physical teaching subject. Show only visible objects, surfaces, materials, "
+        "positions and proportions. This must remain a photograph, not an infographic, diagram "
+        "or annotated explainer. Do not render any letters, words, numbers, labels, legends, "
+        "captions, callouts, arrows, leader lines, annotation circles, overlay cards, watermark "
+        "or pseudo-text; gibberish typography or graphic overlays are a failed result."
+        if photographic
+        else "Generation contract:\n"
         f"Create one large, edge-to-edge {subject_kind}. Fill the frame with "
         "the teaching subject. Use only visible objects, surfaces, positions, proportions, "
         "colors and unlabeled motion/relationship arrows. Do not render any letters, words, "
         "numbers, labels, legends, captions, callouts, watermark or pseudo-text; gibberish "
-        "typography is a failed result.",
+        "typography is a failed result."
+    )
+    sections = [
+        generation_contract,
         f"Subject:\n{spec.visual_goal.strip()}",
         "Required elements:\n"
         + (_bullet_lines(required) or "- Keep only the course-grounded subject."),
-        "Spatial relationships and course facts:\n"
+        (
+            "Visible physical arrangement and course facts:\n"
+            if photographic
+            else "Spatial relationships and course facts:\n"
+        )
         + (_bullet_lines(relationships) or "- Preserve the relationships stated by the subject."),
         f"View and composition:\n{view or 'one clear, unobstructed teaching view'}",
         "Lighting and background:\n"
