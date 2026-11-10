@@ -619,8 +619,10 @@ def test_generic_desktop_components_route_to_grounded_flux_image() -> None:
     assert "compact CPU heatsink area" in prompt
     assert "long narrow parallel DIMM memory slots" in prompt
     assert "Do not render any letters" in prompt
+    assert "clean educational product photograph" in prompt
     assert "brand logos or model numbers" in prompt
     assert "laptops or server racks" in prompt
+    assert "no arrows, leader lines, annotation circles or overlay cards" in prompt
 
 
 def test_svg_compiler_renders_validated_nodes_edges_and_edge_labels() -> None:

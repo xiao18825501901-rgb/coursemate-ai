@@ -382,8 +382,11 @@ class GroundedPolicyVisualPlannerProvider:
                     renderer == "COMFY_VIDEO"
                     and (is_hdd_motion or is_endomembrane_transport)
                 )
-                or (renderer == "COMFY_IMAGE" and is_desktop_internal_components)
-                else "CONCEPTUAL"
+                else (
+                    "REALISTIC"
+                    if renderer == "COMFY_IMAGE" and is_desktop_internal_components
+                    else "CONCEPTUAL"
+                )
             )
         }
         if renderer == "COMFY_IMAGE" and is_desktop_internal_components:
@@ -448,6 +451,7 @@ class GroundedPolicyVisualPlannerProvider:
                     "laptops or server racks",
                     "smartphone circuit boards",
                     "exact dimensions, exact placement or compatibility claims",
+                    "no arrows, leader lines, annotation circles or overlay cards",
                 ]
             )
         grounding = [

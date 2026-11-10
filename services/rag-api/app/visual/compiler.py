@@ -59,11 +59,12 @@ def _generative_prompt(spec: VisualSpec, exact: list[str]) -> str:
     background = " ".join(
         value for value in (spec.style.background, spec.style.color_guidance) if value
     )
-    subject_kind = (
-        "educational video"
-        if spec.renderer is Renderer.COMFY_VIDEO
-        else "textbook scientific illustration"
-    )
+    if spec.renderer is Renderer.COMFY_VIDEO:
+        subject_kind = "educational video"
+    elif spec.style.tone == "REALISTIC":
+        subject_kind = "clean educational product photograph"
+    else:
+        subject_kind = "textbook scientific illustration"
     sections = [
         "Generation contract:\n"
         f"Create one large, edge-to-edge {subject_kind}. Fill the frame with "
