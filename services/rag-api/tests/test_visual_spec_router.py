@@ -546,6 +546,12 @@ def test_hdd_motion_routes_to_a_single_fixed_camera_continuous_action() -> None:
 
     assert spec.visual_type is VisualType.VIDEO
     assert spec.renderer is Renderer.COMFY_VIDEO
+    assert spec.must_include == [
+        "one mechanical hard-disk drive body remaining fixed",
+        "one circular platter rotating about a central spindle",
+        "one actuator arm making a bounded radial sweep",
+        "one read/write head above the platter",
+    ]
     assert [step.label for step in spec.animation_steps] == [
         (
             "The drive body, circular platter, central spindle, actuator arm and "
@@ -563,6 +569,53 @@ def test_hdd_motion_routes_to_a_single_fixed_camera_continuous_action() -> None:
     assert "fixed cutaway view" in prompt
     assert "platter rotates continuously" in prompt
     assert "one bounded radial sweep" in prompt
+    assert "章节定位" not in prompt
+    assert "- CourseJesus_PC_Hardware_Visual_Acceptance_20261009.md" not in prompt
+
+
+def test_generic_desktop_components_route_to_grounded_flux_image() -> None:
+    planner = MockVisualPlannerProvider()
+    spec = planner.plan(
+        question=(
+            "请严格依据课程资料，教我辨认通用台式电脑内部的主板、CPU 插座/散热器区域和 "
+            "DIMM 内存插槽区域。不得推断品牌、精确尺寸、精确布局或兼容性，"
+            "不要出现可读型号文字。"
+        ),
+        answer=(
+            "主板是大型主电路板；CPU 区域位于主板上并可能被散热器覆盖；"
+            "DIMM 插槽是通常位于 CPU 区域附近的长而窄的内存插槽区域。"
+        ),
+        evidence=[
+            {
+                "source_id": "desktop-components-visual-source",
+                "source_version": "v1",
+                "locator": "Unit 1",
+                "supported_claim": (
+                    "A motherboard is the large main circuit board. The CPU socket area is "
+                    "on the motherboard and may be covered by a heatsink. DIMM slots are long "
+                    "narrow memory-slot areas often near the CPU area."
+                ),
+            }
+        ],
+        action="visual",
+        language="zh-CN",
+    )
+    compiled = compile_visual_spec(spec)
+    prompt = compiled.positive_prompt
+
+    assert spec.visual_type is VisualType.IMAGE
+    assert spec.renderer is Renderer.COMFY_IMAGE
+    assert spec.must_include == [
+        "one large main circuit board fills most of the frame",
+        "one compact CPU heatsink area mounted on the motherboard",
+        "one set of long narrow parallel DIMM memory slots near the CPU area",
+    ]
+    assert "large main circuit board" in prompt
+    assert "compact CPU heatsink area" in prompt
+    assert "long narrow parallel DIMM memory slots" in prompt
+    assert "Do not render any letters" in prompt
+    assert "brand logos or model numbers" in prompt
+    assert "laptops or server racks" in prompt
 
 
 def test_svg_compiler_renders_validated_nodes_edges_and_edge_labels() -> None:

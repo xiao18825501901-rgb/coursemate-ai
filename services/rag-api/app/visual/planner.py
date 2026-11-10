@@ -11,6 +11,27 @@ from app.visual.spec import VisualSpec
 
 PROMPT_VERSION = "visual-router-planner-v2"
 PROMPT_PATH = Path(__file__).with_name("prompts") / "visual_router_planner_v1.system.md"
+HDD_VISUAL_REQUIRED = [
+    "one mechanical hard-disk drive body remaining fixed",
+    "one circular platter rotating about a central spindle",
+    "one actuator arm making a bounded radial sweep",
+    "one read/write head above the platter",
+]
+HDD_GROUNDED_CLAIM = (
+    "The circular platter rotates continuously around the fixed central spindle while one "
+    "actuator arm performs a bounded radial sweep that moves the read/write head across "
+    "different radial positions; the drive body remains fixed."
+)
+DESKTOP_VISUAL_REQUIRED = [
+    "one large main circuit board fills most of the frame",
+    "one compact CPU heatsink area mounted on the motherboard",
+    "one set of long narrow parallel DIMM memory slots near the CPU area",
+]
+DESKTOP_GROUNDED_CLAIM = (
+    "The large main circuit board is the motherboard. A compact CPU socket and heatsink "
+    "area is mounted on the motherboard. Long narrow DIMM memory slots form a separate "
+    "parallel-slot region often near the CPU area."
+)
 
 
 @dataclass(frozen=True)
@@ -91,6 +112,23 @@ def _is_hdd_motion(question: str) -> bool:
     )
 
 
+def _is_desktop_internal_components(question: str) -> bool:
+    q = question.lower()
+    has_components = _contains(
+        q,
+        r"(?:motherboard|mainboard).*(?:cpu|dimm|heatsink)",
+        r"(?:cpu socket|heatsink).*(?:dimm|memory slot)",
+        r"主板.*(?:cpu|dimm|内存插槽|散热器)",
+        r"(?:cpu\s*插座|散热器).*(?:dimm|内存插槽)",
+    )
+    return has_components and _contains(
+        q,
+        r"desktop (?:pc|computer)",
+        r"台式(?:电脑|机)",
+        r"通用.*电脑内部",
+    )
+
+
 class GroundedPolicyVisualPlannerProvider:
     """Deterministic, source-grounded production router with no provider cost."""
 
@@ -109,16 +147,9 @@ class GroundedPolicyVisualPlannerProvider:
         ):
             return "NONE", "NONE", []
         if _is_hdd_motion(question):
-            return (
-                "VIDEO",
-                "COMFY_VIDEO",
-                [
-                    "one mechanical hard-disk drive body remaining fixed",
-                    "one circular platter rotating about a central spindle",
-                    "one actuator arm making a bounded radial sweep",
-                    "one read/write head above the platter",
-                ],
-            )
+            return "VIDEO", "COMFY_VIDEO", list(HDD_VISUAL_REQUIRED)
+        if _is_desktop_internal_components(question):
+            return "IMAGE", "COMFY_IMAGE", list(DESKTOP_VISUAL_REQUIRED)
         if _contains(
             q,
             r"endomembrane.*(?:protein|membrane).*transport",
@@ -195,6 +226,7 @@ class GroundedPolicyVisualPlannerProvider:
         visual_type, renderer, includes = self._decision(question)
         is_endomembrane_transport = _is_endomembrane_transport(question)
         is_hdd_motion = _is_hdd_motion(question)
+        is_desktop_internal_components = _is_desktop_internal_components(question)
         kmeans = None
         is_kmeans = _contains(question, r"k[-\s]?means", r"K均值")
         is_phospholipid_bilayer = _contains(
@@ -247,6 +279,10 @@ class GroundedPolicyVisualPlannerProvider:
                 dict.fromkeys(([answer_fact] if answer_fact else []) + supported_claims)
             )
             includes = list(dict.fromkeys(supported))[:4]
+            if renderer == "COMFY_VIDEO" and is_hdd_motion:
+                includes = list(HDD_VISUAL_REQUIRED)
+            elif renderer == "COMFY_IMAGE" and is_desktop_internal_components:
+                includes = list(DESKTOP_VISUAL_REQUIRED)
             is_endomembrane_transport = is_endomembrane_transport or _contains(
                 " ".join(includes),
                 r"transport vesicle buds.*endoplasmic reticulum.*golgi",
@@ -339,11 +375,27 @@ class GroundedPolicyVisualPlannerProvider:
         natural_style = {
             "tone": (
                 "TEXTBOOK"
-                if renderer == "COMFY_VIDEO" and (is_hdd_motion or is_endomembrane_transport)
+                if (
+                    renderer == "COMFY_VIDEO"
+                    and (is_hdd_motion or is_endomembrane_transport)
+                )
+                or (renderer == "COMFY_IMAGE" and is_desktop_internal_components)
                 else "CONCEPTUAL"
             )
         }
-        if renderer == "COMFY_VIDEO" and is_hdd_motion:
+        if renderer == "COMFY_IMAGE" and is_desktop_internal_components:
+            natural_style.update(
+                {
+                    "background": "clean neutral workshop background",
+                    "composition": (
+                        "one opened generic desktop computer fills the frame; the large "
+                        "motherboard, compact CPU heatsink area and parallel DIMM slots are "
+                        "all clearly visible and spatially distinct"
+                    ),
+                    "camera": "locked three-quarter overhead view",
+                }
+            )
+        elif renderer == "COMFY_VIDEO" and is_hdd_motion:
             natural_style.update(
                 {
                     "background": "clean neutral technical teaching background",
@@ -383,6 +435,17 @@ class GroundedPolicyVisualPlannerProvider:
                     "exact RPM or seek-time numbers",
                 ]
             )
+        elif renderer == "COMFY_IMAGE" and is_desktop_internal_components:
+            natural_forbidden.extend(
+                [
+                    "brand logos or model numbers",
+                    "readable technical labels",
+                    "measurement scales",
+                    "laptops or server racks",
+                    "smartphone circuit boards",
+                    "exact dimensions, exact placement or compatibility claims",
+                ]
+            )
         grounding = [
             {
                 "source_id": str(item["source_id"]),
@@ -396,25 +459,65 @@ class GroundedPolicyVisualPlannerProvider:
             }
             for item in evidence[:16]
         ]
+        if natural and is_hdd_motion and grounding:
+            grounding = [
+                {
+                    "source_id": grounding[0]["source_id"],
+                    "source_version": grounding[0]["source_version"],
+                    "locator": grounding[0]["locator"],
+                    "supported_claim": HDD_GROUNDED_CLAIM,
+                }
+            ]
+        elif natural and is_desktop_internal_components and grounding:
+            grounding = [
+                {
+                    "source_id": grounding[0]["source_id"],
+                    "source_version": grounding[0]["source_version"],
+                    "locator": grounding[0]["locator"],
+                    "supported_claim": DESKTOP_GROUNDED_CLAIM,
+                }
+            ]
+        if natural and is_hdd_motion:
+            natural_visual_goal = (
+                "One complete mechanical hard disk drive in a locked cutaway teaching view. "
+                "Keep the drive body fixed and show the circular platter, central spindle, "
+                "actuator arm and read/write head at a medium-wide scale."
+            )
+            pedagogical_reason = (
+                "Let the learner distinguish continuous platter rotation from one bounded "
+                "actuator-arm radial sweep while the same drive body remains fixed."
+            )
+        elif natural and is_desktop_internal_components:
+            natural_visual_goal = (
+                "A generic desktop computer interior showing one large main circuit board, "
+                "one compact CPU heatsink-covered area mounted on it, and a separate region "
+                "of long narrow parallel DIMM memory slots."
+            )
+            pedagogical_reason = (
+                "Let the learner identify three broad component regions without inferring a "
+                "specific brand, exact layout, dimensions or compatibility."
+            )
+        else:
+            natural_visual_goal = (
+                "Create a clear educational illustration that teaches: "
+                f"{_prompt_fragment(question, limit=300)}"
+                + (
+                    " Use this grounded explanation: "
+                    f"{_prompt_fragment(answer_fact, limit=420)}"
+                    if answer_fact
+                    else ""
+                )
+            )
+            pedagogical_reason = "A visual is useful."
         return VisualSpec.model_validate(
             {
                 "visual_spec_version": "1.0",
                 "should_generate": should_generate,
-                "pedagogical_reason": "A visual is useful."
+                "pedagogical_reason": pedagogical_reason
                 if should_generate
                 else "Insufficient supported visual structure; continue with the delivered text.",
                 "visual_goal": (
-                    _prompt_fragment(
-                        "Create a clear educational illustration that teaches: "
-                        f"{_prompt_fragment(question, limit=300)}"
-                        + (
-                            " Use this grounded explanation: "
-                            f"{_prompt_fragment(answer_fact, limit=420)}"
-                            if answer_fact
-                            else ""
-                        ),
-                        limit=800,
-                    )
+                    _prompt_fragment(natural_visual_goal, limit=800)
                     if natural
                     else (
                         "K-means：最近质心分配、坐标均值更新与 SSE（一轮教学例）"
