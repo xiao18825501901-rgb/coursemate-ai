@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -122,6 +123,42 @@ def test_deterministic_diagram_never_invokes_provider(tmp_path: Path) -> None:
     asset = service.store.assets_for_job(str(completed["id"]), user_id="user-1")[0]
     assert asset["mime_type"] == "image/svg+xml"
     assert asset["semantic_validation"] == "PASS"
+
+
+def test_deterministic_renderer_cache_key_rejects_legacy_renderer_version(
+    tmp_path: Path,
+) -> None:
+    service, _ = make_service(tmp_path)
+    value = request(
+        request_id="request-renderer-cache-version",
+        question="为什么流动镶嵌模型中的疏水尾部朝向膜的内侧？",
+    )
+    value = FrozenVisualInput(**{**value.__dict__, "action": "diagram"})
+    job, _ = service.create_job(value)
+    spec = service.planner.plan(
+        question=value.question,
+        answer=value.answer,
+        evidence=list(value.evidence),
+        action=value.action,
+        language=value.language,
+    )
+    workflow = service._workflow(spec)
+    legacy_workflow = replace(
+        workflow,
+        version="1",
+        model_version="deterministic-v1",
+    )
+
+    current_key = service._cache_key(job, value.__dict__, spec, "spec-hash", workflow)
+    legacy_key = service._cache_key(
+        job,
+        value.__dict__,
+        spec,
+        "spec-hash",
+        legacy_workflow,
+    )
+
+    assert current_key != legacy_key
 
 
 def test_kmeans_worked_example_persists_correct_geometry_without_provider(tmp_path: Path) -> None:

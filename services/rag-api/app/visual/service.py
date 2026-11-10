@@ -43,6 +43,7 @@ DETERMINISTIC_FALLBACKS = {
     Renderer.GRAPHVIZ,
     Renderer.MANIM,
 }
+DETERMINISTIC_RENDERER_VERSION = "deterministic-renderer-2026-11-11-v2"
 
 
 class VisualQuotaExceeded(RuntimeError):
@@ -568,13 +569,13 @@ class VisualService:
             return self.workflows.select(spec.renderer, self.provider.name)
         return Workflow(
             workflow_id="deterministic-" + spec.renderer.value.lower(),
-            version="1",
+            version=DETERMINISTIC_RENDERER_VERSION,
             renderer_type=spec.renderer,
             provider="deterministic",
             enabled=True,
             allowed_inputs=(),
             outputs=("image",),
-            model_version="deterministic-v1",
+            model_version=DETERMINISTIC_RENDERER_VERSION,
         )
 
     def _cache_key(
@@ -591,7 +592,7 @@ class VisualService:
             source_snapshot_hash=str(job["source_snapshot_hash"]),
             visual_spec_hash=spec_hash,
             renderer=spec.renderer.value,
-            renderer_version="phase-a-1",
+            renderer_version=DETERMINISTIC_RENDERER_VERSION,
             prompt_version=str(job["prompt_version"]),
             workflow_id=workflow.workflow_id,
             workflow_version=workflow.version,
@@ -617,7 +618,7 @@ class VisualService:
             source_snapshot_hash=str(job["source_snapshot_hash"]),
             visual_spec_hash=spec_hash,
             renderer=spec.renderer.value,
-            renderer_version="phase-a-1",
+            renderer_version=DETERMINISTIC_RENDERER_VERSION,
             prompt_version=str(job["prompt_version"]),
             workflow_id=workflow.workflow_id,
             workflow_version=workflow.version,
