@@ -52,6 +52,23 @@ def _prompt_fragment(value: object, *, limit: int = 800) -> str:
     return normalized[:limit].rstrip()
 
 
+def _answer_fragment(answer: str, *, limit: int = 700) -> str:
+    """Return the delivered fact, without UI citation markers."""
+
+    without_citations = re.sub(r"\[[^\]]+\]", "", answer)
+    return _prompt_fragment(without_citations.split("\n", 1)[0], limit=limit)
+
+
+def _is_visual_claim(value: str) -> bool:
+    """Reject document labels that some citation adapters put in supported_claim."""
+
+    if not value:
+        return False
+    if re.fullmatch(r".+\.(?:pdf|docx?|pptx?|xlsx?|html?)", value, re.IGNORECASE):
+        return False
+    return value.casefold() not in {"course evidence", "source", "document"}
+
+
 class GroundedPolicyVisualPlannerProvider:
     """Deterministic, source-grounded production router with no provider cost."""
 
@@ -161,16 +178,22 @@ class GroundedPolicyVisualPlannerProvider:
             visual_type, renderer, includes = "ANIMATION", "MANIM", ["ordered states"]
         should_generate = renderer != "NONE"
         natural = renderer in {"COMFY_IMAGE", "COMFY_VIDEO"}
+        answer_fact = ""
+        supported: list[str] = []
         if natural:
             subject = _prompt_fragment(question, limit=700)
-            supported = [
+            answer_fact = _answer_fragment(answer)
+            supported_claims = [
                 _prompt_fragment(item.get("supported_claim"))
                 for item in evidence[:16]
                 if _prompt_fragment(item.get("supported_claim"))
             ]
-            if not supported:
-                answer_fact = _prompt_fragment(answer.split("\n", 1)[0])
-                supported = [answer_fact] if answer_fact else []
+            supported_claims = [claim for claim in supported_claims if _is_visual_claim(claim)]
+            supported = list(
+                dict.fromkeys(
+                    ([answer_fact] if answer_fact else []) + supported_claims
+                )
+            )
             includes = list(dict.fromkeys(supported))[:4]
         labels = [] if natural else includes
         nodes = [
@@ -205,7 +228,13 @@ class GroundedPolicyVisualPlannerProvider:
                 "source_id": str(item["source_id"]),
                 "source_version": str(item["source_version"]),
                 "locator": str(item.get("locator") or "source"),
-                "supported_claim": str(item.get("supported_claim") or "Course evidence."),
+                "supported_claim": (
+                    claim
+                    if _is_visual_claim(
+                        claim := _prompt_fragment(item.get("supported_claim"))
+                    )
+                    else answer_fact or "Course-grounded visual explanation."
+                ),
             }
             for item in evidence[:16]
         ]
@@ -217,7 +246,16 @@ class GroundedPolicyVisualPlannerProvider:
                 if should_generate
                 else "Insufficient supported visual structure; continue with the delivered text.",
                 "visual_goal": (
-                    f"Create a clear educational conceptual illustration of: {subject}"
+                    _prompt_fragment(
+                        "Create a clear educational illustration that teaches: "
+                        f"{_prompt_fragment(question, limit=300)}"
+                        + (
+                            f" Use this grounded explanation: {_prompt_fragment(answer_fact, limit=420)}"
+                            if answer_fact
+                            else ""
+                        ),
+                        limit=800,
+                    )
                     if natural
                     else (
                         "K-means：最近质心分配、坐标均值更新与 SSE（一轮教学例）"

@@ -223,6 +223,35 @@ def test_conceptual_image_prompt_contains_question_and_grounded_claim() -> None:
     assert "conceptual scene" not in prompt
 
 
+def test_conceptual_image_uses_answer_when_citation_adapter_only_provides_document_name() -> None:
+    planner = MockVisualPlannerProvider()
+    spec = planner.plan(
+        question="为什么流动镶嵌模型中的疏水尾部朝向膜的内侧？",
+        answer=(
+            "因为疏水尾部无法与水形成氢键，所以在水环境中会彼此相对、朝向膜内侧。"
+            " [S2][S3][S6]"
+        ),
+        evidence=[
+            {
+                "source_id": "source-1",
+                "source_version": "ui-citation-v1",
+                "locator": "96",
+                "supported_claim": "Biology2e-OP.pdf",
+            }
+        ],
+        action="visual",
+        language="zh-CN",
+    )
+    compiled = compile_visual_spec(spec)
+    prompt = compiled.positive_prompt
+
+    assert spec.renderer is Renderer.COMFY_IMAGE
+    assert "Biology2e-OP.pdf" not in prompt
+    assert "[S2]" not in prompt
+    assert "疏水尾部无法与水形成氢键" in prompt
+    assert "Show the supported concept" not in prompt
+
+
 def test_endomembrane_protein_transport_routes_to_grounded_generative_video() -> None:
     planner = MockVisualPlannerProvider()
     spec = planner.plan(
