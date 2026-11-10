@@ -649,6 +649,7 @@
     "cancel": "Cancel",
     "retry": "Retry",
     "fallback": "Use deterministic diagram",
+    "history": "Earlier versions ({{count}})",
     "failure": "Visual generation did not complete ({{code}}). The text response remains available.",
     "diagnosticSaved": "Diagnostic details saved",
     "status": {

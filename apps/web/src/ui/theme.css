@@ -241,6 +241,7 @@
 :root[data-theme='dark'] .visual-job,
 :root[data-theme='dark'] .visual-placeholder,
 :root[data-theme='dark'] .visual-actions button,
+:root[data-theme='dark'] .visual-history-toggle,
 :root[data-theme='dark'] .visual-job-head button,
 :root[data-theme='dark'] .visual-asset-card figcaption button { background:#222a30;color:#d9e1e6;border-color:#46515a; }
 :root[data-theme='dark'] .visual-asset-card img { background:#f7f8f9;border-color:#46515a; }

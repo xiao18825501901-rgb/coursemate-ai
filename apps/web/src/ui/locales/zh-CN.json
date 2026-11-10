@@ -649,6 +649,7 @@
     "cancel": "取消",
     "retry": "重试",
     "fallback": "使用确定性图解",
+    "history": "历史版本（{{count}}）",
     "failure": "视觉生成未完成（{{code}}），文字回答仍可正常使用。",
     "diagnosticSaved": "诊断信息已保存",
     "status": {

@@ -55,6 +55,21 @@ describe('Visual Learning controls', () => {
     expect(api.createVisual).toHaveBeenCalledTimes(1);
   });
 
+  it('shows only the newest result for each teaching action while retaining older jobs in storage', async () => {
+    api.listMessageVisuals.mockResolvedValue({
+      items: [
+        { id: 'job-old', action: 'diagram', status: 'COMPLETED', retry_count: 0, cache_hit: false, assets: [{ id: 'asset-old', mime_type: 'image/svg+xml', alt_text: 'main concept', content_url: '/old' }] },
+        { id: 'job-new', action: 'diagram', status: 'COMPLETED', retry_count: 0, cache_hit: false, assets: [{ id: 'asset-new', mime_type: 'image/svg+xml', alt_text: 'K-means assignments and SSE', content_url: '/new' }] },
+      ],
+    });
+    render(<VisualControls enabled courseId="course-1" pairId="pair-1" message={{ id: 'message-duplicate' } as any}/>);
+
+    expect(await screen.findByText('K-means assignments and SSE')).toBeInTheDocument();
+    expect(screen.queryByText('main concept')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '历史版本（1）' }));
+    expect(screen.getByText('main concept')).toBeInTheDocument();
+  });
+
   it('keeps the text usable while exposing safe retry and deterministic fallback', () => {
     const onRetry = vi.fn();
     const onFallback = vi.fn();

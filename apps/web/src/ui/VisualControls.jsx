@@ -5,14 +5,28 @@ import { defaultUiTranslate } from './UiLocale';
 
 const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN']);
 
+function partitionJobsByFreshness(jobs) {
+    const latest = new Map();
+    for (const job of jobs) {
+        const key = job.action || `job:${job.id}`;
+        latest.delete(key);
+        latest.set(key, job);
+    }
+    const latestIds = new Set([...latest.values()].map(job => job.id));
+    return {
+        latest: [...latest.values()],
+        older: jobs.filter(job => !latestIds.has(job.id)),
+    };
+}
+
 export class VisualControls extends React.Component {
-    state = { jobs: [], busy: false, error: '' };
+    state = { jobs: [], busy: false, error: '', historyOpen: false };
     timers = new Map();
     revision = 0;
     componentDidMount() { this.load(); }
     componentDidUpdate(previous) {
         if (previous.message.id !== this.props.message.id || previous.pairId !== this.props.pairId || previous.courseId !== this.props.courseId) {
-            this.stopAll(); this.setState({ jobs: [], error: '' }, () => this.load());
+            this.stopAll(); this.setState({ jobs: [], error: '', historyOpen: false }, () => this.load());
         } else if (!previous.assistanceEnabled && this.props.assistanceEnabled) {
             this.load();
         }
@@ -81,6 +95,7 @@ export class VisualControls extends React.Component {
     render() {
         if (!this.props.enabled || !this.props.pairId) return null;
         const t = this.props.t || defaultUiTranslate;
+        const { latest, older } = partitionJobsByFreshness(this.state.jobs);
         return <div className="visual-controls">
             <div className="visual-actions" aria-label={t('visual.actions')}>
                 <button type="button" disabled={this.state.busy} onClick={() => this.create('diagram')}>{t('visual.diagram')}</button>
@@ -88,7 +103,11 @@ export class VisualControls extends React.Component {
                 <button type="button" disabled={this.state.busy} onClick={() => this.create('animate')}>{t('visual.animation')}</button>
             </div>
             {this.state.error && <p className="visual-error">{this.state.error}</p>}
-            {this.state.jobs.map(job => <VisualJobStatus key={job.id} job={job} t={t} onCancel={id => this.cancel(id)} onRetry={id => this.retry(id)} onFallback={id => this.fallback(id)}/>)}
+            {latest.map(job => <VisualJobStatus key={job.id} job={job} t={t} onCancel={id => this.cancel(id)} onRetry={id => this.retry(id)} onFallback={id => this.fallback(id)}/>)}
+            {older.length > 0 && <button type="button" className="visual-history-toggle" aria-expanded={this.state.historyOpen} onClick={() => this.setState(state => ({ historyOpen: !state.historyOpen }))}>
+                {t('visual.history', { count: older.length })}
+            </button>}
+            {this.state.historyOpen && older.map(job => <VisualJobStatus key={job.id} job={job} t={t} onCancel={id => this.cancel(id)} onRetry={id => this.retry(id)} onFallback={id => this.fallback(id)}/>)}
         </div>;
     }
 }
