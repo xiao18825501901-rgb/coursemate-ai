@@ -365,10 +365,15 @@ class VisualService:
             compiled = compile_visual_spec(spec)
             spec_json = spec.model_dump_json(by_alias=True)
             spec_hash = _sha(spec_json)
+            compiled_hash = _sha(compiled.model_dump_json())
             if resumed and current.get("visual_spec_hash") != spec_hash:
                 raise RuntimeError("PROVIDER_UNKNOWN")
             workflow = self._workflow(spec)
-            cache_key = self._cache_key(current, frozen, spec, spec_hash, workflow)
+            cache_key = self._cache_key(
+                current, frozen, spec, spec_hash, compiled_hash, workflow
+            )
+            if resumed and current.get("cache_key") not in {None, cache_key}:
+                raise RuntimeError("PROVIDER_UNKNOWN")
             current = self.store.patch(
                 job_id,
                 {
@@ -584,6 +589,7 @@ class VisualService:
         frozen: dict[str, object],
         spec: VisualSpec,
         spec_hash: str,
+        compiled_hash: str,
         workflow: Workflow,
     ) -> str:
         return self.store.cache_key(
@@ -591,6 +597,7 @@ class VisualService:
             scope_key=str(frozen["scope_key"]),
             source_snapshot_hash=str(job["source_snapshot_hash"]),
             visual_spec_hash=spec_hash,
+            compiled_visual_hash=compiled_hash,
             renderer=spec.renderer.value,
             renderer_version=DETERMINISTIC_RENDERER_VERSION,
             prompt_version=str(job["prompt_version"]),

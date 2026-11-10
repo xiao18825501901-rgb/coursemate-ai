@@ -9,6 +9,7 @@ from app.config import Settings
 from app.db import Database
 from app.storage.backends import LocalStorageBackend
 from app.visual.api import _project
+from app.visual.compiler import compile_visual_spec
 from app.visual.planner import MockVisualPlannerProvider
 from app.visual.providers.aliyun_eas import ProviderRendererUnavailable
 from app.visual.providers.base import ProviderResult
@@ -112,6 +113,33 @@ def test_service_renders_valid_asset_and_reuses_private_cache(tmp_path: Path) ->
     )
 
 
+def test_compiled_prompt_change_invalidates_reuse_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, provider = make_service(tmp_path)
+    first, _ = service.create_job(request(request_id="request-before-prompt-change"))
+    assert service.run_once("worker-1")["status"] == "COMPLETED"
+
+    def changed_compiler(spec):
+        compiled = compile_visual_spec(spec)
+        return compiled.model_copy(
+            update={"positive_prompt": compiled.positive_prompt + "\nNew rendering contract."}
+        )
+
+    monkeypatch.setattr("app.visual.service.compile_visual_spec", changed_compiler)
+    second, _ = service.create_job(request(request_id="request-after-prompt-change"))
+    rendered = service.run_once("worker-1")
+
+    assert rendered is not None
+    assert rendered["status"] == "COMPLETED"
+    assert rendered["cache_hit"] == 0
+    assert provider.submit_count == 2
+    assert (
+        service.store.assets_for_job(str(second["id"]), user_id="user-1")[0]["id"]
+        != service.store.assets_for_job(str(first["id"]), user_id="user-1")[0]["id"]
+    )
+
+
 def test_deterministic_diagram_never_invokes_provider(tmp_path: Path) -> None:
     service, provider = make_service(tmp_path)
     value = request(question="Show the CPU pipeline stages")
@@ -149,12 +177,15 @@ def test_deterministic_renderer_cache_key_rejects_legacy_renderer_version(
         model_version="deterministic-v1",
     )
 
-    current_key = service._cache_key(job, value.__dict__, spec, "spec-hash", workflow)
+    current_key = service._cache_key(
+        job, value.__dict__, spec, "spec-hash", "compiled-hash", workflow
+    )
     legacy_key = service._cache_key(
         job,
         value.__dict__,
         spec,
         "spec-hash",
+        "compiled-hash",
         legacy_workflow,
     )
 
