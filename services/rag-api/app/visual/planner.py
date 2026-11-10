@@ -94,12 +94,16 @@ class GroundedPolicyVisualPlannerProvider:
             r"内质网.*高尔基体.*(?:蛋白质|分泌蛋白|膜蛋白).*运输",
             r"囊泡.*(?:出芽|融合).*高尔基体",
         ):
-            return "VIDEO", "COMFY_VIDEO", [
-                "rough endoplasmic reticulum",
-                "transport vesicle budding",
-                "Golgi apparatus",
-                "plasma membrane",
-            ]
+            return (
+                "VIDEO",
+                "COMFY_VIDEO",
+                [
+                    "rough endoplasmic reticulum",
+                    "transport vesicle budding",
+                    "Golgi apparatus",
+                    "plasma membrane",
+                ],
+            )
         if _contains(q, r"two gears", r"gears transfer motion"):
             return "VIDEO", "COMFY_VIDEO", ["two meshed gears", "opposite rotation"]
         if _contains(
@@ -158,6 +162,20 @@ class GroundedPolicyVisualPlannerProvider:
         visual_type, renderer, includes = self._decision(question)
         kmeans = None
         is_kmeans = _contains(question, r"k[-\s]?means", r"K均值")
+        is_phospholipid_bilayer = _contains(
+            question,
+            r"phospholipid",
+            r"hydrophobic\s+tails?",
+            r"流动镶嵌模型",
+            r"磷脂",
+            r"疏水尾部",
+        ) and _contains(
+            question,
+            r"bilayer",
+            r"membrane",
+            r"膜",
+            r"疏水",
+        )
         if is_kmeans:
             kmeans = delivered_example(answer)
             if kmeans is not None:
@@ -170,10 +188,13 @@ class GroundedPolicyVisualPlannerProvider:
                 includes = [p.label for p in kmeans.points]
             else:
                 visual_type, renderer, includes = "NONE", "NONE", []
+        if is_phospholipid_bilayer:
+            visual_type, renderer = "DIAGRAM", "SVG"
+            includes = ["疏水尾部", "水环境", "膜内侧"]
         if action == "diagram" and renderer != "NONE":
             visual_type, renderer = "DIAGRAM", "SVG"
-        elif action == "visual" and renderer == "NONE" and answer.strip() and not is_kmeans:
-            visual_type, renderer, includes = "IMAGE", "COMFY_IMAGE", []
+        elif action == "visual" and renderer == "NONE":
+            visual_type, renderer, includes = "NONE", "NONE", []
         elif action == "animate" and renderer == "NONE" and not is_kmeans and includes:
             visual_type, renderer, includes = "ANIMATION", "MANIM", ["ordered states"]
         should_generate = renderer != "NONE"
@@ -181,7 +202,6 @@ class GroundedPolicyVisualPlannerProvider:
         answer_fact = ""
         supported: list[str] = []
         if natural:
-            subject = _prompt_fragment(question, limit=700)
             answer_fact = _answer_fragment(answer)
             supported_claims = [
                 _prompt_fragment(item.get("supported_claim"))
@@ -190,9 +210,7 @@ class GroundedPolicyVisualPlannerProvider:
             ]
             supported_claims = [claim for claim in supported_claims if _is_visual_claim(claim)]
             supported = list(
-                dict.fromkeys(
-                    ([answer_fact] if answer_fact else []) + supported_claims
-                )
+                dict.fromkeys(([answer_fact] if answer_fact else []) + supported_claims)
             )
             includes = list(dict.fromkeys(supported))[:4]
         labels = [] if natural else includes
@@ -217,6 +235,10 @@ class GroundedPolicyVisualPlannerProvider:
             diagram["edges"] = []
             diagram["kmeans"] = kmeans.model_dump()
             labels = []
+        if is_phospholipid_bilayer and diagram is not None:
+            diagram["edges"] = []
+            diagram["phospholipid_bilayer"] = {"provenance": "DELIVERED_GROUNDED_EXPLANATION"}
+            labels = []
         animation_steps = []
         if renderer == "MANIM":
             animation_steps = [
@@ -230,9 +252,7 @@ class GroundedPolicyVisualPlannerProvider:
                 "locator": str(item.get("locator") or "source"),
                 "supported_claim": (
                     claim
-                    if _is_visual_claim(
-                        claim := _prompt_fragment(item.get("supported_claim"))
-                    )
+                    if _is_visual_claim(claim := _prompt_fragment(item.get("supported_claim")))
                     else answer_fact or "Course-grounded visual explanation."
                 ),
             }
@@ -250,7 +270,8 @@ class GroundedPolicyVisualPlannerProvider:
                         "Create a clear educational illustration that teaches: "
                         f"{_prompt_fragment(question, limit=300)}"
                         + (
-                            f" Use this grounded explanation: {_prompt_fragment(answer_fact, limit=420)}"
+                            " Use this grounded explanation: "
+                            f"{_prompt_fragment(answer_fact, limit=420)}"
                             if answer_fact
                             else ""
                         ),

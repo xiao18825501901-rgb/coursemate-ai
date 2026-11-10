@@ -85,17 +85,26 @@ class KMeansExample(StrictModel):
         return self
 
 
+class PhospholipidBilayerExample(StrictModel):
+    """A grounded cross-section for the hydrophobic-core teaching relationship."""
+
+    provenance: Literal["DELIVERED_GROUNDED_EXPLANATION"]
+
+
 class Diagram(StrictModel):
     layout: Literal["AUTO", "LEFT_RIGHT", "TOP_DOWN", "RADIAL", "TIMELINE", "COORDINATE"]
     nodes: list[DiagramNode] = Field(max_length=60)
     edges: list[DiagramEdge] = Field(max_length=120)
     kmeans: KMeansExample | None = None
+    phospholipid_bilayer: PhospholipidBilayerExample | None = None
 
     @model_serializer(mode="wrap")
     def preserve_legacy_identity(self, handler):
         value = handler(self)
         if self.kmeans is None:
             value.pop("kmeans", None)
+        if self.phospholipid_bilayer is None:
+            value.pop("phospholipid_bilayer", None)
         return value
 
 

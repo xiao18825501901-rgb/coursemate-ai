@@ -28,7 +28,11 @@ Priority order:
 Renderer guidance:
 - B+ tree / red-black tree / ER / SQL plan / CPU pipeline / topology / Dijkstra / BFS/DFS / FSM / UML / logic circuit → deterministic/Graphviz/Mermaid/SVG.
 - Matrix transformation order, exact pointer changes, sorting steps, geometric transforms → MANIM or deterministic animation.
+- Molecular structure, membrane cross-section, anatomical structure, and any view whose
+  orientation or relative placement is the teaching fact → SVG/deterministic, not an image model.
 - Gravitational lensing conceptual scene, physical/biological natural scene → COMFY_IMAGE; COMFY_VIDEO only if motion is essential.
+- A user asking for a picture does not justify a generative renderer when the answer depends on
+  exact structure, orientation, labels, or typography. Use the deterministic renderer or NONE.
 - Acronym/short definition such as "What does ACID stand for?" → usually NONE.
 
 Source grounding:

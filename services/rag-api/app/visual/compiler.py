@@ -52,6 +52,12 @@ def _generative_prompt(spec: VisualSpec, exact: list[str]) -> str:
         value for value in (spec.style.background, spec.style.color_guidance) if value
     )
     sections = [
+        "Generation contract:\n"
+        "Create one large, edge-to-edge textbook scientific illustration. Fill the frame with "
+        "the teaching subject. Use only visible objects, surfaces, positions, proportions, "
+        "colors and unlabeled motion/relationship arrows. Do not render any letters, words, "
+        "numbers, labels, legends, captions, callouts, watermark or pseudo-text; gibberish "
+        "typography is a failed result.",
         f"Subject:\n{spec.visual_goal.strip()}",
         "Required elements:\n"
         + (_bullet_lines(required) or "- Keep only the course-grounded subject."),
@@ -60,8 +66,7 @@ def _generative_prompt(spec: VisualSpec, exact: list[str]) -> str:
         f"View and composition:\n{view or 'one clear, unobstructed teaching view'}",
         "Lighting and background:\n"
         f"{background or 'even, neutral lighting with a clean observable background'}",
-        "Forbidden elements:\n"
-        + (_bullet_lines(spec.must_not_include) or "- unsupported facts"),
+        "Forbidden elements:\n" + (_bullet_lines(spec.must_not_include) or "- unsupported facts"),
         f"Educational purpose:\n{spec.pedagogical_reason.strip()}",
     ]
     if spec.renderer is Renderer.COMFY_VIDEO:
@@ -77,7 +82,12 @@ def _svg(spec: VisualSpec) -> str:
     diagram = spec.diagram
     if diagram is not None and diagram.kmeans is not None:
         from app.visual.kmeans import render
+
         return render(diagram.kmeans, spec.language)
+    if diagram is not None and diagram.phospholipid_bilayer is not None:
+        from app.visual.membrane import render
+
+        return render(spec.language)
     if diagram is None:
         return '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="576"/>'
     node_width = 150
@@ -155,9 +165,7 @@ def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
             # The pinned FLUX workflow zeroes its negative conditioning, so keeping
             # must-not-include facts only in the positive prompt is truthful.
             negative_prompt=(
-                ", ".join(spec.must_not_include)
-                if spec.renderer is Renderer.COMFY_VIDEO
-                else ""
+                ", ".join(spec.must_not_include) if spec.renderer is Renderer.COMFY_VIDEO else ""
             ),
             duration_seconds=spec.duration_seconds,
             frames=wan_frames(spec.duration_seconds)

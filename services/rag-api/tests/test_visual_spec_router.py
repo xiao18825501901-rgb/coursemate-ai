@@ -223,13 +223,12 @@ def test_conceptual_image_prompt_contains_question_and_grounded_claim() -> None:
     assert "conceptual scene" not in prompt
 
 
-def test_conceptual_image_uses_answer_when_citation_adapter_only_provides_document_name() -> None:
+def test_phospholipid_structure_uses_deterministic_teaching_diagram() -> None:
     planner = MockVisualPlannerProvider()
     spec = planner.plan(
         question="为什么流动镶嵌模型中的疏水尾部朝向膜的内侧？",
         answer=(
-            "因为疏水尾部无法与水形成氢键，所以在水环境中会彼此相对、朝向膜内侧。"
-            " [S2][S3][S6]"
+            "因为疏水尾部无法与水形成氢键，所以在水环境中会彼此相对、朝向膜内侧。 [S2][S3][S6]"
         ),
         evidence=[
             {
@@ -243,13 +242,31 @@ def test_conceptual_image_uses_answer_when_citation_adapter_only_provides_docume
         language="zh-CN",
     )
     compiled = compile_visual_spec(spec)
-    prompt = compiled.positive_prompt
 
-    assert spec.renderer is Renderer.COMFY_IMAGE
-    assert "Biology2e-OP.pdf" not in prompt
-    assert "[S2]" not in prompt
-    assert "疏水尾部无法与水形成氢键" in prompt
-    assert "Show the supported concept" not in prompt
+    assert spec.visual_type is VisualType.DIAGRAM
+    assert spec.renderer is Renderer.SVG
+    assert spec.semantic_precision == "EXACT"
+    assert spec.diagram is not None
+    assert spec.diagram.phospholipid_bilayer is not None
+    assert compiled.positive_prompt == ""
+    assert 'data-renderer="phospholipid-bilayer"' in compiled.deterministic_source
+    assert "疏水尾部朝向膜内侧" in compiled.deterministic_source
+    assert "main concept" not in compiled.deterministic_source
+
+
+def test_visual_action_does_not_force_an_unsafe_comfy_image() -> None:
+    planner = MockVisualPlannerProvider()
+    spec = planner.plan(
+        question="请用图片解释一个没有受支持视觉结构的概念。",
+        answer="课程文字给出了一个定义。",
+        evidence=[],
+        action="visual",
+        language="zh-CN",
+    )
+
+    assert spec.visual_type is VisualType.NONE
+    assert spec.renderer is Renderer.NONE
+    assert spec.should_generate is False
 
 
 def test_endomembrane_protein_transport_routes_to_grounded_generative_video() -> None:
@@ -324,9 +341,11 @@ def test_generative_prompt_uses_structured_course_grounded_sections() -> None:
     assert "A relates to B." in prompt
     assert "extra planets" in prompt
     assert "The learner must see why the observer detects an arc." in prompt
+    assert "Do not render any letters" in prompt
+    assert "pseudo-text" in prompt
 
 
-def test_flux_image_uses_the_frozen_klein_sampler_and_does_not_claim_negative_conditioning() -> None:
+def test_flux_image_uses_frozen_klein_sampler_without_negative_conditioning() -> None:
     spec = VisualSpec.model_validate(
         valid_spec(
             visual_type="IMAGE",
