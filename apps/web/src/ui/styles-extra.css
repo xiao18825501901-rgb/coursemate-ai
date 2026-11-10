@@ -246,3 +246,8 @@
   .course-banner-actions{width:100%;align-items:stretch;flex-direction:column}
   .course-banner-actions .btn{width:100%}
 }
+
+@media(max-width:480px){
+  .workspace-toolbar>.muted.small{display:none}
+  .model-label{flex:none;white-space:nowrap}
+}

@@ -21,10 +21,19 @@ export class VisualAssetCard extends React.Component {
     }
     download = () => {
         if (!this.state.url) return;
+        const extension = {
+            'image/png': 'png',
+            'image/jpeg': 'jpg',
+            'image/svg+xml': 'svg',
+            'video/mp4': 'mp4',
+        }[this.props.asset.mime_type];
         const link = document.createElement('a');
         link.href = this.state.url;
-        link.download = `coursejesus-visual-${this.props.asset.id}`;
+        link.download = `coursejesus-visual-${this.props.asset.id}${extension ? `.${extension}` : ''}`;
+        link.hidden = true;
+        document.body.appendChild(link);
         link.click();
+        link.remove();
     };
     render() {
         const { asset } = this.props;
