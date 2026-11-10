@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({ request: vi.fn() }));
@@ -10,16 +10,12 @@ import { VisualJobStatus } from './VisualJobStatus.jsx';
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe('private video asset', () => {
-  it('attaches a named download anchor before clicking it', async () => {
+  it('renders a named native download link for authenticated media', async () => {
     vi.stubGlobal('URL', class extends URL {
       static createObjectURL = vi.fn(() => 'blob:private-video');
       static revokeObjectURL = vi.fn();
     });
     api.request.mockResolvedValue({ blob: async () => new Blob(['transport-fixture'], { type: 'video/mp4' }) });
-    let clicked: { connected: boolean; download: string } | undefined;
-    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
-      clicked = { connected: this.isConnected, download: this.download };
-    });
 
     const { unmount } = render(<VisualAssetCard
       asset={{ id: 'video-1', content_url: '/visual-assets/video-1/content', mime_type: 'video/mp4', alt_text: 'Course motion' } as any}
@@ -27,10 +23,9 @@ describe('private video asset', () => {
     />);
     await screen.findByLabelText('Course motion');
 
-    fireEvent.click(screen.getByRole('button', { name: 'visual.download' }));
-
-    expect(clicked).toEqual({ connected: true, download: 'coursejesus-visual-video-1.mp4' });
-    expect(document.querySelector('a[download]')).toBeNull();
+    const link = screen.getByRole('link', { name: 'visual.download' });
+    expect(link).toHaveAttribute('href', 'blob:private-video');
+    expect(link).toHaveAttribute('download', 'coursejesus-visual-video-1.mp4');
     unmount();
   });
 
