@@ -4,18 +4,29 @@ import { VisualJobStatus } from './VisualJobStatus.jsx';
 import { defaultUiTranslate } from './UiLocale';
 
 const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN']);
+const LEGACY_PLACEHOLDER_ALT_TEXT = new Set(['main concept', 'show the supported concept.']);
+
+function isLegacyPlaceholderJob(job) {
+    const assets = Array.isArray(job.assets) ? job.assets : [];
+    return job.status === 'COMPLETED'
+        && assets.length > 0
+        && assets.every(asset => asset.mime_type === 'image/svg+xml'
+            && LEGACY_PLACEHOLDER_ALT_TEXT.has(String(asset.alt_text || '').trim().toLowerCase()));
+}
 
 function partitionJobsByFreshness(jobs) {
     const latest = new Map();
-    for (const job of jobs) {
+    const legacyIds = new Set(jobs.filter(isLegacyPlaceholderJob).map(job => job.id));
+    const currentJobs = jobs.filter(job => !legacyIds.has(job.id));
+    for (let index = currentJobs.length - 1; index >= 0; index -= 1) {
+        const job = currentJobs[index];
         const key = job.action || `job:${job.id}`;
-        latest.delete(key);
-        latest.set(key, job);
+        if (!latest.has(key)) latest.set(key, job);
     }
     const latestIds = new Set([...latest.values()].map(job => job.id));
     return {
         latest: [...latest.values()],
-        older: jobs.filter(job => !latestIds.has(job.id)),
+        older: jobs.filter(job => legacyIds.has(job.id) || !latestIds.has(job.id)),
     };
 }
 

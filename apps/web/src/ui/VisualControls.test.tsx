@@ -70,6 +70,41 @@ describe('Visual Learning controls', () => {
     expect(screen.getByText('main concept')).toBeInTheDocument();
   });
 
+  it('orders the newest result across teaching actions before older action results', async () => {
+    api.listMessageVisuals.mockResolvedValue({
+      items: [
+        { id: 'job-old-animate', action: 'animate', status: 'COMPLETED', retry_count: 0, cache_hit: false, assets: [{ id: 'asset-old-animate', mime_type: 'image/svg+xml', alt_text: 'Old placeholder animation', content_url: '/old-animation' }] },
+        { id: 'job-old-visual', action: 'visual', status: 'COMPLETED', retry_count: 0, cache_hit: false, assets: [{ id: 'asset-old-visual', mime_type: 'image/svg+xml', alt_text: 'Old placeholder image', content_url: '/old-image' }] },
+        { id: 'job-new-diagram', action: 'diagram', status: 'COMPLETED', retry_count: 0, cache_hit: false, assets: [{ id: 'asset-new-diagram', mime_type: 'image/svg+xml', alt_text: 'K-means assignments and SSE', content_url: '/new-diagram' }] },
+      ],
+    });
+    const { container } = render(<VisualControls enabled courseId="course-1" pairId="pair-1" message={{ id: 'message-cross-action' } as any}/>);
+
+    await waitFor(() => expect(container.querySelectorAll('.visual-job')).toHaveLength(3));
+    const visibleText = [...container.querySelectorAll('.visual-job')].map(card => card.textContent);
+    expect(visibleText).toEqual([
+      expect.stringContaining('K-means assignments and SSE'),
+      expect.stringContaining('Old placeholder image'),
+      expect.stringContaining('Old placeholder animation'),
+    ]);
+  });
+
+  it('moves legacy placeholder media into history instead of presenting it as current teaching', async () => {
+    api.listMessageVisuals.mockResolvedValue({
+      items: [
+        { id: 'job-legacy-visual', action: 'visual', status: 'COMPLETED', retry_count: 0, cache_hit: false, assets: [{ id: 'asset-legacy-visual', mime_type: 'image/svg+xml', alt_text: 'Show the supported concept.', content_url: '/legacy-image' }] },
+        { id: 'job-legacy-animate', action: 'animate', status: 'COMPLETED', retry_count: 0, cache_hit: false, assets: [{ id: 'asset-legacy-animate', mime_type: 'image/svg+xml', alt_text: 'Show the supported concept.', content_url: '/legacy-animation' }] },
+        { id: 'job-grounded', action: 'diagram', status: 'COMPLETED', retry_count: 0, cache_hit: false, assets: [{ id: 'asset-grounded', mime_type: 'image/svg+xml', alt_text: 'K-means assignments and SSE', content_url: '/grounded' }] },
+      ],
+    });
+    render(<VisualControls enabled courseId="course-1" pairId="pair-1" message={{ id: 'message-legacy' } as any}/>);
+
+    expect(await screen.findByText('K-means assignments and SSE')).toBeInTheDocument();
+    expect(screen.queryByText('Show the supported concept.')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '历史版本（2）' }));
+    expect(screen.getAllByText('Show the supported concept.')).toHaveLength(2);
+  });
+
   it('keeps the text usable while exposing safe retry and deterministic fallback', () => {
     const onRetry = vi.fn();
     const onFallback = vi.fn();
