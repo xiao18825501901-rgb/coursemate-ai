@@ -80,6 +80,17 @@ def _is_endomembrane_transport(question: str) -> bool:
     )
 
 
+def _is_hdd_motion(question: str) -> bool:
+    q = question.lower()
+    return _contains(
+        q,
+        r"mechanical hard (?:disk|drive).*(?:platter|actuator)",
+        r"platter.*(?:rotate|rotation).*actuator",
+        r"执行器臂.*径向移动.*盘片.*(?:旋转|转动)",
+        r"机械硬盘.*盘片.*执行器臂",
+    )
+
+
 class GroundedPolicyVisualPlannerProvider:
     """Deterministic, source-grounded production router with no provider cost."""
 
@@ -97,6 +108,17 @@ class GroundedPolicyVisualPlannerProvider:
             r"what does select distinct do",
         ):
             return "NONE", "NONE", []
+        if _is_hdd_motion(question):
+            return (
+                "VIDEO",
+                "COMFY_VIDEO",
+                [
+                    "one mechanical hard-disk drive body remaining fixed",
+                    "one circular platter rotating about a central spindle",
+                    "one actuator arm making a bounded radial sweep",
+                    "one read/write head above the platter",
+                ],
+            )
         if _contains(
             q,
             r"endomembrane.*(?:protein|membrane).*transport",
@@ -172,6 +194,7 @@ class GroundedPolicyVisualPlannerProvider:
     ) -> VisualSpec:
         visual_type, renderer, includes = self._decision(question)
         is_endomembrane_transport = _is_endomembrane_transport(question)
+        is_hdd_motion = _is_hdd_motion(question)
         kmeans = None
         is_kmeans = _contains(question, r"k[-\s]?means", r"K均值")
         is_phospholipid_bilayer = _contains(
@@ -281,11 +304,85 @@ class GroundedPolicyVisualPlannerProvider:
                     "highlight_ids": [],
                 },
             ]
+        elif renderer == "COMFY_VIDEO" and is_hdd_motion:
+            animation_steps = [
+                {
+                    "order": 1,
+                    "label": (
+                        "The drive body, circular platter, central spindle, actuator arm and "
+                        "read/write head are visible in one fixed cutaway view."
+                    ),
+                    "highlight_ids": [],
+                },
+                {
+                    "order": 2,
+                    "label": (
+                        "The platter rotates continuously around the fixed spindle while the "
+                        "actuator arm performs one bounded radial sweep above it."
+                    ),
+                    "highlight_ids": [],
+                },
+                {
+                    "order": 3,
+                    "label": (
+                        "The same drive body and objects remain visible with only the platter "
+                        "angle and actuator-arm radial position changed."
+                    ),
+                    "highlight_ids": [],
+                },
+            ]
         elif renderer == "MANIM":
             animation_steps = [
                 {"order": index + 1, "label": value, "highlight_ids": [nodes[index]["id"]]}
                 for index, value in enumerate(includes or ["state"])
             ]
+        natural_style = {
+            "tone": (
+                "TEXTBOOK"
+                if renderer == "COMFY_VIDEO" and (is_hdd_motion or is_endomembrane_transport)
+                else "CONCEPTUAL"
+            )
+        }
+        if renderer == "COMFY_VIDEO" and is_hdd_motion:
+            natural_style.update(
+                {
+                    "background": "clean neutral technical teaching background",
+                    "composition": (
+                        "one complete drive fills the frame; all moving parts remain visible"
+                    ),
+                    "camera": "locked fixed overhead cutaway view",
+                }
+            )
+        elif renderer == "COMFY_VIDEO" and is_endomembrane_transport:
+            natural_style.update(
+                {
+                    "background": "clean microscopic cell environment",
+                    "composition": (
+                        "the rough ER, Golgi apparatus and plasma membrane remain visible"
+                    ),
+                    "camera": "locked fixed side view",
+                }
+            )
+        natural_forbidden = [
+            "unrelated fantasy elements",
+            "watermark",
+            "unreadable text",
+            "unsupported facts",
+            "camera cuts",
+            "montage",
+            "scene changes",
+        ]
+        if renderer == "COMFY_VIDEO" and is_hdd_motion:
+            natural_forbidden.extend(
+                [
+                    "SSD",
+                    "scratches",
+                    "sparks",
+                    "people",
+                    "readable technical text",
+                    "exact RPM or seek-time numbers",
+                ]
+            )
         grounding = [
             {
                 "source_id": str(item["source_id"]),
@@ -343,21 +440,12 @@ class GroundedPolicyVisualPlannerProvider:
                 "timing": "ON_DEMAND",
                 "source_grounding": grounding,
                 "must_include": includes,
-                "must_not_include": (
-                    [
-                        "unrelated fantasy elements",
-                        "watermark",
-                        "unreadable text",
-                        "unsupported facts",
-                    ]
-                    if natural
-                    else ["unsupported facts"]
-                ),
+                "must_not_include": natural_forbidden if natural else ["unsupported facts"],
                 "exact_labels": labels,
                 "equations": [],
                 "code_elements": [],
                 "reference_assets": [],
-                "style": {"tone": "CONCEPTUAL" if natural else "CLEAN_TECHNICAL"},
+                "style": natural_style if natural else {"tone": "CLEAN_TECHNICAL"},
                 "duration_seconds": 3 if renderer == "COMFY_VIDEO" else None,
                 "aspect_ratio": "16:9",
                 "cost_tier": "EXPENSIVE"

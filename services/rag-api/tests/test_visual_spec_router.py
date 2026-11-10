@@ -513,6 +513,58 @@ def test_wan_prompt_rejects_non_video_semantics_without_stage_order() -> None:
     assert "Final state:\nPreserve A and B at the end" in compiled.positive_prompt
 
 
+def test_hdd_motion_routes_to_a_single_fixed_camera_continuous_action() -> None:
+    planner = MockVisualPlannerProvider()
+    spec = planner.plan(
+        question=(
+            "请严格依据课程资料，教我区分机械硬盘中盘片的连续旋转与执行器臂有限的径向移动。"
+            "用文字说明两个运动改变的是不同位置维度，并保持同一硬盘固定不动。"
+            "不得声称精确转速、寻道时间、数据位置或内部制造细节，也不得出现刮擦、火花、"
+            "SSD、人物或可读技术文字。"
+        ),
+        answer=(
+            "机械硬盘中的圆形盘片绕中央主轴连续旋转，执行器臂带动读写头在盘片上方进行"
+            "有限的径向移动；同一硬盘主体保持固定。"
+        ),
+        evidence=[
+            {
+                "source_id": "hard-disk-visual-source",
+                "source_version": "v1",
+                "locator": "Unit 2",
+                "supported_claim": (
+                    "The circular platters rotate around a central spindle while the actuator "
+                    "arm moves the read/write head across radial positions above the platters; "
+                    "the drive body remains fixed."
+                ),
+            }
+        ],
+        action="animate",
+        language="zh-CN",
+    )
+    compiled = compile_visual_spec(spec)
+    prompt = compiled.positive_prompt
+
+    assert spec.visual_type is VisualType.VIDEO
+    assert spec.renderer is Renderer.COMFY_VIDEO
+    assert [step.label for step in spec.animation_steps] == [
+        (
+            "The drive body, circular platter, central spindle, actuator arm and "
+            "read/write head are visible in one fixed cutaway view."
+        ),
+        (
+            "The platter rotates continuously around the fixed spindle while the actuator "
+            "arm performs one bounded radial sweep above it."
+        ),
+        (
+            "The same drive body and objects remain visible with only the platter angle and "
+            "actuator-arm radial position changed."
+        ),
+    ]
+    assert "fixed cutaway view" in prompt
+    assert "platter rotates continuously" in prompt
+    assert "one bounded radial sweep" in prompt
+
+
 def test_svg_compiler_renders_validated_nodes_edges_and_edge_labels() -> None:
     spec = VisualSpec.model_validate(valid_spec())
     compiled = compile_visual_spec(spec)
