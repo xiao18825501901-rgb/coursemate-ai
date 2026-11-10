@@ -549,8 +549,11 @@ def test_hdd_motion_routes_to_a_single_fixed_camera_continuous_action() -> None:
     assert spec.must_include == [
         "one mechanical hard-disk drive body remaining fixed",
         "one circular platter rotating about a central spindle",
-        "one actuator arm making a bounded radial sweep",
-        "one read/write head above the platter",
+        (
+            "one visible actuator arm spanning from a pivot beside the platter to the "
+            "read/write head above the platter"
+        ),
+        "one read/write head visibly changing bounded radial position above the platter",
     ]
     assert [step.label for step in spec.animation_steps] == [
         (
@@ -569,6 +572,8 @@ def test_hdd_motion_routes_to_a_single_fixed_camera_continuous_action() -> None:
     assert "fixed cutaway view" in prompt
     assert "platter rotates continuously" in prompt
     assert "one bounded radial sweep" in prompt
+    assert "direct overhead cutaway view" in prompt
+    assert "actuator arm is fully exposed beside the platter" in prompt
     assert "章节定位" not in prompt
     assert "- CourseJesus_PC_Hardware_Visual_Acceptance_20261009.md" not in prompt
 

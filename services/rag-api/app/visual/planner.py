@@ -14,8 +14,11 @@ PROMPT_PATH = Path(__file__).with_name("prompts") / "visual_router_planner_v1.sy
 HDD_VISUAL_REQUIRED = [
     "one mechanical hard-disk drive body remaining fixed",
     "one circular platter rotating about a central spindle",
-    "one actuator arm making a bounded radial sweep",
-    "one read/write head above the platter",
+    (
+        "one visible actuator arm spanning from a pivot beside the platter to the "
+        "read/write head above the platter"
+    ),
+    "one read/write head visibly changing bounded radial position above the platter",
 ]
 HDD_GROUNDED_CLAIM = (
     "The circular platter rotates continuously around the fixed central spindle while one "
@@ -400,9 +403,10 @@ class GroundedPolicyVisualPlannerProvider:
                 {
                     "background": "clean neutral technical teaching background",
                     "composition": (
-                        "one complete drive fills the frame; all moving parts remain visible"
+                        "one complete drive is centered in the frame; the platter is fully "
+                        "visible and the actuator arm is fully exposed beside the platter"
                     ),
-                    "camera": "locked fixed overhead cutaway view",
+                    "camera": "locked direct overhead cutaway view with the top cover removed",
                 }
             )
         elif renderer == "COMFY_VIDEO" and is_endomembrane_transport:
