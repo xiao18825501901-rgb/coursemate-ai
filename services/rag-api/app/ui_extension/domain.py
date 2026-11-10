@@ -244,12 +244,15 @@ class V3DomainAdapter:
     def _is_admin(self, subject: str) -> bool:
         return subject in self.settings.admin_user_id_set
 
-    def _workspace_row(self, course_id: str, subject: str) -> sqlite3.Row | None:
-        """Return the caller's workspace for a course, creating it on first use.
+    def _workspace_row(
+        self, course_id: str, subject: str, *, create: bool = True
+    ) -> sqlite3.Row | None:
+        """Return the caller's workspace for a course.
 
         Creating the workspace is what gives the user a private corpus course for
         their own uploads; it is the same call the V3 learning page makes, so no
-        second storage model is introduced.
+        second storage model is introduced. Read-only teaching paths may opt out
+        of creation so public content remains available at the enrollment cap.
         """
 
         cached = _cache().workspaces.get(course_id)
@@ -263,6 +266,11 @@ class V3DomainAdapter:
         if row is not None:
             _cache().workspaces[course_id] = dict(row)
             return row
+        if not create:
+            # Reading the public course or its teaching context is not enrollment.
+            # Treat the caller as having no private scope rather than consuming a
+            # workspace slot (or turning a quota refusal into a teaching outage).
+            return None
         workspace = join_course(
             self.database, course_id, subject, self.settings.user_course_max_courses
         )
@@ -1059,7 +1067,7 @@ class V3DomainAdapter:
                     query = candidate_query.strip()
             except Exception:  # pragma: no cover - rewrite is best effort
                 query = raw_query
-        workspace = self._workspace_row(course_id, subject)
+        workspace = self._workspace_row(course_id, subject, create=False)
         # Conservative alias expansion (deterministic, never reaches Jev): a concept
         # the query already names may contribute its other accepted names, which can
         # only ADD recall. The user's original query is always the prefix, an
@@ -1518,7 +1526,7 @@ class V3DomainAdapter:
             snapshot: dict[str, Any] = {"registry": [], "members": []}
             _cache().snapshots[course_id] = snapshot
             return snapshot
-        workspace = self._workspace_row(course_id, subject)
+        workspace = self._workspace_row(course_id, subject, create=False)
         if workspace is None:
             snapshot = {"registry": [], "members": []}
             _cache().snapshots[course_id] = snapshot

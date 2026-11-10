@@ -445,6 +445,19 @@ def test_public_original_readable_at_workspace_cap_without_enrolling(
     )
     assert original.status_code == 200, original.text
     assert original.content == _markdown()
+    # Reading shared course material or serving a text lesson is not enrollment.
+    # Both paths must remain usable at the workspace cap and must not silently
+    # create the workspace that the quota check just refused.
+    knowledge = client.get(
+        f"{UI}/courses/cs3481/knowledge", headers=auth("Bearer token-a")
+    )
+    assert knowledge.status_code == 200, knowledge.text
+    assert knowledge.json() == []
+    retrieved = _retrieve(
+        client, "Bearer token-a", "cs3481", "K-means clustering"
+    )
+    assert retrieved
+    assert any(source["name"] == "lecture.md" for source in retrieved)
     with database.connect() as connection:
         assert connection.execute(
             "SELECT COUNT(*) FROM learning_workspaces WHERE owner_user_id='user-a'"
