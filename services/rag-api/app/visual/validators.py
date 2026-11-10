@@ -47,8 +47,10 @@ def validate_output(
             "line",
             "circle",
             "ellipse",
+            "lineargradient",
             "polygon",
             "polyline",
+            "stop",
         }
         for element in root.iter():
             tag = str(element.tag).rsplit("}", 1)[-1].lower()

@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from app.visual.compiler import compile_visual_spec
 from app.visual.planner import MockVisualPlannerProvider, load_runtime_prompt
 from app.visual.spec import Renderer, VisualSpec, VisualType, validate_source_grounding
+from app.visual.validators import validate_output
 from app.visual.workflows import WorkflowRegistry
 
 FIXTURES = Path(__file__).parent / "fixtures" / "visual_router_cases_v1.json"
@@ -252,6 +253,17 @@ def test_phospholipid_structure_uses_deterministic_teaching_diagram() -> None:
     assert 'data-renderer="phospholipid-bilayer"' in compiled.deterministic_source
     assert "疏水尾部朝向膜内侧" in compiled.deterministic_source
     assert "main concept" not in compiled.deterministic_source
+    validate_output(
+        compiled.deterministic_source.encode(),
+        mime_type="image/svg+xml",
+        width=compiled.width,
+        height=compiled.height,
+        duration_seconds=None,
+        max_bytes=2_000_000,
+        max_width=2048,
+        max_height=2048,
+        max_duration_seconds=15,
+    )
 
 
 def test_visual_action_does_not_force_an_unsafe_comfy_image() -> None:
