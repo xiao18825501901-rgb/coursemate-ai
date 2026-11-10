@@ -149,6 +149,73 @@ def test_authenticated_visual_job_to_asset_and_cross_user_denial(client: TestCli
     assert client.get(UI + asset["content_url"], headers=auth("Bearer token-b")).status_code == 404
 
 
+def test_legacy_local_asset_content_remains_servable_after_storage_backend_change(
+    client: TestClient,
+) -> None:
+    pair_id, message_id = seed_answer(client)
+    created = client.post(
+        f"{UI}/courses/visual-course/messages/{message_id}/visuals",
+        headers=auth("Bearer token-a"),
+        json={
+            "request_id": "visual-request-legacy-storage",
+            "pair_id": pair_id,
+            "action": "diagram",
+        },
+    )
+    assert created.status_code == 202, created.text
+    completed = client.app.state.visual_service.run_once("test-worker")
+    assert completed is not None and completed["status"] == "COMPLETED"
+    asset = client.app.state.visual_service.store.assets_for_job(
+        str(completed["id"]), user_id="user-a"
+    )[0]
+    assert asset["storage_backend"] == "local"
+
+    class WrongBackend:
+        name = "aliyun_oss"
+
+        def read_range(self, *_args, **_kwargs):
+            raise AssertionError("legacy local assets must not use the current OSS backend")
+
+    client.app.state.visual_service.storage = WrongBackend()  # type: ignore[assignment]
+    content = client.get(
+        f"{UI}/visual-assets/{asset['id']}/content",
+        headers=auth("Bearer token-a"),
+    )
+    assert content.status_code == 200
+    assert content.content.startswith(b"<svg")
+
+
+def test_visual_asset_supports_private_range_and_head(client: TestClient) -> None:
+    pair_id, message_id = seed_answer(client)
+    created = client.post(
+        f"{UI}/courses/visual-course/messages/{message_id}/visuals",
+        headers=auth("Bearer token-a"),
+        json={"request_id": "visual-request-range", "pair_id": pair_id, "action": "diagram"},
+    )
+    assert created.status_code == 202, created.text
+    completed = client.app.state.visual_service.run_once("test-worker")
+    assert completed is not None and completed["status"] == "COMPLETED"
+    asset = client.app.state.visual_service.store.assets_for_job(
+        str(completed["id"]), user_id="user-a"
+    )[0]
+    path = f"{UI}/visual-assets/{asset['id']}/content"
+
+    partial = client.get(
+        path,
+        headers={**auth("Bearer token-a"), "Range": "bytes=0-3"},
+    )
+    assert partial.status_code == 206
+    assert partial.content == b"<svg"
+    assert partial.headers["accept-ranges"] == "bytes"
+    assert partial.headers["content-range"] == f"bytes 0-3/{asset['size_bytes']}"
+
+    head = client.head(path, headers=auth("Bearer token-a"))
+    assert head.status_code == 200
+    assert head.content == b""
+    assert head.headers["content-length"] == str(asset["size_bytes"])
+    assert head.headers["accept-ranges"] == "bytes"
+
+
 def test_visual_assistance_defaults_off_persists_and_is_user_scoped(client: TestClient) -> None:
     seed_answer(client)
     initial = client.get(

@@ -194,8 +194,20 @@ def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
         )
     return CompiledVisual(
         renderer=spec.renderer,
-        width=340 if spec.diagram and spec.diagram.kmeans else 1024,
-        height=510 if spec.diagram and spec.diagram.kmeans else 576,
+        width=(
+            720
+            if spec.diagram and spec.diagram.phospholipid_bilayer
+            else 340
+            if spec.diagram and spec.diagram.kmeans
+            else 1024
+        ),
+        height=(
+            720
+            if spec.diagram and spec.diagram.phospholipid_bilayer
+            else 510
+            if spec.diagram and spec.diagram.kmeans
+            else 576
+        ),
         deterministic_source=source,
         overlays=[Overlay(text=value) for value in exact],
     )

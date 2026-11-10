@@ -253,6 +253,9 @@ def test_phospholipid_structure_uses_deterministic_teaching_diagram() -> None:
     assert 'data-renderer="phospholipid-bilayer"' in compiled.deterministic_source
     assert "疏水尾部朝向膜内侧" in compiled.deterministic_source
     assert "main concept" not in compiled.deterministic_source
+    assert 'viewBox="0 0 720 720"' in compiled.deterministic_source
+    assert 'font-size="34"' in compiled.deterministic_source
+    assert (compiled.width, compiled.height) == (720, 720)
     validate_output(
         compiled.deterministic_source.encode(),
         mime_type="image/svg+xml",

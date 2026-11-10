@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -174,6 +175,27 @@ def _project(service: VisualService, job: dict[str, object], *, user_id: str) ->
     }
 
 
+def _parse_http_range(value: str | None, size: int) -> tuple[int, int] | None:
+    if not value:
+        return None
+    match = re.fullmatch(r"bytes=(\d*)-(\d*)", value.strip())
+    if match is None or "," in value or size <= 0:
+        raise ValueError("unsupported range")
+    start_text, end_text = match.groups()
+    if not start_text and not end_text:
+        raise ValueError("empty range")
+    if not start_text:
+        suffix = int(end_text)
+        if suffix <= 0:
+            raise ValueError("invalid suffix")
+        return max(0, size - suffix), size - 1
+    start = int(start_text)
+    end = int(end_text) if end_text else size - 1
+    if start >= size or end < start:
+        raise ValueError("unsatisfiable range")
+    return start, min(end, size - 1)
+
+
 def visual_router(service: VisualService) -> APIRouter:
     router = APIRouter(prefix="/api/ui/v1")
 
@@ -334,28 +356,61 @@ def visual_router(service: VisualService) -> APIRouter:
             ]
         }
 
-    @router.get("/visual-assets/{asset_id}/content")
-    def visual_content(asset_id: str, user: User, request: Request):
+    def visual_content_response(
+        asset_id: str,
+        user: User,
+        request: Request,
+        *,
+        include_body: bool = True,
+    ):
         asset = service.store.get_asset(asset_id, user_id=user["id"])
         if asset is None:
             raise HTTPException(404, "视觉资源不存在")
         _authorize_course(request, str(asset["course_id"]), user["id"])
         size = int(str(asset["size_bytes"]))
-        content = service.storage.read_range(
-            str(asset["storage_key"]), start=0, end=max(0, size - 1)
-        )
-        if len(content) != size:
+        try:
+            requested = _parse_http_range(request.headers.get("range"), size)
+        except ValueError:
+            raise HTTPException(
+                416,
+                "请求的媒体范围无效",
+                headers={"Content-Range": f"bytes */{size}", "Accept-Ranges": "bytes"},
+            ) from None
+        if requested is None:
+            start, end = 0, max(0, size - 1)
+        else:
+            start, end = requested
+        try:
+            content = service.read_asset_range(asset, start=start, end=end)
+        except Exception:
+            raise HTTPException(503, "视觉资源暂时不可读取") from None
+        expected = end - start + 1
+        if len(content) != expected:
             raise HTTPException(503, "视觉资源暂时不可读取")
+        headers = {
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": f'inline; filename="{asset_id}"',
+            "ETag": f'"{asset["sha256"]}"',
+            "X-Content-Type-Options": "nosniff",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(size if requested is None else expected),
+        }
+        if requested is not None:
+            headers["Content-Range"] = f"bytes {start}-{end}/{size}"
         return Response(
-            content,
+            content if include_body else b"",
             media_type=str(asset["mime_type"]),
-            headers={
-                "Cache-Control": "private, no-store",
-                "Content-Disposition": f'inline; filename="{asset_id}"',
-                "ETag": f'"{asset["sha256"]}"',
-                "X-Content-Type-Options": "nosniff",
-            },
+            status_code=206 if requested is not None else 200,
+            headers=headers,
         )
+
+    @router.get("/visual-assets/{asset_id}/content")
+    def visual_content(asset_id: str, user: User, request: Request):
+        return visual_content_response(asset_id, user, request)
+
+    @router.head("/visual-assets/{asset_id}/content")
+    def visual_content_head(asset_id: str, user: User, request: Request):
+        return visual_content_response(asset_id, user, request, include_body=False)
 
     return router
 

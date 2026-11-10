@@ -10,7 +10,7 @@ from typing import Literal
 
 from app.config import Settings
 from app.course_access import require_course_access
-from app.storage.backends import StorageBackend
+from app.storage.backends import LocalStorageBackend, StorageBackend
 from app.visual.compiler import CompiledVisual, compile_visual_spec
 from app.visual.media import MediaValidationError, inspect_video
 from app.visual.planner import VisualPlannerProvider
@@ -209,6 +209,27 @@ class VisualService:
             # The durable database flag is authoritative. Provider cancel is
             # best-effort and a late result is suppressed before publication.
         return cancelled
+
+    def read_asset_range(
+        self,
+        asset: dict[str, object],
+        *,
+        start: int,
+        end: int,
+    ) -> bytes:
+        """Read an asset through the backend recorded with that asset.
+
+        Production moved new uploads from local storage to OSS over time.  The
+        current service backend must not make already-published local media
+        disappear merely because the deployment default changed.
+        """
+
+        backend_name = str(asset.get("storage_backend") or self.storage.name)
+        if backend_name == "local":
+            storage = LocalStorageBackend(self.settings.upload_dir / "objects")
+        else:
+            storage = self.storage
+        return storage.read_range(str(asset["storage_key"]), start=start, end=end)
 
     def retry_job(
         self, job_id: str, user_id: str, *, request_id: str

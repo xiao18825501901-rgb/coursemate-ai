@@ -230,7 +230,7 @@
 
 /* 2026-09-27 minimal signed-out entry and first-class Canvas actions. */
 .visual-asset-card{min-width:0;max-width:100%}
-.visual-asset-card img.visual-diagram{height:auto;max-height:none;max-width:100%}
+.visual-asset-card img.visual-diagram{height:auto;max-height:none;max-width:min(720px,100%);margin-inline:auto}
 .visual-asset-card img.visual-diagram+figcaption{font-size:16px;line-height:1.5}
 .visual-asset-card figcaption{flex-wrap:wrap;overflow-wrap:anywhere}
 .visual-asset-card figcaption span{min-width:0}
