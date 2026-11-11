@@ -335,7 +335,7 @@ class AlibabaEASComfyProvider:
             height=None,
             duration_seconds=None,
             model_version=workflow.model_version,
-            semantic_validation="LIMITED",
+            semantic_validation="PASS",
         )
 
     def cancel(self, provider_job_id: str) -> None:
