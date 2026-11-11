@@ -77,7 +77,7 @@
       ],
       "model_version": "Wan2.2-TI2V-5B@ee6f4a40737a995bf5818954cfce6d59443b0f04",
       "workflow_file": "coursejesus-wan22-ti2v-5b-video-v1.json",
-      "workflow_sha256": "756c81619e4a9be03fef4b9eee22e18ad2dee5ddeed0ae0334aa994626497f16",
+      "workflow_sha256": "a4c83be69c3e2fedbf76c57169544fe3d51938dd17f1c9f65321d1c175af35a4",
       "output_node_id": "58",
       "input_bindings": {
         "start_image_base64": {

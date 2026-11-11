@@ -31,7 +31,7 @@ def test_production_registry_uses_frozen_flux_and_wan_workflows() -> None:
     )
 
 
-def test_wan_compilation_uses_native_24fps_and_bounded_single_gpu_geometry() -> None:
+def test_wan_compilation_uses_native_720p_24fps_geometry() -> None:
     spec = VisualSpec.model_validate(
         valid_spec(
             visual_type="VIDEO",
@@ -43,7 +43,7 @@ def test_wan_compilation_uses_native_24fps_and_bounded_single_gpu_geometry() -> 
         )
     )
     compiled = compile_visual_spec(spec)
-    assert (compiled.frames, compiled.width, compiled.height) == (73, 512, 288)
+    assert (compiled.frames, compiled.width, compiled.height) == (73, 1280, 704)
     assert compiled.cfg == 5
 
 
@@ -69,7 +69,7 @@ def test_wan_compilation_anchors_a_frozen_chinese_hdd_spec() -> None:
 
     assert compiled.start_image_png_b64
     first_frame = Image.open(io.BytesIO(base64.b64decode(compiled.start_image_png_b64)))
-    assert first_frame.size == (512, 288)
+    assert first_frame.size == (1280, 704)
     assert len(compiled.positive_prompt) <= 700
     assert (compiled.steps, compiled.cfg) == (40, 3.0)
     assert "white wash" in compiled.negative_prompt
@@ -808,7 +808,7 @@ def test_hdd_motion_routes_to_a_single_fixed_camera_continuous_action() -> None:
 
     assert compiled.start_image_png_b64
     first_frame = Image.open(io.BytesIO(base64.b64decode(compiled.start_image_png_b64)))
-    assert first_frame.size == (512, 288)
+    assert first_frame.size == (1280, 704)
     assert len(first_frame.convert("RGB").getcolors(maxcolors=1_000_000) or []) > 4
     assert spec.visual_type is VisualType.VIDEO
     assert spec.renderer is Renderer.COMFY_VIDEO

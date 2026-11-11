@@ -6,12 +6,12 @@ import io
 from PIL import Image, ImageDraw
 
 
-def render_start_frame_png(width: int = 512, height: int = 288) -> bytes:
+def render_start_frame_png(width: int = 1280, height: int = 704) -> bytes:
     """Render a deterministic, text-free HDD cutaway used as the Wan motion anchor."""
 
-    if (width, height) != (512, 288):
-        raise ValueError("HDD start frame requires the pinned 512x288 geometry")
-    image = Image.new("RGB", (width, height), "#f8fafb")
+    if (width, height) not in {(512, 288), (1280, 704)}:
+        raise ValueError("HDD start frame requires the native Wan landscape geometry")
+    image = Image.new("RGB", (512, 288), "#f8fafb")
     draw = ImageDraw.Draw(image)
     draw.rounded_rectangle(
         (24, 30, 388, 264),
@@ -58,6 +58,8 @@ def render_start_frame_png(width: int = 512, height: int = 288) -> bytes:
         outline="#111c23",
         width=3,
     )
+    if image.size != (width, height):
+        image = image.resize((width, height), Image.Resampling.LANCZOS)
     output = io.BytesIO()
     image.save(output, format="PNG", optimize=True)
     return output.getvalue()

@@ -476,7 +476,9 @@ def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
         if hdd_video:
             from app.visual.hdd_motion import render_start_frame_png
 
-            start_image_png_b64 = base64.b64encode(render_start_frame_png()).decode("ascii")
+            start_image_png_b64 = base64.b64encode(
+                render_start_frame_png(width=1280, height=704)
+            ).decode("ascii")
         return CompiledVisual(
             renderer=spec.renderer,
             positive_prompt=positive,
@@ -495,8 +497,8 @@ def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
             frames=wan_frames(spec.duration_seconds)
             if spec.renderer is Renderer.COMFY_VIDEO and spec.duration_seconds
             else None,
-            width=512 if spec.renderer is Renderer.COMFY_VIDEO else 1024,
-            height=288 if spec.renderer is Renderer.COMFY_VIDEO else 576,
+            width=1280 if spec.renderer is Renderer.COMFY_VIDEO else 1024,
+            height=704 if spec.renderer is Renderer.COMFY_VIDEO else 576,
             cfg=3.0 if hdd_video else (5 if spec.renderer is Renderer.COMFY_VIDEO else 1),
             steps=40 if hdd_video else (20 if spec.renderer is Renderer.COMFY_VIDEO else 4),
             seed=int.from_bytes(spec.model_dump_json().encode()[:4].ljust(4, b"0"), "big"),

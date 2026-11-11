@@ -129,7 +129,7 @@ def _compiled() -> dict[str, object]:
     }
 
 
-def _start_frame_b64(*, width: int = 512, height: int = 288) -> str:
+def _start_frame_b64(*, width: int = 1280, height: int = 704) -> str:
     image = Image.new("RGB", (width, height), "white")
     image.putpixel((width // 2, height // 2), (20, 40, 60))
     output = io.BytesIO()
@@ -140,9 +140,9 @@ def _start_frame_b64(*, width: int = 512, height: int = 288) -> str:
 def _video_compiled() -> dict[str, object]:
     return {
         **_compiled(),
-        "width": 512,
-        "height": 288,
-        "frames": 73,
+        "width": 1280,
+        "height": 704,
+        "frames": 121,
         "start_image_png_b64": _start_frame_b64(),
     }
 
@@ -184,6 +184,9 @@ def test_video_submit_binds_the_exact_start_frame_to_wan_latent() -> None:
         assert prompt["59"]["class_type"] == "ETN_LoadImageBase64"
         assert prompt["59"]["inputs"]["image"] == _start_frame_b64()
         assert prompt["55"]["inputs"]["start_image"] == ["59", 0]
+        assert prompt["55"]["inputs"]["width"] == 1280
+        assert prompt["55"]["inputs"]["height"] == 704
+        assert prompt["55"]["inputs"]["length"] == 121
         return httpx.Response(200, json={"prompt_id": expected_prompt_id})
 
     job = _video_provider(handler).submit(_video_compiled(), idempotency_key="video-job-1")
