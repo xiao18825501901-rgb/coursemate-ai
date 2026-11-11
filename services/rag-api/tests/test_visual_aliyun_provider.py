@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import base64
+import io
 import json
 from dataclasses import replace
 from pathlib import Path
 
 import httpx
 import pytest
+from PIL import Image
 from pydantic import SecretStr
 
 from app.config import Settings
@@ -102,6 +105,18 @@ def _provider(handler) -> AlibabaEASComfyProvider:
     )
 
 
+def _video_provider(handler) -> AlibabaEASComfyProvider:
+    registry = WorkflowRegistry.load(REGISTRY)
+    return AlibabaEASComfyProvider(
+        endpoint="https://eas.example.invalid",
+        token="secret-token-must-not-leak",
+        workflow=registry.select(Renderer.COMFY_VIDEO, "aliyun_eas"),
+        timeout_seconds=3.0,
+        max_output_bytes=1024 * 1024,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+
 def _compiled() -> dict[str, object]:
     return {
         "positive_prompt": "a grounded CPU pipeline illustration",
@@ -111,6 +126,24 @@ def _compiled() -> dict[str, object]:
         "height": 512,
         "steps": 24,
         "cfg": 7.5,
+    }
+
+
+def _start_frame_b64(*, width: int = 512, height: int = 288) -> str:
+    image = Image.new("RGB", (width, height), "white")
+    image.putpixel((width // 2, height // 2), (20, 40, 60))
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    return base64.b64encode(output.getvalue()).decode("ascii")
+
+
+def _video_compiled() -> dict[str, object]:
+    return {
+        **_compiled(),
+        "width": 512,
+        "height": 288,
+        "frames": 73,
+        "start_image_png_b64": _start_frame_b64(),
     }
 
 
@@ -137,6 +170,68 @@ def test_submit_uses_raw_eas_authorization_and_only_allowlisted_bindings() -> No
 
     job = _provider(handler).submit(_compiled(), idempotency_key="visual-job-1")
     assert job.id == expected_prompt_id
+
+
+def test_video_submit_binds_the_exact_start_frame_to_wan_latent() -> None:
+    expected_prompt_id = _video_provider(
+        lambda _request: httpx.Response(500)
+    ).job_id_for("video-job-1")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["authorization"] == "secret-token-must-not-leak"
+        assert request.url.path == "/prompt"
+        prompt = json.loads(request.content)["prompt"]
+        assert prompt["59"]["class_type"] == "ETN_LoadImageBase64"
+        assert prompt["59"]["inputs"]["image"] == _start_frame_b64()
+        assert prompt["55"]["inputs"]["start_image"] == ["59", 0]
+        return httpx.Response(200, json={"prompt_id": expected_prompt_id})
+
+    job = _video_provider(handler).submit(_video_compiled(), idempotency_key="video-job-1")
+
+    assert job.id == expected_prompt_id
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "not-base64",
+        base64.b64encode(b"not a png").decode("ascii"),
+        _start_frame_b64(width=320, height=180),
+    ],
+)
+def test_video_submit_rejects_an_invalid_start_frame_before_network_io(value: str) -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(500)
+
+    compiled = {**_video_compiled(), "start_image_png_b64": value}
+    with pytest.raises(ProviderProtocolError, match="START_IMAGE_INVALID"):
+        _video_provider(handler).submit(compiled, idempotency_key="video-job-1")
+    assert calls == 0
+
+
+def test_start_frame_is_rejected_when_the_image_workflow_cannot_accept_it() -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(500)
+
+    provider = _video_provider(handler)
+    assert provider.workflow is not None
+    provider.workflow = replace(
+        provider.workflow,
+        allowed_inputs=tuple(
+            value for value in provider.workflow.allowed_inputs if value != "start_image_base64"
+        ),
+    )
+    with pytest.raises(ProviderProtocolError, match="START_IMAGE_INVALID"):
+        provider.submit(_video_compiled(), idempotency_key="video-job-1")
+    assert calls == 0
 
 
 def test_submit_rejects_a_different_prompt_id_from_comfyui() -> None:

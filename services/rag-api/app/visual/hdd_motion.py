@@ -1,6 +1,66 @@
 from __future__ import annotations
 
 import html
+import io
+
+from PIL import Image, ImageDraw
+
+
+def render_start_frame_png(width: int = 512, height: int = 288) -> bytes:
+    """Render a deterministic, text-free HDD cutaway used as the Wan motion anchor."""
+
+    if (width, height) != (512, 288):
+        raise ValueError("HDD start frame requires the pinned 512x288 geometry")
+    image = Image.new("RGB", (width, height), "#f8fafb")
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle(
+        (24, 30, 388, 264),
+        radius=24,
+        fill="#e8edef",
+        outline="#435967",
+        width=5,
+    )
+    draw.rectangle((39, 45, 373, 249), fill="#d9e2e5", outline="#8b9ca5", width=2)
+    center = (190, 148)
+    draw.ellipse(
+        (center[0] - 103, center[1] - 103, center[0] + 103, center[1] + 103),
+        fill="#b9cbd3",
+        outline="#435967",
+        width=5,
+    )
+    for radius in (45, 68, 90):
+        draw.ellipse(
+            (center[0] - radius, center[1] - radius, center[0] + radius, center[1] + radius),
+            outline="#728993",
+            width=2,
+        )
+    draw.line((center[0], center[1] - 92, center[0], center[1] - 59), fill="#b54f2f", width=8)
+    draw.ellipse(
+        (center[0] - 18, center[1] - 18, center[0] + 18, center[1] + 18),
+        fill="#526c78",
+        outline="#263d49",
+        width=4,
+    )
+    draw.ellipse(
+        (center[0] - 5, center[1] - 5, center[0] + 5, center[1] + 5),
+        fill="#edf4f6",
+    )
+    draw.ellipse((332, 185, 404, 257), fill="#806b55", outline="#3e352b", width=5)
+    draw.polygon(
+        [(350, 211), (232, 133), (218, 155), (345, 239)],
+        fill="#d8af78",
+        outline="#6e4a20",
+    )
+    draw.rounded_rectangle(
+        (224, 132, 253, 164),
+        radius=6,
+        fill="#263b47",
+        outline="#111c23",
+        width=3,
+    )
+    output = io.BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    return output.getvalue()
 
 
 def render(language: str) -> str:

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import base64
+import io
 import json
 from pathlib import Path
 
 import pytest
+from PIL import Image
 from pydantic import ValidationError
 
 from app.visual.api import _exact_asset_labels
@@ -774,6 +777,10 @@ def test_hdd_motion_routes_to_a_single_fixed_camera_continuous_action() -> None:
     compiled = compile_visual_spec(spec)
     prompt = compiled.positive_prompt
 
+    assert compiled.start_image_png_b64
+    first_frame = Image.open(io.BytesIO(base64.b64decode(compiled.start_image_png_b64)))
+    assert first_frame.size == (512, 288)
+    assert len(first_frame.convert("RGB").getcolors(maxcolors=1_000_000) or []) > 4
     assert spec.visual_type is VisualType.VIDEO
     assert spec.renderer is Renderer.COMFY_VIDEO
     assert spec.must_include == [

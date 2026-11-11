@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import html
 import json
 
@@ -29,6 +30,7 @@ class CompiledVisual(BaseModel):
     cfg: float = Field(default=8.0, ge=0.0, le=30.0)
     overlays: list[Overlay] = Field(default_factory=list)
     deterministic_source: str = ""
+    start_image_png_b64: str = Field(default="", max_length=4_000_000)
 
 
 def _bullet_lines(values: list[str]) -> str:
@@ -437,6 +439,21 @@ def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
     exact = spec.exact_labels + spec.equations + spec.code_elements
     if spec.renderer in {Renderer.COMFY_IMAGE, Renderer.COMFY_VIDEO}:
         positive = _generative_prompt(spec, exact)
+        start_image_png_b64 = ""
+        if spec.renderer is Renderer.COMFY_VIDEO:
+            required = " ".join(spec.must_include).casefold()
+            if all(
+                marker in required
+                for marker in (
+                    "mechanical hard-disk drive body",
+                    "circular platter",
+                    "actuator arm",
+                    "read/write head",
+                )
+            ):
+                from app.visual.hdd_motion import render_start_frame_png
+
+                start_image_png_b64 = base64.b64encode(render_start_frame_png()).decode("ascii")
         return CompiledVisual(
             renderer=spec.renderer,
             positive_prompt=positive,
@@ -455,6 +472,7 @@ def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
             steps=20 if spec.renderer is Renderer.COMFY_VIDEO else 4,
             seed=int.from_bytes(spec.model_dump_json().encode()[:4].ljust(4, b"0"), "big"),
             overlays=[Overlay(text=value) for value in exact],
+            start_image_png_b64=start_image_png_b64,
         )
     if spec.renderer is Renderer.NONE:
         return CompiledVisual(renderer=Renderer.NONE)

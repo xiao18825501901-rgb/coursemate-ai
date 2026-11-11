@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import copy
 import hashlib
 import hmac
@@ -40,6 +42,7 @@ class AlibabaEASComfyProvider:
     """Pinned ComfyUI API adapter for one private Alibaba EAS service."""
 
     name = "aliyun_eas"
+    _MAX_START_IMAGE_BYTES = 2 * 1024 * 1024
 
     def __init__(
         self,
@@ -132,6 +135,36 @@ class AlibabaEASComfyProvider:
             raise ProviderProtocolError("CHECKPOINT_MISMATCH")
         return cast(dict[str, object], graph)
 
+    def _prepare_start_image(self, compiled: dict[str, object]) -> dict[str, object]:
+        encoded = compiled.get("start_image_png_b64")
+        workflow = self._configured()
+        if encoded in {None, ""}:
+            return compiled
+        if "start_image_base64" not in workflow.allowed_inputs:
+            raise ProviderProtocolError("START_IMAGE_INVALID")
+        max_encoded_length = (self._MAX_START_IMAGE_BYTES * 4 // 3) + 8
+        if not isinstance(encoded, str) or len(encoded) > max_encoded_length:
+            raise ProviderProtocolError("START_IMAGE_INVALID")
+        try:
+            content = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error) as error:
+            raise ProviderProtocolError("START_IMAGE_INVALID") from error
+        expected_width = compiled.get("width")
+        expected_height = compiled.get("height")
+        if (
+            not content
+            or len(content) > self._MAX_START_IMAGE_BYTES
+            or not content.startswith(b"\x89PNG\r\n\x1a\n")
+            or len(content) < 24
+            or content[12:16] != b"IHDR"
+            or int.from_bytes(content[16:20], "big") != expected_width
+            or int.from_bytes(content[20:24], "big") != expected_height
+        ):
+            raise ProviderProtocolError("START_IMAGE_INVALID")
+        prepared = dict(compiled)
+        prepared["start_image_base64"] = encoded
+        return prepared
+
     def job_id_for(self, idempotency_key: str) -> str:
         return str(uuid5(NAMESPACE_URL, idempotency_key))
 
@@ -142,11 +175,12 @@ class AlibabaEASComfyProvider:
 
     def submit(self, compiled: dict[str, object], *, idempotency_key: str) -> ProviderJob:
         provider_id = self.job_id_for(idempotency_key)
+        prepared = self._prepare_start_image(compiled)
         response = self._request(
             "POST",
             "/prompt",
             json_body={
-                "prompt": self._workflow_payload(compiled),
+                "prompt": self._workflow_payload(prepared),
                 "client_id": provider_id,
                 "prompt_id": provider_id,
             },
