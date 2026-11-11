@@ -135,22 +135,21 @@ class AlibabaEASComfyProvider:
             raise ProviderProtocolError("CHECKPOINT_MISMATCH")
         return cast(dict[str, object], graph)
 
-    def _prepare_start_image(self, compiled: dict[str, object]) -> dict[str, object]:
-        encoded = compiled.get("start_image_png_b64")
-        workflow = self._configured()
-        if encoded in {None, ""}:
-            return compiled
-        if "start_image_base64" not in workflow.allowed_inputs:
-            raise ProviderProtocolError("START_IMAGE_INVALID")
+    def _validate_bound_png(
+        self,
+        encoded: object,
+        *,
+        expected_width: object,
+        expected_height: object,
+        error_code: str,
+    ) -> str:
         max_encoded_length = (self._MAX_START_IMAGE_BYTES * 4 // 3) + 8
         if not isinstance(encoded, str) or len(encoded) > max_encoded_length:
-            raise ProviderProtocolError("START_IMAGE_INVALID")
+            raise ProviderProtocolError(error_code)
         try:
             content = base64.b64decode(encoded, validate=True)
         except (ValueError, binascii.Error) as error:
-            raise ProviderProtocolError("START_IMAGE_INVALID") from error
-        expected_width = compiled.get("width")
-        expected_height = compiled.get("height")
+            raise ProviderProtocolError(error_code) from error
         if (
             not content
             or len(content) > self._MAX_START_IMAGE_BYTES
@@ -160,9 +159,44 @@ class AlibabaEASComfyProvider:
             or int.from_bytes(content[16:20], "big") != expected_width
             or int.from_bytes(content[20:24], "big") != expected_height
         ):
-            raise ProviderProtocolError("START_IMAGE_INVALID")
+            raise ProviderProtocolError(error_code)
+        return encoded
+
+    def _prepare_bound_images(self, compiled: dict[str, object]) -> dict[str, object]:
+        workflow = self._configured()
+        bindings = (
+            ("start_image_png_b64", "start_image_base64", "START_IMAGE_INVALID"),
+            ("end_image_png_b64", "end_image_base64", "END_IMAGE_INVALID"),
+        )
+        present = {
+            field: compiled.get(field)
+            for field, binding, _error_code in bindings
+            if compiled.get(field) not in {None, ""}
+        }
+        if not present:
+            return compiled
+        if len(present) != len(bindings):
+            missing_error = next(
+                error_code
+                for field, _binding, error_code in bindings
+                if field not in present
+            )
+            raise ProviderProtocolError(missing_error)
+        expected_width = compiled.get("width")
+        expected_height = compiled.get("height")
         prepared = dict(compiled)
-        prepared["start_image_base64"] = encoded
+        for field, binding, error_code in bindings:
+            encoded = compiled.get(field)
+            if encoded in {None, ""}:
+                continue
+            if binding not in workflow.allowed_inputs:
+                raise ProviderProtocolError(error_code)
+            prepared[binding] = self._validate_bound_png(
+                encoded,
+                expected_width=expected_width,
+                expected_height=expected_height,
+                error_code=error_code,
+            )
         return prepared
 
     def job_id_for(self, idempotency_key: str) -> str:
@@ -175,7 +209,7 @@ class AlibabaEASComfyProvider:
 
     def submit(self, compiled: dict[str, object], *, idempotency_key: str) -> ProviderJob:
         provider_id = self.job_id_for(idempotency_key)
-        prepared = self._prepare_start_image(compiled)
+        prepared = self._prepare_bound_images(compiled)
         response = self._request(
             "POST",
             "/prompt",

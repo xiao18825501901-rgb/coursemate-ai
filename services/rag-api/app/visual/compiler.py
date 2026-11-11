@@ -31,6 +31,7 @@ class CompiledVisual(BaseModel):
     overlays: list[Overlay] = Field(default_factory=list)
     deterministic_source: str = ""
     start_image_png_b64: str = Field(default="", max_length=4_000_000)
+    end_image_png_b64: str = Field(default="", max_length=4_000_000)
 
 
 def _bullet_lines(values: list[str]) -> str:
@@ -475,11 +476,15 @@ def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
         hdd_video = spec.renderer is Renderer.COMFY_VIDEO and _requires_hdd_start_frame(spec)
         positive = _HDD_VIDEO_PROMPT if hdd_video else _generative_prompt(spec, exact)
         start_image_png_b64 = ""
+        end_image_png_b64 = ""
         if hdd_video:
-            from app.visual.hdd_motion import render_start_frame_png
+            from app.visual.hdd_motion import render_end_frame_png, render_start_frame_png
 
             start_image_png_b64 = base64.b64encode(
                 render_start_frame_png(width=1280, height=704)
+            ).decode("ascii")
+            end_image_png_b64 = base64.b64encode(
+                render_end_frame_png(width=1280, height=704)
             ).decode("ascii")
         return CompiledVisual(
             renderer=spec.renderer,
@@ -506,6 +511,7 @@ def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
             seed=int.from_bytes(spec.model_dump_json().encode()[:4].ljust(4, b"0"), "big"),
             overlays=[Overlay(text=value) for value in exact],
             start_image_png_b64=start_image_png_b64,
+            end_image_png_b64=end_image_png_b64,
         )
     if spec.renderer is Renderer.NONE:
         return CompiledVisual(renderer=Renderer.NONE)

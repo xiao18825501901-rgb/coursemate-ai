@@ -2,15 +2,42 @@ from __future__ import annotations
 
 import html
 import io
+import math
 
 from PIL import Image, ImageDraw
 
 
-def render_start_frame_png(width: int = 1280, height: int = 704) -> bytes:
-    """Render a deterministic, text-free HDD cutaway used as the Wan motion anchor."""
+def _draw_actuator(draw: ImageDraw.ImageDraw, head_center: tuple[int, int]) -> None:
+    pivot = (368, 221)
+    draw.line((pivot, head_center), fill="#6e4a20", width=22)
+    draw.line((pivot, head_center), fill="#d8af78", width=16)
+    draw.ellipse((332, 185, 404, 257), fill="#806b55", outline="#3e352b", width=5)
+    head_x, head_y = head_center
+    draw.rounded_rectangle(
+        (head_x - 14, head_y - 17, head_x + 14, head_y + 15),
+        radius=6,
+        fill="#263b47",
+        outline="#111c23",
+        width=3,
+    )
+    draw.rounded_rectangle(
+        (head_x - 5, head_y - 6, head_x + 5, head_y + 6),
+        radius=2,
+        fill="#d88a38",
+    )
+
+
+def _render_hdd_frame(
+    width: int,
+    height: int,
+    *,
+    head_center: tuple[int, int],
+    platter_marker_degrees: float,
+) -> bytes:
+    """Render one deterministic, text-free HDD cutaway frame."""
 
     if (width, height) not in {(512, 288), (1280, 704)}:
-        raise ValueError("HDD start frame requires the native Wan landscape geometry")
+        raise ValueError("HDD motion frame requires the native Wan landscape geometry")
     image = Image.new("RGB", (512, 288), "#f8fafb")
     draw = ImageDraw.Draw(image)
     draw.rounded_rectangle(
@@ -34,7 +61,16 @@ def render_start_frame_png(width: int = 1280, height: int = 704) -> bytes:
             outline="#728993",
             width=2,
         )
-    draw.line((center[0], center[1] - 92, center[0], center[1] - 59), fill="#b54f2f", width=8)
+    marker_radians = math.radians(platter_marker_degrees)
+    marker_outer = (
+        center[0] + round(math.sin(marker_radians) * 92),
+        center[1] - round(math.cos(marker_radians) * 92),
+    )
+    marker_inner = (
+        center[0] + round(math.sin(marker_radians) * 59),
+        center[1] - round(math.cos(marker_radians) * 59),
+    )
+    draw.line((marker_inner, marker_outer), fill="#b54f2f", width=8)
     draw.ellipse(
         (center[0] - 18, center[1] - 18, center[0] + 18, center[1] + 18),
         fill="#526c78",
@@ -45,29 +81,34 @@ def render_start_frame_png(width: int = 1280, height: int = 704) -> bytes:
         (center[0] - 5, center[1] - 5, center[0] + 5, center[1] + 5),
         fill="#edf4f6",
     )
-    draw.ellipse((332, 185, 404, 257), fill="#806b55", outline="#3e352b", width=5)
-    draw.polygon(
-        [(350, 211), (286, 182), (276, 200), (345, 239)],
-        fill="#d8af78",
-        outline="#6e4a20",
-    )
-    draw.rounded_rectangle(
-        (266, 171, 294, 203),
-        radius=6,
-        fill="#263b47",
-        outline="#111c23",
-        width=3,
-    )
-    draw.rounded_rectangle(
-        (275, 181, 285, 193),
-        radius=2,
-        fill="#d88a38",
-    )
+    _draw_actuator(draw, head_center)
     if image.size != (width, height):
         image = image.resize((width, height), Image.Resampling.LANCZOS)
     output = io.BytesIO()
     image.save(output, format="PNG", optimize=True)
     return output.getvalue()
+
+
+def render_start_frame_png(width: int = 1280, height: int = 704) -> bytes:
+    """Anchor the HDD arm at the platter's outer radius with the marker at twelve o'clock."""
+
+    return _render_hdd_frame(
+        width,
+        height,
+        head_center=(280, 187),
+        platter_marker_degrees=0,
+    )
+
+
+def render_end_frame_png(width: int = 1280, height: int = 704) -> bytes:
+    """Move the head to an inner radius and rotate the marker to show the return phase."""
+
+    return _render_hdd_frame(
+        width,
+        height,
+        head_center=(244, 178),
+        platter_marker_degrees=120,
+    )
 
 
 def render(language: str) -> str:

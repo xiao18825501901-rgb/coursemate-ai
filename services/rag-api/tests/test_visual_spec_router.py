@@ -68,8 +68,12 @@ def test_wan_compilation_anchors_a_frozen_chinese_hdd_spec() -> None:
     compiled = compile_visual_spec(spec)
 
     assert compiled.start_image_png_b64
+    assert compiled.end_image_png_b64
     first_frame = Image.open(io.BytesIO(base64.b64decode(compiled.start_image_png_b64)))
+    last_frame = Image.open(io.BytesIO(base64.b64decode(compiled.end_image_png_b64)))
     assert first_frame.size == (1280, 704)
+    assert last_frame.size == (1280, 704)
+    assert first_frame.tobytes() != last_frame.tobytes()
     assert len(compiled.positive_prompt) <= 700
     assert (compiled.steps, compiled.cfg) == (40, 3.0)
     assert "white wash" in compiled.negative_prompt
@@ -807,8 +811,12 @@ def test_hdd_motion_routes_to_a_single_fixed_camera_continuous_action() -> None:
     prompt = compiled.positive_prompt
 
     assert compiled.start_image_png_b64
+    assert compiled.end_image_png_b64
     first_frame = Image.open(io.BytesIO(base64.b64decode(compiled.start_image_png_b64)))
+    last_frame = Image.open(io.BytesIO(base64.b64decode(compiled.end_image_png_b64)))
     assert first_frame.size == (1280, 704)
+    assert last_frame.size == (1280, 704)
+    assert first_frame.tobytes() != last_frame.tobytes()
     assert len(first_frame.convert("RGB").getcolors(maxcolors=1_000_000) or []) > 4
     assert spec.visual_type is VisualType.VIDEO
     assert spec.renderer is Renderer.COMFY_VIDEO

@@ -137,6 +137,14 @@ def _start_frame_b64(*, width: int = 1280, height: int = 704) -> str:
     return base64.b64encode(output.getvalue()).decode("ascii")
 
 
+def _end_frame_b64(*, width: int = 1280, height: int = 704) -> str:
+    image = Image.new("RGB", (width, height), "white")
+    image.putpixel((width // 3, height // 2), (60, 40, 20))
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    return base64.b64encode(output.getvalue()).decode("ascii")
+
+
 def _video_compiled() -> dict[str, object]:
     return {
         **_compiled(),
@@ -144,6 +152,7 @@ def _video_compiled() -> dict[str, object]:
         "height": 704,
         "frames": 121,
         "start_image_png_b64": _start_frame_b64(),
+        "end_image_png_b64": _end_frame_b64(),
     }
 
 
@@ -172,7 +181,7 @@ def test_submit_uses_raw_eas_authorization_and_only_allowlisted_bindings() -> No
     assert job.id == expected_prompt_id
 
 
-def test_video_submit_binds_the_exact_start_frame_to_wan_latent() -> None:
+def test_video_submit_binds_exact_start_and_end_frames_to_wan() -> None:
     expected_prompt_id = _video_provider(
         lambda _request: httpx.Response(500)
     ).job_id_for("video-job-1")
@@ -183,7 +192,13 @@ def test_video_submit_binds_the_exact_start_frame_to_wan_latent() -> None:
         prompt = json.loads(request.content)["prompt"]
         assert prompt["59"]["class_type"] == "ETN_LoadImageBase64"
         assert prompt["59"]["inputs"]["image"] == _start_frame_b64()
+        assert prompt["60"]["class_type"] == "ETN_LoadImageBase64"
+        assert prompt["60"]["inputs"]["image"] == _end_frame_b64()
+        assert prompt["55"]["class_type"] == "WanFirstLastFrameToVideo"
         assert prompt["55"]["inputs"]["start_image"] == ["59", 0]
+        assert prompt["55"]["inputs"]["end_image"] == ["60", 0]
+        assert prompt["55"]["inputs"]["positive"] == ["6", 0]
+        assert prompt["55"]["inputs"]["negative"] == ["7", 0]
         assert prompt["55"]["inputs"]["width"] == 1280
         assert prompt["55"]["inputs"]["height"] == 704
         assert prompt["55"]["inputs"]["length"] == 121
@@ -195,14 +210,19 @@ def test_video_submit_binds_the_exact_start_frame_to_wan_latent() -> None:
 
 
 @pytest.mark.parametrize(
-    "value",
+    ("field", "value"),
     [
-        "not-base64",
-        base64.b64encode(b"not a png").decode("ascii"),
-        _start_frame_b64(width=320, height=180),
+        ("start_image_png_b64", "not-base64"),
+        ("end_image_png_b64", "not-base64"),
+        ("start_image_png_b64", base64.b64encode(b"not a png").decode("ascii")),
+        ("end_image_png_b64", base64.b64encode(b"not a png").decode("ascii")),
+        ("start_image_png_b64", _start_frame_b64(width=320, height=180)),
+        ("end_image_png_b64", _end_frame_b64(width=320, height=180)),
     ],
 )
-def test_video_submit_rejects_an_invalid_start_frame_before_network_io(value: str) -> None:
+def test_video_submit_rejects_invalid_bound_frames_before_network_io(
+    field: str, value: str
+) -> None:
     calls = 0
 
     def handler(_request: httpx.Request) -> httpx.Response:
@@ -210,13 +230,47 @@ def test_video_submit_rejects_an_invalid_start_frame_before_network_io(value: st
         calls += 1
         return httpx.Response(500)
 
-    compiled = {**_video_compiled(), "start_image_png_b64": value}
-    with pytest.raises(ProviderProtocolError, match="START_IMAGE_INVALID"):
+    compiled = {**_video_compiled(), field: value}
+    expected = "START_IMAGE_INVALID" if field == "start_image_png_b64" else "END_IMAGE_INVALID"
+    with pytest.raises(ProviderProtocolError, match=expected):
         _video_provider(handler).submit(compiled, idempotency_key="video-job-1")
     assert calls == 0
 
 
-def test_start_frame_is_rejected_when_the_image_workflow_cannot_accept_it() -> None:
+@pytest.mark.parametrize(
+    ("field", "expected"),
+    [
+        ("start_image_png_b64", "START_IMAGE_INVALID"),
+        ("end_image_png_b64", "END_IMAGE_INVALID"),
+    ],
+)
+def test_video_submit_rejects_a_missing_bound_frame_before_network_io(
+    field: str, expected: str
+) -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(500)
+
+    compiled = _video_compiled()
+    compiled.pop(field)
+    with pytest.raises(ProviderProtocolError, match=expected):
+        _video_provider(handler).submit(compiled, idempotency_key="video-job-1")
+    assert calls == 0
+
+
+@pytest.mark.parametrize(
+    ("binding", "field", "expected"),
+    [
+        ("start_image_base64", "start_image_png_b64", "START_IMAGE_INVALID"),
+        ("end_image_base64", "end_image_png_b64", "END_IMAGE_INVALID"),
+    ],
+)
+def test_bound_frames_are_rejected_when_the_workflow_cannot_accept_them(
+    binding: str, field: str, expected: str
+) -> None:
     calls = 0
 
     def handler(_request: httpx.Request) -> httpx.Response:
@@ -229,11 +283,14 @@ def test_start_frame_is_rejected_when_the_image_workflow_cannot_accept_it() -> N
     provider.workflow = replace(
         provider.workflow,
         allowed_inputs=tuple(
-            value for value in provider.workflow.allowed_inputs if value != "start_image_base64"
+            value for value in provider.workflow.allowed_inputs if value != binding
         ),
     )
-    with pytest.raises(ProviderProtocolError, match="START_IMAGE_INVALID"):
-        provider.submit(_video_compiled(), idempotency_key="video-job-1")
+    with pytest.raises(ProviderProtocolError, match=expected):
+        provider.submit(
+            {**_video_compiled(), field: _video_compiled()[field]},
+            idempotency_key="video-job-1",
+        )
     assert calls == 0
 
 
