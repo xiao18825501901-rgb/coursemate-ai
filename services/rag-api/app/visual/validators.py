@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import struct
 from xml.etree import ElementTree
 
@@ -41,6 +42,7 @@ def validate_output(
             "rect",
             "defs",
             "marker",
+            "animatetransform",
             "path",
             "text",
             "g",
@@ -52,10 +54,55 @@ def validate_output(
             "polyline",
             "stop",
         }
+        read_only_animation_attributes = {
+            "attributename",
+            "type",
+            "values",
+            "dur",
+            "repeatcount",
+            "calcmode",
+            "keytimes",
+            "keysplines",
+        }
         for element in root.iter():
             tag = str(element.tag).rsplit("}", 1)[-1].lower()
             if tag not in safe_tags:
                 raise InvalidVisualOutput("SVG element is outside the safe allowlist")
+            if tag == "animatetransform":
+                attributes = {
+                    str(name).rsplit("}", 1)[-1].lower(): str(value).strip()
+                    for name, value in element.attrib.items()
+                }
+                if any(name not in read_only_animation_attributes for name in attributes):
+                    raise InvalidVisualOutput("SVG animation attributes are unsafe")
+                if attributes.get("attributename", "").lower() != "transform":
+                    raise InvalidVisualOutput("SVG animation target is unsafe")
+                animation_type = attributes.get("type", "").lower()
+                if animation_type not in {"rotate", "translate", "scale"}:
+                    raise InvalidVisualOutput("SVG animation type is unsafe")
+                if attributes.get("repeatcount", "").lower() != "indefinite":
+                    raise InvalidVisualOutput("SVG animation repeat policy is unsafe")
+                if not re.fullmatch(r"\d+(?:\.\d+)?s", attributes.get("dur", "")):
+                    raise InvalidVisualOutput("SVG animation duration is unsafe")
+                values = attributes.get("values", "")
+                frames = [value.strip() for value in values.split(";") if value.strip()]
+                expected_tokens = 2 if animation_type == "translate" else 1
+                if animation_type == "rotate":
+                    expected_tokens = 3
+                for frame in frames:
+                    tokens = [value for value in re.split(r"[\s,]+", frame) if value]
+                    if len(tokens) != expected_tokens or any(
+                        not re.fullmatch(r"-?(?:\d+(?:\.\d*)?|\.\d+)", token)
+                        for token in tokens
+                    ):
+                        raise InvalidVisualOutput("SVG animation values are unsafe")
+                if len(frames) < 2:
+                    raise InvalidVisualOutput("SVG animation values are incomplete")
+                for name in ("keytimes", "keysplines"):
+                    if name in attributes and not re.fullmatch(
+                        r"[-+0-9.;\s]+", attributes[name]
+                    ):
+                        raise InvalidVisualOutput("SVG animation timing is unsafe")
             for raw_name, raw_value in element.attrib.items():
                 name = str(raw_name).rsplit("}", 1)[-1].lower()
                 value = str(raw_value).strip().lower()

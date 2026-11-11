@@ -205,6 +205,38 @@ def test_kmeans_worked_example_persists_correct_geometry_without_provider(tmp_pa
     assert provider.submit_count == 0
 
 
+def test_hdd_motion_fallback_publishes_animation_without_provider(tmp_path: Path) -> None:
+    service, provider = make_service(tmp_path)
+    value = request(
+        request_id="request-hdd-deterministic",
+        question=(
+            "Explain a mechanical hard disk drive: how does the platter rotate "
+            "while the actuator arm changes radial position?"
+        ),
+    )
+    value = FrozenVisualInput(
+        **{
+            **value.__dict__,
+            "action": "diagram",
+            "answer": (
+                "The platter rotates continuously around the fixed spindle while the "
+                "actuator arm moves the read/write head across radial positions."
+            ),
+        }
+    )
+    service.create_job(value)
+
+    completed = service.run_once("worker-hdd")
+
+    assert completed is not None and completed["status"] == "COMPLETED"
+    assert completed["renderer"] == "SVG"
+    assert provider.submit_count == 0
+    asset = service.store.assets_for_job(str(completed["id"]), user_id="user-1")[0]
+    assert asset["type"] == "ANIMATION"
+    assert asset["mime_type"] == "image/svg+xml"
+    assert asset["semantic_validation"] == "PASS"
+
+
 def test_disabled_assistance_blocks_generative_provider_but_not_diagram(tmp_path: Path) -> None:
     service, provider = make_service(tmp_path)
     service.store.set_assistance_preference(

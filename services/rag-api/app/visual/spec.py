@@ -91,12 +91,19 @@ class PhospholipidBilayerExample(StrictModel):
     provenance: Literal["DELIVERED_GROUNDED_EXPLANATION"]
 
 
+class HddKinematicsExample(StrictModel):
+    """A grounded cutaway for platter rotation and bounded actuator motion."""
+
+    provenance: Literal["DELIVERED_GROUNDED_EXPLANATION"]
+
+
 class Diagram(StrictModel):
     layout: Literal["AUTO", "LEFT_RIGHT", "TOP_DOWN", "RADIAL", "TIMELINE", "COORDINATE"]
     nodes: list[DiagramNode] = Field(max_length=60)
     edges: list[DiagramEdge] = Field(max_length=120)
     kmeans: KMeansExample | None = None
     phospholipid_bilayer: PhospholipidBilayerExample | None = None
+    hdd_kinematics: HddKinematicsExample | None = None
 
     @model_serializer(mode="wrap")
     def preserve_legacy_identity(self, handler):
@@ -105,6 +112,8 @@ class Diagram(StrictModel):
             value.pop("kmeans", None)
         if self.phospholipid_bilayer is None:
             value.pop("phospholipid_bilayer", None)
+        if self.hdd_kinematics is None:
+            value.pop("hdd_kinematics", None)
         return value
 
 

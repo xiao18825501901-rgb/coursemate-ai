@@ -155,6 +155,10 @@ def _generative_prompt(spec: VisualSpec, exact: list[str]) -> str:
 
 def _svg(spec: VisualSpec) -> str:
     diagram = spec.diagram
+    if diagram is not None and diagram.hdd_kinematics is not None:
+        from app.visual.hdd_motion import render
+
+        return render(spec.language)
     if diagram is not None and diagram.kmeans is not None:
         from app.visual.kmeans import render
 
@@ -272,6 +276,8 @@ def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
         width=(
             720
             if spec.diagram and spec.diagram.phospholipid_bilayer
+            else 720
+            if spec.diagram and spec.diagram.hdd_kinematics
             else 340
             if spec.diagram and spec.diagram.kmeans
             else 1024
@@ -279,6 +285,8 @@ def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
         height=(
             720
             if spec.diagram and spec.diagram.phospholipid_bilayer
+            else 720
+            if spec.diagram and spec.diagram.hdd_kinematics
             else 510
             if spec.diagram and spec.diagram.kmeans
             else 576

@@ -261,7 +261,9 @@ class GroundedPolicyVisualPlannerProvider:
         if is_phospholipid_bilayer:
             visual_type, renderer = "DIAGRAM", "SVG"
             includes = ["疏水尾部", "水环境", "膜内侧"]
-        if action == "diagram" and renderer != "NONE":
+        if action == "diagram" and is_hdd_motion:
+            visual_type, renderer, includes = "ANIMATION", "SVG", list(HDD_VISUAL_REQUIRED)
+        elif action == "diagram" and renderer != "NONE":
             visual_type, renderer = "DIAGRAM", "SVG"
         elif action == "visual" and renderer == "NONE":
             visual_type, renderer, includes = "NONE", "NONE", []
@@ -316,8 +318,39 @@ class GroundedPolicyVisualPlannerProvider:
             diagram["edges"] = []
             diagram["phospholipid_bilayer"] = {"provenance": "DELIVERED_GROUNDED_EXPLANATION"}
             labels = []
+        if is_hdd_motion and renderer == "SVG" and diagram is not None:
+            diagram["layout"] = "AUTO"
+            diagram["edges"] = []
+            diagram["hdd_kinematics"] = {"provenance": "DELIVERED_GROUNDED_EXPLANATION"}
+            labels = []
         animation_steps = []
-        if renderer == "COMFY_VIDEO" and is_endomembrane_transport:
+        if is_hdd_motion and renderer == "SVG":
+            animation_steps = [
+                {
+                    "order": 1,
+                    "label": (
+                        "The drive body and central spindle remain fixed while all "
+                        "required parts are visible."
+                    ),
+                    "highlight_ids": ["n1", "n2", "n3", "n4"],
+                },
+                {
+                    "order": 2,
+                    "label": (
+                        "The platter rotates continuously around the fixed spindle."
+                    ),
+                    "highlight_ids": ["n2"],
+                },
+                {
+                    "order": 3,
+                    "label": (
+                        "The actuator arm performs one bounded radial sweep that moves "
+                        "the read/write head across radial positions."
+                    ),
+                    "highlight_ids": ["n3", "n4"],
+                },
+            ]
+        elif renderer == "COMFY_VIDEO" and is_endomembrane_transport:
             animation_steps = [
                 {
                     "order": 1,
@@ -517,6 +550,31 @@ class GroundedPolicyVisualPlannerProvider:
                 )
             )
             pedagogical_reason = "A visual is useful."
+        visual_goal = (
+            _prompt_fragment(natural_visual_goal, limit=800)
+            if natural
+            else (
+                answer_fact
+                if is_hdd_motion and answer_fact
+                else (
+                    "K-means：最近质心分配、坐标均值更新与 SSE（一轮教学例）"
+                    if kmeans is not None
+                    else (
+                        answer_fact
+                        if should_generate and answer_fact
+                        else (
+                            "流动镶嵌模型：磷脂疏水尾部避开水环境并朝向膜内侧。"
+                            if is_phospholipid_bilayer
+                            else (
+                                f"课程图解：{_prompt_fragment(question, limit=400)}"
+                                if should_generate
+                                else ""
+                            )
+                        )
+                    )
+                )
+            )
+        )
         return VisualSpec.model_validate(
             {
                 "visual_spec_version": "1.0",
@@ -524,27 +582,7 @@ class GroundedPolicyVisualPlannerProvider:
                 "pedagogical_reason": pedagogical_reason
                 if should_generate
                 else "Insufficient supported visual structure; continue with the delivered text.",
-                "visual_goal": (
-                    _prompt_fragment(natural_visual_goal, limit=800)
-                    if natural
-                    else (
-                        "K-means：最近质心分配、坐标均值更新与 SSE（一轮教学例）"
-                        if kmeans is not None
-                        else (
-                            answer_fact
-                            if should_generate and answer_fact
-                            else (
-                                "流动镶嵌模型：磷脂疏水尾部避开水环境并朝向膜内侧。"
-                                if is_phospholipid_bilayer
-                                else (
-                                    f"课程图解：{_prompt_fragment(question, limit=400)}"
-                                    if should_generate
-                                    else ""
-                                )
-                            )
-                        )
-                    )
-                ),
+                "visual_goal": visual_goal,
                 "visual_type": visual_type,
                 "renderer": renderer,
                 "importance": "MEDIUM",
@@ -558,7 +596,7 @@ class GroundedPolicyVisualPlannerProvider:
                 "reference_assets": [],
                 "style": natural_style if natural else {"tone": "CLEAN_TECHNICAL"},
                 "duration_seconds": 3 if renderer == "COMFY_VIDEO" else None,
-                "aspect_ratio": "16:9",
+                "aspect_ratio": "1:1" if is_hdd_motion and renderer == "SVG" else "16:9",
                 "cost_tier": "EXPENSIVE"
                 if renderer == "COMFY_VIDEO"
                 else ("DEFAULT" if natural else "LOW"),
