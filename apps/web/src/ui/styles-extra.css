@@ -248,8 +248,41 @@
 }
 
 @media(max-width:480px){
+  .course-top{
+    min-width:0;
+    gap:9px;
+    padding-inline:16px;
+    overflow:hidden;
+  }
+  .course-top>span:not(.crumb-weak){
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .course-top>.crumb-weak{
+    flex:none;
+    white-space:nowrap;
+  }
+  .learn-new,
+  .workspace-new,
+  .workspace-toolbar{
+    min-width:0;
+  }
+  .workspace-toolbar{
+    gap:4px;
+    padding-inline:8px;
+    overflow:hidden;
+  }
   .workspace-toolbar>.muted.small{display:none}
-  .model-label{flex:none;white-space:nowrap}
+  .workspace-toolbar .icon-btn{width:30px}
+  .workspace-toolbar .visual-assistance-toggle{
+    min-width:0;
+    flex:1;
+    justify-content:center;
+  }
+  .workspace-toolbar>.btn.small{flex:none}
+  .model-label{display:none}
 }
 
 .visual-asset-card figcaption a{border:1px solid var(--line);border-radius:5px;background:var(--surface,#fff);color:var(--text,#506875);font-size:10px;padding:6px 9px;text-decoration:none}
