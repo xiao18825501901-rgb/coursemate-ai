@@ -202,6 +202,9 @@ def test_video_submit_binds_exact_start_and_end_frames_to_wan() -> None:
         assert prompt["55"]["inputs"]["width"] == 1280
         assert prompt["55"]["inputs"]["height"] == 704
         assert prompt["55"]["inputs"]["length"] == 121
+        assert prompt["3"]["inputs"]["positive"] == ["55", 0]
+        assert prompt["3"]["inputs"]["negative"] == ["55", 1]
+        assert prompt["3"]["inputs"]["latent_image"] == ["55", 2]
         return httpx.Response(200, json={"prompt_id": expected_prompt_id})
 
     job = _video_provider(handler).submit(_video_compiled(), idempotency_key="video-job-1")

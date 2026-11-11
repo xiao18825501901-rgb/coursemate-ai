@@ -8,7 +8,7 @@
   "59": {"class_type":"ETN_LoadImageBase64","inputs":{"image":""}},
   "60": {"class_type":"ETN_LoadImageBase64","inputs":{"image":""}},
   "55": {"class_type":"WanFirstLastFrameToVideo","inputs":{"vae":["39",0],"positive":["6",0],"negative":["7",0],"width":1280,"height":704,"length":121,"batch_size":1,"start_image":["59",0],"end_image":["60",0]}},
-  "3": {"class_type":"KSampler","inputs":{"model":["48",0],"positive":["6",0],"negative":["7",0],"latent_image":["55",0],"seed":1032026,"steps":20,"cfg":5,"sampler_name":"uni_pc","scheduler":"simple","denoise":1}},
+  "3": {"class_type":"KSampler","inputs":{"model":["48",0],"positive":["55",0],"negative":["55",1],"latent_image":["55",2],"seed":1032026,"steps":20,"cfg":5,"sampler_name":"uni_pc","scheduler":"simple","denoise":1}},
   "8": {"class_type":"VAEDecode","inputs":{"samples":["3",0],"vae":["39",0]}},
   "57": {"class_type":"CreateVideo","inputs":{"images":["8",0],"fps":24}},
   "58": {"class_type":"SaveVideo","inputs":{"video":["57",0],"filename_prefix":"coursejesus-visual/video/unbound","format":"mp4","codec":"h264"}}
