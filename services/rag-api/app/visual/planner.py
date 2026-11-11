@@ -9,7 +9,7 @@ from typing import Literal, Protocol
 from app.visual.kmeans import assignment, delivered_example
 from app.visual.spec import VisualSpec
 
-PROMPT_VERSION = "visual-router-planner-v2"
+PROMPT_VERSION = "visual-router-planner-v3"
 PROMPT_PATH = Path(__file__).with_name("prompts") / "visual_router_planner_v1.system.md"
 HDD_VISUAL_REQUIRED = [
     "one mechanical hard-disk drive body remaining fixed",
@@ -76,21 +76,99 @@ def _prompt_fragment(value: object, *, limit: int = 800) -> str:
     return normalized[:limit].rstrip()
 
 
-def _answer_fragment(answer: str, *, limit: int = 700) -> str:
-    """Return the delivered fact, without UI citation markers."""
+_DOCUMENT_FILE_RE = re.compile(
+    r"(?<![A-Za-z0-9])[A-Za-z0-9][A-Za-z0-9_.-]{0,180}\."
+    r"(?:pdf|docx?|pptx?|xlsx?|csv|json|md|txt|html?|png|jpe?g|gif|webp|mp4|mov|zip)"
+    r"(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
+_HEADING_LINE_RE = re.compile(
+    r"^(?:#{1,6}\s*|[一二三四五六七八九十百]+、|\d+[.、)]\s+)",
+)
+_NAVIGATION_LABEL_RE = re.compile(
+    r"^(?:(?:unit|chapter|section|lesson|module)\s+[\w.-]+(?:\s*[:：-].*)?|"
+    r"第[一二三四五六七八九十百\d]+[章节单元])$",
+    re.IGNORECASE,
+)
+_CLAIM_SPLIT_RE = re.compile(r"(?<=[。！？!?；;.])\s+|[\r\n]+")
+_VISUAL_RELATION_RE = re.compile(
+    r"\b(?:is|are|was|were|has|have|contains?|consists?|shows?|"
+    r"rotates?|moves?|bends?|curves?|fuses?|buds?|flows?|pushes?|turns?|"
+    r"increases?|decreases?|connects?|separates?|lies?|sits?|surrounds?|"
+    r"enters?|leaves?|travels?|reflects?|refracts?|causes?|represents?|"
+    r"expresses?|means?|equals?|occurs?|detects?|creates?|forms?|extends?|"
+    r"spans?|supports?|produces?|changes?|converts?|passes?|reaches?|"
+    r"remains?|relates?)\b|"
+    r"(?:是|为|由|包含|包括|具有|位于|朝向|绕着|绕|旋转|移动|弯曲|折射|"
+    r"传播|流向|连接|组成|构成|形成|进入|离开|到达|保持|改变|增加|减少|"
+    r"导致|表示|说明|产生|发出|吸收|释放|提供|支撑|包围|覆盖|接触|推动|"
+    r"驱动|变为|成为|对应|关系|相比|相差|等于|大于|小于|附近|之间|内侧|"
+    r"外侧|上方|下方|左侧|右侧|内部|外部|相对|彼此|形成|给出)",
+    re.IGNORECASE,
+)
 
-    without_citations = re.sub(r"\[[^\]]+\]", "", answer)
-    return _prompt_fragment(without_citations.split("\n", 1)[0], limit=limit)
+
+def _strip_document_labels(value: object) -> str:
+    """Remove navigation headings and filenames before treating text as visual fact."""
+
+    without_citations = re.sub(r"\[[^\]]+\]", "", str(value or ""))
+    kept_lines: list[str] = []
+    for raw_line in without_citations.splitlines():
+        line = re.sub(r"^[*_`\s-]+|[*_`\s]+$", "", raw_line)
+        if not line or _HEADING_LINE_RE.match(line) or _NAVIGATION_LABEL_RE.fullmatch(line):
+            continue
+        line = _DOCUMENT_FILE_RE.sub(" ", line)
+        line = re.sub(r"\s{2,}", " ", line).strip(" ,，;；:：-")
+        if line:
+            kept_lines.append(line)
+    return _prompt_fragment(" ".join(kept_lines))
 
 
 def _is_visual_claim(value: str) -> bool:
-    """Reject document labels that some citation adapters put in supported_claim."""
+    """Accept only bounded facts that can describe a teaching relationship."""
 
-    if not value:
+    claim = _prompt_fragment(value)
+    if not claim or len(claim) < 12:
         return False
-    if re.fullmatch(r".+\.(?:pdf|docx?|pptx?|xlsx?|html?)", value, re.IGNORECASE):
+    if _HEADING_LINE_RE.match(claim) or _NAVIGATION_LABEL_RE.fullmatch(claim):
         return False
-    return value.casefold() not in {"course evidence", "source", "document"}
+    if _DOCUMENT_FILE_RE.fullmatch(claim):
+        return False
+    if claim.casefold() in {
+        "course evidence",
+        "source",
+        "document",
+        "course material",
+        "reference",
+        "课程资料",
+        "来源",
+        "文档",
+        "课件",
+        "章节定位与知识链",
+    }:
+        return False
+    return bool(_VISUAL_RELATION_RE.search(claim))
+
+
+def _visual_claim_fragments(value: object, *, limit: int = 700) -> list[str]:
+    """Extract bounded, source-usable teaching facts from delivered text."""
+
+    cleaned = _strip_document_labels(value)
+    if not cleaned:
+        return []
+    claims: list[str] = []
+    for raw_sentence in _CLAIM_SPLIT_RE.split(cleaned):
+        sentence = _prompt_fragment(raw_sentence)
+        if _is_visual_claim(sentence):
+            claims.append(sentence[:limit].rstrip())
+    return list(dict.fromkeys(claims))
+
+
+def _answer_fragment(answer: str, *, limit: int = 700) -> str:
+    """Return the first delivered teaching fact, skipping document navigation."""
+
+    claims = _visual_claim_fragments(answer, limit=limit)
+    return claims[0] if claims else ""
 
 
 def _is_endomembrane_transport(question: str) -> bool:
@@ -271,18 +349,25 @@ class GroundedPolicyVisualPlannerProvider:
             visual_type, renderer, includes = "ANIMATION", "MANIM", ["ordered states"]
         should_generate = renderer != "NONE"
         natural = renderer in {"COMFY_IMAGE", "COMFY_VIDEO"}
-        answer_fact = _answer_fragment(answer)
+        answer_claims = _visual_claim_fragments(answer)
+        answer_fact = answer_claims[0] if answer_claims else ""
         supported: list[str] = []
         if natural:
             supported_claims = [
-                _prompt_fragment(item.get("supported_claim"))
+                claim
                 for item in evidence[:16]
-                if _prompt_fragment(item.get("supported_claim"))
+                for claim in _visual_claim_fragments(item.get("supported_claim"))
             ]
-            supported_claims = [claim for claim in supported_claims if _is_visual_claim(claim)]
-            supported = list(
-                dict.fromkeys(([answer_fact] if answer_fact else []) + supported_claims)
-            )
+            if is_hdd_motion:
+                supported = [HDD_GROUNDED_CLAIM, *answer_claims, *supported_claims]
+            elif is_desktop_internal_components:
+                supported = [DESKTOP_GROUNDED_CLAIM, *answer_claims, *supported_claims]
+            else:
+                supported = [*answer_claims, *supported_claims]
+            supported = list(dict.fromkeys(supported))
+            if not supported:
+                visual_type, renderer = "NONE", "NONE"
+                should_generate, natural = False, False
             includes = list(dict.fromkeys(supported))[:4]
             if renderer == "COMFY_VIDEO" and is_hdd_motion:
                 includes = list(HDD_VISUAL_REQUIRED)
@@ -487,19 +572,29 @@ class GroundedPolicyVisualPlannerProvider:
                     "no arrows, leader lines, annotation circles or overlay cards",
                 ]
             )
-        grounding = [
-            {
-                "source_id": str(item["source_id"]),
-                "source_version": str(item["source_version"]),
-                "locator": str(item.get("locator") or "source"),
-                "supported_claim": (
-                    claim
-                    if _is_visual_claim(claim := _prompt_fragment(item.get("supported_claim")))
-                    else answer_fact or "Course-grounded visual explanation."
-                ),
-            }
-            for item in evidence[:16]
-        ]
+        fallback_claim = (
+            HDD_GROUNDED_CLAIM
+            if is_hdd_motion and natural
+            else (
+                DESKTOP_GROUNDED_CLAIM
+                if is_desktop_internal_components and natural
+                else (supported[0] if supported else "")
+            )
+        )
+        grounding = []
+        for item in evidence[:16]:
+            evidence_claims = _visual_claim_fragments(item.get("supported_claim"))
+            claim = evidence_claims[0] if evidence_claims else fallback_claim
+            if not claim:
+                continue
+            grounding.append(
+                {
+                    "source_id": str(item["source_id"]),
+                    "source_version": str(item["source_version"]),
+                    "locator": str(item.get("locator") or "source"),
+                    "supported_claim": claim,
+                }
+            )
         if natural and is_hdd_motion and grounding:
             grounding = [
                 {
@@ -538,18 +633,27 @@ class GroundedPolicyVisualPlannerProvider:
                 "Let the learner identify three broad component regions without inferring a "
                 "specific brand, exact layout, dimensions or compatibility."
             )
-        else:
-            natural_visual_goal = (
-                "Create a clear educational illustration that teaches: "
-                f"{_prompt_fragment(question, limit=300)}"
-                + (
-                    " Use this grounded explanation: "
-                    f"{_prompt_fragment(answer_fact, limit=420)}"
-                    if answer_fact
-                    else ""
-                )
+        elif natural:
+            teaching_medium = (
+                "short continuous teaching video"
+                if renderer == "COMFY_VIDEO"
+                else "clear teaching image"
             )
-            pedagogical_reason = "A visual is useful."
+            grounded_facts = " ".join(supported[:2])
+            natural_visual_goal = (
+                f"Create one {teaching_medium} that visualizes these course-grounded "
+                f"relationships: {grounded_facts}. Use the learner question only to select "
+                f"the relevant relationship: {_prompt_fragment(question, limit=240)}"
+            )
+            pedagogical_reason = (
+                "Let the learner examine the visual relationship stated in the course "
+                f"facts: {_prompt_fragment(supported[0], limit=500)}"
+            )
+        else:
+            natural_visual_goal = ""
+            pedagogical_reason = (
+                "The generated visual makes the supported course relationship easier to inspect."
+            )
         visual_goal = (
             _prompt_fragment(natural_visual_goal, limit=800)
             if natural

@@ -150,7 +150,7 @@ def test_unverified_reference_asset_is_rejected() -> None:
 
 def test_runtime_prompt_is_loaded_from_versioned_file_with_hash() -> None:
     loaded = load_runtime_prompt()
-    assert loaded.version == "visual-router-planner-v2"
+    assert loaded.version == "visual-router-planner-v3"
     assert len(loaded.sha256) == 64
     assert "VisualSpec version 1.0" in loaded.text
 
@@ -159,10 +159,20 @@ def test_all_40_router_cases_match_the_contract() -> None:
     cases = json.loads(FIXTURES.read_text(encoding="utf-8"))["cases"]
     assert len(cases) == 40
     planner = MockVisualPlannerProvider()
+    natural_facts = {
+        "lens": (
+            "A massive foreground galaxy bends light from a distant source into luminous arcs."
+        ),
+        "gear": "When two gears mesh, their touching teeth move in opposite directions.",
+        "cell": "A membrane protein moves across the cell membrane while opening a transport path.",
+        "enzyme": "The substrate binds to the enzyme active site and changes the enzyme shape.",
+        "relativity": "A massive object curves spacetime, so nearby light follows a bent path.",
+    }
     for case in cases:
+        answer = natural_facts.get(case["id"], "Course-grounded answer.")
         spec = planner.plan(
             question=case["question"],
-            answer="Course-grounded answer.",
+            answer=answer,
             evidence=[],
             action="auto",
             language="en",
@@ -222,6 +232,85 @@ def test_conceptual_image_prompt_contains_question_and_grounded_claim() -> None:
     assert "einstein ring" in prompt
     assert "show the supported concept" not in prompt
     assert "conceptual scene" not in prompt
+
+
+def test_natural_image_extracts_a_visual_fact_instead_of_a_leading_heading() -> None:
+    planner = MockVisualPlannerProvider()
+    spec = planner.plan(
+        question="Explain gravitational lensing as a conceptual natural scene.",
+        answer=(
+            "一、章节定位与知识链\n"
+            "A massive foreground galaxy bends light from a distant source into luminous arcs."
+        ),
+        evidence=[
+            {
+                "source_id": "gravity-source",
+                "source_version": "v1",
+                "locator": "section 2",
+                "supported_claim": "CourseJesus_Gravity_Notes.md",
+            }
+        ],
+        action="visual",
+        language="en",
+    )
+    compiled = compile_visual_spec(spec)
+    rendered = compiled.positive_prompt
+
+    assert spec.renderer is Renderer.COMFY_IMAGE
+    assert any("bends light" in claim for claim in spec.must_include)
+    assert "章节定位" not in rendered
+    assert "CourseJesus_Gravity_Notes.md" not in rendered
+    assert spec.pedagogical_reason != "A visual is useful."
+
+
+def test_natural_video_preserves_a_grounded_evidence_fact_and_rejects_labels() -> None:
+    planner = MockVisualPlannerProvider()
+    spec = planner.plan(
+        question="Explain how two gears transfer motion in a short animation.",
+        answer="Unit 2\nCourseJesus_Gear_Notes.docx",
+        evidence=[
+            {
+                "source_id": "gear-source",
+                "source_version": "v1",
+                "locator": "Unit 2",
+                "supported_claim": (
+                    "When two gears mesh, their touching teeth move in opposite directions."
+                ),
+            }
+        ],
+        action="animate",
+        language="en",
+    )
+    compiled = compile_visual_spec(spec)
+    rendered = compiled.positive_prompt
+
+    assert spec.renderer is Renderer.COMFY_VIDEO
+    assert any("opposite directions" in claim for claim in spec.must_include)
+    assert "Unit 2" not in rendered
+    assert "CourseJesus_Gear_Notes.docx" not in rendered
+    assert spec.pedagogical_reason != "A visual is useful."
+
+
+def test_natural_visual_does_not_generate_from_document_labels_alone() -> None:
+    planner = MockVisualPlannerProvider()
+    spec = planner.plan(
+        question="Explain gravitational lensing as a conceptual natural scene.",
+        answer="一、章节定位与知识链\nCourseJesus_Gravity_Notes.md",
+        evidence=[
+            {
+                "source_id": "gravity-source",
+                "source_version": "v1",
+                "locator": "section 2",
+                "supported_claim": "CourseJesus_Gravity_Notes.md",
+            }
+        ],
+        action="visual",
+        language="en",
+    )
+
+    assert spec.renderer is Renderer.NONE
+    assert spec.should_generate is False
+    assert spec.must_include == []
 
 
 def test_phospholipid_structure_uses_deterministic_teaching_diagram() -> None:
@@ -538,7 +627,7 @@ def test_hdd_motion_routes_to_a_single_fixed_camera_continuous_action() -> None:
                 ),
             }
         ],
-        action="animate",
+        action="visual",
         language="zh-CN",
     )
     compiled = compile_visual_spec(spec)

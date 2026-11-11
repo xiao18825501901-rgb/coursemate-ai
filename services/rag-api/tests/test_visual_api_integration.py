@@ -62,7 +62,9 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
 
 
 def seed_answer(
-    client: TestClient, question_text: str = "Show the CPU pipeline stages"
+    client: TestClient,
+    question_text: str = "Show the CPU pipeline stages",
+    answer_text: str = "Fetch, decode, execute, write back.",
 ) -> tuple[str, str]:
     created = client.post(
         "/api/courses",
@@ -110,7 +112,7 @@ def seed_answer(
                 message_id,
                 conversation_id,
                 "assistant",
-                "Fetch, decode, execute, write back.",
+                answer_text,
                 "[]",
                 timestamp,
             ),
@@ -263,7 +265,11 @@ def test_browser_cannot_select_workflow_provider_or_model(client: TestClient) ->
 def test_crafted_generative_request_cannot_bypass_server_preference_gate(
     client: TestClient,
 ) -> None:
-    pair_id, message_id = seed_answer(client, "Explain a gravitational lens")
+    pair_id, message_id = seed_answer(
+        client,
+        "Explain a gravitational lens",
+        "A massive foreground galaxy bends light from a distant source into luminous arcs.",
+    )
     created = client.post(
         f"{UI}/courses/visual-course/messages/{message_id}/visuals",
         headers=auth("Bearer token-a"),
@@ -278,7 +284,11 @@ def test_crafted_generative_request_cannot_bypass_server_preference_gate(
 
 
 def test_failed_visual_exposes_and_runs_a_deterministic_fallback(client: TestClient) -> None:
-    pair_id, message_id = seed_answer(client, "Explain a gravitational lens")
+    pair_id, message_id = seed_answer(
+        client,
+        "Explain a gravitational lens",
+        "A massive foreground galaxy bends light from a distant source into luminous arcs.",
+    )
     enabled = client.put(
         f"{UI}/courses/visual-course/visual-assistance",
         headers=auth("Bearer token-a"),
