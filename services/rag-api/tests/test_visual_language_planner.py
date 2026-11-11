@@ -10,6 +10,7 @@ from app.errors import ApiError
 from app.learning.generic_provider import generic_model_settings
 from app.learning.provider import ProviderCallFailure
 from app.learning.structured_calls import GenericStructuredCalls
+from app.visual.compiler import compile_visual_spec
 from app.visual.language_planner import VisualLanguagePlannerProvider
 from app.visual.planner import GroundedPolicyVisualPlannerProvider, MockVisualPlannerProvider
 
@@ -22,6 +23,7 @@ class ControlledPlanProvider:
         outcome: str = "success",
         foreign_source: bool = False,
         placeholder: bool = False,
+        exact_labels: bool = False,
     ) -> None:
         self.settings = generic_model_settings(settings)
         self.cache_model = "qwen3.8-max"
@@ -30,6 +32,7 @@ class ControlledPlanProvider:
         self.outcome = outcome
         self.foreign_source = foreign_source
         self.placeholder = placeholder
+        self.exact_labels = exact_labels
         self.calls = 0
 
     def generate(self, schema, *, context, transport_event_sink, **kwargs):
@@ -67,6 +70,8 @@ class ControlledPlanProvider:
         if self.placeholder:
             spec.visual_goal = "main concept"
             spec.must_include = ["Show the supported concept."]
+        if self.exact_labels:
+            spec.exact_labels = ["CPU socket area"]
         return schema.model_validate(spec.model_dump(by_alias=True)), {
             "provider_response_id": "TEST_ONLY-plan-response",
         }
@@ -159,6 +164,17 @@ def test_placeholder_visual_content_is_rejected_without_retry(tmp_path):
     with visual.store.database.connect() as connection:
         receipt = connection.execute("SELECT * FROM generic_llm_calls").fetchone()
     assert receipt["status"] == "FAILED"
+
+
+def test_generated_renderer_exact_text_is_overlaid_without_reaching_prompt(tmp_path):
+    planner, visual, job, _provider = planner_context(tmp_path, exact_labels=True)
+
+    spec = planner.plan_job(job=job, worker_id="worker")
+    compiled = compile_visual_spec(spec)
+
+    assert spec.exact_labels == ["CPU socket area"]
+    assert "CPU socket area" not in compiled.positive_prompt
+    assert [overlay.text for overlay in compiled.overlays] == ["CPU socket area"]
 
 
 class SpyPlanner:

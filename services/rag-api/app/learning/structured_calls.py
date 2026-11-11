@@ -327,6 +327,7 @@ class GenericStructuredCalls:
                 except Exception as error:
                     metadata["error_class"] = type(error).__name__
                     metadata["error_code"] = "OUTPUT_CONTRACT_REJECTED"
+                    metadata["validation_rule"] = str(error)[:128]
                     self._finish(claim, "FAILED", None, metadata)
                     output_contract_rejected = True
                     raise
