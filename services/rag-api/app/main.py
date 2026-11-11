@@ -211,7 +211,14 @@ def create_app(
     database.storage_object_probe = ingestion_service.has_stored_object
     database.storage_range_resolver = ingestion_service.read_stored_range
     application.state.database = database
+    generic_provider = (
+        build_generic_provider(resolved_settings)
+        if resolved_settings.v3_enabled and resolved_settings.generic_llm_enabled
+        else None
+    )
     if resolved_settings.visual_engine_enabled:
+        from app.learning.structured_calls import GenericStructuredCalls
+        from app.visual.language_planner import VisualLanguagePlannerProvider
         from app.visual.planner import GroundedPolicyVisualPlannerProvider
         from app.visual.providers.aliyun_eas import AlibabaEASComfyProvider
         from app.visual.providers.mock_comfy import MockComfyProvider
@@ -235,9 +242,22 @@ def create_app(
             provider = MockComfyProvider(
                 complete_after_polls=resolved_settings.visual_mock_complete_after_polls
             )
+        fallback_planner = GroundedPolicyVisualPlannerProvider()
+        visual_planner = (
+            VisualLanguagePlannerProvider(
+                calls=GenericStructuredCalls(
+                    database,
+                    resolved_settings,
+                    generic_provider,
+                ),
+                fallback=fallback_planner,
+            )
+            if generic_provider is not None
+            else fallback_planner
+        )
         application.state.visual_service = VisualService(
             store=VisualJobStore(database),
-            planner=GroundedPolicyVisualPlannerProvider(),
+            planner=visual_planner,
             provider=provider,
             storage=ingestion_service.storage_backend,
             workflows=workflow_registry,
@@ -264,11 +284,6 @@ def create_app(
         )
     )
     if resolved_settings.v3_enabled:
-        generic_provider = (
-            build_generic_provider(resolved_settings)
-            if resolved_settings.generic_llm_enabled
-            else None
-        )
         resolved_point_policy = assessment_point_policy
         if (
             resolved_point_policy is None

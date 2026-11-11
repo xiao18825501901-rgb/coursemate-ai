@@ -28,6 +28,7 @@ class ModelCallClaim:
     content_language: str
     verify: Callable[[], None]
     verify_transaction: Callable[[sqlite3.Connection], None] | None = None
+    source_visual_job_id: str | None = None
 
 
 Output = TypeVar("Output", bound=Contract)
@@ -142,6 +143,7 @@ class GenericStructuredCalls:
         template_version: str,
         schema_version: str,
         max_output_tokens: int,
+        output_validator: Callable[[Output], None] | None = None,
     ) -> Output:
         claim.verify()
         identity, route = self._identity_for(
@@ -176,6 +178,15 @@ class GenericStructuredCalls:
                         "MODEL_ANSWER_IDENTITY_CONFLICT",
                         "The answer request changed.",
                     )
+                if (
+                    claim.source_visual_job_id is not None
+                    and prior["source_visual_job_id"] != claim.source_visual_job_id
+                ):
+                    raise ApiError(
+                        409,
+                        "MODEL_ANSWER_IDENTITY_CONFLICT",
+                        "The answer request changed.",
+                    )
                 if prior["status"] != "COMPLETED":
                     raise ApiError(
                         409,
@@ -203,14 +214,29 @@ class GenericStructuredCalls:
                         "DAILY_MODEL_CALL_QUOTA",
                         "The daily call budget was reached.",
                     )
-                columns = ["id", *identity]
+                columns = ["id"]
+                values: list[Any] = [claim.request_id]
+                if claim.source_visual_job_id is not None:
+                    columns.append("source_visual_job_id")
+                    values.append(claim.source_visual_job_id)
+                columns.extend(identity)
+                values.extend(identity.values())
                 db.execute(
                     f"INSERT INTO generic_llm_calls({','.join(columns)}) "
                     f"VALUES({','.join('?' for _ in columns)})",
-                    (claim.request_id, *identity.values()),
+                    values,
                 )
         if cached is not None:
             verify()
+            if output_validator is not None:
+                try:
+                    output_validator(cached)
+                except Exception as error:
+                    raise ApiError(
+                        409,
+                        "MODEL_COMPLETED_RECEIPT_REJECTED",
+                        "The saved response did not satisfy the output contract.",
+                    ) from error
             return cached
 
         metadata: dict[str, Any] = {
@@ -219,6 +245,7 @@ class GenericStructuredCalls:
             "route": route,
         }
         sent = False
+        output_contract_rejected = False
 
         def transport(event: dict[str, Any]) -> None:
             nonlocal sent
@@ -290,6 +317,15 @@ class GenericStructuredCalls:
                     "MODEL_IDENTITY_UNVERIFIED",
                     "The service response was not verified.",
                 )
+            if output_validator is not None:
+                try:
+                    output_validator(output)
+                except Exception as error:
+                    metadata["error_class"] = type(error).__name__
+                    metadata["error_code"] = "OUTPUT_CONTRACT_REJECTED"
+                    self._finish(claim, "FAILED", None, metadata)
+                    output_contract_rejected = True
+                    raise
         except ProviderCallFailure as failure:
             metadata["error_class"] = type(failure.cause).__name__
             if isinstance(failure.cause, ApiError):
@@ -327,6 +363,8 @@ class GenericStructuredCalls:
             self._finish(claim, outcome, None, metadata)
             raise failure.cause from failure
         except Exception as error:
+            if output_contract_rejected:
+                raise
             metadata["error_class"] = type(error).__name__
             if isinstance(error, ApiError):
                 metadata["error_code"] = error.code

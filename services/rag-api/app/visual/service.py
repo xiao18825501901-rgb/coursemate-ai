@@ -349,13 +349,22 @@ class VisualService:
                     raise RuntimeError("PROVIDER_UNKNOWN")
                 spec = VisualSpec.model_validate_json(str(current["visual_spec_json"]))
             else:
-                spec = self.planner.plan(
-                    question=str(frozen["question"]),
-                    answer=str(frozen["answer"]),
-                    evidence=list(frozen["evidence"]),
-                    action=str(frozen["action"]),  # type: ignore[arg-type]
-                    language=str(frozen["language"]),
-                )
+                if str(frozen["action"]) in {"auto", "visual", "animate"}:
+                    self._require_assistance_enabled(
+                        str(current["user_id"]),
+                        str(current["course_id"]),
+                    )
+                plan_job = getattr(self.planner, "plan_job", None)
+                if callable(plan_job):
+                    spec = plan_job(job=current, worker_id=worker_id)
+                else:
+                    spec = self.planner.plan(
+                        question=str(frozen["question"]),
+                        answer=str(frozen["answer"]),
+                        evidence=list(frozen["evidence"]),
+                        action=str(frozen["action"]),  # type: ignore[arg-type]
+                        language=str(frozen["language"]),
+                    )
             allowed_sources = {
                 (str(item["source_id"]), str(item["source_version"])) for item in frozen["evidence"]
             }
@@ -435,10 +444,10 @@ class VisualService:
             if spec.renderer is Renderer.COMFY_VIDEO and not self.settings.visual_video_enabled:
                 raise RuntimeError("VIDEO_DISABLED")
             if spec.renderer in {Renderer.COMFY_IMAGE, Renderer.COMFY_VIDEO}:
-                if not self.store.get_assistance_preference(
-                    str(current["user_id"]), str(current["course_id"])
-                )["enabled"]:
-                    raise VisualAssistanceNotEnabled("VISUAL_ASSISTANCE_NOT_ENABLED")
+                self._require_assistance_enabled(
+                    str(current["user_id"]),
+                    str(current["course_id"]),
+                )
                 if current["status"] == "PLANNING":
                     current = self.store.transition(job_id, "RENDERING", expected={"PLANNING"})
                 elif current["status"] not in {"RENDERING", "VALIDATING"}:
@@ -582,6 +591,10 @@ class VisualService:
             outputs=("image",),
             model_version=DETERMINISTIC_RENDERER_VERSION,
         )
+
+    def _require_assistance_enabled(self, user_id: str, course_id: str) -> None:
+        if not self.store.get_assistance_preference(user_id, course_id)["enabled"]:
+            raise VisualAssistanceNotEnabled("VISUAL_ASSISTANCE_NOT_ENABLED")
 
     def _cache_key(
         self,

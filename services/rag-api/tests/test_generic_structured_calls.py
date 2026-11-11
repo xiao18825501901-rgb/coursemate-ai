@@ -133,3 +133,28 @@ def test_same_request_id_cannot_change_input_identity(tmp_path):
         calls.generate_for(claim, Result, **changed)
     assert conflict.value.code == "MODEL_ANSWER_IDENTITY_CONFLICT"
     assert provider.calls == 1
+
+
+def test_output_validator_rejects_before_completed_receipt(tmp_path):
+    database, provider, calls, claim, arguments = prepared(tmp_path)
+
+    def reject(_result):
+        raise ValueError("semantic rejection")
+
+    with pytest.raises(ValueError, match="semantic rejection"):
+        calls.generate_for(
+            claim,
+            Result,
+            **arguments,
+            output_validator=reject,
+        )
+
+    assert provider.calls == 1
+    row = row_for(database, claim.request_id)
+    assert row["status"] == "FAILED"
+    assert row["output_json"] is None
+
+    with pytest.raises(ApiError) as replay:
+        calls.generate_for(claim, Result, **arguments)
+    assert replay.value.code == "MODEL_REQUEST_UNCERTAIN"
+    assert provider.calls == 1
