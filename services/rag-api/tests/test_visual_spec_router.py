@@ -754,6 +754,10 @@ def test_dbscan_uses_grounded_density_classes_instead_of_generic_placeholder() -
     assert "核心点" in svg
     assert "边界点" in svg
     assert "噪声点" in svg
+    assert spec.aspect_ratio == "9:16"
+    assert 'viewBox="0 0 360 640"' in svg
+    assert compiled.width == 360
+    assert compiled.height == 640
     assert "exact relationships" not in svg
     assert "main concept" not in svg.lower()
     validate_output(

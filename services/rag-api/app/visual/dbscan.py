@@ -57,7 +57,7 @@ def render(language: str) -> str:
     border_points = [point for point in points if point.kind == "border"]
     noise_points = [point for point in points if point.kind == "noise"]
     title = (
-        "DBSCAN：由 Eps 邻域和 MinPts 判定三类点"
+        "DBSCAN：Eps 邻域与 MinPts 的三类点"
         if chinese
         else "DBSCAN: classify points with Eps neighborhoods and MinPts"
     )
@@ -88,76 +88,87 @@ def render(language: str) -> str:
         "border points join a cluster but cannot expand it"
     )
 
+    # The compact 9:16 canvas keeps labels legible at a 360 px mobile viewport.
+    # Coordinates preserve the original point geometry while eps is scaled with it.
+    display_points = [
+        _Point(point.label, point.x * 0.30 + 30, point.y * 0.30 + 74, point.neighbors, point.kind)
+        for point in points
+    ]
+    display_eps = eps * 0.30
     circles = "".join(
         (
-            f'<circle cx="{point.x:.0f}" cy="{point.y:.0f}" r="{eps:.0f}" '
+            f'<circle cx="{point.x:.1f}" cy="{point.y:.1f}" r="{display_eps:.1f}" '
             'fill="#7c3aed" fill-opacity="0.055" stroke="#8b5cf6" '
             'stroke-width="2" stroke-dasharray="8 7"/>'
         )
-        for point in core_points
+        for point in display_points
+        if point.kind == "core"
     )
     marks: list[str] = []
-    for point in points:
+    for point in display_points:
         fill, stroke, radius = _point_style(point.kind)
+        label_x = point.x + 8
+        if point.label == "E":
+            label_x = point.x + 7
         marks.append(
             f'<g data-point="{html.escape(point.label)}" data-kind="{point.kind}" '
             f'data-neighbors="{point.neighbors}">'
-            f'<circle cx="{point.x:.0f}" cy="{point.y:.0f}" r="{radius}" '
+            f'<circle cx="{point.x:.1f}" cy="{point.y:.1f}" r="{radius}" '
             f'fill="{fill}" stroke="{stroke}" stroke-width="2"/>'
-            f'<text x="{point.x + 14:.0f}" y="{point.y - 13:.0f}" '
-            'font-family="Arial, sans-serif" font-size="17" font-weight="700" '
+            f'<text x="{label_x:.1f}" y="{point.y - 8:.1f}" '
+            'font-family="Arial, sans-serif" font-size="12" font-weight="700" '
             f'fill="{stroke}">{point.label} · {point.neighbors}</text></g>'
         )
 
     return (
-        '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="576" '
-        'viewBox="0 0 1024 576" role="img" '
+        '<svg xmlns="http://www.w3.org/2000/svg" width="360" height="640" '
+        'viewBox="0 0 360 640" role="img" '
         'aria-label="DBSCAN core, border and noise points classified by Eps and MinPts" '
         'data-renderer="dbscan-density" '
         f'data-eps="{eps:.0f}" data-min-pts="{min_pts}" '
         f'data-core-points="{len(core_points)}" '
         f'data-border-points="{len(border_points)}" '
         f'data-noise-points="{len(noise_points)}">'
-        '<rect width="1024" height="576" fill="#f8fafc"/>'
-        f'<text x="512" y="34" text-anchor="middle" font-family="Arial, sans-serif" '
-        f'font-size="25" font-weight="700" fill="#172033">{html.escape(title)}</text>'
-        f'<text x="512" y="57" text-anchor="middle" font-family="Arial, sans-serif" '
-        f'font-size="14" fill="#52637a">{html.escape(subtitle)}</text>'
-        '<rect x="24" y="78" width="650" height="470" rx="18" fill="#ffffff" '
+        '<rect width="360" height="640" fill="#f8fafc"/>'
+        f'<text x="180" y="22" text-anchor="middle" font-family="Arial, sans-serif" '
+        f'font-size="17" font-weight="700" fill="#172033">{html.escape(title)}</text>'
+        f'<text x="180" y="40" text-anchor="middle" font-family="Arial, sans-serif" '
+        f'font-size="10" fill="#52637a">{html.escape(subtitle)}</text>'
+        '<rect x="8" y="50" width="344" height="265" rx="14" fill="#ffffff" '
         'stroke="#d7deea"/>'
         f"{circles}"
-        '<ellipse cx="300" cy="300" rx="215" ry="190" fill="none" stroke="#94a3b8" '
+        '<ellipse cx="120" cy="149" rx="90" ry="75" fill="none" stroke="#94a3b8" '
         'stroke-width="2" stroke-dasharray="3 8"/>'
-        f'<text x="300" y="118" text-anchor="middle" font-family="Arial, sans-serif" '
-        f'font-size="15" font-weight="600" fill="#52637a">{html.escape(cluster_text)}</text>'
+        f'<text x="120" y="69" text-anchor="middle" font-family="Arial, sans-serif" '
+        f'font-size="11" font-weight="600" fill="#52637a">{html.escape(cluster_text)}</text>'
         f'{"".join(marks)}'
-        '<rect x="694" y="78" width="306" height="470" rx="18" fill="#ffffff" '
+        '<rect x="8" y="323" width="344" height="194" rx="14" fill="#ffffff" '
         'stroke="#d7deea"/>'
-        f'<text x="714" y="113" font-family="Arial, sans-serif" font-size="21" '
+        f'<text x="22" y="347" font-family="Arial, sans-serif" font-size="15" '
         f'font-weight="700" fill="#172033">{html.escape(criteria_title)}</text>'
-        '<circle cx="725" cy="155" r="9" fill="#7c3aed"/>'
-        f'<text x="746" y="160" font-family="Arial, sans-serif" font-size="17" '
+        '<circle cx="28" cy="374" r="6" fill="#7c3aed"/>'
+        f'<text x="42" y="377" font-family="Arial, sans-serif" font-size="13" '
         f'font-weight="700" fill="#4c1d95">{html.escape(core_text)}</text>'
-        f'<text x="714" y="188" font-family="Arial, sans-serif" font-size="14" '
+        f'<text x="42" y="396" font-family="Arial, sans-serif" font-size="11" '
         f'fill="#3b4658">{html.escape(core_rule)}</text>'
-        '<circle cx="725" cy="231" r="8" fill="#f59e0b"/>'
-        f'<text x="746" y="236" font-family="Arial, sans-serif" font-size="17" '
+        '<circle cx="28" cy="421" r="6" fill="#f59e0b"/>'
+        f'<text x="42" y="424" font-family="Arial, sans-serif" font-size="13" '
         f'font-weight="700" fill="#b45309">{html.escape(border_text)}</text>'
-        f'<text x="714" y="264" font-family="Arial, sans-serif" font-size="14" '
+        f'<text x="42" y="443" font-family="Arial, sans-serif" font-size="11" '
         f'fill="#3b4658">{html.escape(border_rule)}</text>'
-        '<circle cx="725" cy="307" r="8" fill="#ef4444"/>'
-        f'<text x="746" y="312" font-family="Arial, sans-serif" font-size="17" '
+        '<circle cx="28" cy="468" r="6" fill="#ef4444"/>'
+        f'<text x="42" y="471" font-family="Arial, sans-serif" font-size="13" '
         f'font-weight="700" fill="#991b1b">{html.escape(noise_text)}</text>'
-        f'<text x="714" y="340" font-family="Arial, sans-serif" font-size="14" '
+        f'<text x="42" y="490" font-family="Arial, sans-serif" font-size="11" '
         f'fill="#3b4658">{html.escape(noise_rule)}</text>'
-        '<line x1="714" y1="366" x2="980" y2="366" stroke="#e2e8f0"/>'
-        f'<text x="714" y="398" font-family="Arial, sans-serif" font-size="16" '
+        '<line x1="22" y1="504" x2="338" y2="504" stroke="#e2e8f0"/>'
+        f'<text x="22" y="527" font-family="Arial, sans-serif" font-size="13" '
         f'font-weight="700" fill="#172033">{html.escape(eps_title)}</text>'
-        f'<text x="714" y="425" font-family="Arial, sans-serif" font-size="14" '
+        f'<text x="92" y="527" font-family="Arial, sans-serif" font-size="11" '
         f'fill="#52637a">{html.escape(eps_rule)}</text>'
-        f'<text x="714" y="458" font-family="Arial, sans-serif" font-size="16" '
+        f'<text x="22" y="551" font-family="Arial, sans-serif" font-size="13" '
         f'font-weight="700" fill="#172033">MinPts = {min_pts}</text>'
-        f'<text x="714" y="485" font-family="Arial, sans-serif" font-size="14" '
+        f'<text x="107" y="551" font-family="Arial, sans-serif" font-size="11" '
         f'fill="#52637a">{html.escape(border_note)}</text>'
         "</svg>"
     )

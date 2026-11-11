@@ -785,7 +785,13 @@ class GroundedPolicyVisualPlannerProvider:
                 "reference_assets": [],
                 "style": natural_style if natural else {"tone": "CLEAN_TECHNICAL"},
                 "duration_seconds": 3 if renderer == "COMFY_VIDEO" else None,
-                "aspect_ratio": "1:1" if is_hdd_motion and renderer == "SVG" else "16:9",
+                "aspect_ratio": (
+                    "9:16"
+                    if is_grounded_dbscan and renderer == "SVG"
+                    else "1:1"
+                    if is_hdd_motion and renderer == "SVG"
+                    else "16:9"
+                ),
                 "cost_tier": "EXPENSIVE"
                 if renderer == "COMFY_VIDEO"
                 else ("DEFAULT" if natural else "LOW"),

@@ -43,7 +43,7 @@ DETERMINISTIC_FALLBACKS = {
     Renderer.GRAPHVIZ,
     Renderer.MANIM,
 }
-DETERMINISTIC_RENDERER_VERSION = "deterministic-renderer-2026-11-11-v3"
+DETERMINISTIC_RENDERER_VERSION = "deterministic-renderer-2026-11-11-v4"
 
 
 class VisualQuotaExceeded(RuntimeError):

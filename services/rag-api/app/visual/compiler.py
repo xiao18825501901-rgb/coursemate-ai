@@ -282,6 +282,8 @@ def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
             if spec.diagram and spec.diagram.phospholipid_bilayer
             else 720
             if spec.diagram and spec.diagram.hdd_kinematics
+            else 360
+            if spec.diagram and spec.diagram.dbscan
             else 340
             if spec.diagram and spec.diagram.kmeans
             else 1024
@@ -291,6 +293,8 @@ def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
             if spec.diagram and spec.diagram.phospholipid_bilayer
             else 720
             if spec.diagram and spec.diagram.hdd_kinematics
+            else 640
+            if spec.diagram and spec.diagram.dbscan
             else 510
             if spec.diagram and spec.diagram.kmeans
             else 576
