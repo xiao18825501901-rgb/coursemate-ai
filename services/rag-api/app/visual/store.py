@@ -280,7 +280,7 @@ class VisualJobStore:
             image_count = int(
                 connection.execute(
                     "SELECT COUNT(*) FROM visual_jobs WHERE user_id=? AND status='COMPLETED' "
-                    "AND renderer<>'COMFY_VIDEO' AND created_at LIKE ?",
+                    "AND renderer='COMFY_IMAGE' AND created_at LIKE ?",
                     (user_id, day_prefix + "%"),
                 ).fetchone()[0]
             )

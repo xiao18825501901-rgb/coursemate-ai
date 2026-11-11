@@ -634,6 +634,41 @@ def test_daily_image_quota_fails_closed_before_second_provider_submission(
     assert provider.submit_count == 1
 
 
+def test_deterministic_diagram_does_not_consume_paid_image_quota(
+    tmp_path: Path,
+) -> None:
+    service, provider = make_service(tmp_path, visual_max_images_per_user_day=1)
+    service.create_job(request())
+    generated = service.run_once("worker-1")
+    assert generated is not None and generated["status"] == "COMPLETED"
+    assert generated["renderer"] == "COMFY_IMAGE"
+
+    deterministic = service.create_job(
+        replace(
+            request(
+                request_id="deterministic-diagram-request",
+                question="Explain the gravitational lens as a safe diagram",
+            ),
+            action="diagram",
+        )
+    )[0]
+    diagram = service.run_once("worker-1")
+    assert diagram is not None and diagram["id"] == deterministic["id"]
+    assert diagram["status"] == "COMPLETED"
+    assert diagram["renderer"] == "SVG"
+
+    service.create_job(
+        request(
+            request_id="paid-image-request-2",
+            question="Illustrate the gravitational lens from another viewpoint",
+        )
+    )
+    rejected = service.run_once("worker-1")
+    assert rejected is not None and rejected["status"] == "FAILED"
+    assert rejected["error_code"] == "QUOTA_EXCEEDED"
+    assert provider.submit_count == 1
+
+
 def test_disabled_alibaba_boundary_makes_no_network_call(tmp_path: Path) -> None:
     from app.visual.providers.aliyun_eas import AlibabaEASComfyProvider, ProviderNotConfigured
 
