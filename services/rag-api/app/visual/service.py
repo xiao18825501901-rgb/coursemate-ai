@@ -11,7 +11,7 @@ from typing import Literal
 from app.config import Settings
 from app.course_access import require_course_access
 from app.storage.backends import LocalStorageBackend, StorageBackend
-from app.visual.compiler import CompiledVisual, compile_visual_spec
+from app.visual.compiler import CompiledVisual, asset_alt_text, compile_visual_spec
 from app.visual.media import MediaValidationError, inspect_video
 from app.visual.planner import VisualPlannerProvider
 from app.visual.providers.aliyun_eas import (
@@ -869,7 +869,7 @@ class VisualService:
                 "sha256": digest,
                 "size_bytes": len(content),
                 "thumbnail_asset_id": None,
-                "alt_text": spec.visual_goal,
+                "alt_text": asset_alt_text(spec),
                 "prompt_version": str(job["prompt_version"]),
                 "model_version": model_version,
                 "workflow_id": workflow.workflow_id,

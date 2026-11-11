@@ -110,6 +110,18 @@ def _without_staged_sequence(value: str) -> str:
     return prefix.strip(" ,，;；.。")
 
 
+def asset_alt_text(spec: VisualSpec) -> str:
+    """Return a user-facing description that matches the renderer contract."""
+
+    if spec.renderer is not Renderer.COMFY_VIDEO:
+        return spec.visual_goal.strip()
+    summary = _without_staged_sequence(spec.visual_goal)
+    if not summary:
+        labels = [step.label.strip() for step in spec.animation_steps if step.label.strip()]
+        summary = "；".join(labels) or "Single continuous teaching animation."
+    return _compact_text(summary, 320)
+
+
 def _video_generative_prompt(spec: VisualSpec, exact: list[str]) -> str:
     """Compile a short, single-shot video contract for the pinned Wan workflow.
 

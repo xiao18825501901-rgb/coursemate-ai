@@ -10,12 +10,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.cm_update.auth import current_user
 from app.course_access import require_course_access
 from app.errors import ApiError
+from app.visual.compiler import asset_alt_text
 from app.visual.service import (
     FrozenVisualInput,
     VisualAssistanceNotEnabled,
     VisualQuotaExceeded,
     VisualService,
 )
+from app.visual.spec import Renderer, VisualSpec
 from app.visual.store import IdempotencyConflict, VisualStateConflict
 
 User = Annotated[dict, Depends(current_user)]
@@ -156,6 +158,22 @@ def _exact_asset_labels(job: dict[str, object]) -> list[str]:
     ]
 
 
+def _asset_alt_text(job: dict[str, object], asset: dict[str, object]) -> str:
+    """Repair display-only video captions saved before the single-shot prompt fix."""
+
+    stored = str(asset.get("alt_text") or "").strip()
+    raw = job.get("visual_spec_json")
+    if not isinstance(raw, str) or not raw:
+        return stored
+    try:
+        spec = VisualSpec.model_validate_json(raw)
+    except ValueError:
+        return stored
+    if spec.renderer is Renderer.COMFY_VIDEO:
+        return asset_alt_text(spec)
+    return stored
+
+
 def _project(service: VisualService, job: dict[str, object], *, user_id: str) -> dict[str, object]:
     assets = service.store.assets_for_job(str(job["id"]), user_id=user_id)
     projected_status = job["status"]
@@ -197,7 +215,7 @@ def _project(service: VisualService, job: dict[str, object], *, user_id: str) ->
                 "width": asset["width"],
                 "height": asset["height"],
                 "duration_seconds": asset["duration_seconds"],
-                "alt_text": asset["alt_text"],
+                "alt_text": _asset_alt_text(job, asset),
                 "labels": _exact_asset_labels(job),
                 "semantic_validation": asset["semantic_validation"],
                 "legacy_placeholder": _legacy_placeholder_asset(asset),
