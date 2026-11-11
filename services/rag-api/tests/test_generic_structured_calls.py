@@ -135,6 +135,46 @@ def test_same_request_id_cannot_change_input_identity(tmp_path):
     assert provider.calls == 1
 
 
+def test_completed_read_cannot_reuse_receipt_for_another_visual_job(tmp_path):
+    database, provider, calls, claim, arguments = prepared(tmp_path)
+    with database.connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO visual_jobs(
+                id,request_id,request_hash,user_id,course_id,pair_id,message_id,
+                action,source_snapshot_hash,frozen_input_json,prompt_version,
+                prompt_hash,provider,status,queue_at,created_at,updated_at
+            ) VALUES(
+                'visual-job-original',?,?,'owner','course',
+                'pair','message','diagram',?,'{}','TEST_ONLY-v1',
+                ?,'mock','QUEUED','2026-11-11T00:00:00Z',
+                '2026-11-11T00:00:00Z','2026-11-11T00:00:00Z'
+            )
+            """,
+            ("visual-request", "0" * 64, "1" * 64, "2" * 64),
+        )
+    bound = ModelCallClaim(
+        claim.request_id,
+        claim.owner_user_id,
+        claim.course_id,
+        claim.content_language,
+        claim.verify,
+        source_visual_job_id="visual-job-original",
+    )
+    calls.generate_for(bound, Result, **arguments)
+
+    other_job = ModelCallClaim(
+        claim.request_id,
+        claim.owner_user_id,
+        claim.course_id,
+        claim.content_language,
+        claim.verify,
+        source_visual_job_id="visual-job-other",
+    )
+    assert calls.read_completed(other_job, Result, **arguments) is None
+    assert provider.calls == 1
+
+
 def test_output_validator_rejects_before_completed_receipt(tmp_path):
     database, provider, calls, claim, arguments = prepared(tmp_path)
 

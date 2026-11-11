@@ -120,6 +120,10 @@ class GenericStructuredCalls:
             prior is None
             or prior["status"] != "COMPLETED"
             or any(prior[key] != value for key, value in identity.items())
+            or (
+                claim.source_visual_job_id is not None
+                and prior["source_visual_job_id"] != claim.source_visual_job_id
+            )
         ):
             return None
         try:
