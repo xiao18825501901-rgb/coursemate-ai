@@ -574,13 +574,98 @@ def test_wan_prompt_defines_one_continuous_teaching_action_with_fixed_objects() 
     assert "Camera and continuity:" in prompt
     assert "Learning objective:" in prompt
     assert "A transport vesicle starts attached" in prompt
-    assert "One transport vesicle buds" in prompt
+    assert "transport vesicle buds" in prompt
     assert "reaches and fuses with the Golgi apparatus" in prompt
-    assert "locked fixed camera" in prompt
+    assert "fixed side view" in prompt
     assert "single continuous shot" in prompt
     assert "no montage" in prompt
     assert "no camera cuts" in prompt
     assert "no additional teaching actions" in prompt
+
+
+def test_wan_prompt_is_a_compact_single_shot_renderer_contract() -> None:
+    spec = VisualSpec.model_validate(
+        valid_spec(
+            visual_type="VIDEO",
+            renderer="COMFY_VIDEO",
+            semantic_precision="ILLUSTRATIVE",
+            motion_is_essential=True,
+            duration_seconds=5,
+            visual_goal=(
+                "One complete mechanical hard-disk drive in a fixed cutaway view. "
+                "The circular platter rotates continuously around its central spindle while "
+                "the actuator arm makes one bounded radial sweep above the platter. The drive "
+                "body, platter count and object identities remain unchanged."
+            ),
+            pedagogical_reason=(
+                "Let the learner distinguish angular position change from radial position change."
+            ),
+            must_include=[
+                "one fixed mechanical hard-disk body",
+                "one circular platter rotating about a central spindle",
+                "one actuator arm attached to a fixed pivot",
+                "one read/write head making one bounded radial sweep above the platter",
+            ],
+            must_not_include=[
+                "SSD",
+                "people",
+                "scratches",
+                "sparks",
+                "readable technical text",
+            ],
+            source_grounding=[
+                {
+                    "source_id": f"hard-disk-source-{index}",
+                    "source_version": "v1",
+                    "locator": f"Unit 2 source paragraph {index}",
+                    "supported_claim": (
+                        "This long course-evidence sentence is kept for grounding and audit, "
+                        "not copied into the renderer prompt. "
+                    )
+                    * 6,
+                }
+                for index in range(4)
+            ],
+            diagram=None,
+            animation_steps=[
+                {
+                    "order": 1,
+                    "label": "Show every hard-disk object in one fixed cutaway view.",
+                    "highlight_ids": [],
+                },
+                {
+                    "order": 2,
+                    "label": (
+                        "The platter rotates continuously while the actuator arm completes one "
+                        "bounded radial sweep above the same platter."
+                    ),
+                    "highlight_ids": [],
+                },
+                {
+                    "order": 3,
+                    "label": "Keep the drive body and every object fixed and recognizable.",
+                    "highlight_ids": [],
+                },
+            ],
+            style={
+                "tone": "CLEAN_TECHNICAL",
+                "background": "plain neutral background",
+                "composition": "one drive fills the frame",
+                "camera": "locked overhead cutaway view",
+            },
+        )
+    )
+
+    prompt = compile_visual_spec(spec).positive_prompt
+
+    assert len(prompt) <= 1800
+    assert "hard-disk-source-" not in prompt
+    assert "This long course-evidence sentence" not in prompt
+    assert "platter rotates continuously" in prompt
+    assert "one bounded radial sweep" in prompt
+    assert prompt.count("rotates continuously") == 1
+    assert "single continuous shot" in prompt.lower()
+    assert "fixed cutaway view" in prompt.lower()
 
 
 def test_wan_prompt_rejects_non_video_semantics_without_stage_order() -> None:

@@ -43,8 +43,144 @@ def _and_list(values: list[str]) -> str:
     return f"{', '.join(values[:-1])}, and {values[-1]}"
 
 
+def _compact_text(value: str, limit: int) -> str:
+    """Normalize a renderer clause without letting one field dominate the prompt."""
+
+    normalized = " ".join(value.split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 1].rstrip(" ,;:-") + "…"
+
+
+def _compact_values(values: list[str], *, count: int, item_limit: int) -> list[str]:
+    compacted: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = _compact_text(value, item_limit)
+        key = normalized.casefold()
+        if not normalized or key in seen:
+            continue
+        seen.add(key)
+        compacted.append(normalized)
+        if len(compacted) == count:
+            break
+    return compacted
+
+
+def _video_generative_prompt(spec: VisualSpec, exact: list[str]) -> str:
+    """Compile a short, single-shot video contract for the pinned Wan workflow.
+
+    Course grounding is retained in the validated VisualSpec and source receipts. It is
+    not copied wholesale into the generative prompt: Wan needs one observable scene and
+    one continuous action, while long audit text and staged prose make the renderer drift.
+    """
+
+    exact_set = set(exact)
+    required = _compact_values(
+        [value for value in spec.must_include if value not in exact_set],
+        count=5,
+        item_limit=120,
+    )
+    forbidden = _compact_values(spec.must_not_include, count=6, item_limit=90)
+    stage_labels = [
+        _compact_text(step.label, 140)
+        for step in spec.animation_steps
+        if step.label.strip()
+    ]
+    initial_state = (
+        stage_labels[0]
+        if stage_labels
+        else (
+            "All required teaching objects are already visible in one fixed view."
+        )
+    )
+    final_state = (
+        stage_labels[-1]
+        if len(stage_labels) >= 2
+        else (
+            f"Preserve {_and_list(required)} at the end while the teaching relationship "
+            "is established."
+            if required
+            else "Keep every object visible and preserve the same physical scene."
+        )
+    )
+    main_action = _compact_text(spec.visual_goal, 320)
+    if not main_action or main_action.casefold() in {
+        "show the supported concept.",
+        "show the supported relationship.",
+    }:
+        main_action = (
+            stage_labels[1]
+            if len(stage_labels) >= 2
+            else "Show one slow, continuous, physically plausible change."
+        )
+    elif not any(
+        cue in main_action.casefold()
+        for cue in (
+            "rotate",
+            "rotating",
+            "move",
+            "moving",
+            "sweep",
+            "flow",
+            "bud",
+            "fuse",
+            "change",
+            "旋转",
+            "移动",
+            "运动",
+            "变化",
+        )
+    ) and len(stage_labels) >= 2:
+        main_action = stage_labels[1]
+    view = _compact_text(
+        " ".join(value for value in (spec.style.camera, spec.style.composition) if value),
+        240,
+    )
+    background = _compact_text(
+        " ".join(
+            value for value in (spec.style.background, spec.style.color_guidance) if value
+        ),
+        140,
+    )
+    learning_objective = _compact_text(spec.pedagogical_reason, 160)
+
+    return "\n\n".join(
+        [
+            (
+                "Create one short educational video as a single continuous shot. "
+                "Use one fixed camera and one physical scene. Fill the frame with the "
+                "teaching subject and preserve the same object identities throughout."
+            ),
+            f"Main action:\n{main_action}",
+            (
+                "Motion contract:\n"
+                f"Initial state:\n{initial_state}\n"
+                f"Final state:\n{final_state}"
+            ),
+            "Fixed objects:\n" + (_bullet_lines(required) or "- required teaching objects"),
+            (
+                "Camera and continuity:\n"
+                f"{view or 'locked medium-wide teaching view'}. One unbroken shot; no camera cuts, "
+                "no montage, no scene changes, no additional teaching actions, "
+                "no object morphing or "
+                "unexplained disappearance."
+            ),
+            (
+                f"Lighting and background:\n"
+                f"{background or 'even neutral lighting with a clean background'}"
+            ),
+            "Forbidden elements:\n" + (_bullet_lines(forbidden) or "- unsupported facts"),
+            f"Learning objective:\n{learning_objective}",
+        ]
+    )
+
+
 def _generative_prompt(spec: VisualSpec, exact: list[str]) -> str:
     """Build a teaching prompt from the existing grounded VisualSpec fields."""
+
+    if spec.renderer is Renderer.COMFY_VIDEO:
+        return _video_generative_prompt(spec, exact)
 
     exact_set = set(exact)
     required = list(dict.fromkeys(value for value in spec.must_include if value not in exact_set))
