@@ -47,6 +47,31 @@ def test_wan_compilation_uses_native_24fps_and_bounded_single_gpu_geometry() -> 
     assert compiled.cfg == 5
 
 
+def test_wan_compilation_anchors_a_frozen_chinese_hdd_spec() -> None:
+    spec = VisualSpec.model_validate(
+        valid_spec(
+            visual_type="VIDEO",
+            renderer="COMFY_VIDEO",
+            duration_seconds=5,
+            motion_is_essential=True,
+            semantic_precision="ILLUSTRATIVE",
+            language="zh-CN",
+            must_include=[
+                "单个机械硬盘剖视概念场景，硬盘主体固定不动。",
+                "圆形盘片绕中央主轴连续旋转。",
+                "执行器臂带动读写头在盘片表面上方做有界径向移动。",
+            ],
+            diagram=None,
+        )
+    )
+
+    compiled = compile_visual_spec(spec)
+
+    assert compiled.start_image_png_b64
+    first_frame = Image.open(io.BytesIO(base64.b64decode(compiled.start_image_png_b64)))
+    assert first_frame.size == (512, 288)
+
+
 def test_exact_labels_are_projected_for_the_caption_but_not_sent_to_generation() -> None:
     labels = ["主板", "CPU 插座／散热器区域", "不要从本图推断电气兼容性"]
     spec = VisualSpec.model_validate(

@@ -84,10 +84,25 @@ _STAGED_SEQUENCE_MARKERS = (
     "first show",
 )
 
+_HDD_START_FRAME_MARKERS = (
+    ("mechanical hard-disk drive body", "机械硬盘", "硬盘主体"),
+    ("circular platter", "圆形盘片", "盘片"),
+    ("actuator arm", "执行器臂"),
+    ("read/write head", "read write head", "读写头", "读写磁头"),
+)
+
 
 def _contains_staged_sequence(value: str) -> bool:
     lowered = value.casefold()
     return any(marker in lowered for marker in _STAGED_SEQUENCE_MARKERS)
+
+
+def _requires_hdd_start_frame(spec: VisualSpec) -> bool:
+    required = " ".join(spec.must_include).casefold()
+    return all(
+        any(marker in required for marker in aliases)
+        for aliases in _HDD_START_FRAME_MARKERS
+    )
 
 
 def _without_staged_sequence(value: str) -> str:
@@ -440,20 +455,10 @@ def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
     if spec.renderer in {Renderer.COMFY_IMAGE, Renderer.COMFY_VIDEO}:
         positive = _generative_prompt(spec, exact)
         start_image_png_b64 = ""
-        if spec.renderer is Renderer.COMFY_VIDEO:
-            required = " ".join(spec.must_include).casefold()
-            if all(
-                marker in required
-                for marker in (
-                    "mechanical hard-disk drive body",
-                    "circular platter",
-                    "actuator arm",
-                    "read/write head",
-                )
-            ):
-                from app.visual.hdd_motion import render_start_frame_png
+        if spec.renderer is Renderer.COMFY_VIDEO and _requires_hdd_start_frame(spec):
+            from app.visual.hdd_motion import render_start_frame_png
 
-                start_image_png_b64 = base64.b64encode(render_start_frame_png()).decode("ascii")
+            start_image_png_b64 = base64.b64encode(render_start_frame_png()).decode("ascii")
         return CompiledVisual(
             renderer=spec.renderer,
             positive_prompt=positive,
