@@ -20,6 +20,11 @@ from app.visual.store import IdempotencyConflict, VisualStateConflict
 
 User = Annotated[dict, Depends(current_user)]
 
+LEGACY_PLACEHOLDER_ALT_TEXT = frozenset({"main concept", "show the supported concept."})
+LEGACY_PLACEHOLDER_SHA256 = frozenset(
+    {"de2802d000220eb3cefe277679fc135b18b14a2b4f69fa124a6c4e82e9fa2ad0"}
+)
+
 
 class StrictRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -125,6 +130,14 @@ def _evidence(message: dict) -> tuple[dict[str, str], ...]:
     return tuple(values)
 
 
+def _legacy_placeholder_asset(asset: dict[str, object]) -> bool:
+    if asset.get("mime_type") != "image/svg+xml":
+        return False
+    alt_text = str(asset.get("alt_text") or "").strip().lower()
+    sha256 = str(asset.get("sha256") or "").strip().lower()
+    return alt_text in LEGACY_PLACEHOLDER_ALT_TEXT or sha256 in LEGACY_PLACEHOLDER_SHA256
+
+
 def _project(service: VisualService, job: dict[str, object], *, user_id: str) -> dict[str, object]:
     assets = service.store.assets_for_job(str(job["id"]), user_id=user_id)
     projected_status = job["status"]
@@ -168,6 +181,7 @@ def _project(service: VisualService, job: dict[str, object], *, user_id: str) ->
                 "duration_seconds": asset["duration_seconds"],
                 "alt_text": asset["alt_text"],
                 "semantic_validation": asset["semantic_validation"],
+                "legacy_placeholder": _legacy_placeholder_asset(asset),
                 "content_url": f"/visual-assets/{asset['id']}/content",
             }
             for asset in assets

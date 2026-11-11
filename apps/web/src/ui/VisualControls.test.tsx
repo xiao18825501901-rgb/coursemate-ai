@@ -105,6 +105,21 @@ describe('Visual Learning controls', () => {
     expect(screen.getAllByText('Show the supported concept.')).toHaveLength(2);
   });
 
+  it('moves server-identified legacy placeholder bytes into history even when alt text is course-specific', async () => {
+    api.listMessageVisuals.mockResolvedValue({
+      items: [
+        { id: 'job-legacy-v3', action: 'visual', status: 'COMPLETED', retry_count: 0, cache_hit: false, assets: [{ id: 'asset-legacy-v3', mime_type: 'image/svg+xml', alt_text: 'DBSCAN needs Eps and MinPts.', semantic_validation: 'PASS', legacy_placeholder: true, content_url: '/legacy-v3' }] },
+        { id: 'job-grounded-v4', action: 'diagram', status: 'COMPLETED', retry_count: 0, cache_hit: false, assets: [{ id: 'asset-grounded-v4', mime_type: 'image/svg+xml', alt_text: 'DBSCAN core, border, and noise points', semantic_validation: 'PASS', legacy_placeholder: false, content_url: '/grounded-v4' }] },
+      ],
+    });
+    render(<VisualControls enabled courseId="course-1" pairId="pair-1" message={{ id: 'message-legacy-v3' } as any}/>);
+
+    expect(await screen.findByText('DBSCAN core, border, and noise points')).toBeInTheDocument();
+    expect(screen.queryByText('DBSCAN needs Eps and MinPts.')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '历史版本（1）' }));
+    expect(screen.getByText('DBSCAN needs Eps and MinPts.')).toBeInTheDocument();
+  });
+
   it('keeps the text usable while exposing safe retry and deterministic fallback', () => {
     const onRetry = vi.fn();
     const onFallback = vi.fn();

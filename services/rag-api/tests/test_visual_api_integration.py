@@ -151,6 +151,52 @@ def test_authenticated_visual_job_to_asset_and_cross_user_denial(client: TestCli
     assert client.get(UI + asset["content_url"], headers=auth("Bearer token-b")).status_code == 404
 
 
+def test_projection_marks_known_legacy_placeholder_bytes_without_hiding_real_assets(
+    client: TestClient,
+) -> None:
+    pair_id, message_id = seed_answer(client)
+    created = client.post(
+        f"{UI}/courses/visual-course/messages/{message_id}/visuals",
+        headers=auth("Bearer token-a"),
+        json={"request_id": "visual-request-legacy-mark", "pair_id": pair_id, "action": "diagram"},
+    )
+    assert created.status_code == 202, created.text
+    completed = client.app.state.visual_service.run_once("test-worker")
+    assert completed is not None and completed["status"] == "COMPLETED"
+    asset = client.app.state.visual_service.store.assets_for_job(
+        str(completed["id"]), user_id="user-a"
+    )[0]
+    with client.app.state.visual_service.store.database.connect() as connection:
+        connection.execute(
+            "UPDATE visual_assets SET size_bytes=?, sha256=? WHERE id=?",
+            (
+                657,
+                "de2802d000220eb3cefe277679fc135b18b14a2b4f69fa124a6c4e82e9fa2ad0",
+                asset["id"],
+            ),
+        )
+
+    listed = client.get(
+        f"{UI}/courses/visual-course/messages/{message_id}/visuals",
+        headers=auth("Bearer token-a"),
+    )
+    assert listed.status_code == 200, listed.text
+    projected = listed.json()["items"][0]["assets"][0]
+    assert projected["legacy_placeholder"] is True
+
+    with client.app.state.visual_service.store.database.connect() as connection:
+        connection.execute(
+            "UPDATE visual_assets SET size_bytes=?, sha256=? WHERE id=?",
+            (4666, "4d94233161f790cd80c11cb4c92614a22a8059ef9ad7c352e2239bf663668cea", asset["id"]),
+        )
+    listed = client.get(
+        f"{UI}/courses/visual-course/messages/{message_id}/visuals",
+        headers=auth("Bearer token-a"),
+    )
+    projected = listed.json()["items"][0]["assets"][0]
+    assert projected["legacy_placeholder"] is False
+
+
 def test_legacy_local_asset_content_remains_servable_after_storage_backend_change(
     client: TestClient,
 ) -> None:

@@ -10,8 +10,9 @@ function isLegacyPlaceholderJob(job) {
     const assets = Array.isArray(job.assets) ? job.assets : [];
     return job.status === 'COMPLETED'
         && assets.length > 0
-        && assets.every(asset => asset.mime_type === 'image/svg+xml'
-            && LEGACY_PLACEHOLDER_ALT_TEXT.has(String(asset.alt_text || '').trim().toLowerCase()));
+        && assets.every(asset => asset.legacy_placeholder === true
+            || (asset.mime_type === 'image/svg+xml'
+                && LEGACY_PLACEHOLDER_ALT_TEXT.has(String(asset.alt_text || '').trim().toLowerCase())));
 }
 
 function partitionJobsByFreshness(jobs) {
