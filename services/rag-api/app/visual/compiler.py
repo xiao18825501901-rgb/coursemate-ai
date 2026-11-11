@@ -67,6 +67,49 @@ def _compact_values(values: list[str], *, count: int, item_limit: int) -> list[s
     return compacted
 
 
+_STAGED_SEQUENCE_MARKERS = (
+    "分段呈现",
+    "分段展示",
+    "分阶段",
+    "先分别",
+    "先展示",
+    "再展示",
+    "随后展示",
+    "segmented presentation",
+    "staged presentation",
+    "then show",
+    "then display",
+    "first show",
+)
+
+
+def _contains_staged_sequence(value: str) -> bool:
+    lowered = value.casefold()
+    return any(marker in lowered for marker in _STAGED_SEQUENCE_MARKERS)
+
+
+def _without_staged_sequence(value: str) -> str:
+    """Remove delivery directions that would ask a single-shot video to become a montage."""
+
+    normalized = " ".join(value.split())
+    lowered = normalized.casefold()
+    cut_at = min(
+        (
+            index
+            for marker in _STAGED_SEQUENCE_MARKERS
+            if (index := lowered.find(marker)) >= 0
+        ),
+        default=-1,
+    )
+    if cut_at < 0:
+        return normalized
+    prefix = normalized[:cut_at]
+    boundary = max(prefix.rfind(mark) for mark in ("，", ",", "；", ";", "。", "."))
+    if boundary >= 0:
+        prefix = prefix[:boundary]
+    return prefix.strip(" ,，;；.。")
+
+
 def _video_generative_prompt(spec: VisualSpec, exact: list[str]) -> str:
     """Compile a short, single-shot video contract for the pinned Wan workflow.
 
@@ -77,7 +120,11 @@ def _video_generative_prompt(spec: VisualSpec, exact: list[str]) -> str:
 
     exact_set = set(exact)
     required = _compact_values(
-        [value for value in spec.must_include if value not in exact_set],
+        [
+            value
+            for value in spec.must_include
+            if value not in exact_set and not _contains_staged_sequence(value)
+        ],
         count=5,
         item_limit=120,
     )
@@ -104,7 +151,7 @@ def _video_generative_prompt(spec: VisualSpec, exact: list[str]) -> str:
             else "Keep every object visible and preserve the same physical scene."
         )
     )
-    main_action = _compact_text(spec.visual_goal, 320)
+    main_action = _compact_text(_without_staged_sequence(spec.visual_goal), 320)
     if not main_action or main_action.casefold() in {
         "show the supported concept.",
         "show the supported relationship.",

@@ -668,6 +668,54 @@ def test_wan_prompt_is_a_compact_single_shot_renderer_contract() -> None:
     assert "fixed cutaway view" in prompt.lower()
 
 
+def test_wan_prompt_removes_staged_delivery_instructions() -> None:
+    spec = VisualSpec.model_validate(
+        valid_spec(
+            visual_type="VIDEO",
+            renderer="COMFY_VIDEO",
+            semantic_precision="ILLUSTRATIVE",
+            motion_is_essential=True,
+            duration_seconds=5,
+            visual_goal=(
+                "单个硬盘盘片连续旋转，执行器臂同时做一次有边界的径向移动，"
+                "硬盘主体保持固定，并通过分段呈现区分两种运动。"
+            ),
+            must_include=[
+                "单个固定硬盘主体",
+                "圆形盘片连续旋转",
+                "执行器臂做一次有边界的径向移动",
+                "先分别展示盘片旋转段和执行器臂移动段，再展示二者组合",
+            ],
+            diagram=None,
+            animation_steps=[
+                {
+                    "order": 1,
+                    "label": "同一固定场景中可见硬盘主体、盘片和执行器臂。",
+                    "highlight_ids": [],
+                },
+                {
+                    "order": 2,
+                    "label": "盘片连续旋转，执行器臂同时做一次径向扫掠。",
+                    "highlight_ids": [],
+                },
+                {
+                    "order": 3,
+                    "label": "所有对象保持相同身份和位置关系。",
+                    "highlight_ids": [],
+                },
+            ],
+        )
+    )
+
+    prompt = compile_visual_spec(spec).positive_prompt
+
+    assert "连续旋转" in prompt
+    assert "径向移动" in prompt
+    assert "分段呈现" not in prompt
+    assert "先分别展示" not in prompt
+    assert "再展示" not in prompt
+
+
 def test_wan_prompt_rejects_non_video_semantics_without_stage_order() -> None:
     spec = VisualSpec.model_validate(
         valid_spec(
