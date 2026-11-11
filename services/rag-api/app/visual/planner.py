@@ -261,7 +261,7 @@ class GroundedPolicyVisualPlannerProvider:
         if is_phospholipid_bilayer:
             visual_type, renderer = "DIAGRAM", "SVG"
             includes = ["疏水尾部", "水环境", "膜内侧"]
-        if action == "diagram" and is_hdd_motion:
+        if is_hdd_motion and action in {"diagram", "animate"}:
             visual_type, renderer, includes = "ANIMATION", "SVG", list(HDD_VISUAL_REQUIRED)
         elif action == "diagram" and renderer != "NONE":
             visual_type, renderer = "DIAGRAM", "SVG"

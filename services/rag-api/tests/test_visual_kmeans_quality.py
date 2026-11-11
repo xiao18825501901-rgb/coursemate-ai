@@ -96,7 +96,8 @@ def test_other_cluster_counts_are_not_silently_replaced_by_two():
     assert not plan(ANSWER.replace("K = 2", "K = 3")).should_generate
 
 
-def test_hdd_kinematics_diagram_is_structured_deterministic_animation():
+@pytest.mark.parametrize("action", ["diagram", "animate"])
+def test_hdd_kinematics_is_structured_deterministic_animation(action: str):
     spec = GroundedPolicyVisualPlannerProvider().plan(
         question=(
             "Explain a mechanical hard disk drive: how does the platter rotate "
@@ -117,7 +118,7 @@ def test_hdd_kinematics_diagram_is_structured_deterministic_animation():
                 ),
             }
         ],
-        action="diagram",
+        action=action,
         language="en",
     )
     compiled = compile_visual_spec(spec)
