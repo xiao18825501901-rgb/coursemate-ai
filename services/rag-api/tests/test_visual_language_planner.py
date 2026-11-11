@@ -182,6 +182,8 @@ def test_planner_prompt_does_not_downgrade_physical_visual_tasks_to_svg(tmp_path
 
     assert "explicitly visual task to SVG" in planner.prompt.text
     assert "select COMFY_IMAGE" in planner.prompt.text
+    assert "real physical object whose continuous motion must be observed" in planner.prompt.text
+    assert "select COMFY_VIDEO" in planner.prompt.text
 
 
 class SpyPlanner:

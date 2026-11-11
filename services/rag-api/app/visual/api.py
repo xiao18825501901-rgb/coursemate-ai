@@ -138,6 +138,24 @@ def _legacy_placeholder_asset(asset: dict[str, object]) -> bool:
     return alt_text in LEGACY_PLACEHOLDER_ALT_TEXT or sha256 in LEGACY_PLACEHOLDER_SHA256
 
 
+def _exact_asset_labels(job: dict[str, object]) -> list[str]:
+    raw = job.get("visual_spec_json")
+    if not isinstance(raw, str) or not raw:
+        return []
+    try:
+        spec = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    labels = spec.get("exact_labels") if isinstance(spec, dict) else None
+    if not isinstance(labels, list):
+        return []
+    return [
+        value.strip()
+        for value in labels
+        if isinstance(value, str) and value.strip() and len(value.strip()) <= 200
+    ]
+
+
 def _project(service: VisualService, job: dict[str, object], *, user_id: str) -> dict[str, object]:
     assets = service.store.assets_for_job(str(job["id"]), user_id=user_id)
     projected_status = job["status"]
@@ -180,6 +198,7 @@ def _project(service: VisualService, job: dict[str, object], *, user_id: str) ->
                 "height": asset["height"],
                 "duration_seconds": asset["duration_seconds"],
                 "alt_text": asset["alt_text"],
+                "labels": _exact_asset_labels(job),
                 "semantic_validation": asset["semantic_validation"],
                 "legacy_placeholder": _legacy_placeholder_asset(asset),
                 "content_url": f"/visual-assets/{asset['id']}/content",

@@ -234,6 +234,8 @@
 .visual-asset-card img.visual-diagram+figcaption{font-size:16px;line-height:1.5}
 .visual-asset-card figcaption{flex-wrap:wrap;overflow-wrap:anywhere}
 .visual-asset-card figcaption span{min-width:0}
+.visual-asset-labels{display:flex;flex-wrap:wrap;gap:.35rem .75rem;margin:.6rem 0 0;padding:0;list-style:none;font-size:.82rem;line-height:1.45}
+.visual-asset-labels li{max-width:100%;padding:.22rem .55rem;border:1px solid var(--line,#e4e9ed);border-radius:999px;background:var(--surface,#f6f8fa);overflow-wrap:anywhere}
 .login-page{background:var(--surface);padding:20px}
 .login-card{width:min(520px,calc(100vw - 40px));padding:40px;background:var(--bg);display:flex;flex-direction:column;align-items:center;text-align:center;gap:28px}
 .login-brand{margin:0;justify-content:center}

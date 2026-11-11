@@ -140,6 +140,7 @@ def test_authenticated_visual_job_to_asset_and_cross_user_denial(client: TestCli
     assert "prompt_hash" not in status.json()
 
     asset = status.json()["assets"][0]
+    assert "labels" in asset
     content = client.get(UI + asset["content_url"], headers=auth("Bearer token-a"))
     assert content.status_code == 200
     assert content.headers["content-type"].startswith("image/svg+xml")

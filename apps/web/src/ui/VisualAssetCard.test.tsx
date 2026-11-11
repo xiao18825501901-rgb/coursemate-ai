@@ -39,6 +39,28 @@ describe('private video asset', () => {
     expect(await screen.findByAltText('K-means worked example')).toHaveClass('visual-diagram');
     unmount();
   });
+  it('shows deterministic VisualSpec labels as readable text below a raster image', async () => {
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = vi.fn(() => 'blob:private-png');
+      static revokeObjectURL = vi.fn();
+    });
+    api.request.mockResolvedValue({ blob: async () => new Blob(['png'], { type: 'image/png' }) });
+    const {unmount} = render(<VisualAssetCard
+      asset={{
+        id: 'grounded-image',
+        content_url: '/visual-assets/grounded-image/content',
+        mime_type: 'image/png',
+        alt_text: 'Motherboard components',
+        labels: ['主板', 'CPU 插座／散热器区域'],
+      } as any}
+      t={(key: string) => key}
+    />);
+
+    expect(await screen.findByRole('list', {name: 'visual.labels'})).toHaveTextContent('主板');
+    expect(screen.getByRole('list', {name: 'visual.labels'})).toHaveTextContent('CPU 插座／散热器区域');
+    expect(screen.getByAltText('Motherboard components')).toHaveAttribute('src', 'blob:private-png');
+    unmount();
+  });
   it('explains a text-only completion without showing an empty asset', () => {
     const {unmount} = render(<VisualJobStatus job={{id:'no-structure', status:'COMPLETED', renderer:'NONE', assets:[]}} t={key => key} onCancel={vi.fn()} onRetry={vi.fn()} onFallback={vi.fn()}/>);
     expect(screen.getByText('visual.insufficientStructure')).toBeInTheDocument();

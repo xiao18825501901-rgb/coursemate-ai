@@ -36,6 +36,9 @@ export class VisualAssetCard extends React.Component {
             {!this.state.url && !this.state.error && <div className="visual-placeholder" aria-busy="true">{t('visual.loadingAsset')}</div>}
             {this.state.url && asset.mime_type.startsWith('image/') && <img className={asset.mime_type === 'image/svg+xml' ? 'visual-diagram' : undefined} src={this.state.url} alt={asset.alt_text}/>}
             {this.state.url && asset.mime_type === 'video/mp4' && <video src={this.state.url} aria-label={asset.alt_text} controls playsInline preload="metadata"/>}
+            {this.state.url && asset.mime_type === 'image/png' && asset.labels?.length > 0 && <ul className="visual-asset-labels" aria-label={t('visual.labels')}>
+                {asset.labels.map((label, index) => <li key={`${index}:${label}`}>{label}</li>)}
+            </ul>}
             <figcaption>
                 <span>{asset.alt_text}</span>
                 {this.state.url

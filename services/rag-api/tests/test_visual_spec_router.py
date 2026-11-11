@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from app.visual.api import _exact_asset_labels
 from app.visual.compiler import compile_visual_spec
 from app.visual.planner import MockVisualPlannerProvider, load_runtime_prompt
 from app.visual.spec import Renderer, VisualSpec, VisualType, validate_source_grounding
@@ -41,6 +42,27 @@ def test_wan_compilation_uses_native_24fps_and_bounded_single_gpu_geometry() -> 
     compiled = compile_visual_spec(spec)
     assert (compiled.frames, compiled.width, compiled.height) == (73, 512, 288)
     assert compiled.cfg == 5
+
+
+def test_exact_labels_are_projected_for_the_caption_but_not_sent_to_generation() -> None:
+    labels = ["主板", "CPU 插座／散热器区域", "不要从本图推断电气兼容性"]
+    spec = VisualSpec.model_validate(
+        valid_spec(
+            visual_type="IMAGE",
+            renderer="COMFY_IMAGE",
+            exact_labels=labels,
+            semantic_precision="BOUNDED",
+            diagram=None,
+        )
+    )
+
+    compiled = compile_visual_spec(spec)
+    projected = _exact_asset_labels(
+        {"visual_spec_json": spec.model_dump_json(by_alias=True)}
+    )
+
+    assert projected == labels
+    assert all(label not in compiled.positive_prompt for label in labels)
 
 
 def valid_spec(**changes: object) -> dict[str, object]:

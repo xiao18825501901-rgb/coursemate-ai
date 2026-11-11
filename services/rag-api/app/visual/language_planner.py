@@ -75,7 +75,11 @@ class VisualLanguagePlannerProvider:
             "or scene, select COMFY_IMAGE and place required exact text in deterministic "
             "overlays. Use deterministic renderers when the teaching target is primarily an "
             "abstract relationship, graph, formula or exact numeric annotation. Do not add "
-            "reference_assets. Match the frozen language exactly. Return only VisualSpec JSON."
+            "reference_assets. When the frozen action is 'animate' and the learning target is "
+            "a real physical object whose continuous motion must be observed, select "
+            "COMFY_VIDEO; do not substitute MANIM or SVG merely because directional or spatial "
+            "relationships need to remain accurate. Match the frozen language exactly. Return "
+            "only VisualSpec JSON."
         )
         self.prompt = RuntimePrompt(
             "visual-language-plan-v2",
