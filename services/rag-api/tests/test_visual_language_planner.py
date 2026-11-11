@@ -177,6 +177,13 @@ def test_generated_renderer_exact_text_is_overlaid_without_reaching_prompt(tmp_p
     assert [overlay.text for overlay in compiled.overlays] == ["CPU socket area"]
 
 
+def test_planner_prompt_does_not_downgrade_physical_visual_tasks_to_svg(tmp_path):
+    planner, _visual, _job, _provider = planner_context(tmp_path)
+
+    assert "explicitly visual task to SVG" in planner.prompt.text
+    assert "select COMFY_IMAGE" in planner.prompt.text
+
+
 class SpyPlanner:
     prompt = GroundedPolicyVisualPlannerProvider().prompt
 

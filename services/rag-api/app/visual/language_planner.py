@@ -69,8 +69,13 @@ class VisualLanguagePlannerProvider:
             "text into exact_labels, equations or code_elements; those fields are overlaid "
             "deterministically and are never sent as text for the generative model to draw. "
             "Never duplicate their literal text in visual_goal, must_include, style or "
-            "animation_steps. Do not add reference_assets. Match the frozen language exactly. "
-            "Return only VisualSpec JSON."
+            "animation_steps. Do not downgrade an explicitly visual task to SVG merely because "
+            "it needs labels or generic-concept restrictions. When the frozen action is "
+            "'visual' and the learning target is a real physical object, interior, component "
+            "or scene, select COMFY_IMAGE and place required exact text in deterministic "
+            "overlays. Use deterministic renderers when the teaching target is primarily an "
+            "abstract relationship, graph, formula or exact numeric annotation. Do not add "
+            "reference_assets. Match the frozen language exactly. Return only VisualSpec JSON."
         )
         self.prompt = RuntimePrompt(
             "visual-language-plan-v2",
