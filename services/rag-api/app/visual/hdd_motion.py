@@ -47,16 +47,21 @@ def render_start_frame_png(width: int = 1280, height: int = 704) -> bytes:
     )
     draw.ellipse((332, 185, 404, 257), fill="#806b55", outline="#3e352b", width=5)
     draw.polygon(
-        [(350, 211), (232, 133), (218, 155), (345, 239)],
+        [(350, 211), (286, 182), (276, 200), (345, 239)],
         fill="#d8af78",
         outline="#6e4a20",
     )
     draw.rounded_rectangle(
-        (224, 132, 253, 164),
+        (266, 171, 294, 203),
         radius=6,
         fill="#263b47",
         outline="#111c23",
         width=3,
+    )
+    draw.rounded_rectangle(
+        (275, 181, 285, 193),
+        radius=2,
+        fill="#d88a38",
     )
     if image.size != (width, height):
         image = image.resize((width, height), Image.Resampling.LANCZOS)

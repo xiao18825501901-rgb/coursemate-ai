@@ -837,9 +837,10 @@ def test_hdd_motion_routes_to_a_single_fixed_camera_continuous_action() -> None:
     ]
     assert len(prompt) <= 700
     assert "Locked overhead camera" in prompt
-    assert "circular platter spins continuously" in prompt
-    assert "actuator arm swings through a narrow radial arc" in prompt
-    assert "same platter, spindle, arm, head and case in every frame" in prompt
+    assert "orange-marked black read/write head" in prompt
+    assert "visibly slides inward" in prompt
+    assert "circular platter turns continuously" in prompt
+    assert "same drive, platter, spindle, arm, head and case in every frame" in prompt
     assert "章节定位" not in prompt
     assert "- CourseJesus_PC_Hardware_Visual_Acceptance_20261009.md" not in prompt
 

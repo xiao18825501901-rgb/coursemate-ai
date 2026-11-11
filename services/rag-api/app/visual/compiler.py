@@ -92,13 +92,15 @@ _HDD_START_FRAME_MARKERS = (
 )
 
 _HDD_VIDEO_PROMPT = (
-    "One continuous educational cutaway video of a single mechanical hard-disk drive. "
-    "Locked overhead camera. The rectangular drive body and background stay completely fixed. "
-    "The circular platter spins continuously around the central spindle. The actuator arm "
-    "swings through a narrow radial arc, carrying the read/write head from an inner radius "
-    "toward an outer radius and back without leaving the platter area. Preserve the same "
-    "platter, spindle, arm, head and case in every frame. Smooth stable lighting, cool neutral "
-    "technical illustration, no readable text."
+    "Continuous educational cutaway of one mechanical hard-disk drive. "
+    "Locked overhead camera; the rectangular case and background stay completely fixed. "
+    "The clearest moving part is the orange-marked black read/write head at the tip of the "
+    "tan actuator arm. It visibly slides inward across the platter toward the central spindle, "
+    "clearly changing its radial distance, then returns outward. The arm pivots with it and "
+    "never detaches. Meanwhile the circular platter turns continuously around the fixed "
+    "spindle, shown by its red radial stripe. Preserve the same drive, platter, spindle, arm, "
+    "head and case in every frame. Smooth stable lighting, cool neutral technical illustration, "
+    "no readable text."
 )
 
 _HDD_VIDEO_NEGATIVE_PROMPT = (
