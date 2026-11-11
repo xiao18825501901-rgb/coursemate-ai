@@ -24,6 +24,7 @@ class ControlledPlanProvider:
         foreign_source: bool = False,
         placeholder: bool = False,
         exact_labels: bool = False,
+        video_duration_seconds: float | None = None,
     ) -> None:
         self.settings = generic_model_settings(settings)
         self.cache_model = "qwen3.8-max"
@@ -33,6 +34,7 @@ class ControlledPlanProvider:
         self.foreign_source = foreign_source
         self.placeholder = placeholder
         self.exact_labels = exact_labels
+        self.video_duration_seconds = video_duration_seconds
         self.calls = 0
 
     def generate(self, schema, *, context, transport_event_sink, **kwargs):
@@ -72,14 +74,21 @@ class ControlledPlanProvider:
             spec.must_include = ["Show the supported concept."]
         if self.exact_labels:
             spec.exact_labels = ["CPU socket area"]
+        if self.video_duration_seconds is not None:
+            spec.duration_seconds = self.video_duration_seconds
         return schema.model_validate(spec.model_dump(by_alias=True)), {
             "provider_response_id": "TEST_ONLY-plan-response",
         }
 
 
-def planner_context(tmp_path, **provider_options):
-    visual, _renderer = make_service(tmp_path)
-    job, _ = visual.create_job(request())
+def planner_context(
+    tmp_path,
+    visual_request=None,
+    visual_settings: dict[str, object] | None = None,
+    **provider_options,
+):
+    visual, _renderer = make_service(tmp_path, **(visual_settings or {}))
+    job, _ = visual.create_job(visual_request or request())
     claimed = visual.store.claim_next("worker", now_epoch=time.time(), lease_seconds=300)
     assert claimed is not None
     job = visual.store.transition(str(job["id"]), "PLANNING", expected={"QUEUED"})
@@ -184,6 +193,52 @@ def test_planner_prompt_does_not_downgrade_physical_visual_tasks_to_svg(tmp_path
     assert "select COMFY_IMAGE" in planner.prompt.text
     assert "real physical object whose continuous motion must be observed" in planner.prompt.text
     assert "select COMFY_VIDEO" in planner.prompt.text
+
+
+def test_planner_fits_model_duration_to_bounded_wan_window(tmp_path):
+    grounded_claim = (
+        "The circular platter rotates continuously around the fixed central spindle while "
+        "one actuator arm performs a bounded radial sweep that moves the read/write head "
+        "across different radial positions; the drive body remains fixed."
+    )
+    value = request(
+        request_id="request-hdd-video-duration",
+        question=(
+            "Teach mechanical hard disk platter rotation and bounded actuator "
+            "arm radial motion."
+        ),
+    )
+    value = type(value)(
+        **{
+            **value.__dict__,
+            "answer": grounded_claim,
+            "evidence": (
+                {
+                    "source_id": "document-1",
+                    "source_version": "version-1",
+                    "locator": "page 1",
+                    "supported_claim": grounded_claim,
+                },
+            ),
+        }
+    )
+    planner, _visual, job, provider = planner_context(
+        tmp_path,
+        visual_request=value,
+        visual_settings={"visual_video_enabled": True},
+        video_duration_seconds=8.0,
+    )
+
+    spec = planner.plan_job(job=job, worker_id="worker")
+    replay = planner.plan_job(job=job, worker_id="worker")
+    compiled = compile_visual_spec(spec)
+
+    assert provider.calls == 1
+    assert replay == spec
+    assert spec.renderer.value == "COMFY_VIDEO"
+    assert spec.duration_seconds == 5.0
+    assert compiled.frames == 121
+    assert "3 to 5 seconds" in planner.prompt.text
 
 
 class SpyPlanner:

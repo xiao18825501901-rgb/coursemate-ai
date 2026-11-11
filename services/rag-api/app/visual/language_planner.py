@@ -43,6 +43,19 @@ def _normalized(value: str) -> str:
     return " ".join(value.casefold().split())
 
 
+def _fit_renderer_contract(spec: VisualSpec) -> VisualSpec:
+    """Keep provider proposals inside the pinned renderer's execution contract."""
+
+    if (
+        spec.renderer is Renderer.COMFY_VIDEO
+        and spec.duration_seconds is not None
+        and not 3.0 <= spec.duration_seconds <= 5.0
+    ):
+        bounded_duration = min(5.0, max(3.0, spec.duration_seconds))
+        return spec.model_copy(update={"duration_seconds": bounded_duration})
+    return spec
+
+
 class VisualLanguagePlannerProvider:
     """Produce a validated VisualSpec once, then reuse its immutable ledger receipt."""
 
@@ -78,7 +91,9 @@ class VisualLanguagePlannerProvider:
             "reference_assets. When the frozen action is 'animate' and the learning target is "
             "a real physical object whose continuous motion must be observed, select "
             "COMFY_VIDEO; do not substitute MANIM or SVG merely because directional or spatial "
-            "relationships need to remain accurate. Match the frozen language exactly. Return "
+            "relationships need to remain accurate. For COMFY_VIDEO, set duration_seconds "
+            "within the pinned model's supported 3 to 5 seconds inclusive. Match the frozen "
+            "language exactly. Return "
             "only VisualSpec JSON."
         )
         self.prompt = RuntimePrompt(
@@ -159,10 +174,10 @@ class VisualLanguagePlannerProvider:
                     "VISUAL_PLAN_OUTPUT_REJECTED",
                     "The saved visual plan did not match its frozen sources.",
                 ) from error
-            return completed
+            return _fit_renderer_contract(completed)
 
         try:
-            return self.calls.generate_for(
+            generated = self.calls.generate_for(
                 claim,
                 VisualSpec,  # type: ignore[arg-type]
                 instructions=self.prompt.text,
@@ -174,6 +189,7 @@ class VisualLanguagePlannerProvider:
                 max_output_tokens=8000,
                 output_validator=validate_output,
             )
+            return _fit_renderer_contract(generated)
         except ValueError as error:
             raise ApiError(
                 502,
