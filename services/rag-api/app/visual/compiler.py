@@ -478,13 +478,10 @@ def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
         start_image_png_b64 = ""
         end_image_png_b64 = ""
         if hdd_video:
-            from app.visual.hdd_motion import render_end_frame_png, render_start_frame_png
+            from app.visual.hdd_motion import render_start_frame_png
 
             start_image_png_b64 = base64.b64encode(
                 render_start_frame_png(width=1280, height=704)
-            ).decode("ascii")
-            end_image_png_b64 = base64.b64encode(
-                render_end_frame_png(width=1280, height=704)
             ).decode("ascii")
         return CompiledVisual(
             renderer=spec.renderer,

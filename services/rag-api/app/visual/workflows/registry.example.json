@@ -67,7 +67,6 @@
         "width",
         "height",
         "start_image_base64",
-        "end_image_base64",
         "frames",
         "steps",
         "cfg",
@@ -78,15 +77,11 @@
       ],
       "model_version": "Wan2.2-TI2V-5B@ee6f4a40737a995bf5818954cfce6d59443b0f04",
       "workflow_file": "coursejesus-wan22-ti2v-5b-video-v1.json",
-      "workflow_sha256": "27f08b04a9a6910244e2c2645c236ff721758d5631e699d113a77ac9f5f838e0",
+      "workflow_sha256": "a4c83be69c3e2fedbf76c57169544fe3d51938dd17f1c9f65321d1c175af35a4",
       "output_node_id": "58",
       "input_bindings": {
         "start_image_base64": {
           "node_id": "59",
-          "input": "image"
-        },
-        "end_image_base64": {
-          "node_id": "60",
           "input": "image"
         },
         "positive_prompt": {

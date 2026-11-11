@@ -152,7 +152,6 @@ def _video_compiled() -> dict[str, object]:
         "height": 704,
         "frames": 121,
         "start_image_png_b64": _start_frame_b64(),
-        "end_image_png_b64": _end_frame_b64(),
     }
 
 
@@ -181,7 +180,7 @@ def test_submit_uses_raw_eas_authorization_and_only_allowlisted_bindings() -> No
     assert job.id == expected_prompt_id
 
 
-def test_video_submit_binds_exact_start_and_end_frames_to_wan() -> None:
+def test_video_submit_uses_the_official_wan22_5b_start_image_latent_node() -> None:
     expected_prompt_id = _video_provider(
         lambda _request: httpx.Response(500)
     ).job_id_for("video-job-1")
@@ -192,19 +191,15 @@ def test_video_submit_binds_exact_start_and_end_frames_to_wan() -> None:
         prompt = json.loads(request.content)["prompt"]
         assert prompt["59"]["class_type"] == "ETN_LoadImageBase64"
         assert prompt["59"]["inputs"]["image"] == _start_frame_b64()
-        assert prompt["60"]["class_type"] == "ETN_LoadImageBase64"
-        assert prompt["60"]["inputs"]["image"] == _end_frame_b64()
-        assert prompt["55"]["class_type"] == "WanFirstLastFrameToVideo"
+        assert "60" not in prompt
+        assert prompt["55"]["class_type"] == "Wan22ImageToVideoLatent"
         assert prompt["55"]["inputs"]["start_image"] == ["59", 0]
-        assert prompt["55"]["inputs"]["end_image"] == ["60", 0]
-        assert prompt["55"]["inputs"]["positive"] == ["6", 0]
-        assert prompt["55"]["inputs"]["negative"] == ["7", 0]
         assert prompt["55"]["inputs"]["width"] == 1280
         assert prompt["55"]["inputs"]["height"] == 704
         assert prompt["55"]["inputs"]["length"] == 121
-        assert prompt["3"]["inputs"]["positive"] == ["55", 0]
-        assert prompt["3"]["inputs"]["negative"] == ["55", 1]
-        assert prompt["3"]["inputs"]["latent_image"] == ["55", 2]
+        assert prompt["3"]["inputs"]["positive"] == ["6", 0]
+        assert prompt["3"]["inputs"]["negative"] == ["7", 0]
+        assert prompt["3"]["inputs"]["latent_image"] == ["55", 0]
         return httpx.Response(200, json={"prompt_id": expected_prompt_id})
 
     job = _video_provider(handler).submit(_video_compiled(), idempotency_key="video-job-1")
@@ -240,28 +235,24 @@ def test_video_submit_rejects_invalid_bound_frames_before_network_io(
     assert calls == 0
 
 
-@pytest.mark.parametrize(
-    ("field", "expected"),
-    [
-        ("start_image_png_b64", "START_IMAGE_INVALID"),
-        ("end_image_png_b64", "END_IMAGE_INVALID"),
-    ],
-)
-def test_video_submit_rejects_a_missing_bound_frame_before_network_io(
-    field: str, expected: str
-) -> None:
-    calls = 0
+def test_video_submit_without_a_start_frame_removes_the_optional_image_node() -> None:
+    expected_prompt_id = _video_provider(
+        lambda _request: httpx.Response(500)
+    ).job_id_for("video-job-2")
 
-    def handler(_request: httpx.Request) -> httpx.Response:
-        nonlocal calls
-        calls += 1
-        return httpx.Response(500)
+    def handler(request: httpx.Request) -> httpx.Response:
+        prompt = json.loads(request.content)["prompt"]
+        assert "59" not in prompt
+        assert "start_image" not in prompt["55"]["inputs"]
+        assert prompt["55"]["class_type"] == "Wan22ImageToVideoLatent"
+        assert prompt["3"]["inputs"]["latent_image"] == ["55", 0]
+        return httpx.Response(200, json={"prompt_id": expected_prompt_id})
 
     compiled = _video_compiled()
-    compiled.pop(field)
-    with pytest.raises(ProviderProtocolError, match=expected):
-        _video_provider(handler).submit(compiled, idempotency_key="video-job-1")
-    assert calls == 0
+    compiled.pop("start_image_png_b64")
+    job = _video_provider(handler).submit(compiled, idempotency_key="video-job-2")
+
+    assert job.id == expected_prompt_id
 
 
 @pytest.mark.parametrize(
@@ -290,8 +281,13 @@ def test_bound_frames_are_rejected_when_the_workflow_cannot_accept_them(
         ),
     )
     with pytest.raises(ProviderProtocolError, match=expected):
+        value = (
+            _end_frame_b64()
+            if field == "end_image_png_b64"
+            else _start_frame_b64()
+        )
         provider.submit(
-            {**_video_compiled(), field: _video_compiled()[field]},
+            {**_video_compiled(), field: value},
             idempotency_key="video-job-1",
         )
     assert calls == 0

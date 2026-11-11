@@ -130,6 +130,27 @@ class AlibabaEASComfyProvider:
                 graph[node_id]["inputs"][field] = compiled[name]
             except (KeyError, TypeError) as error:
                 raise ProviderProtocolError("INVALID_WORKFLOW_BINDING") from error
+        for binding in ("start_image_base64", "end_image_base64"):
+            if binding in compiled:
+                continue
+            binding_node = bindings.get(binding)
+            if binding_node is None:
+                continue
+            node_id, _field = binding_node
+            graph.pop(node_id, None)
+            for node in graph.values():
+                if not isinstance(node, dict):
+                    continue
+                inputs = node.get("inputs")
+                if not isinstance(inputs, dict):
+                    continue
+                for name, value in tuple(inputs.items()):
+                    if (
+                        isinstance(value, list)
+                        and len(value) >= 2
+                        and value[0] == node_id
+                    ):
+                        inputs.pop(name, None)
         checkpoint = graph.get("4", {}).get("inputs", {}).get("ckpt_name")
         if checkpoint != workflow.checkpoint:
             raise ProviderProtocolError("CHECKPOINT_MISMATCH")
@@ -175,13 +196,6 @@ class AlibabaEASComfyProvider:
         }
         if not present:
             return compiled
-        if len(present) != len(bindings):
-            missing_error = next(
-                error_code
-                for field, _binding, error_code in bindings
-                if field not in present
-            )
-            raise ProviderProtocolError(missing_error)
         expected_width = compiled.get("width")
         expected_height = compiled.get("height")
         prepared = dict(compiled)
