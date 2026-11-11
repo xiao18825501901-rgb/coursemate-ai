@@ -11,7 +11,7 @@ export function VisualJobStatus({ job, onCancel, onRetry, onFallback, t = defaul
         <div className="visual-job-head"><strong>{job.cache_hit ? t('visual.cacheHit') : statusLabel}</strong>
             {active && <button type="button" onClick={() => onCancel(job.id)}>{t('visual.cancel')}</button>}
             {job.status === 'FAILED' && job.retry_count < 1 && <button type="button" onClick={() => onRetry(job.id)}>{t('visual.retry')}</button>}
-            {job.status === 'FAILED' && job.fallback_available && <button type="button" onClick={() => onFallback(job.id)}>{t('visual.fallback')}</button>}
+            {['FAILED', 'COMPLETED'].includes(job.status) && job.fallback_available && <button type="button" onClick={() => onFallback(job.id)}>{t('visual.fallback')}</button>}
         </div>
         {['FAILED', 'UNKNOWN'].includes(job.status) && <p className="visual-error">{t('visual.failure', { code: job.error_code || t('visual.diagnosticSaved') })}</p>}
         {job.status === 'COMPLETED' && job.renderer === 'NONE' && !job.assets?.length && <p>{t('visual.insufficientStructure')}</p>}

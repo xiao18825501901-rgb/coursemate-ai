@@ -131,6 +131,32 @@ describe('Visual Learning controls', () => {
     expect(onFallback).toHaveBeenCalledWith('job-1');
   });
 
+  it('offers a deterministic alternative beside a limited completed visual', () => {
+    const onFallback = vi.fn();
+    render(<VisualJobStatus
+      job={{
+        id: 'job-limited',
+        status: 'COMPLETED',
+        retry_count: 0,
+        fallback_available: true,
+        assets: [{
+          id: 'asset-limited',
+          mime_type: 'video/mp4',
+          alt_text: 'actuator arm motion',
+          semantic_validation: 'LIMITED',
+          legacy_placeholder: false,
+          content_url: '/limited-video',
+        }],
+      } as any}
+      onCancel={vi.fn()}
+      onRetry={vi.fn()}
+      onFallback={onFallback}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: '使用确定性图解' }));
+    expect(onFallback).toHaveBeenCalledWith('job-limited');
+  });
+
   it.each([
     ['QUEUED', '等待生成'],
     ['WAITING_FOR_RENDERER', '正在唤醒图片生成服务'],

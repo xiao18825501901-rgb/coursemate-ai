@@ -163,6 +163,18 @@ class VisualJobStore:
                 ).fetchone()
             )
 
+    def get_fallback_child(
+        self, parent_job_id: str, *, user_id: str
+    ) -> dict[str, object] | None:
+        with self.database.connect() as connection:
+            return _row(
+                connection.execute(
+                    "SELECT * FROM visual_jobs WHERE parent_job_id=? AND user_id=? "
+                    "AND action='diagram' ORDER BY created_at,rowid LIMIT 1",
+                    (parent_job_id, user_id),
+                ).fetchone()
+            )
+
     def get_assistance_preference(self, user_id: str, course_id: str) -> dict[str, object]:
         with self.database.connect() as connection:
             row = connection.execute(

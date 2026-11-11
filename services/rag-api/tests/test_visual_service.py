@@ -345,6 +345,42 @@ def test_failed_generative_job_can_create_a_linked_deterministic_fallback(
     assert provider.submit_count == 1
 
 
+def test_limited_completed_visual_exposes_one_free_deterministic_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, provider = make_service(tmp_path)
+    original, _ = service.create_job(request())
+    completed = service.run_once("worker-1")
+    assert completed is not None and completed["status"] == "COMPLETED"
+    original_assets = service.store.assets_for_job(
+        str(original["id"]), user_id="user-1"
+    )
+    assert original_assets[0]["semantic_validation"] == "LIMITED"
+    assert service.fallback_available(completed) is True
+
+    monkeypatch.setattr(
+        service.store,
+        "daily_completed_counts",
+        lambda *_args, **_kwargs: (999, 999, 999_999.0),
+    )
+    fallback, created = service.fallback_job(
+        str(original["id"]), "user-1", request_id="fallback-request-1"
+    )
+    repeated, repeated_created = service.fallback_job(
+        str(original["id"]), "user-1", request_id="fallback-request-2"
+    )
+
+    assert created is True
+    assert repeated_created is False
+    assert repeated["id"] == fallback["id"]
+    completed_fallback = service.run_once("worker-1")
+    assert completed_fallback is not None
+    assert completed_fallback["id"] == fallback["id"]
+    assert completed_fallback["status"] == "COMPLETED"
+    assert completed_fallback["renderer"] == "SVG"
+    assert provider.submit_count == 1
+
+
 def test_provider_unknown_is_preserved_and_cannot_create_another_paid_attempt(
     tmp_path: Path,
 ) -> None:
@@ -587,7 +623,10 @@ def test_daily_image_quota_fails_closed_before_second_provider_submission(
     assert provider.submit_count == 1
 
     service.create_job(
-        request(request_id="request-2", question="Illustrate a different supported concept")
+        request(
+            request_id="request-2",
+            question="Illustrate the gravitational lens from another supported viewpoint",
+        )
     )
     rejected = service.run_once("worker-1")
     assert rejected is not None and rejected["status"] == "FAILED"

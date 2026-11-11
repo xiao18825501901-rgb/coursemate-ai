@@ -363,3 +363,55 @@ def test_failed_visual_exposes_and_runs_a_deterministic_fallback(client: TestCli
     assert fallback.status_code == 202, fallback.text
     completed = client.app.state.visual_service.run_once("test-worker")
     assert completed is not None and completed["renderer"] == "SVG"
+
+
+def test_limited_completed_visual_exposes_one_deterministic_fallback(
+    client: TestClient,
+) -> None:
+    pair_id, message_id = seed_answer(
+        client,
+        "Explain a gravitational lens",
+        "A massive foreground galaxy bends light from a distant source into luminous arcs.",
+    )
+    enabled = client.put(
+        f"{UI}/courses/visual-course/visual-assistance",
+        headers=auth("Bearer token-a"),
+        json={"request_id": "preference-api-limited-0001", "enabled": True},
+    )
+    assert enabled.status_code == 200, enabled.text
+    created = client.post(
+        f"{UI}/courses/visual-course/messages/{message_id}/visuals",
+        headers=auth("Bearer token-a"),
+        json={
+            "request_id": "visual-request-limited-0001",
+            "pair_id": pair_id,
+            "action": "visual",
+        },
+    )
+    assert created.status_code == 202, created.text
+    job_id = created.json()["id"]
+    original = client.app.state.visual_service.run_once("test-worker")
+    assert original is not None and original["status"] == "COMPLETED"
+
+    projected = client.get(f"{UI}/visual-jobs/{job_id}", headers=auth("Bearer token-a"))
+    assert projected.status_code == 200, projected.text
+    assert projected.json()["fallback_available"] is True
+
+    first = client.post(
+        f"{UI}/visual-jobs/{job_id}/fallback",
+        headers=auth("Bearer token-a"),
+        json={"request_id": "visual-fallback-limited-0001"},
+    )
+    assert first.status_code == 202, first.text
+    completed = client.app.state.visual_service.run_once("test-worker")
+    assert completed is not None
+    assert completed["id"] == first.json()["id"]
+    assert completed["renderer"] == "SVG"
+
+    repeated = client.post(
+        f"{UI}/visual-jobs/{job_id}/fallback",
+        headers=auth("Bearer token-a"),
+        json={"request_id": "visual-fallback-limited-0002"},
+    )
+    assert repeated.status_code == 202, repeated.text
+    assert repeated.json()["id"] == first.json()["id"]

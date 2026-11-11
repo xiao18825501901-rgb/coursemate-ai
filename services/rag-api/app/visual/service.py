@@ -185,7 +185,10 @@ class VisualService:
         if renderer is Renderer.COMFY_VIDEO:
             if videos >= self.settings.visual_max_video_jobs_per_user_day:
                 raise VisualQuotaExceeded("daily visual video quota exceeded")
-        elif images >= self.settings.visual_max_images_per_user_day:
+        elif (
+            renderer is Renderer.COMFY_IMAGE
+            and images >= self.settings.visual_max_images_per_user_day
+        ):
             raise VisualQuotaExceeded("daily visual image quota exceeded")
 
     def run_once(self, worker_id: str) -> dict[str, object] | None:
@@ -276,7 +279,8 @@ class VisualService:
         )
 
     def fallback_available(self, job: dict[str, object]) -> bool:
-        if job.get("status") != "FAILED" or not job.get("visual_spec_json"):
+        status = str(job.get("status") or "")
+        if status not in {"FAILED", "COMPLETED"} or not job.get("visual_spec_json"):
             return False
         if int(str(job.get("retry_count") or 0)) >= self.settings.visual_max_retries:
             return False
@@ -284,7 +288,17 @@ class VisualService:
             spec = VisualSpec.model_validate_json(str(job["visual_spec_json"]))
         except ValueError:
             return False
-        return Renderer(spec.fallback_renderer) in DETERMINISTIC_FALLBACKS
+        if Renderer(spec.fallback_renderer) not in DETERMINISTIC_FALLBACKS:
+            return False
+        if status == "FAILED":
+            return True
+        assets = self.store.assets_for_job(
+            str(job["id"]), user_id=str(job["user_id"])
+        )
+        return any(
+            str(asset.get("semantic_validation") or "") in {"LIMITED", "UNCERTAIN"}
+            for asset in assets
+        )
 
     def fallback_job(
         self, job_id: str, user_id: str, *, request_id: str
@@ -294,9 +308,15 @@ class VisualService:
             raise KeyError(job_id)
         if not self.fallback_available(parent):
             raise VisualStateConflict("deterministic visual fallback is not available")
-        self._enforce_gpu_quota(user_id)
+        existing = self.store.get_fallback_child(job_id, user_id=user_id)
+        if existing is not None:
+            return existing, False
+        # The parent job is the idempotency key. A caller retry with a fresh UI
+        # request ID must still return the one deterministic child.
+        del request_id
+        fallback_request_id = f"deterministic-fallback:{job_id}"
         frozen = json.loads(str(parent["frozen_input_json"]))
-        frozen["request_id"] = request_id
+        frozen["request_id"] = fallback_request_id
         frozen["action"] = "diagram"
         frozen_json = _canonical(frozen)
         retry_count = int(str(parent["retry_count"])) + 1
@@ -304,7 +324,7 @@ class VisualService:
             _canonical(
                 {
                     "parent_job_id": job_id,
-                    "request_id": request_id,
+                    "request_id": fallback_request_id,
                     "fallback": "diagram",
                     "frozen_input_json": frozen_json,
                 }
@@ -312,7 +332,7 @@ class VisualService:
         )
         return self._create_job_record(
             VisualJobCreate(
-                request_id=request_id,
+                request_id=fallback_request_id,
                 request_hash=request_hash,
                 user_id=user_id,
                 course_id=str(parent["course_id"]),
