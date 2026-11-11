@@ -70,6 +70,10 @@ def test_wan_compilation_anchors_a_frozen_chinese_hdd_spec() -> None:
     assert compiled.start_image_png_b64
     first_frame = Image.open(io.BytesIO(base64.b64decode(compiled.start_image_png_b64)))
     assert first_frame.size == (512, 288)
+    assert len(compiled.positive_prompt) <= 700
+    assert (compiled.steps, compiled.cfg) == (40, 3.0)
+    assert "white wash" in compiled.negative_prompt
+    assert "black frame" in compiled.negative_prompt
 
 
 def test_exact_labels_are_projected_for_the_caption_but_not_sent_to_generation() -> None:
@@ -831,11 +835,11 @@ def test_hdd_motion_routes_to_a_single_fixed_camera_continuous_action() -> None:
             "actuator-arm radial position changed."
         ),
     ]
-    assert "fixed cutaway view" in prompt
-    assert "platter rotates continuously" in prompt
-    assert "one bounded radial sweep" in prompt
-    assert "direct overhead cutaway view" in prompt
-    assert "actuator arm is fully exposed beside the platter" in prompt
+    assert len(prompt) <= 700
+    assert "Locked overhead camera" in prompt
+    assert "circular platter spins continuously" in prompt
+    assert "actuator arm swings through a narrow radial arc" in prompt
+    assert "same platter, spindle, arm, head and case in every frame" in prompt
     assert "章节定位" not in prompt
     assert "- CourseJesus_PC_Hardware_Visual_Acceptance_20261009.md" not in prompt
 

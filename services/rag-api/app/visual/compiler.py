@@ -91,6 +91,23 @@ _HDD_START_FRAME_MARKERS = (
     ("read/write head", "read write head", "读写头", "读写磁头"),
 )
 
+_HDD_VIDEO_PROMPT = (
+    "One continuous educational cutaway video of a single mechanical hard-disk drive. "
+    "Locked overhead camera. The rectangular drive body and background stay completely fixed. "
+    "The circular platter spins continuously around the central spindle. The actuator arm "
+    "swings through a narrow radial arc, carrying the read/write head from an inner radius "
+    "toward an outer radius and back without leaving the platter area. Preserve the same "
+    "platter, spindle, arm, head and case in every frame. Smooth stable lighting, cool neutral "
+    "technical illustration, no readable text."
+)
+
+_HDD_VIDEO_NEGATIVE_PROMPT = (
+    "camera movement, zoom, pan, scene cut, montage, object morphing, extra or missing parts, "
+    "people, text, labels, watermark, sparks, damage, SSD, exact speed, seek time, data "
+    "locations, manufacturing details, overexposure, white wash, black frame, flicker, "
+    "color shift, blur"
+)
+
 
 def _contains_staged_sequence(value: str) -> bool:
     lowered = value.casefold()
@@ -453,9 +470,10 @@ def _svg(spec: VisualSpec) -> str:
 def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
     exact = spec.exact_labels + spec.equations + spec.code_elements
     if spec.renderer in {Renderer.COMFY_IMAGE, Renderer.COMFY_VIDEO}:
-        positive = _generative_prompt(spec, exact)
+        hdd_video = spec.renderer is Renderer.COMFY_VIDEO and _requires_hdd_start_frame(spec)
+        positive = _HDD_VIDEO_PROMPT if hdd_video else _generative_prompt(spec, exact)
         start_image_png_b64 = ""
-        if spec.renderer is Renderer.COMFY_VIDEO and _requires_hdd_start_frame(spec):
+        if hdd_video:
             from app.visual.hdd_motion import render_start_frame_png
 
             start_image_png_b64 = base64.b64encode(render_start_frame_png()).decode("ascii")
@@ -465,7 +483,13 @@ def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
             # The pinned FLUX workflow zeroes its negative conditioning, so keeping
             # must-not-include facts only in the positive prompt is truthful.
             negative_prompt=(
-                ", ".join(spec.must_not_include) if spec.renderer is Renderer.COMFY_VIDEO else ""
+                _HDD_VIDEO_NEGATIVE_PROMPT
+                if hdd_video
+                else (
+                    ", ".join(spec.must_not_include)
+                    if spec.renderer is Renderer.COMFY_VIDEO
+                    else ""
+                )
             ),
             duration_seconds=spec.duration_seconds,
             frames=wan_frames(spec.duration_seconds)
@@ -473,8 +497,8 @@ def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
             else None,
             width=512 if spec.renderer is Renderer.COMFY_VIDEO else 1024,
             height=288 if spec.renderer is Renderer.COMFY_VIDEO else 576,
-            cfg=5 if spec.renderer is Renderer.COMFY_VIDEO else 1,
-            steps=20 if spec.renderer is Renderer.COMFY_VIDEO else 4,
+            cfg=3.0 if hdd_video else (5 if spec.renderer is Renderer.COMFY_VIDEO else 1),
+            steps=40 if hdd_video else (20 if spec.renderer is Renderer.COMFY_VIDEO else 4),
             seed=int.from_bytes(spec.model_dump_json().encode()[:4].ljust(4, b"0"), "big"),
             overlays=[Overlay(text=value) for value in exact],
             start_image_png_b64=start_image_png_b64,
