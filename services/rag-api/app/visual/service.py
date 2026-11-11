@@ -54,6 +54,10 @@ class VisualAssistanceNotEnabled(RuntimeError):
     pass
 
 
+class SemanticValidationFailed(InvalidVisualOutput):
+    """The provider returned media but did not prove the teaching contract."""
+
+
 @dataclass(frozen=True)
 class FrozenVisualInput:
     request_id: str
@@ -499,6 +503,15 @@ class VisualService:
                     )
                     width, height = inspection.width, inspection.height
                     duration = inspection.duration_seconds
+                    # Decode success only proves that the bytes are playable. A
+                    # generated teaching video is publishable only after semantic
+                    # evidence reaches PASS. The preserve-on-failure path keeps
+                    # provider job/receipt data while routing the learner to the
+                    # deterministic fallback for this grounded task.
+                    if result.semantic_validation != "PASS":
+                        raise SemanticValidationFailed(
+                            "video semantic validation did not reach PASS"
+                        )
                 else:
                     width, height = validate_output(
                         content,
@@ -585,18 +598,30 @@ class VisualService:
             current = self.store.get(job_id)
             if current is None or current["status"] in TERMINAL:
                 return current or claimed
-            if isinstance(error, (InvalidVisualOutput, MediaValidationError)):
+            if isinstance(error, SemanticValidationFailed):
+                code = "SEMANTIC_VALIDATION_FAILED"
+            elif isinstance(error, (InvalidVisualOutput, MediaValidationError)):
                 code = "INVALID_PROVIDER_OUTPUT"
             elif isinstance(error, VisualQuotaExceeded):
                 code = "QUOTA_EXCEEDED"
             else:
                 code = self._safe_error(error)
-            return self.store.transition(
+            failed = self.store.transition(
                 job_id,
                 "FAILED",
                 expected={str(current["status"])},
                 fields={"error_code": code, "error_detail_safe": code},
             )
+            if isinstance(error, SemanticValidationFailed):
+                # The failed parent and its receipt remain the source of truth.
+                # A fallback constraint must not rewrite the original failure.
+                with suppress(KeyError, VisualStateConflict):
+                    self.fallback_job(
+                        job_id,
+                        str(failed["user_id"]),
+                        request_id=f"auto-deterministic-fallback:{job_id}",
+                    )
+            return failed
 
     def _workflow(self, spec: VisualSpec) -> Workflow:
         if spec.renderer in {Renderer.COMFY_IMAGE, Renderer.COMFY_VIDEO}:
@@ -911,6 +936,7 @@ class VisualService:
             "PROVIDER_TIMEOUT",
             "CANCELLED",
             "VISUAL_ASSISTANCE_NOT_ENABLED",
+            "SEMANTIC_VALIDATION_FAILED",
         }
         if value in allowed or value.startswith("MOCK_"):
             return value

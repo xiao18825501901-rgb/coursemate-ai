@@ -106,6 +106,7 @@ def test_decoded_video_persists_through_the_existing_visual_service(clip, tmp_pa
         height=None,
         duration_seconds=None,
         model_version="offline-transport-fixture",
+        semantic_validation="PASS",
     )
     job, _ = service.create_job(request(question="Explain how two gears transfer motion"))
     completed = service.run_once("video-test-worker")
@@ -168,6 +169,7 @@ def test_video_asset_alt_text_matches_the_single_shot_contract(clip, tmp_path):
         height=None,
         duration_seconds=None,
         model_version="offline-transport-fixture",
+        semantic_validation="PASS",
     )
 
     job, _ = service.create_job(request(question="Explain HDD motion"))
@@ -189,3 +191,51 @@ def test_video_asset_alt_text_matches_the_single_shot_contract(clip, tmp_path):
         )
     projected = _project(service, service.store.get(str(job["id"])), user_id="user-1")
     assert "分段呈现" not in projected["assets"][0]["alt_text"]
+
+
+def test_video_without_semantic_pass_is_not_published_and_queues_fallback(
+    clip, tmp_path
+):
+    from test_visual_service import make_service, request
+
+    from app.visual.providers.base import ProviderResult
+
+    service, provider = make_service(tmp_path, visual_video_enabled=True)
+    provider.get_result = lambda _job: ProviderResult(
+        content=clip,
+        mime_type="video/mp4",
+        width=None,
+        height=None,
+        duration_seconds=None,
+        model_version="offline-transport-fixture",
+        semantic_validation="LIMITED",
+    )
+
+    original, _ = service.create_job(
+        request(question="Explain mechanical hard-disk platter rotation and actuator motion")
+    )
+    rejected = service.run_once("video-semantic-gate-worker")
+
+    assert rejected["id"] == original["id"]
+    assert rejected["status"] == "FAILED"
+    assert rejected["error_code"] == "SEMANTIC_VALIDATION_FAILED"
+    assert service.store.assets_for_job(
+        str(original["id"]), user_id="user-1"
+    ) == []
+
+    fallback = service.store.get_fallback_child(
+        str(original["id"]), user_id="user-1"
+    )
+    assert fallback is not None
+    assert fallback["status"] == "QUEUED"
+
+    completed_fallback = service.run_once("video-semantic-gate-worker")
+    assert completed_fallback["id"] == fallback["id"]
+    assert completed_fallback["status"] == "COMPLETED"
+    assert completed_fallback["renderer"] == "SVG"
+    fallback_asset = service.store.assets_for_job(
+        str(fallback["id"]), user_id="user-1"
+    )[0]
+    assert fallback_asset["mime_type"] == "image/svg+xml"
+    assert fallback_asset["semantic_validation"] == "PASS"
+    assert provider.submit_count == 1
