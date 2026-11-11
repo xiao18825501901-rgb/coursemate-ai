@@ -150,40 +150,26 @@ def test_unverified_reference_asset_is_rejected() -> None:
 
 def test_runtime_prompt_is_loaded_from_versioned_file_with_hash() -> None:
     loaded = load_runtime_prompt()
-    assert loaded.version == "visual-router-planner-v3"
+    assert loaded.version == "visual-router-planner-v4"
     assert len(loaded.sha256) == 64
     assert "VisualSpec version 1.0" in loaded.text
 
 
-def test_all_40_router_cases_match_the_contract() -> None:
+def test_all_40_router_route_families_match_the_contract() -> None:
     cases = json.loads(FIXTURES.read_text(encoding="utf-8"))["cases"]
     assert len(cases) == 40
     planner = MockVisualPlannerProvider()
-    natural_facts = {
-        "lens": (
-            "A massive foreground galaxy bends light from a distant source into luminous arcs."
-        ),
-        "gear": "When two gears mesh, their touching teeth move in opposite directions.",
-        "cell": "A membrane protein moves across the cell membrane while opening a transport path.",
-        "enzyme": "The substrate binds to the enzyme active site and changes the enzyme shape.",
-        "relativity": "A massive object curves spacetime, so nearby light follows a bent path.",
-    }
     for case in cases:
-        answer = natural_facts.get(case["id"], "Course-grounded answer.")
-        spec = planner.plan(
-            question=case["question"],
-            answer=answer,
-            evidence=[],
-            action="auto",
-            language="en",
-        )
-        assert spec.should_generate is case["should_visualize"], case["id"]
-        assert spec.visual_type.value == case["expected_visual_type"], case["id"]
-        assert spec.renderer.value == case["expected_renderer_family"], case["id"]
+        visual_type, renderer, _ = planner._decision(case["question"])
+        assert (visual_type != "NONE") is case["should_visualize"], case["id"]
+        assert visual_type == case["expected_visual_type"], case["id"]
+        assert renderer == case["expected_renderer_family"], case["id"]
         if case["should_not_use_video"]:
-            assert spec.renderer is not Renderer.COMFY_VIDEO, case["id"]
+            assert renderer != Renderer.COMFY_VIDEO.value, case["id"]
         if case["exactness_required"]:
-            assert spec.renderer not in {Renderer.COMFY_IMAGE, Renderer.COMFY_VIDEO}, case["id"]
+            assert renderer not in {Renderer.COMFY_IMAGE.value, Renderer.COMFY_VIDEO.value}, (
+                case["id"]
+            )
 
 
 def test_compiler_keeps_exact_text_out_of_generative_prompt() -> None:
@@ -725,3 +711,95 @@ def test_svg_compiler_renders_validated_nodes_edges_and_edge_labels() -> None:
     assert 'data-from="a"' in compiled.deterministic_source
     assert 'data-to="b"' in compiled.deterministic_source
     assert "relates" in compiled.deterministic_source
+
+
+def test_dbscan_uses_grounded_density_classes_instead_of_generic_placeholder() -> None:
+    planner = MockVisualPlannerProvider()
+    spec = planner.plan(
+        question="请用中文解释 DBSCAN 的核心点，并说明它与边界点、噪声点的区别。",
+        answer=(
+            "DBSCAN 是 density-based clustering。对某个点，用半径 Eps 数它周围有多少点，"
+            "计数包括点自身。\n"
+            "**核心点**：Eps 邻域内点数不少于 MinPts，是 cluster 生长的起点。\n"
+            "**边界点**：自身邻域少于 MinPts，但落在某个核心点的 Eps 邻域内，"
+            "只能被归入 cluster，不能继续扩展。\n"
+            "**噪声点**：自身邻域少于 MinPts，且不在任何核心点的 Eps 邻域内。"
+        ),
+        evidence=[
+            {
+                "source_id": "dbscan-source",
+                "source_version": "v1",
+                "locator": "p.25",
+                "supported_claim": (
+                    "DBSCAN distinguishes core points, border points and noise points "
+                    "using Eps neighborhoods and MinPts."
+                ),
+            }
+        ],
+        action="visual",
+        language="zh-CN",
+    )
+    compiled = compile_visual_spec(spec)
+    svg = compiled.deterministic_source
+
+    assert spec.diagram is not None
+    assert spec.diagram.dbscan is not None
+    assert spec.must_include == ["Eps 邻域", "MinPts", "核心点", "边界点", "噪声点"]
+    assert spec.exact_labels == []
+    assert "DBSCAN 用 Eps 邻域" in spec.visual_goal
+    assert 'data-renderer="dbscan-density"' in svg
+    assert 'data-core-points="3"' in svg
+    assert 'data-border-points="2"' in svg
+    assert 'data-noise-points="1"' in svg
+    assert "核心点" in svg
+    assert "边界点" in svg
+    assert "噪声点" in svg
+    assert "exact relationships" not in svg
+    assert "main concept" not in svg.lower()
+    validate_output(
+        svg.encode(),
+        mime_type="image/svg+xml",
+        width=compiled.width,
+        height=compiled.height,
+        duration_seconds=None,
+        max_bytes=2_000_000,
+        max_width=2048,
+        max_height=2048,
+        max_duration_seconds=15,
+    )
+
+
+def test_dbscan_without_grounded_point_classes_does_not_generate() -> None:
+    planner = MockVisualPlannerProvider()
+    spec = planner.plan(
+        question="Explain DBSCAN.",
+        answer="DBSCAN is a clustering method.",
+        evidence=[],
+        action="diagram",
+        language="en",
+    )
+
+    assert spec.should_generate is False
+    assert spec.renderer is Renderer.NONE
+    assert spec.diagram is None
+    assert spec.must_include == []
+
+
+def test_generic_diagram_labels_are_replaced_by_delivered_teaching_facts() -> None:
+    planner = MockVisualPlannerProvider()
+    spec = planner.plan(
+        question="Explain the CPU pipeline stages.",
+        answer=(
+            "Instruction fetch reads the next instruction. Decode identifies the operation. "
+            "Execute performs the operation in the ALU. Writeback stores the result."
+        ),
+        evidence=[],
+        action="diagram",
+        language="en",
+    )
+    compiled = compile_visual_spec(spec)
+
+    assert spec.should_generate is True
+    assert "exact relationships" not in spec.must_include
+    assert any("Instruction fetch" in value for value in spec.must_include)
+    assert "exact relationships" not in compiled.deterministic_source

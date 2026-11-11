@@ -97,6 +97,12 @@ class HddKinematicsExample(StrictModel):
     provenance: Literal["DELIVERED_GROUNDED_EXPLANATION"]
 
 
+class DbscanExample(StrictModel):
+    """A grounded density-neighborhood example for DBSCAN point classes."""
+
+    provenance: Literal["DELIVERED_GROUNDED_EXPLANATION"]
+
+
 class Diagram(StrictModel):
     layout: Literal["AUTO", "LEFT_RIGHT", "TOP_DOWN", "RADIAL", "TIMELINE", "COORDINATE"]
     nodes: list[DiagramNode] = Field(max_length=60)
@@ -104,6 +110,7 @@ class Diagram(StrictModel):
     kmeans: KMeansExample | None = None
     phospholipid_bilayer: PhospholipidBilayerExample | None = None
     hdd_kinematics: HddKinematicsExample | None = None
+    dbscan: DbscanExample | None = None
 
     @model_serializer(mode="wrap")
     def preserve_legacy_identity(self, handler):
@@ -114,6 +121,8 @@ class Diagram(StrictModel):
             value.pop("phospholipid_bilayer", None)
         if self.hdd_kinematics is None:
             value.pop("hdd_kinematics", None)
+        if self.dbscan is None:
+            value.pop("dbscan", None)
         return value
 
 

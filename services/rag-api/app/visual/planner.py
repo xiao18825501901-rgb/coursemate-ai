@@ -9,7 +9,7 @@ from typing import Literal, Protocol
 from app.visual.kmeans import assignment, delivered_example
 from app.visual.spec import VisualSpec
 
-PROMPT_VERSION = "visual-router-planner-v3"
+PROMPT_VERSION = "visual-router-planner-v4"
 PROMPT_PATH = Path(__file__).with_name("prompts") / "visual_router_planner_v1.system.md"
 HDD_VISUAL_REQUIRED = [
     "one mechanical hard-disk drive body remaining fixed",
@@ -35,6 +35,31 @@ DESKTOP_GROUNDED_CLAIM = (
     "area is mounted on the motherboard. Long narrow DIMM memory slots form a separate "
     "parallel-slot region often near the CPU area."
 )
+DBSCAN_VISUAL_REQUIRED_ZH = ["Eps 邻域", "MinPts", "核心点", "边界点", "噪声点"]
+DBSCAN_VISUAL_REQUIRED_EN = [
+    "Eps neighborhood",
+    "MinPts",
+    "core point",
+    "border point",
+    "noise point",
+]
+DBSCAN_GROUNDED_CLAIM_ZH = (
+    "DBSCAN 用 Eps 邻域中的点数与 MinPts 判定核心点；边界点落在核心点邻域内，"
+    "但自身邻域不足 MinPts；噪声点不在任何核心点的 Eps 邻域内。"
+)
+DBSCAN_GROUNDED_CLAIM_EN = (
+    "DBSCAN classifies a point as core when its Eps neighborhood contains at least "
+    "MinPts points, as border when it lies in a core point's neighborhood without "
+    "meeting MinPts itself, and as noise when it lies in no core point's neighborhood."
+)
+_GENERIC_DIAGRAM_LABELS = {
+    "concept",
+    "nodes",
+    "edges",
+    "relationships",
+    "exact relationships",
+    "ordered states",
+}
 
 
 @dataclass(frozen=True)
@@ -93,6 +118,8 @@ _NAVIGATION_LABEL_RE = re.compile(
 _CLAIM_SPLIT_RE = re.compile(r"(?<=[。！？!?；;.])\s+|[\r\n]+")
 _VISUAL_RELATION_RE = re.compile(
     r"\b(?:is|are|was|were|has|have|contains?|consists?|shows?|"
+    r"reads?|identifies?|performs?|stores?|writes?|selects?|loads?|decodes?|"
+    r"executes?|fetches?|"
     r"rotates?|moves?|bends?|curves?|fuses?|buds?|flows?|pushes?|turns?|"
     r"increases?|decreases?|connects?|separates?|lies?|sits?|surrounds?|"
     r"enters?|leaves?|travels?|reflects?|refracts?|causes?|represents?|"
@@ -210,6 +237,27 @@ def _is_desktop_internal_components(question: str) -> bool:
     )
 
 
+def _has_grounded_dbscan_structure(answer: str) -> bool:
+    return (
+        _contains(answer, r"\bdbscan\b")
+        and _contains(answer, r"\bcore point\b", r"核心点")
+        and _contains(answer, r"\bborder point\b", r"边界点")
+        and _contains(answer, r"\bnoise point\b", r"噪声点")
+        and _contains(answer, r"\beps\b", r"\bminpts\b", r"邻域")
+    )
+
+
+def _grounded_diagram_labels(includes: list[str], answer_claims: list[str]) -> list[str]:
+    if includes and not any(value.casefold() in _GENERIC_DIAGRAM_LABELS for value in includes):
+        return includes
+    labels: list[str] = []
+    for value in answer_claims[:4]:
+        label = _prompt_fragment(value, limit=150)
+        if label:
+            labels.append(label)
+    return labels
+
+
 class GroundedPolicyVisualPlannerProvider:
     """Deterministic, source-grounded production router with no provider cost."""
 
@@ -308,6 +356,8 @@ class GroundedPolicyVisualPlannerProvider:
         is_endomembrane_transport = _is_endomembrane_transport(question)
         is_hdd_motion = _is_hdd_motion(question)
         is_desktop_internal_components = _is_desktop_internal_components(question)
+        is_dbscan = _contains(question, r"\bdbscan\b", r"基于密度的聚类")
+        is_grounded_dbscan = is_dbscan and _has_grounded_dbscan_structure(answer)
         kmeans = None
         is_kmeans = _contains(question, r"k[-\s]?means", r"K均值")
         is_phospholipid_bilayer = _contains(
@@ -339,6 +389,16 @@ class GroundedPolicyVisualPlannerProvider:
         if is_phospholipid_bilayer:
             visual_type, renderer = "DIAGRAM", "SVG"
             includes = ["疏水尾部", "水环境", "膜内侧"]
+        if is_dbscan:
+            if is_grounded_dbscan:
+                visual_type, renderer = "DIAGRAM", "SVG"
+                includes = (
+                    list(DBSCAN_VISUAL_REQUIRED_ZH)
+                    if language.lower().startswith("zh")
+                    else list(DBSCAN_VISUAL_REQUIRED_EN)
+                )
+            else:
+                visual_type, renderer, includes = "NONE", "NONE", []
         if is_hdd_motion and action in {"diagram", "animate"}:
             visual_type, renderer, includes = "ANIMATION", "SVG", list(HDD_VISUAL_REQUIRED)
         elif action == "diagram" and renderer != "NONE":
@@ -351,6 +411,11 @@ class GroundedPolicyVisualPlannerProvider:
         natural = renderer in {"COMFY_IMAGE", "COMFY_VIDEO"}
         answer_claims = _visual_claim_fragments(answer)
         answer_fact = answer_claims[0] if answer_claims else ""
+        if should_generate and not natural:
+            includes = _grounded_diagram_labels(includes, answer_claims)
+            if not includes:
+                visual_type, renderer = "NONE", "NONE"
+                should_generate = False
         supported: list[str] = []
         if natural:
             supported_claims = [
@@ -407,6 +472,11 @@ class GroundedPolicyVisualPlannerProvider:
             diagram["layout"] = "AUTO"
             diagram["edges"] = []
             diagram["hdd_kinematics"] = {"provenance": "DELIVERED_GROUNDED_EXPLANATION"}
+            labels = []
+        if is_grounded_dbscan and renderer == "SVG" and diagram is not None:
+            diagram["layout"] = "AUTO"
+            diagram["edges"] = []
+            diagram["dbscan"] = {"provenance": "DELIVERED_GROUNDED_EXPLANATION"}
             labels = []
         animation_steps = []
         if is_hdd_motion and renderer == "SVG":
@@ -679,6 +749,21 @@ class GroundedPolicyVisualPlannerProvider:
                 )
             )
         )
+        if is_grounded_dbscan:
+            visual_goal = (
+                DBSCAN_GROUNDED_CLAIM_ZH
+                if language.lower().startswith("zh")
+                else DBSCAN_GROUNDED_CLAIM_EN
+            )
+            pedagogical_reason = (
+                "区分 DBSCAN 核心点、边界点和噪声点：比较 Eps 邻域计数、MinPts 阈值"
+                "以及点是否落在核心点邻域内。"
+                if language.lower().startswith("zh")
+                else (
+                    "Distinguish DBSCAN core, border, and noise points by comparing "
+                    "Eps-neighborhood counts with MinPts and checking connectivity to core points."
+                )
+            )
         return VisualSpec.model_validate(
             {
                 "visual_spec_version": "1.0",

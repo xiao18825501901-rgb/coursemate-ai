@@ -143,7 +143,16 @@ def test_compiled_prompt_change_invalidates_reuse_cache(
 def test_deterministic_diagram_never_invokes_provider(tmp_path: Path) -> None:
     service, provider = make_service(tmp_path)
     value = request(question="Show the CPU pipeline stages")
-    value = FrozenVisualInput(**{**value.__dict__, "action": "diagram"})
+    value = FrozenVisualInput(
+        **{
+            **value.__dict__,
+            "action": "diagram",
+            "answer": (
+                "Instruction fetch reads the next instruction. Decode identifies the operation. "
+                "Execute performs the operation in the ALU. Writeback stores the result."
+            ),
+        }
+    )
     service.create_job(value)
     completed = service.run_once("worker-1")
     assert completed is not None and completed["status"] == "COMPLETED"

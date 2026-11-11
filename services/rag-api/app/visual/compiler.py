@@ -167,6 +167,10 @@ def _svg(spec: VisualSpec) -> str:
         from app.visual.membrane import render
 
         return render(spec.language)
+    if diagram is not None and diagram.dbscan is not None:
+        from app.visual.dbscan import render
+
+        return render(spec.language)
     if diagram is None:
         return '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="576"/>'
     node_width = 150
