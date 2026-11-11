@@ -93,20 +93,21 @@ _HDD_START_FRAME_MARKERS = (
 )
 
 _HDD_VIDEO_PROMPT = (
-    "Continuous educational cutaway of one mechanical hard-disk drive. "
-    "Locked overhead camera; the rectangular case and background stay completely fixed. "
-    "The clearest moving part is the orange-marked black read/write head at the tip of the "
-    "tan actuator arm. It visibly slides inward across the platter toward the central spindle, "
-    "clearly changing its radial distance, then returns outward. The arm pivots with it and "
-    "never detaches. Meanwhile the circular platter turns continuously around the fixed "
-    "spindle, shown by its red radial stripe. Preserve the same drive, platter, spindle, arm, "
-    "head and case in every frame. Smooth stable lighting, cool neutral technical illustration, "
-    "no readable text."
+    "Single-shot 2D technical animation of one mechanical hard-disk cutaway. "
+    "Locked overhead camera; the case, background and object identities stay fixed. "
+    "The orange-marked black read/write head at the tip of the tan actuator arm must make "
+    "a large unmistakable radial sweep: start on the outer track, move inward across at "
+    "least half the platter radius toward the inner track and spindle, then return outward. "
+    "do not leave it frozen; the arm pivots visibly and never detaches. Meanwhile the "
+    "circular platter turns continuously around the fixed spindle, shown by its red radial "
+    "stripe. Preserve the same drive, platter, spindle, arm, head and case in every frame. "
+    "Smooth stable lighting, cool neutral technical illustration, no readable text."
 )
 
 _HDD_VIDEO_NEGATIVE_PROMPT = (
     "camera movement, zoom, pan, scene cut, montage, object morphing, extra or missing parts, "
-    "people, text, labels, watermark, sparks, damage, SSD, exact speed, seek time, data "
+    "frozen actuator arm, stationary read/write head, people, text, labels, watermark, sparks, "
+    "damage, SSD, exact speed, seek time, data "
     "locations, manufacturing details, overexposure, white wash, black frame, flicker, "
     "color shift, blur"
 )
@@ -503,7 +504,7 @@ def compile_visual_spec(spec: VisualSpec) -> CompiledVisual:
             else None,
             width=1280 if spec.renderer is Renderer.COMFY_VIDEO else 1024,
             height=704 if spec.renderer is Renderer.COMFY_VIDEO else 576,
-            cfg=3.0 if hdd_video else (5 if spec.renderer is Renderer.COMFY_VIDEO else 1),
+            cfg=4.0 if hdd_video else (5 if spec.renderer is Renderer.COMFY_VIDEO else 1),
             steps=40 if hdd_video else (20 if spec.renderer is Renderer.COMFY_VIDEO else 4),
             seed=int.from_bytes(spec.model_dump_json().encode()[:4].ljust(4, b"0"), "big"),
             overlays=[Overlay(text=value) for value in exact],

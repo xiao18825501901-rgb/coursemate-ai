@@ -6,6 +6,10 @@ import math
 
 from PIL import Image, ImageDraw
 
+HDD_PLATTER_CENTER = (190, 148)
+HDD_START_HEAD_CENTER = (280, 187)
+HDD_INNER_HEAD_CENTER = (240, 170)
+
 
 def _draw_actuator(draw: ImageDraw.ImageDraw, head_center: tuple[int, int]) -> None:
     pivot = (368, 221)
@@ -24,6 +28,26 @@ def _draw_actuator(draw: ImageDraw.ImageDraw, head_center: tuple[int, int]) -> N
         (head_x - 5, head_y - 6, head_x + 5, head_y + 6),
         radius=2,
         fill="#d88a38",
+    )
+
+
+def _draw_radial_motion_cue(draw: ImageDraw.ImageDraw) -> None:
+    """Show the intended inner sweep without adding a second mechanical part."""
+
+    start = (HDD_START_HEAD_CENTER[0] - 2, HDD_START_HEAD_CENTER[1] + 3)
+    end = (HDD_INNER_HEAD_CENTER[0] + 2, HDD_INNER_HEAD_CENTER[1] - 1)
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    draw.line((start, end), fill="#f1a53d", width=6)
+    draw.line((start, end), fill="#fff7dc", width=2)
+    draw.polygon(
+        (
+            (end[0], end[1]),
+            (end[0] - dx // 4 - dy // 5, end[1] - dy // 4 + dx // 5),
+            (end[0] - dx // 4 + dy // 5, end[1] - dy // 4 - dx // 5),
+        ),
+        fill="#f1a53d",
+        outline="#9c5b1b",
     )
 
 
@@ -48,7 +72,7 @@ def _render_hdd_frame(
         width=5,
     )
     draw.rectangle((39, 45, 373, 249), fill="#d9e2e5", outline="#8b9ca5", width=2)
-    center = (190, 148)
+    center = HDD_PLATTER_CENTER
     draw.ellipse(
         (center[0] - 103, center[1] - 103, center[0] + 103, center[1] + 103),
         fill="#b9cbd3",
@@ -81,6 +105,7 @@ def _render_hdd_frame(
         (center[0] - 5, center[1] - 5, center[0] + 5, center[1] + 5),
         fill="#edf4f6",
     )
+    _draw_radial_motion_cue(draw)
     _draw_actuator(draw, head_center)
     if image.size != (width, height):
         image = image.resize((width, height), Image.Resampling.LANCZOS)
@@ -95,7 +120,7 @@ def render_start_frame_png(width: int = 1280, height: int = 704) -> bytes:
     return _render_hdd_frame(
         width,
         height,
-        head_center=(280, 187),
+        head_center=HDD_START_HEAD_CENTER,
         platter_marker_degrees=0,
     )
 
@@ -106,7 +131,7 @@ def render_end_frame_png(width: int = 1280, height: int = 704) -> bytes:
     return _render_hdd_frame(
         width,
         height,
-        head_center=(244, 178),
+        head_center=HDD_INNER_HEAD_CENTER,
         platter_marker_degrees=120,
     )
 
