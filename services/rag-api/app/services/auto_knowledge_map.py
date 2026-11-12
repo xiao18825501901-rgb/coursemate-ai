@@ -2816,7 +2816,8 @@ class AutoKnowledgeMapService:
             "'AUTO_LOCAL_NORMALIZATION_REJECTED') "
             "AND receipt.status='FAILED') OR ("
             "job.status='BLOCKED' AND job.target_kind='AUTO_COURSE' "
-            "AND job.error_code='COURSE_NOT_FOUND' AND receipt.status='BLOCKED')) "
+            "AND job.error_code IN ('COURSE_NOT_FOUND','WORKSPACE_QUOTA') "
+            "AND receipt.status='BLOCKED')) "
             + ("AND job.target_key=?" if target_key is not None else ""),
             (() if target_key is None else (target_key,)),
         ).fetchall()
@@ -2829,7 +2830,55 @@ class AutoKnowledgeMapService:
             ).fetchone()
             if uncertain is not None:
                 continue
-            if row["error_code"] == "COURSE_NOT_FOUND":
+            if row["error_code"] == "WORKSPACE_QUOTA":
+                course = connection.execute(
+                    "SELECT course_type FROM courses WHERE id=?",
+                    (row["course_id"],),
+                ).fetchone()
+                sent_evidence = any(
+                    (
+                        int(row["receipt_model_calls_made"] or 0) != 0,
+                        connection.execute(
+                            "SELECT 1 FROM learning_operations "
+                            "WHERE id LIKE ? LIMIT 1",
+                            (operation_prefix,),
+                        ).fetchone(),
+                        connection.execute(
+                            "SELECT 1 FROM learning_model_call_reservations "
+                            "WHERE operation_id LIKE ? LIMIT 1",
+                            (operation_prefix,),
+                        ).fetchone(),
+                        connection.execute(
+                            "SELECT 1 FROM learning_model_run_evidence "
+                            "WHERE operation_id LIKE ? LIMIT 1",
+                            (operation_prefix,),
+                        ).fetchone(),
+                        connection.execute(
+                            "SELECT 1 FROM auto_knowledge_model_attempts "
+                            "WHERE job_id=? LIMIT 1",
+                            (row["id"],),
+                        ).fetchone(),
+                        connection.execute(
+                            "SELECT 1 FROM auto_knowledge_job_artifacts "
+                            "WHERE job_id=? LIMIT 1",
+                            (row["id"],),
+                        ).fetchone(),
+                        connection.execute(
+                            "SELECT 1 FROM auto_knowledge_repair_reservations "
+                            "WHERE job_id=? LIMIT 1",
+                            (row["id"],),
+                        ).fetchone(),
+                    )
+                )
+                if (
+                    course is None
+                    or str(course["course_type"]) != "official"
+                    or sent_evidence
+                ):
+                    continue
+                blocked = []
+                reason = "INTERNAL_METERING_WORKSPACE_V1"
+            elif row["error_code"] == "COURSE_NOT_FOUND":
                 # V46 and earlier tried the public enrollment path before a
                 # staged official course was published.  This error happened
                 # before an operation, reservation, attempt or artifact could
@@ -4643,8 +4692,8 @@ class AutoKnowledgeMapService:
             ).fetchone()
         if course is None:
             raise ApiError(404, "COURSE_NOT_FOUND", "The course was removed.")
-        if tuple(course) == ("official", "private", "private"):
-            return self._staged_official_workspace(str(job["course_id"]), admin)
+        if job["target_kind"] == "AUTO_COURSE" and course["course_type"] == "official":
+            return self._auto_course_metering_workspace(str(job["course_id"]), admin)
         workspace = join_course(
             self.database,
             str(job["course_id"]),
@@ -4653,15 +4702,15 @@ class AutoKnowledgeMapService:
         )
         return str(workspace["id"])
 
-    def _staged_official_workspace(self, course_id: str, admin: str) -> str:
-        """Create the internal metering workspace without publishing the course.
+    def _auto_course_metering_workspace(self, course_id: str, admin: str) -> str:
+        """Create the internal metering workspace for an official course.
 
         Normal enrollment must keep using ``join_course`` and its visibility,
-        campus-access and quota checks.  This path is reachable only from a
-        leased ``AUTO_COURSE`` job after the caller verified a private official
-        course.  Deterministic ids make restart/race handling idempotent; the
-        private corpus contains no imported source material and remains an
-        audit anchor for model reservations.
+        campus-access and quota checks. This path is reachable only from a
+        leased ``AUTO_COURSE`` job for an official course, including published
+        corpus courses. Deterministic ids make restart/race handling
+        idempotent; the private corpus contains no imported source material and
+        remains an audit anchor for model reservations.
         """
 
         identity = digest(["AUTO_COURSE_METERING", course_id, admin])[:32]
@@ -4673,11 +4722,11 @@ class AutoKnowledgeMapService:
                 "SELECT course_type,visibility,publication_status FROM courses WHERE id=?",
                 (course_id,),
             ).fetchone()
-            if course is None or tuple(course) != ("official", "private", "private"):
+            if course is None or str(course["course_type"]) != "official":
                 raise ApiError(
                     409,
                     "AUTO_STAGED_COURSE_REQUIRED",
-                    "The internal workspace is restricted to a staged official course.",
+                    "The internal workspace is restricted to an official course.",
                 )
             current = connection.execute(
                 "SELECT id FROM learning_workspaces WHERE course_id=? AND owner_user_id=?",

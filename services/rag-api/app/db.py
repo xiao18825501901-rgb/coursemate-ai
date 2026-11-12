@@ -86,6 +86,7 @@ V3_MIGRATIONS = (
     "083_point_question_cross_configuration_reuse.sql",
     "084_deterministic_point_questions.sql",
     "085_source_bound_student_entry.sql",
+    "086_auto_knowledge_internal_workspace_recovery.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -93,6 +94,7 @@ V3_MIGRATIONS = (
 # Keep historical SQL immutable and skip only a superseded rebuild after its
 # superseding version has committed its ledger row.
 V3_REPLAY_SUPERSEDED_BY = {
+    "086_auto_knowledge_internal_workspace_recovery.sql": 86,
     "085_source_bound_student_entry.sql": 85,
     "084_deterministic_point_questions.sql": 84,
     "083_point_question_cross_configuration_reuse.sql": 83,
@@ -158,7 +160,7 @@ V3_REPLAY_SUPERSEDED_BY = {
     "072_assessment_preparation_retry_epochs.sql": 72,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 85
+LATEST_V3_SCHEMA_VERSION = 86
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (

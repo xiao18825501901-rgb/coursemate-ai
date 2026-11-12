@@ -688,6 +688,316 @@ def test_staged_official_course_build_uses_an_internal_metering_workspace(
     assert tuple(corpus) == ("admin", "user", "private", "private")
 
 
+def test_published_official_course_build_does_not_consume_admin_user_quota(
+    tmp_path: Path,
+) -> None:
+    settings = settings_at(tmp_path).model_copy(
+        update={
+            "user_course_max_courses": 1,
+            "auto_knowledge_map_enabled": True,
+            "auto_knowledge_map_allow_billable": True,
+        }
+    )
+    database = Database(settings)
+    database.initialize()
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO courses("
+            "id,name,owner_user_id,course_type,visibility,publication_status"
+            ") VALUES("
+            "'admin-private','Admin private','admin','user','private','private'"
+            ")"
+        )
+        connection.execute(
+            "INSERT INTO courses("
+            "id,name,owner_user_id,course_type,visibility,publication_status"
+            ") VALUES("
+            "'admin-corpus','Admin corpus','admin','user','private','private'"
+            ")"
+        )
+        connection.execute(
+            "INSERT INTO learning_workspaces("
+            "id,owner_user_id,course_id,private_course_id"
+            ") VALUES("
+            "'admin-workspace','admin','admin-private','admin-corpus'"
+            ")"
+        )
+        connection.execute(
+            "INSERT INTO courses("
+            "id,name,course_type,visibility,publication_status"
+            ") VALUES("
+            "'published-campus','Published campus','official','private','private'"
+            ")"
+        )
+    ready_document(
+        database,
+        document_id="published-campus-doc",
+        chunk_id="published-campus-chunk",
+        content="A published campus course still needs an internal map workspace.",
+        course_id="published-campus",
+    )
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE courses SET visibility='public',publication_status='published' "
+            "WHERE id='published-campus'"
+        )
+    generator = FakeGenerator()
+    service = AutoKnowledgeMapService(
+        database,
+        settings,
+        learning=object(),  # type: ignore[arg-type]
+        generator=generator,
+    )
+
+    assert service.reconcile(force=True)["QUEUED"] == 1
+    result = service.run_once("published-campus-worker")
+
+    assert result is not None and result["status"] == "READY"
+    with database.connect() as connection:
+        workspace = connection.execute(
+            "SELECT * FROM learning_workspaces WHERE course_id='published-campus'"
+        ).fetchone()
+        target = connection.execute(
+            "SELECT status FROM auto_knowledge_targets "
+            "WHERE target_key='AUTO_COURSE:published-campus'"
+        ).fetchone()
+    assert workspace is not None
+    assert workspace["id"].startswith("akm-workspace-")
+    assert workspace["private_course_id"].startswith("akm-corpus-")
+    assert target["status"] == "READY"
+    with database.connect() as connection:
+        job = connection.execute(
+            "SELECT * FROM auto_knowledge_jobs "
+            "WHERE target_key='AUTO_COURSE:published-campus'"
+        ).fetchone()
+        assert service._workspace_for_job(job) == workspace["id"]
+        workspace_count = connection.execute(
+            "SELECT COUNT(*) FROM learning_workspaces "
+            "WHERE course_id='published-campus'"
+        ).fetchone()[0]
+    assert workspace_count == 1
+
+
+def test_pre_dispatch_workspace_quota_failure_resumes_with_internal_workspace(
+    tmp_path: Path,
+) -> None:
+    settings = settings_at(tmp_path).model_copy(
+        update={
+            "user_course_max_courses": 1,
+            "auto_knowledge_map_enabled": True,
+            "auto_knowledge_map_allow_billable": True,
+        }
+    )
+    database = Database(settings)
+    database.initialize()
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO courses("
+            "id,name,owner_user_id,course_type,visibility,publication_status"
+            ") VALUES("
+            "'admin-private','Admin private','admin','user','private','private'"
+            ")"
+        )
+        connection.execute(
+            "INSERT INTO courses("
+            "id,name,owner_user_id,course_type,visibility,publication_status"
+            ") VALUES("
+            "'admin-corpus','Admin corpus','admin','user','private','private'"
+            ")"
+        )
+        connection.execute(
+            "INSERT INTO learning_workspaces("
+            "id,owner_user_id,course_id,private_course_id"
+            ") VALUES("
+            "'admin-workspace','admin','admin-private','admin-corpus'"
+            ")"
+        )
+        connection.execute(
+            "INSERT INTO courses("
+            "id,name,course_type,visibility,publication_status"
+            ") VALUES("
+            "'quota-campus','Quota campus','official','private','private'"
+            ")"
+        )
+    ready_document(
+        database,
+        document_id="quota-campus-doc",
+        chunk_id="quota-campus-chunk",
+        content="A pre-dispatch quota stop has no model send evidence.",
+        course_id="quota-campus",
+    )
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE courses SET visibility='public',publication_status='published' "
+            "WHERE id='quota-campus'"
+        )
+    generator = FakeGenerator()
+    service = AutoKnowledgeMapService(
+        database,
+        settings,
+        learning=object(),  # type: ignore[arg-type]
+        generator=generator,
+    )
+    assert service.reconcile(force=True)["QUEUED"] == 1
+    with database.connect() as connection:
+        job = connection.execute(
+            "SELECT * FROM auto_knowledge_jobs "
+            "WHERE target_key='AUTO_COURSE:quota-campus'"
+        ).fetchone()
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='BLOCKED',"
+            "error_code='WORKSPACE_QUOTA',error_message='Workspace quota reached.',"
+            "completed_at=? WHERE id=?",
+            ("2026-11-12T00:00:00.000Z", job["id"]),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_targets SET status='BLOCKED',"
+            "message='Workspace quota reached.' WHERE target_key=?",
+            (job["target_key"],),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_job_receipts("
+            "job_id,target_key,corpus_fingerprint,status,source_snapshot_hash,"
+            "model_calls_made,detail_json) VALUES(?,?,?,'BLOCKED',?,0,?)",
+            (
+                job["id"],
+                job["target_key"],
+                job["corpus_fingerprint"],
+                digest(json.loads(job["source_snapshot_json"])),
+                json.dumps({"error_code": "WORKSPACE_QUOTA"}),
+            ),
+        )
+
+    reconciled = service.reconcile(force=True)
+    assert reconciled["RECOVERED_SAFE_FAILURE"] == 1
+    result = service.run_once("workspace-recovery-worker")
+
+    assert result is not None and result["status"] == "READY"
+    with database.connect() as connection:
+        recovery = connection.execute(
+            "SELECT reason,prior_receipt_json,blocked_operation_ids_json "
+            "FROM auto_knowledge_job_recovery_receipts WHERE job_id=?",
+            (job["id"],),
+        ).fetchone()
+        workspace = connection.execute(
+            "SELECT id,private_course_id FROM learning_workspaces "
+            "WHERE course_id='quota-campus'"
+        ).fetchone()
+    assert recovery["reason"] == "INTERNAL_METERING_WORKSPACE_V1"
+    assert json.loads(recovery["prior_receipt_json"])["status"] == "BLOCKED"
+    assert json.loads(recovery["blocked_operation_ids_json"]) == []
+    assert workspace["id"].startswith("akm-workspace-")
+    assert workspace["private_course_id"].startswith("akm-corpus-")
+
+
+@pytest.mark.parametrize("evidence_kind", ["receipt_call", "operation"])
+def test_workspace_quota_recovery_refuses_any_send_evidence(
+    tmp_path: Path,
+    evidence_kind: str,
+) -> None:
+    settings = settings_at(tmp_path).model_copy(
+        update={
+            "auto_knowledge_map_enabled": True,
+            "auto_knowledge_map_allow_billable": True,
+        }
+    )
+    database = Database(settings)
+    database.initialize()
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO courses(id,name,course_type,visibility,publication_status) "
+            "VALUES('evidence-campus','Evidence campus','official','private','private')"
+        )
+    ready_document(
+        database,
+        document_id="evidence-campus-doc",
+        chunk_id="evidence-campus-chunk",
+        content="A terminal job with provider evidence must remain frozen.",
+        course_id="evidence-campus",
+    )
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE courses SET visibility='public',publication_status='published' "
+            "WHERE id='evidence-campus'"
+        )
+    generator = FakeGenerator()
+    service = AutoKnowledgeMapService(
+        database,
+        settings,
+        learning=object(),  # type: ignore[arg-type]
+        generator=generator,
+    )
+    assert service.reconcile(force=True)["QUEUED"] == 1
+    with database.connect() as connection:
+        job = connection.execute(
+            "SELECT * FROM auto_knowledge_jobs "
+            "WHERE target_key='AUTO_COURSE:evidence-campus'"
+        ).fetchone()
+        connection.execute(
+            "UPDATE auto_knowledge_jobs SET status='BLOCKED',"
+            "error_code='WORKSPACE_QUOTA',error_message='Workspace quota reached.',"
+            "completed_at=? WHERE id=?",
+            ("2026-11-12T00:00:00.000Z", job["id"]),
+        )
+        connection.execute(
+            "UPDATE auto_knowledge_targets SET status='BLOCKED',"
+            "message='Workspace quota reached.' WHERE target_key=?",
+            (job["target_key"],),
+        )
+        connection.execute(
+            "INSERT INTO auto_knowledge_job_receipts("
+            "job_id,target_key,corpus_fingerprint,status,source_snapshot_hash,"
+            "model_calls_made,detail_json) VALUES(?,?,?,'BLOCKED',?,?,?)",
+            (
+                job["id"],
+                job["target_key"],
+                job["corpus_fingerprint"],
+                digest(json.loads(job["source_snapshot_json"])),
+                1 if evidence_kind == "receipt_call" else 0,
+                json.dumps({"error_code": "WORKSPACE_QUOTA"}),
+            ),
+        )
+        if evidence_kind == "operation":
+            operation_id = f"akm-{digest(str(job['id']))[:16]}-evidence"
+            connection.execute(
+                "INSERT INTO courses("
+                "id,name,owner_user_id,course_type,visibility,publication_status"
+                ") VALUES('prior-private','Prior private','owner-a','user','private','private')"
+            )
+            connection.execute(
+                "INSERT INTO courses("
+                "id,name,owner_user_id,course_type,visibility,publication_status"
+                ") VALUES('prior-corpus','Prior corpus','owner-a','user','private','private')"
+            )
+            connection.execute(
+                "INSERT INTO learning_workspaces("
+                "id,owner_user_id,course_id,private_course_id"
+                ") VALUES('prior-workspace','owner-a','prior-private','prior-corpus')"
+            )
+            connection.execute(
+                "INSERT INTO learning_operations("
+                "workspace_id,id,request_hash,kind,status) "
+                "VALUES('prior-workspace',?,?,'auto.knowledge.map','RUNNING')",
+                (operation_id, "a" * 64),
+            )
+
+    reconciled = service.reconcile(force=True)
+
+    assert reconciled.get("RECOVERED_SAFE_FAILURE", 0) == 0
+    with database.connect() as connection:
+        current = connection.execute(
+            "SELECT status,error_code FROM auto_knowledge_jobs WHERE id=?",
+            (job["id"],),
+        ).fetchone()
+        recovery_count = connection.execute(
+            "SELECT COUNT(*) FROM auto_knowledge_job_recovery_receipts "
+            "WHERE job_id=?",
+            (job["id"],),
+        ).fetchone()[0]
+    assert tuple(current) == ("BLOCKED", "WORKSPACE_QUOTA")
+    assert recovery_count == 0
+
+
 def test_pre_dispatch_staged_course_access_failure_has_one_audited_recovery(
     tmp_path: Path,
 ) -> None:

@@ -355,4 +355,4 @@ def test_rehearsal_preserves_legacy_fields_when_migration_adds_course_columns(
 def test_stable_source_carries_the_source_bound_student_entry_schema_boundary() -> None:
     """R8 adds source-bound student entry without rewriting old assessment rows."""
 
-    assert LATEST_V3_SCHEMA_VERSION == 85
+    assert LATEST_V3_SCHEMA_VERSION == 86
