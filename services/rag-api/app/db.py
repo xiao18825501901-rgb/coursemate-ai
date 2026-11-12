@@ -87,6 +87,7 @@ V3_MIGRATIONS = (
     "084_deterministic_point_questions.sql",
     "085_source_bound_student_entry.sql",
     "086_auto_knowledge_internal_workspace_recovery.sql",
+    "087_auto_knowledge_recovery_receipt_constraint_repair.sql",
 )
 # Migrations 038 and 039 successively widen both model-call ledgers. Replaying
 # either older rebuild on a database that already has the newer role set would
@@ -106,6 +107,7 @@ V3_REPLAY_SUPERSEDED_BY = {
     "085_source_bound_student_entry.sql": 85,
     "084_deterministic_point_questions.sql": 84,
     "083_point_question_cross_configuration_reuse.sql": 83,
+    "087_auto_knowledge_recovery_receipt_constraint_repair.sql": 87,
     "078_point_assessment_plans.sql": 78,
     "077_metered_strong_review_roles.sql": 77,
     # Migration 021's legacy evidence backfill is safe while 021 is first
@@ -151,6 +153,12 @@ V3_REPLAY_SUPERSEDED_BY = {
     # Migration 055 records the one safe resume after V54's short-lived
     # global normalization lookup stopped an otherwise authorized new shard.
     "055_auto_knowledge_evidence_scope_resume.sql": 55,
+    # Migrations 062 and 063 rebuild the immutable recovery-receipt enum.
+    # Replaying either after the later schema has committed would narrow the
+    # table again while 086/087 are skipped, reproducing the production
+    # ledger/table mismatch that blocked INTERNAL_METERING_WORKSPACE_V1.
+    "062_auto_knowledge_spec_split_resume.sql": 87,
+    "063_auto_knowledge_spec_split_source_replay.sql": 87,
     # SQLite has no portable ADD COLUMN IF NOT EXISTS. Migration 059 links
     # immutable document versions to durable objects and is therefore a
     # deliberately one-shot schema alteration; its own ledger row is the
@@ -168,7 +176,7 @@ V3_REPLAY_SUPERSEDED_BY = {
     "072_assessment_preparation_retry_epochs.sql": 72,
 }
 LATEST_V2_SCHEMA_VERSION = 10
-LATEST_V3_SCHEMA_VERSION = 86
+LATEST_V3_SCHEMA_VERSION = 87
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (
