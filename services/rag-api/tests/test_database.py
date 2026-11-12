@@ -347,6 +347,37 @@ def test_v3_readiness_requires_latest_v3_migration(tmp_path: Path) -> None:
     assert database.is_ready() is False
 
 
+def test_applied_legacy_chunk_backfills_are_not_replayed_on_startup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(
+        database_path=tmp_path / "rag.sqlite3",
+        upload_dir=tmp_path / "uploads",
+        v3_enabled=True,
+    )
+    database = Database(settings)
+    database.initialize()
+
+    original_read_text = Path.read_text
+    migration_reads: list[str] = []
+
+    def tracked_read_text(
+        path: Path,
+        encoding: str | None = None,
+        errors: str | None = None,
+    ) -> str:
+        if path.parent.name == "migrations":
+            migration_reads.append(path.name)
+        return original_read_text(path, encoding=encoding, errors=errors)
+
+    monkeypatch.setattr(Path, "read_text", tracked_read_text)
+    Database(settings).initialize()
+
+    assert "013_document_versions_and_artifacts.sql" not in migration_reads
+    assert "016_problem_runtime_and_bridges.sql" not in migration_reads
+
+
 def test_v3_restart_preserves_repeated_question_engine_and_practice_model_roles(
     tmp_path: Path,
 ) -> None:

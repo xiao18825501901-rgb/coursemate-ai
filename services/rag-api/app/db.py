@@ -94,6 +94,14 @@ V3_MIGRATIONS = (
 # Keep historical SQL immutable and skip only a superseded rebuild after its
 # superseding version has committed its ledger row.
 V3_REPLAY_SUPERSEDED_BY = {
+    # Migrations 013 and 016 contain legacy backfills over the V2 chunks
+    # table. Their ledger rows are written only after the backfill commits, so
+    # replaying an applied migration can only repeat a full-table scan. On a
+    # multi-gigabyte corpus that delayed every service restart by several
+    # minutes and left the API without a listening socket. A missing ledger
+    # row still runs the migration normally.
+    "013_document_versions_and_artifacts.sql": 13,
+    "016_problem_runtime_and_bridges.sql": 16,
     "086_auto_knowledge_internal_workspace_recovery.sql": 86,
     "085_source_bound_student_entry.sql": 85,
     "084_deterministic_point_questions.sql": 84,
