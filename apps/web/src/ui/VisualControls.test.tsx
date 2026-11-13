@@ -33,6 +33,21 @@ describe('Visual Learning controls', () => {
     expect(screen.queryByText(/workflow|checkpoint|KSampler/i)).not.toBeInTheDocument();
   });
 
+  it('keeps every visual action disabled while a listed job is still processing', async () => {
+    api.listMessageVisuals.mockResolvedValue({
+      items: [{ id: 'job-active', action: 'visual', status: 'RENDERING', retry_count: 0, cache_hit: false, assets: [] }],
+    });
+    const { container } = render(<VisualControls enabled courseId="course-1" pairId="pair-1" message={{ id: 'message-active' } as any}/>);
+
+    await waitFor(() => expect(api.listMessageVisuals).toHaveBeenCalledWith('course-1', 'message-active'));
+    await waitFor(() => {
+      const actions = container.querySelector('.visual-actions');
+      expect(actions).toHaveAttribute('aria-busy', 'true');
+      expect([...actions.querySelectorAll('button')].every(button => button.disabled)).toBe(true);
+    });
+    expect(api.createVisual).not.toHaveBeenCalled();
+  });
+
   it('opens consent instead of submitting an image job while assistance is off', async () => {
     const requestAssistance = vi.fn();
     render(<VisualControls enabled assistanceEnabled={false} requestAssistance={requestAssistance} courseId="course-1" pairId="pair-1" message={{ id: 'message-1' } as any}/>);

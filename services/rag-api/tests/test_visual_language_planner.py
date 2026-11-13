@@ -11,7 +11,7 @@ from app.learning.generic_provider import generic_model_settings
 from app.learning.provider import ProviderCallFailure
 from app.learning.structured_calls import GenericStructuredCalls
 from app.visual.compiler import compile_visual_spec
-from app.visual.language_planner import VisualLanguagePlannerProvider
+from app.visual.language_planner import VisualLanguagePlannerProvider, VisualPlanProposal
 from app.visual.planner import GroundedPolicyVisualPlannerProvider, MockVisualPlannerProvider
 
 
@@ -239,6 +239,48 @@ def test_planner_fits_model_duration_to_bounded_wan_window(tmp_path):
     assert spec.duration_seconds == 5.0
     assert compiled.frames == 121
     assert "3 to 5 seconds" in planner.prompt.text
+
+
+def test_plan_proposal_normalizes_renderer_implied_semantics():
+    spec = MockVisualPlannerProvider().plan(
+        question=(
+            "Teach mechanical hard disk platter rotation and bounded actuator "
+            "arm radial motion."
+        ),
+        answer=(
+            "The circular platter rotates while one actuator arm performs a bounded "
+            "radial sweep and the drive body remains fixed."
+        ),
+        evidence=[
+            {
+                "source_id": "document-1",
+                "source_version": "version-1",
+                "locator": "page 1",
+                "supported_claim": (
+                    "The circular platter rotates while one actuator arm performs a bounded "
+                    "radial sweep and the drive body remains fixed."
+                ),
+            }
+        ],
+        action="animate",
+        language="en",
+    )
+    proposal = spec.model_dump(by_alias=True)
+    proposal.update(
+        renderer="COMFY_VIDEO",
+        visual_type="VIDEO",
+        motion_is_essential=False,
+        semantic_precision="EXACT",
+        duration_seconds=8.0,
+    )
+
+    normalized = VisualPlanProposal.model_validate(proposal)
+
+    assert normalized.renderer.value == "COMFY_VIDEO"
+    assert normalized.visual_type.value == "VIDEO"
+    assert normalized.motion_is_essential is True
+    assert normalized.semantic_precision == "BOUNDED"
+    assert normalized.duration_seconds == 5.0
 
 
 class SpyPlanner:

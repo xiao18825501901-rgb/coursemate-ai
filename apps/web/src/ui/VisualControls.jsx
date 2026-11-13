@@ -108,11 +108,12 @@ export class VisualControls extends React.Component {
         if (!this.props.enabled || !this.props.pairId) return null;
         const t = this.props.t || defaultUiTranslate;
         const { latest, older } = partitionJobsByFreshness(this.state.jobs);
+        const processing = this.state.busy || this.state.jobs.some(job => !TERMINAL.has(job.status));
         return <div className="visual-controls">
-            <div className="visual-actions" aria-label={t('visual.actions')}>
-                <button type="button" disabled={this.state.busy} onClick={() => this.create('diagram')}>{t('visual.diagram')}</button>
-                <button type="button" disabled={this.state.busy} onClick={() => this.create('visual')}>{t('visual.image')}</button>
-                <button type="button" disabled={this.state.busy} onClick={() => this.create('animate')}>{t('visual.animation')}</button>
+            <div className="visual-actions" aria-label={t('visual.actions')} aria-busy={processing}>
+                <button type="button" disabled={processing} onClick={() => this.create('diagram')}>{t('visual.diagram')}</button>
+                <button type="button" disabled={processing} onClick={() => this.create('visual')}>{t('visual.image')}</button>
+                <button type="button" disabled={processing} onClick={() => this.create('animate')}>{t('visual.animation')}</button>
             </div>
             {this.state.error && <p className="visual-error">{this.state.error}</p>}
             {latest.map(job => <VisualJobStatus key={job.id} job={job} t={t} onCancel={id => this.cancel(id)} onRetry={id => this.retry(id)} onFallback={id => this.fallback(id)}/>)}
