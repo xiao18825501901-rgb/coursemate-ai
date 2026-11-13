@@ -43,6 +43,7 @@ describe('Visual Learning controls', () => {
     await waitFor(() => {
       const actions = container.querySelector('.visual-actions');
       expect(actions).toHaveAttribute('aria-busy', 'true');
+      if (actions == null) throw new Error('visual actions were not rendered');
       expect([...actions.querySelectorAll('button')].every(button => button.disabled)).toBe(true);
     });
     expect(api.createVisual).not.toHaveBeenCalled();
